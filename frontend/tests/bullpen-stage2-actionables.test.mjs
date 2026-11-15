@@ -1,3 +1,4 @@
+import { readBullpenScheduleSource } from "./helpers/bullpenScheduleSource.mjs";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
@@ -275,13 +276,7 @@ test("the actionables dialog keeps the required red, green, and yellow sections"
 });
 
 test("the Stage 2 monitor renders the clickable Actionables line below New Events", () => {
-  const scheduleCardSource = readFileSync(
-    new URL(
-      "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
-      import.meta.url,
-    ),
-    "utf8",
-  );
+  const scheduleCardSource = readBullpenScheduleSource();
 
   const newEventsIndex = scheduleCardSource.indexOf("New Events to Invest in:");
   const actionablesIndex = scheduleCardSource.indexOf("Actionables: Exit=");

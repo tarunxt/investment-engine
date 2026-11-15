@@ -270,7 +270,7 @@ function EmptyState() {
       </div>
       <h3 className="mt-4 text-sm font-semibold text-gray-900">No INDmoney snapshots yet</h3>
       <p className="mt-2 text-sm text-gray-500">
-        Choose Import snapshot to paste your daily INDmoney US Stocks screen and start building a manual portfolio history.
+        Choose Paste snapshot to paste your daily INDmoney US Stocks screen and start building a manual portfolio history.
       </p>
     </div>
   );
@@ -605,7 +605,7 @@ function MarketIndicesTable({ indices }: { indices: IndMoneyUsMarketIndex[] }) {
         </table>
         {indices.length === 0 ? (
           <p className="py-8 text-center text-sm text-gray-400">
-            Market-context extraction is incomplete or unavailable. No index rows were extracted; this does not confirm that the source has no indices. Review the raw pasted snapshot below.
+            Market-context extraction is incomplete or unavailable. No index rows were extracted; this does not confirm that the source has no indices. Use the eye beside Paste snapshot to review the most recent paste.
           </p>
         ) : null}
       </div>
@@ -871,16 +871,6 @@ export function IndMoneyUsSnapshotsPanel({
             <CompactHoldingsTable title="Laggards" holdings={selectedSnapshot.derived.top_laggards} />
           </div>
 
-          <div className="border border-gray-200 bg-white shadow-sm">
-            <div className="border-b border-gray-200 px-5 py-4">
-              <h3 className="text-sm font-semibold uppercase tracking-wider text-gray-500">Raw Pasted Snapshot</h3>
-            </div>
-            <div className="max-h-[28rem] overflow-auto bg-slate-950 p-5">
-              <pre className="whitespace-pre-wrap text-xs leading-5 text-slate-200">
-                {selectedSnapshot.raw_text}
-              </pre>
-            </div>
-          </div>
         </div>
       </div>
   );

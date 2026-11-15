@@ -65,7 +65,7 @@ test('late run responses cannot replace newer data, failure, or loading state', 
   const pending = [];
   const state = { runs: null, loading: false, error: null, writes: [] };
   const { loadRuns } = load(`${scoped.slice(start, end)}\nexport {loadRuns};`, {
-    withFinalActionablesReadDeadline,
+    withFinalActionablesReadDeadline, setHistoryNotice: () => {},
     useCallback: fn => fn, runsRequestRef: { current: 0 }, market: 'india', runCacheKey: 'fixture',
     setLoading: value => { state.loading = value; }, setError: value => { state.error = value; },
     setRuns: value => { state.runs = value; }, cacheFinalActionablesRuns: (...args) => state.writes.push(args),
@@ -81,4 +81,26 @@ test('late run responses cannot replace newer data, failure, or loading state', 
   pending[3].reject(new Error('current failure')); await newest;
   assert.equal(state.error, 'current failure'); assert.equal(state.loading, false);
   assert.deepEqual(state.runs, [{ id: 451 }]);
+});
+
+test('soft history notices respect current request and navigation ownership',async()=>{
+ const source=read('../app/console/_components/FinalActionablesConsole.tsx');
+ const scoped=source.slice(source.indexOf('function ScopedFinalActionablesConsole'));
+ const start=scoped.indexOf('  const loadRuns = useCallback('),end=scoped.indexOf('\n  const loadTechnicalScanHistory',start);
+ const requests={current:0},pending=[],callbacks=[],notices=[],writes=[];
+ const {loadRuns}=load(`${scoped.slice(start,end)}\nexport {loadRuns};`,{
+  withFinalActionablesReadDeadline:(read,hard,slow)=>{assert.equal(hard,120000);callbacks.push(slow);return read;},
+  useCallback:fn=>fn,runsRequestRef:requests,market:'us',runCacheKey:'us',
+  setLoading:()=>{},setError:()=>{},setHistoryNotice:value=>notices.push(value),
+  setRuns:value=>writes.push(value),cacheFinalActionablesRuns:()=>{},
+  fetchAllFullRuns:()=>new Promise(resolve=>pending.push(resolve)),
+ });
+ const old=loadRuns(),current=loadRuns();notices.length=0;
+ callbacks[0]();assert.deepEqual(notices,[]);
+ callbacks[1]();assert.match(notices[0],/full retained run history/);
+ pending[0]([{id:1}]);await old;assert.deepEqual(writes,[]);
+ pending[1]([{id:2}]);await current;assert.deepEqual(writes,[[{id:2}]]);assert.equal(notices.at(-1),null);
+ const abandoned=loadRuns();requests.current++;notices.length=0;
+ callbacks[2]();pending[2]([{id:3}]);await abandoned;
+ assert.deepEqual(notices,[]);assert.equal(writes.length,1);
 });

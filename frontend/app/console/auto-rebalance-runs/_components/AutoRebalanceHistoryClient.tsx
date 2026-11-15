@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { RunSideEffectPolicyNotice } from "@/components/shared/AnalysisOnlyRunControl";
+import { actionablesActivityKey } from "@/lib/autoRebalanceAudit";
+import { captureWorkflowOwner } from "@/lib/workflowOwnerLifetime";
 import { RUN_HIERARCHY_HELP } from "@/lib/runHierarchy";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
@@ -50,11 +52,12 @@ function statusTone(status?: string | null) {
   const value = (status || "").toLowerCase();
   if (["failed", "cancelled", "interrupted"].includes(value))
     return "border-rose-200 bg-rose-50 text-rose-800";
-  if (["partial", "skipped", "paused"].includes(value))
+  if (["processing", "running"].includes(value)) return "border-yellow-300 bg-yellow-50 text-yellow-900";
+  if (["partial", "completed with warnings", "finish unconfirmed"].includes(value))
     return "border-amber-200 bg-amber-50 text-amber-800";
   if (["completed", "success"].includes(value))
     return "border-emerald-200 bg-emerald-50 text-emerald-800";
-  if (["queued", "pending", "processing", "running"].includes(value))
+  if (["queued", "pending"].includes(value))
     return "border-sky-200 bg-sky-50 text-sky-800";
   return "border-slate-200 bg-slate-50 text-slate-700";
 }
@@ -63,10 +66,11 @@ function stageCardTone(status?: string | null) {
   const value = (status || "").toLowerCase();
   if (["failed", "cancelled", "interrupted"].includes(value))
     return "border-rose-200 bg-rose-50/70";
-  if (["partial", "skipped", "paused"].includes(value))
+  if (["processing", "running"].includes(value)) return "border-yellow-300 bg-yellow-50 text-yellow-900";
+  if (["partial", "completed with warnings", "finish unconfirmed"].includes(value))
     return "border-amber-200 bg-amber-50/70";
   if (["completed", "success"].includes(value)) return "border-emerald-200 bg-emerald-50/70";
-  if (["queued", "pending", "processing", "running"].includes(value)) return "border-sky-200 bg-sky-50/70";
+  if (["queued", "pending"].includes(value)) return "border-sky-200 bg-sky-50/70";
   return "border-slate-200 bg-white";
 }
 
@@ -88,21 +92,37 @@ function formatCost(value?: number | null) {
   }).format(value);
 }
 
-function StatusBadge({ status }: { status?: string | null }) {
+function StatusBadge({ status, workflow = false }: { status?: string | null; workflow?: boolean }) {
   return (
     <span className={`inline-flex max-w-full rounded-full border px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.14em] ${statusTone(status)}`}>
-      {status || "Unknown"}
+      {workflow && status === "partial" ? "Completed with warnings" : status || "Unknown"}
     </span>
   );
 }
 
-function StageSummary({ stage }: { stage: AutoRebalanceStageResponse }) {
+function StageSummary({ stage, portfolio, sequence }: { stage: AutoRebalanceStageResponse; portfolio: string; sequence: number }) {
+  const checkActivity = stage.stage === "actionables" && ["processing", "running"].includes(stage.status);
+  const [activeKey, setActiveKey] = useState<string | null>(null);
+  const owner = captureWorkflowOwner();
+  const key = owner && checkActivity ? actionablesActivityKey(owner.id, portfolio, sequence) : null;
+  useEffect(() => {
+    if (!key || !navigator.locks?.query) return;
+    let mounted = true;
+    const refresh = async () => {
+      const snapshot = await navigator.locks.query().catch(() => null);
+      if (mounted) setActiveKey(snapshot?.held?.some(lock => lock.name === key) ? key : null);
+    };
+    void refresh();
+    const timer = window.setInterval(refresh, 2000);
+    return () => { mounted = false; window.clearInterval(timer); };
+  }, [key]);
+  const status = checkActivity && !(key && activeKey === key) ? "Finish unconfirmed" : stage.status;
   const label = STAGE_LABELS[stage.stage];
   const started = parseApiTimestamp(stage.started_at);
   const finished = parseApiTimestamp(stage.completed_at);
   const invalidInterval = started !== null && finished !== null && finished.getTime() < started.getTime();
   return (
-    <div className={`min-w-0 rounded-xl border p-4 [overflow-wrap:anywhere] ${stageCardTone(stage.status)}`}>
+    <div className={`min-w-0 rounded-xl border p-4 [overflow-wrap:anywhere] ${stageCardTone(status)}`}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 flex-1 basis-28">
           <p className="font-semibold text-slate-950">{label}</p>
@@ -112,7 +132,7 @@ function StageSummary({ stage }: { stage: AutoRebalanceStageResponse }) {
               : "System stage"}
           </p>
         </div>
-        <StatusBadge status={stage.status} />
+        <StatusBadge status={status} />
       </div>
       <div className="mt-3 grid gap-2 text-xs text-slate-700 sm:grid-cols-2">
         <span>Started: {formatTime(stage.started_at)}</span>
@@ -208,16 +228,16 @@ export function AutoRebalanceHistoryListClient({
                 <RunSideEffectPolicyNotice policy={item.side_effect_policy} />
                 <p className="mt-1 text-sm text-slate-600">Started {formatTime(item.created_at)}</p>
               </div>
-              <div className="flex max-w-full items-center gap-2"><span className="text-xs text-slate-600">Saved status <StatusBadge status={item.status} /></span><ChevronRight className="size-5 text-slate-400 transition group-hover:translate-x-0.5" /></div>
+              <div className="flex max-w-full items-center gap-2"><span className="text-xs text-slate-600">Saved status <StatusBadge status={item.status} workflow /></span><ChevronRight className="size-5 text-slate-400 transition group-hover:translate-x-0.5" /></div>
             </div>
             <div className="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
               <div><p className="text-xs text-slate-500">Last recorded stage</p><p className="mt-1 font-semibold text-slate-900">{item.current_stage ? STAGE_LABELS[item.current_stage] : "Not recorded"}</p></div>
-              <div><p className="text-xs text-slate-500">Stages</p><p className="mt-1 font-semibold text-slate-900">{item.stages.filter((stage) => stage.status === "completed").length}/{item.stages.length || 6}</p></div>
+              <div><p className="text-xs text-slate-500">Stages</p><p className="mt-1 font-semibold text-slate-900">{item.stages.filter((stage) => ["completed", "partial"].includes(stage.status)).length}/{item.stages.length || 6}</p></div>
               <div><p className="text-xs text-slate-500">LLM cost</p><p className="mt-1 font-semibold text-slate-900">{formatCost(item.total_estimated_cost)}</p></div>
               <div><p className="text-xs text-slate-500">Finished</p><p className="mt-1 font-semibold text-slate-900">{item.completed_at ? formatTime(item.completed_at) : "Not recorded"}</p></div>
             </div>
             <div className="mt-4 grid gap-2 sm:grid-cols-3">
-              {item.stages.map((stage) => <StageSummary key={stage.stage} stage={stage} />)}
+              {item.stages.map((stage) => <StageSummary key={stage.stage} stage={stage} portfolio={item.portfolio} sequence={item.sequence} />)}
             </div>
             {item.error_message ? <p className="mt-4 line-clamp-2 text-sm text-rose-800">Stopped because: {item.error_message}</p> : null}
           </Link>
@@ -229,6 +249,10 @@ export function AutoRebalanceHistoryListClient({
 
 function JobDetails({ job }: { job: AutoRebalanceJobDetailResponse }) {
   const attribution = outputAttribution(job);
+  const validation = job.runtime_metadata_json?.deterministic_output as {
+    exclusions?: {symbol?: string; exchange?: string; row?: number; field?: string; reason?: string}[];
+    exclusion_count?: number; finding_counts?: Record<string, number>;
+  } | undefined;
   return (
     <article className={`min-w-0 rounded-xl border p-4 [overflow-wrap:anywhere] ${stageCardTone(job.status)}`}>
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -244,6 +268,15 @@ function JobDetails({ job }: { job: AutoRebalanceJobDetailResponse }) {
         <p>Original generated text is preserved below. Its model names and source dates are unverified content, distinct from job timestamps and telemetry observation times.</p>
         {attribution.conflict ? <p role="note" className="rounded border border-amber-200 bg-amber-50 p-2 text-amber-900">Attribution conflict: the generated model header differs from {attribution.comparison === "telemetry" ? "provider-response telemetry" : "requested job settings"}. Generated self-identification is untrusted; do not use it to attribute provider or cost.</p> : null}
       </div>
+      {job.status === "partial" && validation && (
+        <details className="mt-3 rounded border p-3 text-sm">
+          <summary>Excluded inputs and validation findings</summary>
+          {validation.finding_counts && <p>{Object.entries(validation.finding_counts).map(([code, count]) => `${code}: ${count}`).join(" · ")}</p>}
+          {validation.exclusions?.map((x, i) => <p key={i}>{[x.exchange, x.symbol].filter(Boolean).join(":") || `Row ${x.row ?? "unknown"}`} · {x.field || "Rationale"} · {x.reason}</p>)}
+          {validation.exclusion_count != null && validation.exclusion_count > (validation.exclusions?.length ?? 0) && <p>Showing {validation.exclusions?.length} of {validation.exclusion_count} excluded fields.</p>}
+          {!validation.exclusions && <p>This job predates saved per-row exclusion details.</p>}
+        </details>
+      )}
       {job.error_message ? <div className={`mt-3 rounded-lg border bg-white/70 p-3 text-sm ${job.status === "partial" ? "border-amber-200 text-amber-800" : "border-rose-200 text-rose-800"}`}>{job.error_message}</div> : null}
       <div className="mt-3 grid gap-2 text-xs text-slate-700 sm:grid-cols-3"><span>Input tokens: {job.tokens_in ?? "—"}</span><span>Output tokens: {job.tokens_out ?? "—"}</span><span>Web search: {job.web_search_used ? "used" : "not used"}</span></div>
       <details className="mt-3 rounded-lg border border-slate-200 bg-white"><summary className="cursor-pointer px-3 py-2 text-sm font-semibold text-slate-800">Prompt and response</summary><div className="space-y-3 border-t border-slate-200 p-3"><pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded bg-slate-950 p-3 text-xs leading-5 text-slate-100">{job.prompt}</pre><pre className="max-h-[32rem] overflow-auto whitespace-pre-wrap break-words rounded bg-slate-950 p-3 text-xs leading-5 text-slate-100">{job.response || "No model output was saved."}</pre></div></details>
@@ -278,6 +311,19 @@ export function AutoRebalanceHistoryDetailClient({
     const timer = window.setTimeout(() => void load(), 0);
     return () => window.clearTimeout(timer);
   }, [load]);
+  const [reconciling, setReconciling] = useState(false);
+  const reconcile = async () => {
+    setReconciling(true);
+    setError(null);
+    try {
+      await apiService.post(URLs.runs.autoRebalanceHistoryDetail(apiPortfolio(portfolio), sequence) + "/reconcile", {});
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Run reconciliation failed.");
+    } finally {
+      setReconciling(false);
+    }
+  };
   const jobs = useMemo(() => run ? [...run.standalone_jobs, ...run.runs.flatMap((item) => item.jobs)] : [], [run]);
 
   return (
@@ -290,8 +336,10 @@ export function AutoRebalanceHistoryDetailClient({
       </div>
       {loading ? <div className="flex min-h-56 items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white text-sm text-slate-600"><Loader2 className="size-4 animate-spin" />Loading run detail…</div> : null}
       {error ? <div role="alert" className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">{error}</div> : null}
+      {run?.current_stage === "actionables" && ["processing", "running"].includes(run.status) &&
+        <Button disabled={reconciling || loading} onClick={() => void reconcile()}>{reconciling ? "Reconciling…" : "Reconcile this run"}</Button>}
       {run ? <>
-        <div className={`rounded-2xl border p-5 ${stageCardTone(run.status)}`}><div className="flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-2 text-slate-900">{run.status === "failed" ? <XCircle className="size-5 text-rose-600" /> : <Clock3 className="size-5 text-slate-600" />}<span className="font-semibold">{run.status === "failed" ? "Run stopped" : "Run summary"}</span></div><span className="text-xs text-slate-600">Saved status <StatusBadge status={run.status} /></span></div><div className="mt-4 grid gap-3 text-sm sm:grid-cols-4"><span>Started: {formatTime(run.created_at)}</span><span>Finished: {formatTime(run.completed_at)}</span><span>Last recorded stage: {run.current_stage ? STAGE_LABELS[run.current_stage] : "—"}</span><span>Total LLM cost: {formatCost(run.total_estimated_cost)}</span></div>{run.error_message ? <div className="mt-4 rounded-lg border border-rose-200 bg-white/70 p-3 text-sm text-rose-800">{run.error_message}</div> : null}</div>
+        <div className={`rounded-2xl border p-5 ${stageCardTone(run.status)}`}><div className="flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-2 text-slate-900">{run.status === "failed" ? <XCircle className="size-5 text-rose-600" /> : <Clock3 className="size-5 text-slate-600" />}<span className="font-semibold">{run.status === "failed" ? "Run stopped" : "Run summary"}</span></div><span className="text-xs text-slate-600">Saved status <StatusBadge status={run.status} workflow /></span></div><div className="mt-4 grid gap-3 text-sm sm:grid-cols-4"><span>Started: {formatTime(run.created_at)}</span><span>Finished: {formatTime(run.completed_at)}</span><span>Last recorded stage: {run.current_stage ? STAGE_LABELS[run.current_stage] : "—"}</span><span>Total LLM cost: {formatCost(run.total_estimated_cost)}</span></div>{run.error_message ? <div className="mt-4 rounded-lg border border-rose-200 bg-white/70 p-3 text-sm text-rose-800">{run.error_message}</div> : null}</div>
         {run.stages.filter(stage => stage.stage === "actionables" && stage.summary.frozen_final).map(stage => (
           <details key="frozen-final" className="rounded-xl border bg-white p-4">
             <summary className="cursor-pointer font-semibold">Saved final calculation — original formula and source evidence</summary>
@@ -299,7 +347,7 @@ export function AutoRebalanceHistoryDetailClient({
             <pre className="max-h-96 overflow-auto whitespace-pre-wrap text-xs">{JSON.stringify(stage.summary.frozen_final, null, 2)}</pre>
           </details>
         ))}
-        <div><h2 className="text-xl font-bold text-slate-950">Stage timeline</h2><p className="mt-1 text-sm text-slate-600">Color indicates completion (green), active work (blue), warnings (amber), and the exact failure point (red).</p><div className="mt-4 grid gap-3 lg:grid-cols-2">{run.stages.map((stage) => <StageSummary key={stage.stage} stage={stage} />)}</div></div>
+        <div><h2 className="text-xl font-bold text-slate-950">Stage timeline</h2><p className="mt-1 text-sm text-slate-600">Color indicates completion (green), active work (yellow), queued stages (blue), and the exact failure point (red).</p><div className="mt-4 grid gap-3 lg:grid-cols-2">{run.stages.map((stage) => <StageSummary key={stage.stage} stage={stage} portfolio={run.portfolio} sequence={run.sequence} />)}</div></div>
         <div><h2 className="text-xl font-bold text-slate-950">LLM diagnostics and saved output</h2><p className="mt-1 text-sm text-slate-600">Outputs are preserved per provider/model; failed work remains visible with its error rather than disappearing from the audit trail.</p><div className="mt-4 space-y-3">{jobs.length ? jobs.map((job) => <JobDetails key={job.id} job={job} />) : <div className="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-600">No LLM job was created for this run yet.</div>}</div></div>
       </> : null}
     </section>
