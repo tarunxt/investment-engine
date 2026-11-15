@@ -16,14 +16,15 @@ const mergeStageEvidence = new Function(ts.transpileModule('function mergeStageE
 const stages = ['sync', 'threats', 'swing', 'rebalance', 'technical', 'actionables'];
 const oldTime = '2026-10-30T12:00:00Z', newTime = '2026-11-01T12:00:00Z';
 const record = (status, count) => ({ portfolio: 'india', sequence: 7, created_at: newTime, updated_at: newTime, completed_at: newTime, stages: [{ stage: 'actionables', status, started_at: newTime, completed_at: newTime, run_id: 10, job_id: 20, provider_count: 2, completed_provider_count: 1, failed_provider_count: 1, partial_provider_count: 0, estimated_cost: 0, summary: { recommended_stocks: count } }] });
-async function hydrate({ runs = [], histories = [], initial, historyFailure, snapshot, onError = () => {} } = {}) {
+async function hydrate({ runs = [], histories = [], initial, historyFailure, snapshot, runningPortfolio = null, executing = false, readBarrier, generation = {current:0}, onError = () => {} } = {}) {
   let states = initial ?? Object.fromEntries(['zerodha', 'indmoneyUs'].map(market => [market, Object.fromEntries(stages.map(stage => [stage, { state: 'idle' }]))]));
   const apiService = Object.fromEntries(['zerodhaPortfolioOverview', 'indmoneyUsPortfolioOverview', 'zerodhaThreatsLatest', 'indmoneyUsThreatsLatest'].map(key => [key, async () => ({})]));
   apiService.zerodhaPortfolioOverview = async () => ({latest: snapshot});
-  apiService.getAutoRebalanceHistory = async market => { if (historyFailure) throw historyFailure; return { items: market === 'india' ? histories : [] }; };
+  apiService.getAutoRebalanceHistory = async market => { await readBarrier; if (historyFailure) throw historyFailure; return { items: market === 'india' ? histories : [] }; };
   const context = {
     setWorkflowHistoryError: onError, normalizeError: error => error.message,
-    runtimeOwner: {}, isCurrentWorkflowOwner: () => true, savedStageReadGeneration: {current: 0},
+    runningPortfolio, isWorkflowExecutingRef: {current: executing},
+    runtimeOwner: {}, isCurrentWorkflowOwner: () => true, savedStageReadGeneration: generation,
     apiService, fetchDashboardRecentFullRuns: async () => runs, useCallback: fn => fn, usdInrRate: 1,
     getLatestStageRun: (rows, stage, market) => market === 'india' ? rows.find(row => row.stage === stage) : undefined,
     getLatestMatchingRebalanceRuns: (rows, market) => market === 'india' ? rows.filter(row => row.stage === 'rebalance') : [],
@@ -101,4 +102,44 @@ test('a newer successful stage replaces old errors, but stale evidence does not'
   assert.equal(result.zerodha.sync.portfolioStockCount, 0);
   const stale = await hydrate({initial: result, runs:[{...run, id:15, status:'failed', updated_at:oldTime}]});
   assert.deepEqual(stale.zerodha.technical, result.zerodha.technical);
+});
+
+
+test('history cannot refill upcoming or failed stages while local or restored execution is active', async () => {
+  for (const active of [{executing:true}, {runningPortfolio:'zerodha'}]) {
+    const initial = await hydrate();
+    initial.zerodha.technical = {state:'failed', error:'Current failure', lastRunId:300};
+    const before = structuredClone(initial);
+    const result = await hydrate({...active, initial, histories:[record('completed', 3)], snapshot:{holdings_count:5, captured_at:newTime}});
+    assert.deepEqual(result.zerodha, before.zerodha);
+    const idle = await hydrate({initial:result, histories:[record('completed',3)]});
+    assert.equal(idle.zerodha.actionables.evidence.kind, 'saved');
+  }
+});
+
+test('starting each run clears every old evidence field before acknowledgement', () => {
+  const start = source.indexOf('  const resetPortfolio = useCallback(');
+  const resetSource = source.slice(start, source.indexOf('\n  const completeSkippedStage', start));
+  let states = Object.fromEntries(['zerodha','indmoneyUs'].map(portfolio => [portfolio,Object.fromEntries(stages.map(stage => [stage,{state:'failed',error:'Old failure',errorDetails:[{}],lastRunId:22,completedAt:oldTime,recommendedStocks:4,evidence:{kind:'saved'}}]))]));
+  const generation = {current:4};
+  const reset = new Function('useCallback','setStates','STAGE_ORDER','savedStageReadGeneration','setWorkflowHistoryError',ts.transpileModule(resetSource+'\nreturn resetPortfolio;', {compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText)(fn=>fn,fn=>{states=fn(states)},stages,generation,()=>{});
+  for (let run=0;run<2;run++) {
+    reset('zerodha');
+    for (const stage of stages) assert.deepEqual(states.zerodha[stage],{state:'idle'});
+    states.zerodha.swing={state:'failed',error:'Current failure',lastRunId:run+100};
+  }
+  assert.equal(generation.current,6);
+  assert.equal(states.indmoneyUs.swing.error,'Old failure');
+});
+
+
+test('a pre-start history request cannot apply after reset invalidates its generation', async () => {
+  let release;
+  const readBarrier=new Promise(resolve=>{release=resolve;});
+  const generation={current:0};
+  const initial=await hydrate();
+  const pending=hydrate({initial,histories:[record('completed',3)],readBarrier,generation});
+  generation.current+=1; // The same synchronous invalidation performed by resetPortfolio.
+  release();
+  assert.deepEqual(await pending,initial);
 });

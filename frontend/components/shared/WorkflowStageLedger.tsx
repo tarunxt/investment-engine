@@ -37,9 +37,10 @@ export function WorkflowStageLedgerViews({ market, view, onChange, portfolioOnly
 const control = "inline-flex min-h-9 items-center rounded-lg border border-indigo-200 bg-white px-3 py-1.5 text-sm font-medium text-indigo-800 hover:bg-indigo-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600 focus-visible:ring-offset-2";
 
 /** Presentation adapter: the workflow continues to own every value and callback. */
-export function WorkflowStageLedger({ children, enabled, view = "ledger", historyHref, onStockFlowClick, market }: {
+export function WorkflowStageLedger({ children, enabled, view = "ledger", historyHref, onStockFlowClick, market, active = false }: {
   children: ReactElement<Stage>[];
   enabled: boolean;
+  active?: boolean;
   view?: WorkflowLedgerView;
   market?: "zerodha" | "indmoneyUs";
   historyHref: string;
@@ -49,7 +50,12 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
   const [durationStage, setDurationStage] = useState<Stage | null>(null);
   const detailId = useId();
   if (!enabled) return <div className="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{children}</div>;
-  const stages = children.map(child => child.props);
+  const stages = children.map(child => {
+    const item = child.props;
+    // Upcoming stages have no current execution evidence, including restored tabs.
+    return active && (item.info.state === "idle" || item.info.state === "queued")
+      ? { ...item, info: { state: item.info.state } } : item;
+  });
   const selected = stages.find(item => item.stage === selectedStage) ?? stages[0];
   const rowValue = (item: Stage, label: string, fallback = "—") => getIdleStageRows(item.stage, item.info, item.now).find(row => row.label === label)?.value ?? fallback;
   const openDuration = (item: Stage) => {
@@ -67,6 +73,7 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
         <caption className="sr-only">Saved workflow stages. Select a stage to inspect its evidence; execution controls are separate.</caption>
         <thead className="bg-slate-100 text-xs text-slate-700"><tr>{["Stage", "Evidence time", "Completion / inputs", "Stocks", "Duration", "Error"].map(label => <th key={label} scope="col" className="px-3 py-2 font-semibold">{label}</th>)}</tr></thead>
         <tbody>{stages.map(item => {
+          const upcoming = active && (item.info.state === "idle" || item.info.state === "queued");
           const rows = getIdleStageRows(item.stage, item.info, item.now);
           const error = rows.find(row => row.label === "Error")!;
           const time = rows[0].value;
@@ -84,18 +91,18 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
                 </button>
               </div>
             </th>
-            <td className="px-3 py-2 whitespace-nowrap">{time}</td>
-            <td className="max-w-56 px-3 py-2">{market && ["threats", "swing", "rebalance", "technical"].includes(item.stage) ? <button type="button" data-auto-rebalance-llm-metric="true" data-workflow-stage={item.stage} data-workflow-portfolio={market === "zerodha" ? "india" : "indmoney_us"} data-workflow-total={item.info.totalLlms ?? undefined}
+            <td className="px-3 py-2 whitespace-nowrap">{upcoming ? null : time}</td>
+            <td className="max-w-56 px-3 py-2">{!upcoming && <>{market && ["threats", "swing", "rebalance", "technical"].includes(item.stage) ? <button type="button" data-auto-rebalance-llm-metric="true" data-workflow-stage={item.stage} data-workflow-portfolio={market === "zerodha" ? "india" : "indmoney_us"} data-workflow-total={item.info.totalLlms ?? undefined}
               data-workflow-run-id={item.info.activeRunId ?? item.info.lastRunId ?? undefined}
               data-workflow-job-id={item.info.jobId ?? undefined}
               data-workflow-sequence={item.info.workflowSequence ?? undefined}
               data-workflow-passed={item.info.passedLlms ?? undefined}
               data-workflow-failed={item.info.failedLlms ?? undefined}
               data-workflow-partial={item.info.partialLlms ?? undefined}
-              aria-label={`Open ${STAGE_METADATA[item.stage].idle} LLM details`} aria-haspopup="dialog" className="rounded text-indigo-700 underline decoration-dotted underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600">{rowValue(item, "LLMs completed")}</button> : rowValue(item, "LLMs completed", item.stage === "actionables" ? `Rebalance inputs ${rowValue(item, "Rebalance inputs")}` : "—")}{rows.some(row => row.label === "Cost incurred") ? <span className="mt-1 block text-xs text-slate-500">Cost incurred: {rowValue(item, "Cost incurred")}</span> : null}</td>
-            <td className="px-3 py-2" title={usesSyncStockCount ? "Holdings count from the latest saved Zerodha portfolio snapshot" : undefined}>{stockCell}</td>
-            <td className="px-3 py-2 whitespace-nowrap">{rows.some(row => row.label === "Duration") ? <button type="button" aria-haspopup="dialog" aria-label={`Show duration breakdown for ${STAGE_METADATA[item.stage].idle}`} className="rounded text-indigo-700 underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600" onClick={() => openDuration(item)}>{rowValue(item, "Duration")}</button> : "—"}</td>
-            <td className={`max-w-44 px-3 py-2 ${error.detail ? "text-amber-900" : ""}`}>{error.value}{error.detail ? <StageErrorDetails stageLabel={STAGE_METADATA[item.stage].idle} info={item.info} row={error} /> : null}</td>
+              aria-label={`Open ${STAGE_METADATA[item.stage].idle} LLM details`} aria-haspopup="dialog" className="rounded text-indigo-700 underline decoration-dotted underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600">{rowValue(item, "LLMs completed")}</button> : rowValue(item, "LLMs completed", item.stage === "actionables" ? `Rebalance inputs ${rowValue(item, "Rebalance inputs")}` : "—")}{rows.some(row => row.label === "Cost incurred") ? <span className="mt-1 block text-xs text-slate-500">Cost incurred: {rowValue(item, "Cost incurred")}</span> : null}</>}</td>
+            <td className="px-3 py-2" title={usesSyncStockCount ? "Holdings count from the latest saved Zerodha portfolio snapshot" : undefined}>{upcoming ? null : stockCell}</td>
+            <td className="px-3 py-2 whitespace-nowrap">{upcoming ? null : rows.some(row => row.label === "Duration") ? <button type="button" aria-haspopup="dialog" aria-label={`Show duration breakdown for ${STAGE_METADATA[item.stage].idle}`} className="rounded text-indigo-700 underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600" onClick={() => openDuration(item)}>{rowValue(item, "Duration")}</button> : "—"}</td>
+            <td className={`max-w-44 px-3 py-2 ${error.detail ? "text-amber-900" : ""}`}>{upcoming ? null : error.value}{!upcoming && error.detail ? <StageErrorDetails stageLabel={STAGE_METADATA[item.stage].idle} info={item.info} row={error} /> : null}</td>
           </tr>;
         })}</tbody>
       </table>
