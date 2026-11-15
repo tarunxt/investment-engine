@@ -18,9 +18,14 @@ on:
           - full
 
       expected_sha:
-        description: Exact reviewed main SHA (required for frontend scope)
+        description: Exact reviewed main SHA (required for frontend scope or a runner SSH window)
         required: false
         type: string
+
+      runner_ssh_window:
+        description: Publish each runner IPv4 and wait for operator-managed single-host SSH access
+        type: boolean
+        default: false
 
 permissions:
   actions: read
@@ -54,6 +59,7 @@ jobs:
           BEFORE_SHA: ${{ github.event.before }}
           GH_TOKEN: ${{ github.token }}
           REQUESTED_SCOPE: ${{ github.event.inputs.scope }}
+          RUNNER_SSH_WINDOW: ${{ inputs.runner_ssh_window }}
           EXPECTED_RELEASE_SHA: ${{ github.event.inputs.expected_sha }}
         run: |
           set -euo pipefail
@@ -101,6 +107,54 @@ jobs:
       - name: Record checkout duration
         id: checkout-timing
         run: echo "seconds=$(( $(date +%s) - CHECKOUT_STARTED_AT ))" >>"${GITHUB_OUTPUT}"
+
+      - &record-runner-address
+        name: Identify this job's public IPv4
+        if: inputs.runner_ssh_window
+        id: runner-address
+        shell: bash
+        run: |
+          set -euo pipefail
+          ipv4=$(curl -4 --noproxy '*' --proto '=https' --fail --silent --show-error --max-time 10 --retry 2 https://checkip.amazonaws.com)
+          python3 - "$ipv4" <<'PY'
+          import ipaddress, sys
+          address = ipaddress.IPv4Address(sys.argv[1])
+          if not address.is_global or address.is_multicast:
+              sys.exit("Runner address is not public unicast IPv4")
+          PY
+          printf '%s/32\n' "$ipv4" > "$RUNNER_TEMP/runner-cidr.txt"
+          printf 'ipv4=%s\n' "$ipv4" >> "$GITHUB_OUTPUT"
+
+      - &publish-runner-address
+        name: Publish this job's SSH source for the operator
+        if: inputs.runner_ssh_window
+        uses: actions/upload-artifact@v7
+        with:
+          name: ssh-source-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}-${{ steps.runner-address.outputs.ipv4 }}
+          path: ${{ runner.temp }}/runner-cidr.txt
+          retention-days: 1
+          if-no-files-found: error
+
+      - &wait-for-ssh
+        name: Wait up to five minutes for this runner's SSH route
+        if: inputs.runner_ssh_window
+        timeout-minutes: 6
+        env:
+          DEPLOY_HOST: ${{ secrets.EC2_HOST }}
+        run: |
+          python3 - <<'PY'
+          import os, socket, time
+          target = (os.environ["DEPLOY_HOST"], 22)
+          deadline = time.monotonic() + 300
+          while time.monotonic() < deadline:
+              try:
+                  with socket.create_connection(target, timeout=3):
+                      break
+              except OSError:
+                  time.sleep(5)
+          else:
+              raise SystemExit("Timed out waiting for the approved SSH route")
+          PY
 
       - name: Read canonical non-secret audit build flag
         id: audit-public-flag
@@ -294,6 +348,10 @@ jobs:
     timeout-minutes: 60
 
     steps:
+      - *record-runner-address
+      - *publish-runner-address
+      - *wait-for-ssh
+
       - name: Start artifact download timer
         if: needs.detect-changes.outputs.scope != 'backend-only'
         run: echo "DOWNLOAD_STARTED_AT=$(date +%s)" >>"${GITHUB_ENV}"
