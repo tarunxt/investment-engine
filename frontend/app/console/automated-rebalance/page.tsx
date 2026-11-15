@@ -1,5 +1,2 @@
-import { AutomatedRebalanceClient } from "./_components/AutomatedRebalanceClient";
-
-export default function AutomatedRebalancePage() {
-  return <AutomatedRebalanceClient />;
-}
+import { WorkflowCompatibilityResolver } from "./_components/WorkflowCompatibilityResolver";
+export default function AutomatedRebalancePage() { return <WorkflowCompatibilityResolver />; }

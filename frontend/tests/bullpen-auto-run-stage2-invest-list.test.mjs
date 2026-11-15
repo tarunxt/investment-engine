@@ -1,3 +1,4 @@
+import { readBullpenScheduleSource } from "./helpers/bullpenScheduleSource.mjs";
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -155,17 +156,12 @@ function createStage2TopTenQuestion(index) {
 }
 
 test("Stage 2 invest list reuses the saved Stage 2 top-10 events summary and keeps Stage 3 handoff diagnostics separate", () => {
-  const source = readFileSync(
-    new URL(
-      "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
-      import.meta.url,
-    ),
-    "utf8",
-  );
+  const source = readBullpenScheduleSource();
 
-  assert.match(source, /if \(decision\.decision === "BUY_NEW"\) \{\s*return true;/);
+  assert.match(source, /readStageTwoActionableDisplayContract\(\s*llmWorkflowStage.outputs/);
+  assert.match(source, /rows: actionableContract.hasExactMarketIds \? authoritativeBuyRows : \[\]/);
   assert.match(source, /buildStageTwoInvestEventsDialogState/);
-  assert.match(source, /getBullpenTopTenStrongestLlmOddsRows/);
+  assert.match(readFileSync(new URL("../app/console/bullpen-ai/_components/bullpenStage2TopTenHandoff.ts", import.meta.url), "utf8"), /getBullpenTopTenStrongestLlmOddsRows/);
   assert.match(source, /Stage 2 Top 10 events ranked by Returns\/day\./);
   assert.match(source, /rowsOverride=\{state\.rows\}/);
   assert.match(source, /updatedAt=\{state\.updatedAt\}/);
@@ -184,13 +180,7 @@ test("Stage 2 invest list reuses the saved Stage 2 top-10 events summary and kee
 });
 
 test("Stage 2 invest list can collapse into a compact Events Summary view", () => {
-  const source = readFileSync(
-    new URL(
-      "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
-      import.meta.url,
-    ),
-    "utf8",
-  );
+  const source = readBullpenScheduleSource();
 
   assert.match(source, /const \[isCompactRows, setIsCompactRows\] = useState\(false\);/);
   assert.match(source, /Collapse Stage 2 invest rows/);
@@ -208,7 +198,7 @@ test("Stage 2 handoff fallback reuses the canonical strongest-odds Top 10 select
   );
 
   assert.match(source, /questionByMarketId: Map<string, BullpenQuestionRow>/);
-  assert.match(source, /getBullpenTopTenStrongestLlmOddsRows/);
+  assert.match(readFileSync(new URL("../app/console/bullpen-ai/_components/bullpenStage2TopTenHandoff.ts", import.meta.url), "utf8"), /getBullpenTopTenStrongestLlmOddsRows/);
   assert.match(source, /\[\.\.\.questionByMarketId\.values\(\)\]/);
   assert.match(source, /return reviewedTopTenMarketIds;/);
 });
@@ -264,13 +254,7 @@ test("Stage 3 Step 2 handoff keeps the full saved Stage 2 Top 10 even when later
 });
 
 test("Stage 3 Step 2 transfer queue summary cards open metric info popups for each queue count", () => {
-  const source = readFileSync(
-    new URL(
-      "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
-      import.meta.url,
-    ),
-    "utf8",
-  );
+  const source = readBullpenScheduleSource();
 
   assert.match(source, /Stage2TransferQueueMetricSummaryCard/);
   assert.match(source, /Stage2TransferQueueMetricInfoDialog/);

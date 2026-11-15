@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 const source = readFileSync(
   new URL("../app/console/dashboard/_components/RebalanceWorkflowSections.tsx", import.meta.url),
   "utf8",
-);
+) + readFileSync(new URL("../app/console/_components/WorkflowConfiguration.tsx", import.meta.url), "utf8");
 
 assert.match(source, /type ZerodhaExecutionMode = "direct_market" \| "publisher_limit";/);
 assert.doesNotMatch(source, /Open Kite protected LIMIT basket/);

@@ -225,9 +225,12 @@ COST_COMPONENTS = ("commission", "spread", "slippage", "fx", "tax", "financing")
 
 def cost_coverage(costs):
     """Known zero, missing and partial remain distinct. No synthetic defaults."""
+    costs = costs if isinstance(costs, dict) else {}
     states = {}
     for key in COST_COMPONENTS:
-        item = costs.get(key) or {}
+        item = costs.get(key)
+        if not isinstance(item, dict):
+            item = {}
         amount = number(item.get("value"))
         known = item.get("coverage") == "complete" and amount is not None and amount >= 0 and isinstance(item.get("source_hash"), str) and bool(re.fullmatch(r"[0-9a-f]{64}", item["source_hash"]))
         states[key] = "known_zero" if known and amount == 0 else "known" if known else "partial" if item.get("coverage") == "partial" else "unknown"

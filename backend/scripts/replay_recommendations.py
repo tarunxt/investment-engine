@@ -35,7 +35,7 @@ def main():
     try:
         if args.input.resolve() == args.output.resolve():
             raise ValueError("Source and output must differ")
-        if args.input.stat().st_size > 20_000_000:
+        if args.evidence_only and args.input.stat().st_size > 20_000_000:
             raise ValueError("Offline input exceeds byte bound")
         data = json.loads(args.input.read_text())
         if not isinstance(data, dict):
@@ -46,7 +46,7 @@ def main():
         if not isinstance(data.get("prices", []), list):
             raise ValueError("Expected price array")
         for record in records:
-            for key in ("coverage", "calculation", "execution_costs"):
+            for key in ("coverage", "calculation"):
                 if record.get(key) is not None and not isinstance(record[key], dict):
                     raise ValueError("Invalid nested evidence object")
             findings = (record.get("calculation") or {}).get("findings", [])

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import ts from "typescript";
@@ -199,12 +200,18 @@ function loadRefreshRuntime({ fetch, clock, update = async () => {} }) {
     runtime: "../app/api/bullpen-ai/_lib/backendBullpenRuntime.ts",
     singleFlight: "../lib/singleFlight.ts",
     transport: "../lib/boundedApiTransport.ts",
+    trusted: "../lib/trustedSessionUpdate.ts",
   };
   const modules = new Map([
     ["node:crypto", { createHash }],
+    ["node:async_hooks", { AsyncLocalStorage }],
     ["@auth/core/jwt", { getToken: async () => null }],
     ["next/server", { NextResponse: Response }],
-    ["@/auth", { resolveNextAuthSecret: () => "unused", unstable_update: update }],
+    ["@/auth", { resolveNextAuthSecret: () => "unused", unstable_update: async () => {
+      const replacement = load("trusted").trustedSessionReplacement(fixtureCookie);
+      assert.ok(replacement, "server-only replacement must be account/generation bound");
+      await update(replacement);
+    } }],
     ["@/lib/authSessionCookie", {
       readCookieNames: () => [],
       resolveSessionCookieSecurity: () => false,
@@ -214,6 +221,19 @@ function loadRefreshRuntime({ fetch, clock, update = async () => {} }) {
     "./backendBullpenRuntime": "runtime",
     "@/lib/singleFlight": "singleFlight",
     "@/lib/boundedApiTransport": "transport",
+    "@/lib/trustedSessionUpdate": "trusted",
+  };
+  const fixtureCookie = { id: "42", sub: "42", sessionGeneration: "fixture-session", refreshToken: "fixture-refresh" };
+  const intents = new Set();
+  const fixtureFetch = async (url, options) => {
+    if (url.endsWith("/auth/refresh-intent")) {
+      const credential = JSON.parse(options.body).refresh_token;
+      if (intents.has(credential)) return Response.json({detail: "Refresh reserved or uncertain; sign in again"}, {status: 409});
+      intents.add(credential);
+      fixtureCookie.refreshToken = credential;
+      return Response.json({intent_nonce: "synthetic-intent"});
+    }
+    return fetch(url, options);
   };
   function load(specifier) {
     const id = aliases[specifier] ?? specifier;
@@ -231,7 +251,7 @@ function loadRefreshRuntime({ fetch, clock, update = async () => {} }) {
       "exports", "module", "require", "fetch", "setTimeout", "clearTimeout", "process",
       output,
     )(
-      loaded.exports, loaded, load, fetch, clock.setTimeout, clock.clearTimeout,
+      loaded.exports, loaded, load, fixtureFetch, clock.setTimeout, clock.clearTimeout,
       { env: { BACKEND_API_URL: "http://backend.test" } },
     );
     return loaded.exports;
@@ -246,7 +266,7 @@ function refreshContext(overrides = {}) {
     accessTokenExpiresAt: 0,
     hasAuthJsSession: false,
     sessionGeneration: "fixture-session",
-    sessionSubject: null,
+    sessionSubject: "42",
     rotatedTokens: null,
     ...overrides,
   };
@@ -303,11 +323,13 @@ test("a timed-out BFF waiter cannot pin later requests to a hung refresh", async
   clock.advance(2_000);
   await flushRefreshPromises();
   assert.equal(calls[0].options.signal.aborted, true);
-  const retry = request();
+  // The hung flight is retired, but durable intent forbids replay/takeover
+  // with the same credential. Reauthentication is honest recovery.
+  const retry = assert.rejects(request(), error => error instanceof runtime.BackendRuntimeHttpError && error.status === 409);
   await flushRefreshPromises();
   clock.advance(1_000);
-  assert.equal((await retry).response.status, 200);
-  assert.equal(calls.length, 2);
+  await retry;
+  assert.equal(calls.length, 1);
   assert.equal(clock.timers.size, 0);
 });
 
@@ -342,7 +364,7 @@ test("the shared deadline covers a stalled refresh response body and discards la
   assert.equal(initialSignal.aborted, true);
   assert.equal(firstContext.rotatedTokens, null);
 
-  const nextContext = refreshContext({ hasAuthJsSession: true });
+  const nextContext = refreshContext({ hasAuthJsSession: true, refreshToken: "fixture-independent-refresh" });
   await runtime.rotateBackendTokens(nextContext);
   assert.equal(calls, 2);
   resolveBody(JSON.stringify({ access_token: "fixture-late", refresh_token: "fixture-late" }));
@@ -379,6 +401,7 @@ test("one caller cancellation does not abort another caller's shared refresh", a
   const surviving = runtime.rotateBackendTokens(survivingContext);
   caller.abort();
   await cancelled;
+  await flushRefreshPromises(); // The separate durable-intent response precedes dispatch.
   assert.equal(calls, 1);
   assert.equal(upstreamSignal.aborted, false);
   resolveFetch(refreshedResponse());
@@ -400,7 +423,7 @@ test("an already-aborted caller does not start an orphaned shared refresh", asyn
   assert.equal(clock.timers.size, 0);
 });
 
-test("failed refreshes preserve authentication errors and allow a later flight", async () => {
+test("failed refreshes preserve authentication errors and allow a new-session flight", async () => {
   const clock = new RefreshClock();
   let calls = 0;
   const runtime = loadRefreshRuntime({
@@ -413,7 +436,7 @@ test("failed refreshes preserve authentication errors and allow a later flight",
     error instanceof runtime.BackendRuntimeHttpError && error.status === 401,
   );
   assert.equal(clock.timers.size, 0);
-  const context = refreshContext();
+  const context = refreshContext({ refreshToken: "fixture-independent-refresh" });
   await runtime.rotateBackendTokens(context);
   assert.equal(context.accessToken, "fixture-new-access");
   assert.equal(calls, 2);

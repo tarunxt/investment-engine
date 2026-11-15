@@ -113,3 +113,37 @@ def test_a10_007_cli_valid_long_horizon_is_unknown_not_fabricated(tmp_path):
     rows=json.loads(output.read_text())['walk_forward']['horizons']
     assert rows[0]['return']==str(Decimal(103)/Decimal(101)-1)
     assert rows[1]['return'] is None and rows[1]['price_points']==100
+
+
+@pytest.mark.parametrize('horizons', [None, 1, True, '1', {'count': 1}])
+def test_invalid_horizon_container_is_rejected(horizons):
+    with pytest.raises(ValueError, match='horizon'):
+        walk_forward([], [], horizons=horizons)
+
+
+@pytest.mark.parametrize('invalid_time', ['2024-02-02T12:00:00', 'invalid', 123])
+def test_cli_invalid_timestamp_preserves_previous_report_and_source(tmp_path, invalid_time):
+    source, output = tmp_path/'input.json', tmp_path/'report.json'
+    points = prices(); points[1]['at'] = invalid_time
+    source.write_text(json.dumps({'records': [record()], 'prices': points, 'simulation': {'train_fraction': 0}}))
+    output.write_bytes(b'{"previous":true}\n')
+    before, old = source.read_bytes(), output.read_bytes()
+    script = Path(__file__).resolve().parents[1]/'scripts'/'replay_recommendations.py'
+    result = subprocess.run([sys.executable, str(script), str(source), str(output)], capture_output=True, text=True)
+    assert result.returncode == 2
+    assert output.read_bytes() == old and source.read_bytes() == before
+    assert 'No new report was published' in result.stderr
+    assert not list(tmp_path.glob('.*.tmp'))
+
+
+def test_cli_preserves_preexisting_record_bounds_without_new_byte_ceiling(tmp_path):
+    source, output = tmp_path/'input.json', tmp_path/'report.json'
+    legacy = record(); legacy['execution_costs'] = ['synthetic-legacy-metadata']
+    data = {'records': [legacy], 'prices': prices(), 'simulation': {'train_fraction': 0},
+            'synthetic_unused_padding': 'x' * 20_000_001}
+    source.write_text(json.dumps(data))
+    script = Path(__file__).resolve().parents[1]/'scripts'/'replay_recommendations.py'
+    result = subprocess.run([sys.executable, str(script), str(source), str(output)], capture_output=True, text=True)
+    assert result.returncode == 0
+    assert json.loads(output.read_text())['walk_forward']['status'] == 'computed'
+    assert source.stat().st_size > 20_000_000
