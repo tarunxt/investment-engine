@@ -111,6 +111,7 @@ function harness({ analysisOnly = false, formulaScore = 0, intercept, read, emai
   };
   const bindings = {
     runtimeOwner: {}, isCurrentWorkflowOwner: () => true,
+    savedStageReadGeneration: {current:0}, setWorkflowHistoryError: set("historyError"),
     readLatestIndmoneySnapshot: () => apiService.indmoneyUsPortfolioOverview(),
     readIndmoneySnapshotSource, useCallback: (fn) => fn, technicalInputPlanIssue, AutoRebalanceAuditSession, assertAutoRebalanceRunMetadata, autoRebalanceAuditKey, assertIndmoneyHoldingsSnapshot,
     activeAutoRebalanceMetadataRef: active, auditSessionsRef: sessions,
@@ -570,3 +571,26 @@ for (const rawScore of [3.033333333333333, -3.033333333333333, 0, null]) {
     assert.equal(frozen.rows[0].scorePolicy, frozen.scorePolicy);
   });
 }
+
+test('actual selective workflow clears cached evidence before each reservation acknowledgement', async () => {
+  let gate=deferred();
+  const h=harness({selection:['swing'],reserve:()=>gate.promise});
+  for(let iteration=0;iteration<2;iteration++) {
+    const stale={state:'failed',error:'Previous run failure',errorDetails:[{message:'Previous detail'}],lastRunId:900,completedAt:'2026-10-01T00:00:00Z',recommendedStocks:99,evidence:{kind:'saved',references:['Old run']}};
+    for(const stage of stages)h.view.states.zerodha[stage]=structuredClone(stale);
+    const running=h.runWorkflow('zerodha');
+    assert.equal(h.view.running,'zerodha');
+    assert.equal(h.modelCalls.length,iteration,'reservation is still pending');
+    for(const stage of stages) {
+      const info=h.view.states.zerodha[stage];
+      for(const field of ['errorDetails','lastRunId','completedAt','recommendedStocks','evidence'])assert.equal(info[field],undefined,`${stage}.${field}`);
+      assert.notEqual(info.error,'Previous run failure');
+    }
+    gate.resolve(metadata('india',42+iteration));
+    await running;
+    assert.equal(h.view.running,null);
+    assert.equal(h.view.states.zerodha.swing.state,'completed');
+    assert.equal(h.modelCalls.length,iteration+1);
+    gate=deferred();
+  }
+});
