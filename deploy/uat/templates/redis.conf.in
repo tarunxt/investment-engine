@@ -1,0 +1,15 @@
+bind 127.0.0.1
+port 16379
+protected-mode yes
+daemonize no
+dir /var/lib/credx-uat-redis
+dbfilename uat.rdb
+appendonly no
+save ""
+maxmemory ${redis_maxmemory_bytes}
+maxmemory-policy noeviction
+maxclients 16
+timeout 60
+# Runtime provisioning of an independent ACL file requires the repository's
+# mandated secret workflow. Do not share production credentials.
+aclfile /etc/credx-uat/redis.acl

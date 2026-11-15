@@ -1,0 +1,36 @@
+[Unit]
+Description=CredX UAT backend - NOT READY until release gates pass
+After=network.target credx-uat-redis.service
+ConditionPathExists=/etc/credx-uat/ISOLATION_VERIFIED
+
+[Service]
+Type=simple
+User=credx-uat
+Group=credx-uat
+Slice=credx-uat.slice
+WorkingDirectory=/srv/credx-uat/current/backend
+EnvironmentFile=/etc/credx-uat/backend.env
+# Deliberately absent entrypoint: implementing/reviewing UAT auth and fake
+# adapters is a mandatory gate. NEVER substitute app.main:app to start now.
+ExecStart=/srv/credx-uat/venv/bin/uvicorn app.uat_main:app --host 127.0.0.1 --port 18000 --workers 1 --limit-concurrency 8
+Restart=no
+TimeoutStopSec=20
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_INET
+ReadWritePaths=/var/lib/credx-uat /var/log/credx-uat
+InaccessiblePaths=-/etc/investor -/srv/investor -/srv/investment-engine -/run/postgresql -/run/redis -/run/docker.sock
+# Additional per-UID/per-port firewall is REQUIRED: loopback alone is unsafe.
+IPAddressDeny=any
+IPAddressAllow=127.0.0.1/32
+StandardOutput=append:/var/log/credx-uat/backend.log
+StandardError=append:/var/log/credx-uat/backend.log

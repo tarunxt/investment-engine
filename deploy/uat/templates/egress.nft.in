@@ -1,0 +1,14 @@
+# Candidate only. Requires installed nftables/kernel support and host review.
+# Never flush the host ruleset. Load this dedicated table atomically ONLY after
+# validating numeric UIDs, unused ports, existing rules and rollback procedure.
+table inet credx_uat {
+    chain output {
+        type filter hook output priority 10; policy accept;
+        # Responses to inbound connections; no unrestricted new outbound flow.
+        meta skuid { ${app_uid}, ${redis_uid}, ${db_uid} } ct direction reply accept
+        # App access: own backend, Redis, PostgreSQL and fixed-origin cert relay.
+        meta skuid ${app_uid} ip daddr 127.0.0.1 tcp dport { 18000, 16379, 15432, 18802 } accept
+        # Deny other IPv4/IPv6 and DNS, including production loopback services.
+        meta skuid { ${app_uid}, ${redis_uid}, ${db_uid} } reject
+    }
+}

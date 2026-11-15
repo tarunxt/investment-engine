@@ -1,0 +1,9 @@
+# PREPARATION ONLY. No backend is exposed, including assets/API/WebSockets.
+# Do not install until existing proxy/vhosts, DNS and graceful reload are verified.
+# This is NOT the authenticated vhost required for the final gate.
+server {
+    listen 80;
+    server_name uat.cred-x.in;
+    add_header X-Robots-Tag "noindex, nofollow" always;
+    return 403;
+}
