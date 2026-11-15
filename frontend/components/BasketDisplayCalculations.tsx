@@ -19,15 +19,42 @@ export function useBasketDisplayQuotes(open: boolean, market: "india" | "us", in
   useEffect(() => {
     if (!open || !keys) return;
     let active = true;
+    const controller = new AbortController();
     const requested = keys.split(",");
-    void (async () => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let running = false;
+    let failures = 0;
+    let nextRefresh = 0;
+    const visible = () => document.visibilityState !== "hidden";
+    // Completion-based scheduling prevents overlapping batches. Keep the request
+    // identity stable during polling so quote updates never reset draft edits.
+    const refresh = async () => {
+      if (!active || running || !visible()) return;
+      if (timer) clearTimeout(timer);
+      running = true;
+      try {
+        const result = await load();
+        if (active && result) setState({ request, ...result });
+        failures = 0;
+      } catch (error: unknown) {
+        failures += 1;
+        if (active) setState({ request, quotes: [], error: error instanceof Error ? error.message : "Live display quotes are unavailable." });
+      } finally {
+        running = false;
+        // HTTP failures (including rate limits) back off up to five minutes.
+        const delay = failures ? Math.min(300_000, 30_000 * 2 ** Math.min(failures, 4)) : 30_000;
+        nextRefresh = Date.now() + delay;
+        if (active && market === "india" && requested.length <= 500 && visible()) timer = setTimeout(refresh, delay);
+      }
+    };
+    const load = async () => {
       const quotes: { instrument: string; price: number; as_of: string; source: string }[] = [];
       const upstoxQuotes: typeof quotes = [];
       const vendorQuotes: UsVendorDisplayQuote[] = [];
       const warnings: string[] = [];
       if (requested.length > 500) throw new Error("Display quote batch exceeds 500 instruments.");
       for (let offset = 0; offset < requested.length; offset += 50) {
-        if (!active) return null;
+        if (!active || market === "india" && !visible()) return null;
         const batch = requested.slice(offset, offset + 50);
         if (market === "us") {
           const supported = batch.filter(key => /^(NASDAQ|NYSE|NYSEARCA|NYSEAMERICAN):[A-Z0-9.-]{1,24}$/.test(key));
@@ -43,17 +70,35 @@ export function useBasketDisplayQuotes(open: boolean, market: "india" | "us", in
           warnings.push(...data.missing.map(row => row.reason));
           continue;
         }
-        const data = await apiService.zerodhaDisplayQuotes(batch);
+        const data = await apiService.zerodhaDisplayQuotes(batch, controller.signal);
         if (!Array.isArray(data.quotes) || !Array.isArray(data.missing) || data.quotes.some(quote => !batch.includes(quote.instrument))) throw new Error("Quote response does not match this basket.");
         quotes.push(...data.quotes);
         if (data.upstox_quotes !== undefined && (!Array.isArray(data.upstox_quotes) || data.upstox_quotes.some(quote => !batch.includes(quote.instrument) || !quote.source?.startsWith("Upstox ")))) throw new Error("Upstox response does not match this basket.");
         upstoxQuotes.push(...(data.upstox_quotes ?? []));
       }
       return { quotes, upstoxQuotes, vendorQuotes, ...(warnings.length ? { error: [...new Set(warnings)].join("; ") } : {}) };
-    })().then(result => {
-      if (active && result) setState({ request, ...result });
-    }).catch((error: unknown) => { if (active) setState({ request, quotes: [], error: error instanceof Error ? error.message : "Live display quotes are unavailable." }); });
-    return () => { active = false; };
+    };
+    const visibilityChanged = () => {
+      if (timer) clearTimeout(timer);
+      if (visible() && market === "india" && !running && requested.length <= 500) {
+        // Returning to a visible tab refreshes when due. Repeated tab switches
+        // cannot bypass the normal interval or an error cooldown.
+        if (Date.now() < nextRefresh) timer = setTimeout(refresh, nextRefresh - Date.now());
+        else void refresh();
+      }
+    };
+    if (market === "india") document.addEventListener("visibilitychange", visibilityChanged);
+    // US quotes retain their existing one-shot behavior, even in hidden tabs.
+    if (market === "us") {
+      void load().then(result => { if (active && result) setState({ request, ...result }); })
+        .catch((error: unknown) => { if (active) setState({ request, quotes: [], error: error instanceof Error ? error.message : "Live display quotes are unavailable." }); });
+    } else void refresh();
+    return () => {
+      active = false;
+      controller.abort();
+      if (timer) clearTimeout(timer);
+      document.removeEventListener("visibilitychange", visibilityChanged);
+    };
   }, [open, market, keys, request]);
   useEffect(() => {
     if (!open || market !== "india") return;
