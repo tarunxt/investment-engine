@@ -356,8 +356,6 @@ validate_backend_env_file() {
     source '$APP_ROOT/deploy/no-docker/load-env-file.sh'
     load_env_file '$BACKEND_ENV_FILE'
 
-    # Check the signing key before installing units, migrating, or restarting.
-    # The validator uses only the standard library and never prints the key.
     python3 '$APP_ROOT/backend/app/core/jwt_configuration.py'
 
     if [[ -z \"\${DATABASE_URL:-}\" ]]; then
@@ -1938,6 +1936,13 @@ if [[ "$DEPLOY_BACKEND" == "true" ]]; then
 fi
 if [[ "$DEPLOY_FRONTEND" == "true" ]]; then
   sudo systemctl status "$FRONTEND_SERVICE_NAME" --no-pager
+  if [[ -n "${CREDX_CONTAINED_RELEASE_DRIVER:-}" ]]; then
+    [[ "$DEPLOY_BACKEND" == false ]]
+    [[ "$CREDX_CONTAINED_RELEASE_DRIVER" == /tmp/investor-contained-driver.*/deploy-recovery.sh ]]
+    # Both frontend pointer/config rollback remain armed during this outer gate.
+    bash "$CREDX_CONTAINED_RELEASE_DRIVER" --post-frontend-check
+  fi
+  deployment_test_hook "contained-release-guard"
   discard_previous_frontend_build
 fi
 

@@ -1,5 +1,23 @@
 # Final Actionables display provenance
 
+## Run matching retrieval states
+
+Both India and US run groups distinguish loading, failed retrieval, retained
+source data, and confirmed empty results. An unfinished or failed request does
+not imply no matching run or zero consolidated runs/stocks. A retained source
+group is labeled while refreshing or after a failed refresh. A successful check
+distinguishes no qualifying run from a selected group with no parsable stock
+rows. The source disclosure preserves the saved input bundle (or full legacy
+prompt), source IDs and timestamps verbatim; missing text/timestamps are labeled
+unavailable. It does not infer missing sources or claim corrupted data.
+
+The existing matcher and counts remain unchanged: market/stage identity,
+completed/partial status or saved usable model output, latest creation time,
+and whitespace-normalized input bundle equality (full prompt for legacy runs).
+Existing request-generation guards reject stale success and failure responses.
+These are read-only presentation changes with no provider, scan, execution,
+history-write, or account side effects.
+
 The current recommendation view previously combined the latest portfolio
 quantity with the first model's Units Change/Final Units and a multi-model mean.
 For example, two independent jobs proposing changes of 6 and 5 for a captured
@@ -34,3 +52,40 @@ zero versus unknown holdings, India/US rounding, historical temporal isolation,
 cache quota/session isolation, and valid Markdown versus terminal malformed
 JSON. These changes do not promise faster cold history hydration or validate
 historical model research. No production trading action is performed.
+
+## Historical action and score labels
+
+Legacy backfill stores model-consensus actions independently of an average of
+captured rationale scores. If rationale scores were absent, that legacy writer
+used its original action-code average instead. Neither is the weighted Calculated
+Score or an inverse of today's model-action input weights. The audit history now
+labels the recorded score method using `formula_version` and the saved legacy
+inputs; incomplete method evidence stays explicitly unknown. Original actions and
+scores are never changed to fit current formula settings.
+
+The model-action weight table is labeled as an input table. Current formula range
+labels now show inclusive/exclusive endpoints explicitly; matching conditions and
+holdings-dependent Buy New/Add More behavior are unchanged. Historical frozen
+matrices continue to display saved actions and rules, with the unrounded saved
+score available in the score tooltip.
+
+## Audit6 A6-05: exact holding provenance
+
+India captured-detail holding averages and completed-buy observations now require
+both exchange and symbol, matching the existing consolidated position identity.
+A BSE holding or order must not supply NSE detail evidence, or vice versa; missing
+venue evidence is not guessed. Original model cells, dates, scores and actions
+remain untouched. Historical reconstruction continues to use captured holdings
+and current formula settings, separately from original saved decisions.
+
+Position source labels distinguish a matched snapshot holding (including an
+explicit zero) from absence of that instrument in the snapshot. The existing
+zero-on-absence arithmetic is preserved and is now explicitly labeled as inferred,
+not a verified holding quantity. This does not establish universal portfolio
+reconciliation or verify the audit's historical BEL example.
+
+Synthetic regressions cover both venues in either holding order, missing venues,
+matched zero, absent instrument, unavailable snapshot and unchanged quantity
+arithmetic. The supplied report resolved to Library version 3 rather than the
+specified version 2; supported materialization and its bounded retry failed, so
+no report screenshot or live browser review is claimed.

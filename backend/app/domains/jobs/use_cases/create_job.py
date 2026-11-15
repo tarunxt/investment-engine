@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.core.recovery import require_equity_analysis
+
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -8,12 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.domains.jobs.events import JobCreated
 from app.domains.jobs.models import Job
 from app.domains.jobs.repository import PostgresJobRepository
-from app.infrastructure.database.outbox.models import OutboxMessage
 from app.infrastructure.messaging.event_bus import EventBus
 from app.infrastructure.messaging.idempotency import IdempotencyStore
-from app.infrastructure.messaging.task_registry import register_job_task
-from app.infrastructure.locks.redis_lock import RedisLock, LockAcquisitionError
-from app.shared.exceptions import ConflictException, ValidationException
+from app.infrastructure.locks.redis_lock import RedisLock
 from app.shared.types import JobId, JobStatus, UserId
 
 
@@ -52,83 +51,70 @@ class CreateJobUseCase:
         self._idempotency = idempotency
 
     async def execute(self, cmd: CreateJobCommand) -> CreateJobResult:
-        # ── 1. Idempotency fast-path ─────────────────────────────────────────
-        if cmd.idempotency_key:
-            if cached := await self._idempotency.get(cmd.idempotency_key):
-                return CreateJobResult(**cached)
+        require_equity_analysis(cmd.auto_rebalance_portfolio)
+        from app.domains.jobs.resource_policy import validate_prompt
+        from app.domains.jobs.resource_validation import validate_model_identifiers
+        validate_prompt(cmd.prompt)
+        validate_model_identifiers(cmd.provider, cmd.model)
+        from sqlalchemy.exc import IntegrityError
+        from app.domains.jobs.admission import (
+            JobAdmission, OPERATION, replay_admission, request_identity, utc_schedule,
+        )
+        from app.infrastructure.database.outbox.dispatch import obligation, dispatch_one
 
-        # ── 2. Normalise scheduled_at to UTC-aware ───────────────────────────
+        identity = request_identity(cmd) if cmd.idempotency_key else None
+        if identity:
+            existing = await replay_admission(self._session, self._repo, cmd, *identity[:2])
+            if existing is not None:
+                return CreateJobResult(existing.id, existing.status, utc_schedule(existing.scheduled_at))
+
         now = datetime.now(timezone.utc)
-        scheduled_at = cmd.scheduled_at
-        if scheduled_at is not None and scheduled_at.tzinfo is None:
-            scheduled_at = scheduled_at.replace(tzinfo=timezone.utc)
+        scheduled_at = utc_schedule(cmd.scheduled_at)
         is_future = scheduled_at is not None and scheduled_at > now
         initial_status = JobStatus.SCHEDULED if is_future else JobStatus.PENDING
-
-        # ── 3. Atomic write: job + outbox in one transaction ─────────────────
-        lock_key = f"job:create:{cmd.idempotency_key or cmd.prompt[:40]}"
         try:
-            async with self._lock.acquire(lock_key, ttl=15, timeout=5):
-                job = Job(
-                    prompt=cmd.prompt,
-                    provider=cmd.provider,
-                    model=cmd.model,
-                    user_id=cmd.user_id,
-                    status=initial_status,
-                    scheduled_at=scheduled_at,
-                    auto_rebalance_portfolio=cmd.auto_rebalance_portfolio,
-                    auto_rebalance_sequence=cmd.auto_rebalance_sequence,
-                    auto_rebalance_label=cmd.auto_rebalance_label,
-                )
-                await self._repo.create(job)
-
-                outbox_msg = OutboxMessage(
-                    topic="job.created",
-                    payload={
-                        "job_id": job.id,
-                        "scheduled_at": scheduled_at.isoformat() if scheduled_at else None,
-                    },
-                )
-                self._session.add(outbox_msg)
-                await self._session.commit()
-
-        except LockAcquisitionError:
-            raise ConflictException("Another request is creating the same job. Retry shortly.")
-
-        result = CreateJobResult(
-            job_id=JobId(job.id),
-            status=initial_status,
-            scheduled_at=scheduled_at,
-        )
-
-        # ── 4. Dispatch Celery task (ETA for future jobs) ────────────────────
-        from app.domains.jobs.tasks import execute_ai_job
-        if is_future:
-            task = execute_ai_job.apply_async(args=[job.id], eta=scheduled_at)
-        else:
-            task = execute_ai_job.delay(job.id)
-        await register_job_task(job.id, task.id)
-
-        # ── 5. In-process domain events (non-critical, fire-and-forget) ──────
-        await self._event_bus.publish(
-            JobCreated(
-                job_id=result.job_id,
-                user_id=cmd.user_id,
-                provider=cmd.provider,
-                model=cmd.model,
-                scheduled_at=scheduled_at,
+            job = Job(
+                prompt=cmd.prompt, provider=cmd.provider, model=cmd.model,
+                user_id=cmd.user_id, status=initial_status,
+                scheduled_at=scheduled_at.replace(tzinfo=None) if scheduled_at else None,
+                auto_rebalance_portfolio=cmd.auto_rebalance_portfolio,
+                auto_rebalance_sequence=cmd.auto_rebalance_sequence,
+                auto_rebalance_label=cmd.auto_rebalance_label,
             )
-        )
+            await self._repo.create(job)
+            message = obligation(job, scheduled_at if is_future else None)
+            self._session.add(message)
+            if identity:
+                self._session.add(JobAdmission(
+                    user_id=cmd.user_id, operation=OPERATION,
+                    request_key_hash=identity[0], fingerprint=identity[1], job_id=job.id,
+                ))
+            await self._session.commit()
+        except IntegrityError:
+            await self._session.rollback()
+            # Only the durable winner can resolve a concurrent uniqueness conflict.
+            if identity:
+                existing = await replay_admission(self._session, self._repo, cmd, *identity[:2])
+                if existing is not None:
+                    return CreateJobResult(existing.id, existing.status, utc_schedule(existing.scheduled_at))
+            raise
 
-        # ── 6. Cache result for idempotency ──────────────────────────────────
-        if cmd.idempotency_key:
-            await self._idempotency.set(
-                cmd.idempotency_key,
-                {
-                    "job_id": result.job_id,
-                    "status": result.status.value,
-                    "scheduled_at": result.scheduled_at.isoformat() if result.scheduled_at else None,
-                },
-            )
-
+        result = CreateJobResult(JobId(job.id), initial_status, scheduled_at)
+        await dispatch_one(self._session, message.id)
+        await self._event_bus.publish(JobCreated(
+            job_id=result.job_id, user_id=cmd.user_id, provider=cmd.provider,
+            model=cmd.model, scheduled_at=scheduled_at,
+        ))
+        if identity:
+            # Optional hint only. All replay branches read the durable record and
+            # recheck the owner; stale/foreign Redis values are never serialized.
+            try:
+                await self._idempotency.set_for_request(
+                    cmd.user_id, OPERATION, cmd.idempotency_key, identity[1],
+                    {"job_id": int(result.job_id)},
+                )
+            except Exception:
+                import logging
+                logging.getLogger(__name__).warning("Optional admission cache unavailable")
         return result
+

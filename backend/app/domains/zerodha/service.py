@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from app.core.recovery import (
+    recovery_mode, manual_zerodha_orders_enabled, require_zerodha_write_allowed,
+)
+
 import hashlib
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -29,7 +33,21 @@ class ZerodhaService:
 
     @property
     def direct_market_orders_enabled(self) -> bool:
-        return bool(self.is_configured and settings.zerodha_enable_direct_market_orders)
+        return bool(
+            (not recovery_mode() or manual_zerodha_orders_enabled())
+            and self.is_configured
+            and settings.zerodha_enable_direct_market_orders
+        )
+
+    @property
+    def order_submission_blocked_reason(self) -> str | None:
+        if recovery_mode() and not manual_zerodha_orders_enabled():
+            return (
+                "Order submission is disabled during analysis-only recovery. "
+                "No orders will be sent to Kite. Trading must be explicitly restored "
+                "by the operator before placing orders from Cred-X."
+            )
+        return None
 
     def get_login_url(self) -> str:
         return f"{self.LOGIN_BASE}?v=3&api_key={settings.zerodha_api_key}"
@@ -68,6 +86,10 @@ class ZerodhaService:
         headers: dict[str, str] | None = None,
         timeout: float = 30.0,
     ) -> Any:
+        if method.upper() not in {"GET", "HEAD"} and not (
+            method.upper() == "POST" and path == "/session/token"
+        ):
+            require_zerodha_write_allowed(method.upper(), path, data)
         request_headers = dict(headers or {})
         if access_token:
             request_headers.update(self._auth_headers(access_token))
@@ -94,6 +116,10 @@ class ZerodhaService:
         headers: dict[str, str] | None = None,
         timeout: float = 30.0,
     ) -> Any:
+        if method.upper() not in {"GET", "HEAD"} and not (
+            method.upper() == "POST" and path == "/session/token"
+        ):
+            require_zerodha_write_allowed(method.upper(), path, data)
         request_headers = dict(headers or {})
         if access_token:
             request_headers.update(self._auth_headers(access_token))

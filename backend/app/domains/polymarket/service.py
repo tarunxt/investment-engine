@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.core.recovery import recovery_mode, require_financial_writes_allowed
+
 import asyncio
 from copy import deepcopy
 from dataclasses import dataclass
@@ -170,6 +172,8 @@ class PolymarketBotManager:
 
     async def get_bot(self, user_id: int) -> PolymarketPaperCopyBot:
         loop = asyncio.get_running_loop()
+        if recovery_mode():
+            require_financial_writes_allowed()  # No bot init/background jobs in recovery.
         async with self._lock_for_current_loop():
             existing = self._bots.get(user_id)
             if existing and existing.loop is loop:

@@ -1,28 +1,32 @@
-"""Dependency-free JWT configuration validation for startup and deploy preflight."""
+"""Validate the runtime JWT signing key without loading application dependencies."""
 
 import os
 import re
 import sys
 
 
-def validate_jwt_secret_key(value: str | None) -> None:
-    """Reject missing, malformed, and repeated keys without exposing their values."""
-    # Require an unambiguous representation of a full 256-bit HS256 key.
-    # Format checks cannot prove entropy: the operator must generate random bytes.
-    if value is None or re.fullmatch(r"[0-9a-fA-F]{64}", value) is None:
-        raise ValueError(
-            "JWT_SECRET_KEY must be 32 random bytes encoded as 64 hexadecimal characters"
-        )
-    decoded = bytes.fromhex(value)
-    if any(decoded == decoded[:size] * (32 // size) for size in (1, 2, 4, 8, 16)):
-        raise ValueError("JWT_SECRET_KEY must not use a repeated placeholder pattern")
+def signing_key(supplied: list[str]) -> str:
+    if not supplied:
+        raise ValueError("JWT_SIGNING_KEY is required (private server-generated key)")
+    # A single explicit format avoids whitespace/encoding ambiguity. Format
+    # checks cannot establish randomness: generate 32 bytes with a CSPRNG.
+    if any(re.fullmatch(r"[0-9a-f]{64}", value) is None for value in supplied):
+        raise ValueError("JWT signing keys must encode 32 random bytes as 64 lowercase hex characters")
+    if any(
+        value == value[:size] * (64 // size)
+        for value in supplied for size in (1, 2, 4, 8, 16, 32)
+    ):
+        raise ValueError("JWT signing keys must not be repeated/default patterns")
+    if any(value != supplied[0] for value in supplied[1:]):
+        raise ValueError("Conflicting JWT_SIGNING_KEY, JWT_SECRET or SECRET_KEY configuration")
+    return supplied[0]
 
 
 if __name__ == "__main__":
+    environment = {name.lower(): value for name, value in os.environ.items()}
+    supplied = [environment[name] for name in ("jwt_signing_key", "jwt_secret", "secret_key")
+                if name in environment]
     try:
-        validate_jwt_secret_key(os.environ.get("JWT_SECRET_KEY"))
+        signing_key(supplied)
     except ValueError as error:
-        # Do not render a traceback, raw environment, fingerprint, or input value.
-        print(str(error), file=sys.stderr)
-        sys.exit(1)
-    print("JWT configuration valid")
+        sys.exit(str(error))

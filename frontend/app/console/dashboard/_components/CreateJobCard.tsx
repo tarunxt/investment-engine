@@ -19,6 +19,7 @@ export function CreateJobCard({
   runActionLabel = 'Run S1',
   runButtonClassName,
   submitBlockedReason = null,
+  showEstimateReadiness = false,
 }: {
   promptAside?: ReactNode;
   title?: string;
@@ -27,6 +28,7 @@ export function CreateJobCard({
   runActionLabel?: string;
   runButtonClassName?: string;
   submitBlockedReason?: string | null;
+  showEstimateReadiness?: boolean;
 } = {}) {
   const {
     prompt,
@@ -68,7 +70,7 @@ export function CreateJobCard({
             void handleSubmit(event);
           }} className="grid gap-5 xl:grid-cols-2">
             <div className="space-y-5">
-              <RunModeFields />
+              <RunModeFields showEstimateReadiness={showEstimateReadiness} />
             </div>
             <div className="space-y-5">
               <TemplateField />

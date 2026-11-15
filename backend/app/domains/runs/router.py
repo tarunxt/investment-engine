@@ -13,6 +13,7 @@ from app.domains.ai_providers.factory import ProviderFactory
 from app.domains.auth.dependencies import get_current_user
 from app.domains.auth.models import ActivityLog, User
 from app.domains.jobs.models import Job
+from app.domains.runs.side_effect_policy import permits_side_effects, require_workflow_policy_schema
 from app.domains.runs.models import (
     AutoRebalanceWorkflow,
     AutoRebalanceWorkflowStage,
@@ -225,7 +226,9 @@ def _timestamp_sort_key(value: datetime) -> float:
     return value.timestamp()
 
 
-def _serialize_auto_rebalance_job(job: Job) -> AutoRebalanceJobDetailResponse:
+def _serialize_auto_rebalance_job(job: Job, provenance: dict | None = None) -> AutoRebalanceJobDetailResponse:
+    from app.domains.jobs.schemas import JobResponse
+    job = JobResponse.model_validate(job)
     return AutoRebalanceJobDetailResponse(
         id=job.id,
         provider=job.provider,
@@ -241,6 +244,7 @@ def _serialize_auto_rebalance_job(job: Job) -> AutoRebalanceJobDetailResponse:
         web_search_queries=job.web_search_queries,
         web_sources=job.web_sources,
         runtime_metadata_json=job.runtime_metadata_json,
+        output_provenance=provenance,
         created_at=job.created_at,
         updated_at=job.updated_at,
     )
@@ -276,6 +280,8 @@ def _stage_response(
         for link in run.run_jobs
         if (job := link.job) is not None
     ] + standalone_jobs
+    from app.domains.jobs.schemas import JobResponse
+    jobs = [JobResponse.model_validate(job) for job in jobs]
     failed_jobs = [job for job in jobs if _status_value(job.status) == "failed"]
     event_status = event.status.lower() if event else None
     status = event_status or _derive_stage_status(jobs)
@@ -285,16 +291,31 @@ def _stage_response(
         derived_status = _derive_stage_status(jobs)
         if _is_terminal_auto_rebalance_status(derived_status):
             status = derived_status
+    partial_count = sum(_status_value(job.status) == "partial" for job in jobs)
+    summary = dict(event.summary_json or {}) if event else {}
+    if partial_count:
+        summary.update(
+            completed_llms=sum(_status_value(job.status) in {"completed", "partial", "failed"} for job in jobs),
+            passed_llms=sum(_status_value(job.status) == "completed" for job in jobs),
+            partial_llms=partial_count, failed_llms=len(failed_jobs), total_llms=len(jobs),
+        )
+    if partial_count:
+        from app.domains.jobs.partial_output import PARTIAL_NOTICE
+        summary["partial_notice"] = PARTIAL_NOTICE
+        if not any(_status_value(job.status) in {"pending", "processing", "scheduled"} for job in jobs):
+            status = "partial"
+            summary["run_status"] = "partial"
     return AutoRebalanceStageResponse(
         stage=stage,
         status=status,
         run_id=event.run_id if event and event.run_id else (runs[-1].id if runs else None),
         job_id=event.job_id if event and event.job_id else (standalone_jobs[-1].id if standalone_jobs else None),
-        summary=dict(event.summary_json or {}) if event else {},
+        summary=summary,
         error_message=(
-            event.error_message
-            if event and event.error_message
-            else (failed_jobs[-1].error_message if failed_jobs else None)
+            None if partial_count and not failed_jobs else (
+                event.error_message if event and event.error_message
+                else (failed_jobs[-1].error_message if failed_jobs else None)
+            )
         ),
         started_at=(
             event.started_at
@@ -315,6 +336,7 @@ def _stage_response(
         completed_provider_count=sum(
             _status_value(job.status) in {"completed", "partial"} for job in jobs
         ),
+        partial_provider_count=sum(_status_value(job.status) == "partial" for job in jobs),
         failed_provider_count=len(failed_jobs),
         estimated_cost=round(sum(job.estimated_cost or 0 for job in jobs), 8),
     )
@@ -327,6 +349,7 @@ async def _build_auto_rebalance_history(
     portfolio: str,
     sequences: set[int] | None = None,
 ) -> list[tuple[AutoRebalanceHistoryItemResponse, list[Run], list[Job]]]:
+    await require_workflow_policy_schema(db)
     workflow_query = (
         select(AutoRebalanceWorkflow)
         .where(
@@ -453,6 +476,7 @@ async def _build_auto_rebalance_history(
                 portfolio=portfolio,
                 sequence=sequence,
                 label=label,
+                side_effect_policy=workflow.side_effect_policy_json if workflow else None,
                 # A subset of finished child jobs is not a finished workflow.
                 # Preserve the durable parent's lifecycle; derivation is only
                 # a compatibility fallback for runs predating workflow audits.
@@ -471,6 +495,26 @@ async def _build_auto_rebalance_history(
             group_jobs,
         ))
     return sorted(result, key=lambda entry: (entry[0].sequence, entry[0].updated_at), reverse=True)
+
+
+@router.get("/final-actionables/stock-observations")
+async def stock_observations(market: str = Query(pattern="^(india|us)$"), symbol: str = Query(min_length=1, max_length=64), cursor: str | None = Query(default=None, max_length=100), limit: int = Query(default=50, ge=1, le=100), db: AsyncSession = Depends(get_async_db), current_user: User = Depends(get_current_user)):
+    from .stock_observations import stock_observation_page
+    try:
+        return await db.run_sync(lambda session: stock_observation_page(session, user_id=current_user.id, market=market, symbol=symbol, cursor=cursor, limit=limit))
+    except ValueError as exc: raise HTTPException(422, str(exc)) from exc
+
+
+@router.get("/final-actionables/score-history")
+async def basket_score_history(market: str = Query(pattern="^(india|us)$"), symbols: list[str] = Query(), days: int = Query(default=5, ge=1, le=3650), as_of: datetime | None = Query(default=None), db: AsyncSession = Depends(get_async_db), current_user: User = Depends(get_current_user)):
+    from .basket_score_history import score_history_view
+    # Authentication eagerly loads User.profile; timezone is a profile field,
+    # not a User attribute. Missing profile context must not silently change it.
+    if current_user.profile is None or not current_user.profile.timezone:
+        raise HTTPException(422, "A profile timezone is required for historical scores")
+    try:
+        return await db.run_sync(lambda session: score_history_view(session, user_id=current_user.id, market=market, symbols=symbols, days=days, as_of=as_of or datetime.now(timezone.utc), timezone_name=current_user.profile.timezone))
+    except ValueError as exc: raise HTTPException(422, str(exc)) from exc
 
 
 @router.get(
@@ -556,6 +600,7 @@ async def reserve_auto_rebalance_label(
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
+    await require_workflow_policy_schema(db)
     redis = _get_redis()
     try:
         sequence = await _reserve_auto_rebalance_sequence(db, redis, body.portfolio)
@@ -568,6 +613,7 @@ async def reserve_auto_rebalance_label(
         label=_format_auto_rebalance_label(body.portfolio, sequence),
         status="queued",
         current_stage="sync",
+        side_effect_policy_json=body.side_effect_policy.model_dump() if body.side_effect_policy else None,
     )
     db.add(workflow)
     await db.commit()
@@ -575,41 +621,47 @@ async def reserve_auto_rebalance_label(
         portfolio=body.portfolio,
         sequence=sequence,
         label=workflow.label,
+        side_effect_policy=workflow.side_effect_policy_json,
     )
 
 
 @router.get("/auto-rebalance-history", response_model=AutoRebalanceHistoryListResponse)
 async def list_auto_rebalance_history(
+    offset: int = Query(default=0, ge=0),
     portfolio: str = Query(..., pattern="^(india|indmoney_us)$"),
     limit: int = Query(default=100, ge=1, le=250),
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
-    recent_sequences = set(
-        (
-            await db.execute(
-                select(AutoRebalanceWorkflow.sequence)
-                .where(
-                    AutoRebalanceWorkflow.user_id == current_user.id,
-                    AutoRebalanceWorkflow.portfolio == portfolio,
-                )
-                .order_by(
-                    AutoRebalanceWorkflow.sequence.desc(),
-                    AutoRebalanceWorkflow.updated_at.desc(),
-                )
-                .limit(limit)
-            )
-        ).scalars().all()
-    )
+    await require_workflow_policy_schema(db)
+    # Include legacy run/job sequences as well as durable workflow rows. All
+    # branches retain the authenticated owner and market boundary.
+    sequence_query = select(AutoRebalanceWorkflow.sequence).where(
+        AutoRebalanceWorkflow.user_id == current_user.id,
+        AutoRebalanceWorkflow.portfolio == portfolio,
+    ).union(
+        select(Run.auto_rebalance_sequence).where(
+            Run.user_id == current_user.id,
+            Run.auto_rebalance_portfolio == portfolio,
+            Run.auto_rebalance_sequence.is_not(None),
+        ),
+        select(Job.auto_rebalance_sequence).where(
+            Job.user_id == current_user.id,
+            Job.auto_rebalance_portfolio == portfolio,
+            Job.auto_rebalance_sequence.is_not(None),
+        ),
+    ).subquery()
+    sequences = list((await db.execute(
+        select(sequence_query.c.sequence)
+        .order_by(sequence_query.c.sequence.desc())
+        .offset(offset).limit(limit)
+    )).scalars().all())
+    total = (await db.execute(select(func.count()).select_from(sequence_query))).scalar_one()
     history = await _build_auto_rebalance_history(
-        db,
-        user_id=current_user.id,
-        portfolio=portfolio,
-        sequences=recent_sequences or None,
+        db, user_id=current_user.id, portfolio=portfolio, sequences=set(sequences),
     )
     return AutoRebalanceHistoryListResponse(
-        items=[item for item, _, _ in history[:limit]],
-        total=len(history),
+        items=[item for item, _, _ in history], total=total,
     )
 
 
@@ -635,6 +687,13 @@ async def get_auto_rebalance_history_detail(
     if not match:
         raise HTTPException(404, detail="Auto-rebalance run not found")
     item, runs, standalone_jobs = match
+    from app.domains.runs.output_provenance import load_output_provenance
+    provenance = await load_output_provenance(
+        db, user_id=current_user.id,
+        job_ids={job.id for job in standalone_jobs} | {
+            link.job.id for run in runs for link in run.run_jobs if link.job is not None
+        },
+    )
     detailed_runs = [
         AutoRebalanceRunDetailResponse(
             id=run.id,
@@ -643,7 +702,7 @@ async def get_auto_rebalance_history_detail(
             created_at=run.created_at,
             updated_at=run.updated_at,
             jobs=[
-                _serialize_auto_rebalance_job(link.job)
+                _serialize_auto_rebalance_job(link.job, provenance.get(link.job.id))
                 for link in run.run_jobs
                 if link.job is not None
             ],
@@ -654,7 +713,7 @@ async def get_auto_rebalance_history_detail(
         **item.model_dump(),
         runs=detailed_runs,
         standalone_jobs=[
-            _serialize_auto_rebalance_job(job)
+            _serialize_auto_rebalance_job(job, provenance.get(job.id))
             for job in sorted(standalone_jobs, key=lambda value: value.id)
         ],
     )
@@ -672,6 +731,7 @@ async def update_auto_rebalance_stage(
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
+    await require_workflow_policy_schema(db)
     if portfolio not in AUTO_REBALANCE_LABEL_PREFIXES:
         raise HTTPException(404, detail="Auto-rebalance portfolio not found")
     # Lock the parent row. The dashboard may send a "started" audit update and
@@ -712,6 +772,15 @@ async def update_auto_rebalance_stage(
         stage=stage, run_id=effective_run_id, job_id=effective_job_id,
         expected_status=status if stage in LLM_STAGES and status in {"completed", "partial"} else None,
     )
+    if "frozen_final" in body.summary:
+        if stage != "actionables":
+            raise HTTPException(422, detail="Final capture belongs only to the actionables stage")
+        from .frozen_final import validate_frozen_final
+        await validate_frozen_final(db, body.summary["frozen_final"], user_id=current_user.id,
+                                   portfolio=portfolio, sequence=sequence,
+                                   allow_legacy=bool(was_terminal and stage_record
+                                       and isinstance((stage_record.summary_json or {}).get("frozen_final"), dict)
+                                       and stage_record.summary_json["frozen_final"].get("schema") == "workflow-final-v1"))
     if stage_record is None:
         # Defaults run at flush; linking the relationship also keeps the
         # loaded stages collection current for first-write serialization.
@@ -728,9 +797,10 @@ async def update_auto_rebalance_stage(
     )
     if not was_terminal and body.error_message is not None:
         stage_record.error_message = body.error_message
-    stage_record.started_at = stage_record.started_at or body.started_at or datetime.now(timezone.utc)
+    recorded_at = datetime.now(timezone.utc)
+    stage_record.started_at = stage_record.started_at or body.started_at or recorded_at
     if not was_terminal and status in AUTO_REBALANCE_TERMINAL_STATUSES:
-        stage_record.completed_at = body.completed_at or datetime.now(timezone.utc)
+        stage_record.completed_at = body.completed_at or recorded_at
 
     # The parent lock serializes different stage writers too. A delayed sync
     # update cannot move a later stage backward or reopen a terminal workflow.
@@ -762,7 +832,8 @@ async def update_auto_rebalance_stage(
         else:
             workflow.status = "processing" if status != "skipped" else workflow.status
             workflow.error_message = None
-    if status in {"completed", "partial"} and existing_status not in AUTO_REBALANCE_TERMINAL_STATUSES:
+    if (permits_side_effects(workflow.side_effect_policy_json)
+            and status in {"completed", "partial"} and existing_status not in AUTO_REBALANCE_TERMINAL_STATUSES):
         from app.domains.mails.completion_events import add_completion_event
         from app.domains.mails.completion_preferences import STOCK_STAGES, stock_segment
         add_completion_event(db, user_id=current_user.id, payload={
@@ -789,12 +860,31 @@ async def update_auto_rebalance_stage(
     return response
 
 
+@router.post("/auto-rebalance-history/{portfolio}/{sequence}/reconcile", response_model=AutoRebalanceStageResponse)
+async def reconcile_auto_rebalance(portfolio: str, sequence: int, db: AsyncSession = Depends(get_async_db),
+                                   current_user: User = Depends(get_current_user)):
+    from .final_reconciliation import recover_final
+    workflow = (await db.execute(select(AutoRebalanceWorkflow).where(
+        AutoRebalanceWorkflow.user_id == current_user.id, AutoRebalanceWorkflow.portfolio == portfolio,
+        AutoRebalanceWorkflow.sequence == sequence,
+    ).options(selectinload(AutoRebalanceWorkflow.stages)).with_for_update())).scalar_one_or_none()
+    if workflow is None:
+        raise HTTPException(404, "Workflow not found")
+    if workflow.status not in {"processing", "running", "completed", "partial"}:
+        raise HTTPException(409, "Workflow is ineligible for final reconciliation")
+    capture = await recover_final(db, workflow)
+    return await update_auto_rebalance_stage(portfolio, sequence, "actionables", AutoRebalanceStageUpdateRequest(
+        status="completed", summary={"frozen_final": capture, "run_status": "saved calculation",
+                                    "recommended_stocks": len(capture["rows"])}), db, current_user)
+
+
 @router.post("/auto-rebalance-completion-email")
 async def queue_auto_rebalance_completion_email(
     body: AutoRebalanceCompletionEmailRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_db),
 ):
+    await require_workflow_policy_schema(db)
     workflow = (await db.execute(
         select(AutoRebalanceWorkflow)
         .where(
@@ -808,6 +898,8 @@ async def queue_auto_rebalance_completion_email(
     )).scalar_one_or_none()
     if not workflow:
         raise HTTPException(404, detail="Auto-rebalance run not found")
+    if not permits_side_effects(workflow.side_effect_policy_json):
+        return {"status": "suppressed", "reason": "run_side_effect_policy"}
     stages = {event.stage: event for event in workflow.stages}
     if (
         workflow.status not in {"completed", "partial"}
@@ -934,6 +1026,7 @@ async def create_run(
                     if body.polymarket_event_context is not None
                     else None
                 ),
+                recommendation_audit=body.recommendation_audit,
                 output_source_jobs=body.output_source_jobs,
                 prompt_id=body.prompt_id,
                 scheduled_at=body.scheduled_at,

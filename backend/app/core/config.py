@@ -2,10 +2,10 @@ import os
 from datetime import datetime, timezone
 from typing import Optional
 
-from pydantic import AliasChoices, Field, SecretStr, field_validator
+from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from app.core.jwt_configuration import validate_jwt_secret_key
+from app.core.jwt_configuration import signing_key
 
 _TRUE_ENV_VALUES = {"1", "true", "t", "yes", "y", "on", "debug", "development", "dev"}
 _FALSE_ENV_VALUES = {"0", "false", "f", "no", "n", "off", "release", "prod", "production"}
@@ -15,8 +15,26 @@ class Settings(BaseSettings):
     """Application configuration from environment variables."""
 
     model_config = SettingsConfigDict(
-        env_file=".env", case_sensitive=False, hide_input_in_errors=True
+        env_file=".env", case_sensitive=False, extra="ignore", hide_input_in_errors=True,
     )
+
+    # Keep aliases as separate fields so conflicting/blank legacy values cannot
+    # be silently hidden by AliasChoices. Never expose these in repr or dumps.
+    jwt_signing_key: Optional[SecretStr] = Field(default=None, repr=False, exclude=True)
+    jwt_secret: Optional[SecretStr] = Field(default=None, repr=False, exclude=True)
+    secret_key: Optional[SecretStr] = Field(default=None, repr=False, exclude=True)
+
+    @model_validator(mode="after")
+    def _require_private_jwt_signing_key(self) -> "Settings":
+        supplied = [
+            value.get_secret_value()
+            for value in (self.jwt_signing_key, self.jwt_secret, self.secret_key)
+            if value is not None
+        ]
+        # Canonical > JWT_SECRET > SECRET_KEY, with all supplied names required
+        # to agree. No default or previous-key verification path is supported.
+        self.jwt_signing_key = SecretStr(signing_key(supplied))
+        return self
 
     # Database
     database_url: str
@@ -24,6 +42,14 @@ class Settings(BaseSettings):
     # Redis
     redis_url: str
     
+    # Disabled by default; local review must opt in after schema checks.
+    recommendation_audit_enabled: bool = False
+    recommendation_audit_recovery_stored_only_enabled: bool = False
+    recommendation_audit_external_enabled: bool = False
+    recommendation_audit_fundamentals_enabled: bool = False
+    recommendation_audit_daily_cap_usd: float = Field(default=0, ge=0, le=100)
+    recommendation_audit_kite_incremental_cost_usd: float | None = Field(default=None, ge=0, le=100)
+
     # API Keys
     openai_api_key: Optional[str] = None
     gemini_api_key: Optional[str] = None
@@ -40,6 +66,9 @@ class Settings(BaseSettings):
     zerodha_token_encryption_key: Optional[str] = None  # Fernet key for access_token at-rest encryption
     zerodha_enable_direct_market_orders: bool = False  # Enable only when the server egress IP is Kite-whitelisted
 
+    # Operator-approved manual protected-order exception; automated writes stay blocked.
+    zerodha_recovery_manual_orders_enabled: bool = True
+
     # Google Sheets OAuth
     google_client_id: Optional[str] = None
     google_client_secret: Optional[str] = None
@@ -53,9 +82,6 @@ class Settings(BaseSettings):
     celery_broker_url: Optional[str] = None
     celery_result_backend: Optional[str] = None
     
-    # JWT signing: required in every environment, with no legacy alias or default.
-    jwt_secret_key: SecretStr = Field(repr=False)
-
     # Application
     debug: bool = False
     environment: str = "production"
@@ -85,12 +111,6 @@ class Settings(BaseSettings):
     # Logging
     log_level: str = "INFO"
     
-    @field_validator("jwt_secret_key")
-    @classmethod
-    def _validate_jwt_secret_key(cls, value: SecretStr) -> SecretStr:
-        validate_jwt_secret_key(value.get_secret_value())
-        return value
-
     @field_validator("debug", mode="before")
     @classmethod
     def _coerce_debug_flag(cls, value: object) -> object:

@@ -28,6 +28,9 @@ const FORWARDED_HEADER_BLOCKLIST = new Set([
   "x-forwarded-proto",
 ]);
 const RESPONSE_HEADER_BLOCKLIST = new Set(["content-encoding", "content-length"]);
+// Broker connection/snapshot reads may wait behind a database transaction.
+const ZERODHA_SYNC_PROXY_ATTEMPT_TIMEOUT_MS = 16_000;
+const ZERODHA_SYNC_PROXY_TOTAL_TIMEOUT_MS = 18_000;
 const DEFAULT_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS = 1_200;
 const DEFAULT_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 4_000;
 // Captured portfolio reports can wait for a DB connection and parse stored
@@ -56,10 +59,12 @@ const BULLPEN008_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 12_000;
 const SPORTS_EVENT_COMPARISONS_PROXY_TIMEOUT_MS = 18_000;
 const SPORTS_RANKINGS_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS = 12_500;
 const SPORTS_RANKINGS_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 14_000;
+const ZERODHA_PROTECTED_ORDER_TIMEOUT_MS = 180_000;
 const DEFAULT_BACKEND_PROXY_MUTATION_TIMEOUT_MS = 8_000;
 const EVENT_TRENDS_SCAN_COUNT_MUTATION_TIMEOUT_MS = 20_000;
 const SAFE_FALLBACK_METHODS = new Set(["GET", "HEAD"]);
 const PUBLIC_BACKEND_PATHS = new Set([
+  "auth/google/config",
   "auth/register",
   "auth/forgot-password",
   "auth/reset-password",
@@ -257,6 +262,7 @@ function getResearchHistoryReadScope(method: string, path: string) {
   if (!SAFE_FALLBACK_METHODS.has(method)) return undefined;
   // Full stored run details and model cost estimates read historical model
   // output. Keep their deadline and circuit separate from wallet/broker reads.
+  if (path === "runs" || path === "runs/auto-rebalance-history") return "runs/history";
   if (/^runs\/[0-9]+$/.test(path)) return "runs/detail";
   if (path === "providers") return "providers";
   return undefined;
@@ -325,7 +331,18 @@ function isSportsEventComparisonsRead(method: string, path: string) {
   return method === "POST" && path === "api/sports-rankings/event-comparisons";
 }
 
+function isZerodhaSyncRequest(method: string, path: string) {
+  return (
+    (SAFE_FALLBACK_METHODS.has(method) &&
+      ["zerodha/status", "zerodha/login-url", "zerodha/portfolio"].includes(path)) ||
+    (method === "POST" &&
+      ["zerodha/callback", "zerodha/portfolio/sync"].includes(path))
+  );
+}
+
 function getProxyAttemptTimeoutMs(method: string, path: string) {
+  if (method === "POST" && ["zerodha/orders/place-protected-market", "zerodha/orders/place-protected-market-sequenced"].includes(path)) return ZERODHA_PROTECTED_ORDER_TIMEOUT_MS;
+  if (isZerodhaSyncRequest(method, path)) return ZERODHA_SYNC_PROXY_ATTEMPT_TIMEOUT_MS;
   if (getCapturedPortfolioAnalysisReadScope(method, path) || getResearchHistoryReadScope(method, path)) {
     return CAPTURED_ANALYSIS_PROXY_ATTEMPT_TIMEOUT_MS;
   }
@@ -348,6 +365,7 @@ function getProxyAttemptTimeoutMs(method: string, path: string) {
       30_000,
     );
   }
+
 
   if (isBullpenHistoryRead(method, path)) {
     return BULLPEN_HISTORY_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS;
@@ -377,6 +395,8 @@ function getProxyAttemptTimeoutMs(method: string, path: string) {
 }
 
 function getProxyTotalTimeoutMs(method: string, path: string) {
+  if (method === "POST" && ["zerodha/orders/place-protected-market", "zerodha/orders/place-protected-market-sequenced"].includes(path)) return ZERODHA_PROTECTED_ORDER_TIMEOUT_MS;
+  if (isZerodhaSyncRequest(method, path)) return ZERODHA_SYNC_PROXY_TOTAL_TIMEOUT_MS;
   if (getCapturedPortfolioAnalysisReadScope(method, path) || getResearchHistoryReadScope(method, path)) {
     return CAPTURED_ANALYSIS_PROXY_TOTAL_TIMEOUT_MS;
   }
@@ -484,6 +504,8 @@ async function proxyBackendRequest(request: NextRequest, context: RouteContext) 
     (path === "polymarket/auto-live/history" ||
       path === "polymarket/auto-live/history/event-trends")
       ? path
+      : SAFE_FALLBACK_METHODS.has(request.method) && isZerodhaSyncRequest(request.method, path)
+      ? "zerodha/sync"
       : getCapturedPortfolioAnalysisReadScope(request.method, path)
         ?? getResearchHistoryReadScope(request.method, path);
   const resolvedCandidates = resolveBackendApiCandidates(request).map(
@@ -508,6 +530,15 @@ async function proxyBackendRequest(request: NextRequest, context: RouteContext) 
     );
   }
 
+  // Logout needs revocation only, even when access is expired or refresh has
+  // already been reserved. Never rotate simply to authenticate this action.
+  const revokeWithRefresh = request.method === "POST" && path === "auth/logout" &&
+    Boolean(backendSession?.refreshToken);
+  const upstreamPath = revokeWithRefresh ? "auth/logout-refresh" : path;
+  const upstreamBody = revokeWithRefresh
+    ? JSON.stringify({ refresh_token: backendSession!.refreshToken })
+    : body;
+
   const eventTrendsTimeoutMs = getEventTrendsProxyTimeoutMs(request, path);
   const totalTimeoutMs =
     eventTrendsTimeoutMs === null
@@ -527,19 +558,18 @@ async function proxyBackendRequest(request: NextRequest, context: RouteContext) 
       callerSignal: request.signal,
       totalBudgetMs: totalTimeoutMs,
       primaryAttemptBudgetMs: primaryAttemptTimeoutMs,
-      refreshAuthentication: backendSession
+      refreshAuthentication: backendSession && !revokeWithRefresh
         ? (signal) => rotateBackendTokens(backendSession, signal)
         : undefined,
       fetchCandidate: async (candidate, signal) => {
-        const targetUrl = buildTargetUrl(candidate.baseUrl, path, request);
+        const targetUrl = buildTargetUrl(candidate.baseUrl, upstreamPath, request);
+        const headers = buildForwardHeaders(request, correlationId,
+          revokeWithRefresh ? null : backendSession?.accessToken ?? null);
+        if (revokeWithRefresh) headers.set("Content-Type", "application/json");
         const response = await fetch(targetUrl, {
           method: request.method,
-          headers: buildForwardHeaders(
-            request,
-            correlationId,
-            backendSession?.accessToken ?? null,
-          ),
-          body,
+          headers,
+          body: upstreamBody,
           cache: "no-store",
           signal,
         });
@@ -587,6 +617,13 @@ async function proxyBackendRequest(request: NextRequest, context: RouteContext) 
       );
     }
 
+    if (error instanceof BackendRuntimeHttpError && error.status === 409) {
+      outcome = "refresh_coordination_required";
+      return NextResponse.json(
+        { message: "Your session update is in progress or could not be confirmed. Reload this page, or sign in again." },
+        { status: 409, headers: { "X-Correlation-ID": correlationId } },
+      );
+    }
     if (error instanceof BackendRuntimeHttpError && error.status === 401) {
       outcome = "authentication_failed";
       return NextResponse.json(

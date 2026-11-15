@@ -78,6 +78,10 @@ export interface UpdatePasswordRequest {
   confirm_password: string;
 }
 
+export interface ProfilePreferencesResponse extends UpdateProfileRequest {
+  preferences_writable?: boolean;
+}
+
 export interface UpdateProfileRequest {
   full_name?: string | null;
   avatar_url?: string | null;
@@ -644,6 +648,7 @@ export interface LlmCostHistoryRun {
 }
 
 export interface LlmCostHistoryResponse {
+  coverage_note?: string;
   provider: string;
   name: string;
   timezone: string;
@@ -786,7 +791,13 @@ export interface RunModelTarget {
 
 export type AutoRebalancePortfolioKey = 'india' | 'indmoney_us';
 
+export interface RunSideEffectPolicy {
+  version: 1;
+  mode: "existing_preferences" | "analysis_only";
+}
+
 export interface AutoRebalanceRunReservationResponse {
+  side_effect_policy?: RunSideEffectPolicy | null;
   portfolio: AutoRebalancePortfolioKey;
   sequence: number;
   label: string;
@@ -848,6 +859,7 @@ export interface AutoRebalanceStageResponse {
   completed_at?: string | null;
   provider_count: number;
   completed_provider_count: number;
+  partial_provider_count?: number;
   failed_provider_count: number;
   estimated_cost: number;
 }
@@ -867,6 +879,12 @@ export interface AutoRebalanceJobDetailResponse {
   web_search_queries?: string[] | null;
   web_sources?: string[] | null;
   runtime_metadata_json?: Record<string, unknown> | null;
+  output_provenance?: {
+    source: "api_usage_attempt_events";
+    identities: { provider: string; model: string | null }[];
+    observed_from: string | null;
+    observed_to: string | null;
+  } | null;
   created_at: string;
   updated_at: string;
 }
@@ -881,6 +899,7 @@ export interface AutoRebalanceRunDetailResponse {
 }
 
 export interface AutoRebalanceHistoryItemResponse {
+  side_effect_policy?: RunSideEffectPolicy | null;
   portfolio: AutoRebalancePortfolioKey;
   sequence: number;
   label: string;
@@ -912,6 +931,7 @@ export interface OutputSourceJobReference {
 }
 
 export interface RunCreate {
+  recommendation_audit?: import("./recommendationAudit").AuditRunContext;
   prompt: string;
   targets: RunModelTarget[];
   polymarket_event_context?: PolymarketEventRunContext | null;
@@ -1031,11 +1051,13 @@ export interface ZerodhaLoginUrlResponse {
   login_url: string;
   configured: boolean;
   direct_market_orders_enabled?: boolean;
+  order_submission_blocked_reason?: string | null;
 }
 
 export interface ZerodhaStatusResponse {
   connected: boolean;
   direct_market_orders_enabled?: boolean;
+  order_submission_blocked_reason?: string | null;
   login_time: string | null;
   expires_at: string | null;
   last_portfolio_sync_at?: string | null;
@@ -1043,63 +1065,65 @@ export interface ZerodhaStatusResponse {
 }
 
 export interface ZerodhaPortfolioHolding {
+  numeric_input_status?: Record<string, string>;
   tradingsymbol: string;
   exchange: string;
   instrument_token: number | null;
   isin: string | null;
   product: string | null;
-  quantity: number;
-  used_quantity: number;
-  t1_quantity: number;
-  realised_quantity: number;
-  authorised_quantity: number;
+  quantity: number | null;
+  used_quantity: number | null;
+  t1_quantity: number | null;
+  realised_quantity: number | null;
+  authorised_quantity: number | null;
   authorised_date: string | null;
-  opening_quantity: number;
-  short_quantity: number;
-  collateral_quantity: number;
+  opening_quantity: number | null;
+  short_quantity: number | null;
+  collateral_quantity: number | null;
   collateral_type: string | null;
   discrepancy: boolean;
-  average_price: number;
-  last_price: number;
-  close_price: number;
-  pnl: number;
-  day_change: number;
-  day_change_percentage: number;
-  market_value: number;
-  invested_value: number;
-  day_change_value: number;
+  average_price: number | null;
+  last_price: number | null;
+  close_price: number | null;
+  pnl: number | null;
+  day_change: number | null;
+  day_change_percentage: number | null;
+  market_value: number | null;
+  invested_value: number | null;
+  day_change_value: number | null;
 }
 
 export interface ZerodhaPortfolioPosition {
+  numeric_input_status?: Record<string, string>;
   tradingsymbol: string;
   exchange: string;
   instrument_token: number | null;
   product: string | null;
-  quantity: number;
-  overnight_quantity: number;
-  multiplier: number;
-  average_price: number;
-  close_price: number;
-  last_price: number;
-  value: number;
-  pnl: number;
-  m2m: number;
-  unrealised: number;
-  realised: number;
-  buy_quantity: number;
-  buy_price: number;
-  buy_value: number;
-  buy_m2m: number;
-  sell_quantity: number;
-  sell_price: number;
-  sell_value: number;
-  sell_m2m: number;
-  day_buy_quantity: number;
-  day_buy_price: number;
-  day_buy_value: number;
-  day_sell_quantity: number;
-  day_sell_price: number;
-  day_sell_value: number;
+  quantity: number | null;
+  overnight_quantity: number | null;
+  multiplier: number | null;
+  average_price: number | null;
+  close_price: number | null;
+  last_price: number | null;
+  value: number | null;
+  pnl: number | null;
+  m2m: number | null;
+  unrealised: number | null;
+  realised: number | null;
+  buy_quantity: number | null;
+  buy_price: number | null;
+  buy_value: number | null;
+  buy_m2m: number | null;
+  sell_quantity: number | null;
+  sell_price: number | null;
+  sell_value: number | null;
+  sell_m2m: number | null;
+  day_buy_quantity: number | null;
+  day_buy_price: number | null;
+  day_buy_value: number | null;
+  day_sell_quantity: number | null;
+  day_sell_price: number | null;
+  day_sell_value: number | null;
 }
 
 export interface ZerodhaPortfolioSnapshotSummary {
@@ -1113,7 +1137,7 @@ export interface ZerodhaPortfolioSnapshotSummary {
   holdings_invested_value?: number | null;
   holdings_pnl: number;
   holdings_day_change_value: number;
-  available_margin: number;
+  available_margin: number | null;
   positions_pnl: number;
   positions_m2m: number;
 }
@@ -3487,11 +3511,22 @@ export interface BullpenTradeAnalysisSummaryStats {
   total_executed_trades: number;
   open_positions: number;
   closed_positions: number;
-  total_net_pnl: number;
-  win_rate: number;
+  total_net_pnl: number | null;
+  win_rate: number | null;
   average_pnl_percent?: number | null;
   average_holding_period_seconds?: number | null;
-  total_fees: number;
+  total_fees: number | null;
+  known_outcomes?: number;
+  unknown_outcomes?: number;
+  win_rate_denominator?: number;
+  known_fee_records?: number;
+  unknown_fee_records?: number;
+  fee_coverage?: string;
+  net_pnl_coverage?: string;
+  measured_fee_components_total?: number | null;
+  known_fee_components?: number;
+  unknown_fee_components?: number;
+
 }
 
 export interface BullpenTradeAnalysisListItem {
@@ -3610,7 +3645,9 @@ export interface BullpenTradeAnalysisActionableLearning {
   exit_timing: string;
   entry_too_expensive: boolean;
   liquidity_or_spread_issue: boolean;
-  llm_confidence_aligned: boolean;
+  llm_confidence_aligned: boolean | null;
+  algorithm_version?: string | null;
+  evidence_status?: string;
   suggested_platform_rule_changes: string[];
   suggested_prompt_changes: string[];
   suggested_risk_management_changes: string[];
@@ -3957,3 +3994,35 @@ export type FinalActionableHistoryBackfillResponse = {
   status: "queued" | "already_queued";
   task_id: string | null;
 };
+
+
+export type HistoricalScoreObservation = { id: string; runId: number; jobId: number; label: string; score: number | null; rationale: string; rawScore?: unknown; rawRationale?: unknown; sourceHash?: string | null; representation?: string };
+export type HistoricalScoreEvidenceResponse = {
+  scope: { run_id: number; market: string; symbol: string; exchange: string; covered_at: string; history_id: number | null };
+  status: "available" | "partial" | "missing" | "ambiguous";
+  matrix: Record<string, unknown> | null;
+  parameters: Record<string, HistoricalScoreObservation[]>;
+  parameter_labels?: Record<string, string>;
+  notes: string[];
+  coverage: Record<string, number>;
+  candidates: Array<{ id: string; captured_at: string; provenance: string }>;
+  source?: string;
+  capture_id?: string;
+  history_context?: { formula_version: string; score: number | null; action: string | null };
+};
+
+export type StockSourceObservation = { id: string; run_id: number; job_id: number; stage: string; run_status: string; job_status: string; provider: string | null; model: string | null; created_at: string | null; source: string; cells: Record<string, unknown> };
+export type StockSourceObservationPage = { market: "india" | "us"; symbol: string; items: StockSourceObservation[]; next_cursor: string | null; has_more: boolean; examined_sources: number; coverage_note: string };
+
+export type ZerodhaDisplayQuoteResponse = { quotes: { instrument: string; price: number; as_of: string; source: string }[]; missing: string[]; upstox_quotes?: { instrument: string; price: number; as_of: string; source: string }[] };
+
+export interface UsVendorDisplayQuote {
+  instrument: string; security_id: string; symbol: string; listing_mic: string; share_class: string;
+  vendor_symbol: string; currency: 'USD'; provider: 'Alpaca'; feed: 'iex'; coverage: string;
+  price: number; as_of: string; received_at: string; session: string; stale: boolean;
+  delay_reason: string | null; eligible_for_readiness: boolean; source: string;
+}
+export interface UsVendorDisplayQuotes {
+  quotes: UsVendorDisplayQuote[]; missing: { instrument: string; reason: string }[];
+  provider: 'Alpaca'; feed: 'iex';
+}

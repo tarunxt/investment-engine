@@ -1,27 +1,22 @@
 "use client";
+import { DashboardStockFlowSlot } from "@/app/console/_components/WorkflowSurfaceSlots";
 
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import {
   AlertCircle,
-  Clock,
   Eye,
   EyeOff,
   Info,
   Loader2,
   RefreshCw,
-  Sparkles,
   Target,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Dialog } from "radix-ui";
 import { LazyMount } from "@/components/shared/LazyMount";
 import { useAuth } from "@/hooks/useAuth";
 import {
@@ -47,7 +42,6 @@ import type {
 } from "@/types/api";
 
 import {
-  DashboardHeroSkeleton,
   DashboardMarketCardSkeleton,
   DashboardThreatCardSkeleton,
 } from "./_components/DashboardSkeletons";
@@ -84,12 +78,19 @@ import {
   type PortfolioCommandChartOption,
 } from "./_components/PortfolioCommandChart";
 
+import {
+  dataAge,
+  SnapshotAvailability,
+  snapshotAvailability,
+  type TotalDataStatusInfo,
+} from "./_components/TotalDataStatus";
+
 const ThreatMarketCard = dynamic(
   () =>
     import("./_components/ThreatMarketCard").then(
       (module) => module.ThreatMarketCard,
     ),
-  { ssr: false },
+  { ssr: false, loading: () => <DashboardThreatCardSkeleton /> },
 );
 
 type DashboardState = {
@@ -330,10 +331,7 @@ function writeDashboardOverviewCacheEntry(
   }
 }
 
-function logDashboardCacheFallback(
-  key: DashboardSectionKey,
-  reason: unknown,
-) {
+function logDashboardCacheFallback(key: DashboardSectionKey, reason: unknown) {
   console.warn(
     JSON.stringify({
       event: "dashboard_read_fallback_triggered",
@@ -354,7 +352,7 @@ function buildIndiaTopHoldings(
   overview: ZerodhaPortfolioOverviewResponse | null,
 ): PortfolioCardTopHolding[] {
   const holdings = [...(overview?.latest?.holdings ?? [])]
-    .sort((left, right) => right.market_value - left.market_value)
+    .sort((left, right) => (right.market_value ?? -Infinity) - (left.market_value ?? -Infinity))
     .slice(0, 4);
 
   return holdings.map((holding) => ({
@@ -516,24 +514,6 @@ function maskInvestmentValue(value: string) {
   return value.replace(/\p{N}/gu, "*");
 }
 
-function formatCommandTileUpdatedAt(value?: string | null) {
-  if (!value) return "Not synced yet";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Not synced yet";
-
-  const time = new Intl.DateTimeFormat("en-GB", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-  }).format(date);
-  const day = new Intl.DateTimeFormat("en-GB", { day: "2-digit" }).format(date);
-  const month = new Intl.DateTimeFormat("en-GB", { month: "long" }).format(date);
-  const year = new Intl.DateTimeFormat("en-GB", { year: "numeric" }).format(date);
-
-  return `${time} | ${day} ${month}, ${year}`;
-}
-
 type CommandTileInfoKey = "zerodha" | "indmoney" | "bullpen";
 
 const COMMAND_TILE_INFO: Record<
@@ -575,12 +555,18 @@ function PortfolioCommandSummary({
   refreshingIndmoney,
   refreshingBullpen,
   fx,
+  totalStatuses,
+  onRefreshBoard,
+  refreshingBoard,
 }: {
+  onRefreshBoard: () => void;
+  refreshingBoard: boolean;
+  totalStatuses: Record<CommandTileInfoKey, TotalDataStatusInfo>;
   totalValue: number | null;
-  zerodhaValue: number;
+  zerodhaValue: number | null;
   zerodhaPortfolioValue: number | null | undefined;
-  zerodhaMargin: number;
-  indmoneyValue: number;
+  zerodhaMargin: number | null;
+  indmoneyValue: number | null;
   indmoneyPortfolioValue: number | null | undefined;
   indmoneyFundsValue: number | null | undefined;
   bullpenTotalValueInr: number | null | undefined;
@@ -598,204 +584,423 @@ function PortfolioCommandSummary({
   fx: DashboardSummaryResponse["fx"] | null;
 }) {
   const [showInvestmentNumbers, setShowInvestmentNumbers] = useState(false);
+  const [view, setView] = useState("overview");
+  const [infoDialog, setInfoDialog] = useState<CommandTileInfoKey | null>(null);
+  const infoTrigger = useRef<HTMLButtonElement | null>(null);
+  const VisibilityIcon = showInvestmentNumbers ? EyeOff : Eye;
+  const info = infoDialog ? COMMAND_TILE_INFO[infoDialog] : null;
   const formatPrivateInvestmentValue = (
     value: number | null | undefined,
     currency: "INR" | "USD" = "INR",
   ) => {
-    const formattedValue =
-      currency === "USD" ? formatUsd(value) : formatInr(value);
-    return showInvestmentNumbers
-      ? formattedValue
-      : maskInvestmentValue(formattedValue);
+    const formatted = currency === "USD" ? formatUsd(value) : formatInr(value);
+    return showInvestmentNumbers ? formatted : maskInvestmentValue(formatted);
   };
-  const VisibilityIcon = showInvestmentNumbers ? EyeOff : Eye;
-  const [infoDialog, setInfoDialog] = useState<CommandTileInfoKey | null>(null);
-
-  const renderTile = ({
-    keyName,
-    title,
-    value,
-    portfolioValue,
-    cashValue,
-    cashLabel = "Cash",
-    updatedAt,
-    onRefresh,
-    refreshingTile,
-    currency = "INR",
-  }: {
-    keyName: CommandTileInfoKey;
-    title: string;
+  const rows: Array<{
+    key: CommandTileInfoKey;
+    label: string;
+    identity: string;
     value: number | null | undefined;
-    portfolioValue: number | null | undefined;
-    cashValue: number | null | undefined;
-    cashLabel?: string;
+    portfolio: number | null | undefined;
+    cash: number | null | undefined;
     updatedAt?: string | null;
     onRefresh: () => void;
-    refreshingTile: boolean;
-    currency?: "INR" | "USD";
-  }) => {
-    const formatter = (amount: number | null | undefined) =>
-      formatPrivateInvestmentValue(amount, currency);
-
-    return (
-      <div className="relative rounded-[18px] border border-white/10 bg-white/8 px-4 py-4 text-slate-200">
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex items-center gap-1.5 text-xs font-semibold text-white">
-            {title}
-            <button
-              type="button"
-              onClick={() => setInfoDialog(keyName)}
-              className="rounded-full text-slate-300 transition hover:text-white"
-              aria-label={`${title} info`}
-            >
-              <Info className="size-3.5" />
-            </button>
-          </div>
-          <button
-            type="button"
-            onClick={onRefresh}
-            disabled={refreshingTile}
-            className="rounded-full text-slate-300 transition hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
-            aria-label={`Refresh ${title}`}
-          >
-            <RefreshCw
-              className={`size-3.5 ${refreshingTile ? "animate-spin" : ""}`}
-            />
-          </button>
-        </div>
-        <div className="mt-1 text-sm font-bold text-white">
-          {formatter(value)}
-        </div>
-        <div className="mt-3 space-y-1 text-xs leading-5 text-slate-200">
-          <div>Portfolio: {formatter(portfolioValue)}</div>
-          <div>{cashLabel}: {formatter(cashValue)}</div>
-        </div>
-        <div className="mt-3 flex items-center gap-1.5 text-[10px] leading-4 text-slate-300">
-          <Clock className="size-3" />
-          <span>{formatCommandTileUpdatedAt(updatedAt)}</span>
-        </div>
-      </div>
-    );
+    refreshing: boolean;
+    currency: "INR" | "USD";
+  }> = [
+    {
+      key: "zerodha",
+      label: "India",
+      identity: "Zerodha",
+      value: zerodhaValue,
+      portfolio: zerodhaPortfolioValue,
+      cash: zerodhaMargin,
+      updatedAt: zerodhaUpdatedAt,
+      onRefresh: onRefreshZerodha,
+      refreshing: refreshingZerodha,
+      currency: "INR",
+    },
+    {
+      key: "indmoney",
+      label: "INDmoney",
+      identity: "INDmoney",
+      value: indmoneyValue,
+      portfolio: indmoneyPortfolioValue,
+      cash: indmoneyFundsValue,
+      updatedAt: indmoneyUpdatedAt,
+      onRefresh: onRefreshIndmoney,
+      refreshing: refreshingIndmoney,
+      currency: fx?.status === "valid" ? "INR" : "USD",
+    },
+    {
+      key: "bullpen",
+      label: "Bullpen",
+      identity: "Bullpen",
+      value: bullpenTotalValueInr,
+      portfolio: bullpenAccountValueInr,
+      cash: bullpenCashValueInr,
+      updatedAt: bullpenUpdatedAt,
+      onRefresh: onRefreshBullpen,
+      refreshing: refreshingBullpen,
+      currency: fx?.status === "valid" ? "INR" : "USD",
+    },
+  ];
+  const controls = (row: (typeof rows)[number]) => (
+    <span className="inline-flex shrink-0 items-center gap-1">
+      <button
+        type="button"
+        aria-label={`${row.label} total (portfolio + cash) info`}
+        onClick={(event) => {
+          infoTrigger.current = event.currentTarget;
+          setInfoDialog(row.key);
+        }}
+        className="rounded p-1.5 text-slate-500 hover:text-violet-700 focus-visible:outline-2 focus-visible:outline-offset-2"
+      >
+        <Info className="size-3.5" />
+      </button>
+      <button
+        type="button"
+        aria-label={`Refresh ${row.identity}`}
+        onClick={row.onRefresh}
+        disabled={row.refreshing}
+        className="rounded p-1.5 text-slate-500 hover:text-violet-700 focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-50"
+      >
+        <RefreshCw
+          className={`size-3.5 ${row.refreshing ? "animate-spin" : ""}`}
+        />
+      </button>
+    </span>
+  );
+  const balance = (row: (typeof rows)[number]) => {
+    const status = totalStatuses[row.key];
+    return status.pending && !status.capturedAt
+      ? "Loading…"
+      : status.complete
+        ? formatPrivateInvestmentValue(row.value, row.currency)
+        : row.key === "zerodha" || status.capturedAt
+          ? "Incomplete total"
+          : "Unavailable";
   };
-
-  const info = infoDialog ? COMMAND_TILE_INFO[infoDialog] : null;
-
+  const availability = (status: TotalDataStatusInfo, includeSourceState = true) => (
+    <div className="text-xs leading-5 text-slate-600" data-total-complete={status.complete}>
+      <p>
+        {status.pending ? "Refreshing… · " : ""}
+        {status.complete
+          ? "All components available"
+          : status.failed || status.pending
+            ? "Incomplete · Portfolio or cash unverified"
+            : "Incomplete · Missing portfolio or cash"}
+      </p>
+      {includeSourceState ? <SnapshotAvailability info={status} /> : null}
+    </div>
+  );
+  const saved = (row: (typeof rows)[number]) => (
+    <time
+      dateTime={row.updatedAt ?? undefined}
+      title={row.updatedAt ?? undefined}
+    >
+      {row.updatedAt ? formatTs(row.updatedAt) : "Time unavailable"}
+    </time>
+  );
+  const age = (status: TotalDataStatusInfo) => (
+    <div className="text-xs leading-5 text-slate-600">
+      <p>Snapshot: {dataAge(status.capturedAt)}</p>
+      {status.cachedAt !== undefined ? (
+        <p>Browser cache: {dataAge(status.cachedAt)} · Saved copy</p>
+      ) : null}
+    </div>
+  );
+  const tableClass =
+    "w-full text-left text-sm [&_th]:px-4 [&_th]:py-2 [&_th]:text-xs [&_th]:font-semibold [&_th]:text-slate-600 [&_td]:px-4 [&_td]:py-3 [&_td]:align-top";
   return (
-    <div className="rounded-[28px] border border-white/10 bg-white/8 p-5 shadow-2xl shadow-slate-950/15 backdrop-blur">
-      <div className="flex flex-col gap-5">
-        <div>
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-300">
-              <Target className="size-3.5" />
-              Total Investments
-            </div>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              aria-pressed={showInvestmentNumbers}
-              aria-label={
-                showInvestmentNumbers
-                  ? "Hide investment numbers"
-                  : "Show investment numbers"
-              }
-              title={
-                showInvestmentNumbers
-                  ? "Hide investment numbers"
-                  : "Show investment numbers"
-              }
-              onClick={() =>
-                setShowInvestmentNumbers((currentValue) => !currentValue)
-              }
-              className="size-9 shrink-0 rounded-full border border-white/10 bg-white/8 text-slate-200 hover:bg-white/15 hover:text-white"
+    <>
+      <Tabs value={view} onValueChange={setView} className="gap-3">
+        <TabsList
+          aria-label="Portfolio overview details"
+          style={{ height: "auto" }}
+          className="grid w-full max-w-full grid-cols-1 justify-start gap-1 bg-transparent p-0 sm:w-fit sm:grid-cols-3"
+        >
+          {[
+            ["overview", "Overview"],
+            ["sources", "Sources and freshness"],
+            ["refresh", "Refresh behaviour"],
+          ].map(([value, label]) => (
+            <TabsTrigger
+              key={value}
+              value={value}
+              className="h-auto rounded-lg bg-indigo-100 px-3 py-2 text-xs normal-case tracking-normal text-slate-700 transition-none data-active:bg-violet-700 data-active:text-white data-[state=active]:bg-violet-700 data-[state=active]:text-white"
             >
-              <VisibilityIcon className="size-4" />
-            </Button>
+              {label}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+        <div
+          className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2 text-xs leading-5 text-amber-950"
+          data-fx-status={fx?.status ?? "unavailable"}
+        >
+          {fx?.status === "valid" && fx.source && fx.as_of
+            ? `USD/INR ${fx.value?.toFixed(4)} from ${fx.source}, as of ${formatTs(fx.as_of)}.`
+            : fx?.status === "stale"
+              ? `USD/INR is stale as of ${fx.as_of ? formatTs(fx.as_of) : "an unknown time"}; combined INR totals are omitted and native USD stays USD.`
+              : "USD/INR is unavailable; combined INR totals are omitted and USD values remain in USD."}{" "}
+          Missing portfolio or cash keeps totals incomplete.
+        </div>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <Button
+            type="button"
+            onClick={onRefreshBoard}
+            disabled={refreshingBoard}
+            className="bg-amber-400 text-slate-950 hover:bg-amber-300"
+          >
+            {refreshingBoard ? (
+              <Loader2 className="mr-2 size-4 animate-spin" />
+            ) : (
+              <RefreshCw className="mr-2 size-4" />
+            )}
+            Refresh Board
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            aria-pressed={showInvestmentNumbers}
+            aria-label={
+              showInvestmentNumbers
+                ? "Hide investment numbers"
+                : "Show investment numbers"
+            }
+            onClick={() => setShowInvestmentNumbers((value) => !value)}
+          >
+            <VisibilityIcon className="size-4" />
+          </Button>
+          <p className="max-w-lg text-xs leading-5 text-slate-600">
+            Reloads saved snapshots and FX; requests a fresh Bullpen wallet
+            read. Stored prices stay at their snapshot time.
+          </p>
+        </div>
+        <TabsContent value="overview" className="mt-0">
+          <p className="mb-2 text-xs text-slate-600 sm:hidden">Scroll horizontally to see all columns.</p>
+          <div
+            className="overflow-x-auto rounded-xl border border-indigo-100 bg-white focus-visible:outline-2"
+            tabIndex={0}
+            role="region"
+            aria-label="Portfolio overview table"
+          >
+            <table className={`${tableClass} min-w-[580px]`}>
+              <thead className="bg-slate-50">
+                <tr>
+                  <th scope="col">Portfolio</th>
+                  <th scope="col">Portfolio + cash</th>
+                  <th scope="col">Snapshot age</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200">
+                {rows.map((row) => (
+                  <tr key={row.key}>
+                    <th scope="row" className="w-[22%]">
+                      <div className="flex flex-wrap items-center gap-1">
+                        <span className="text-sm font-semibold text-slate-950">
+                          {row.label}
+                        </span>
+                        {controls(row)}
+                      </div>
+                    </th>
+                    <td>
+                      <p className="font-semibold text-slate-950">
+                        {balance(row)}
+                      </p>
+                      <p className="mt-1 text-xs leading-5 text-slate-600">
+                        Source: {totalStatuses[row.key].source} · Saved:{" "}
+                        {saved(row)}
+                      </p>
+                      {availability(totalStatuses[row.key])}
+                      {row.currency === "USD" ? (
+                        <p className="text-xs leading-5 text-amber-900">
+                          INR unavailable · Verified USD/INR required
+                        </p>
+                      ) : null}
+                    </td>
+                    <td className="w-[23%]">{age(totalStatuses[row.key])}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-          <div className="mt-4 text-3xl font-bold tracking-tight text-white md:text-4xl">
+        </TabsContent>
+        <TabsContent value="sources" className="mt-0">
+          <p className="mb-2 text-xs text-slate-600 sm:hidden">Scroll horizontally to see all columns.</p>
+          <div
+            className="overflow-x-auto rounded-xl border border-indigo-100 bg-white focus-visible:outline-2"
+            tabIndex={0}
+            role="region"
+            aria-label="Sources and freshness table"
+          >
+            <table className={`${tableClass} min-w-[780px]`}>
+              <thead className="bg-slate-50">
+                <tr>
+                  {[
+                    "Source",
+                    "Source status",
+                    "Captured snapshot text",
+                    "Age",
+                    "INR",
+                  ].map((label) => (
+                    <th key={label} scope="col">
+                      {label}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200">
+                {rows.map((row) => {
+                  const status = totalStatuses[row.key];
+                  return (
+                    <tr key={row.key}>
+                      <th scope="row">
+                        <div className="flex flex-wrap items-center">
+                          <span className="text-sm text-slate-950">
+                            {row.identity}
+                          </span>
+                          {controls(row)}
+                        </div>
+                      </th>
+                      <td className="text-xs leading-5">
+                        <SnapshotAvailability info={status} />
+                      </td>
+                      <td>
+                        <p className="text-xs leading-5">
+                          Source: {status.source}
+                        </p>
+                        <p className="text-xs leading-5">Saved: {saved(row)}</p>
+                        <div className="mt-1 text-xs leading-5">
+                          <p>
+                            Portfolio:{" "}
+                            {formatPrivateInvestmentValue(
+                              row.portfolio,
+                              row.currency,
+                            )}
+                          </p>
+                          <p>
+                            Cash:{" "}
+                            {formatPrivateInvestmentValue(
+                              row.cash,
+                              row.currency,
+                            )}
+                          </p>
+                        </div>
+                      </td>
+                      <td>{age(status)}</td>
+                      <td>
+                        <p className="text-xs font-medium">
+                          {row.currency === "USD"
+                            ? "Unavailable · Verified USD/INR required"
+                            : status.complete
+                              ? "Available"
+                              : "Incomplete total"}
+                        </p>
+                        {availability(status, false)}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </TabsContent>
+        <TabsContent
+          value="refresh"
+          className="mt-0 rounded-xl border border-indigo-100 bg-white p-4 text-sm leading-6 text-slate-700"
+        >
+          <h2 className="font-semibold text-slate-950">Refresh behaviour</h2>
+          <ul className="mt-2 list-disc space-y-1 pl-5">
+            <li>
+              Refresh Board reloads stored portfolio snapshots and FX status.
+            </li>
+            <li>Requests a fresh Bullpen wallet read.</li>
+            <li>Zerodha sync is requested when its workflow is open.</li>
+            <li>
+              INDmoney stays at the last imported snapshot until you import a
+              new one.
+            </li>
+            <li>
+              Reloading the board does not make stored snapshot prices current.
+            </li>
+            <li>
+              If a read fails, the last available data is labelled beside each
+              source.
+            </li>
+          </ul>
+        </TabsContent>
+      </Tabs>
+      <div className="mt-3 border-t border-indigo-200 pt-3">
+        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+          <span className="inline-flex items-center gap-2 text-xs font-semibold text-slate-600">
+            <Target className="size-3.5" />
+            Total Investments
+          </span>
+          <p className="font-semibold text-slate-950">
             {totalValue == null
               ? "Combined INR unavailable"
               : formatPrivateInvestmentValue(totalValue)}
-          </div>
-          <div
-            className={`mt-2 text-xs leading-5 ${
-              fx?.status === "valid" ? "text-slate-300" : "text-amber-200"
-            }`}
-            data-fx-status={fx?.status ?? "unavailable"}
-          >
-            {fx?.status === "valid" && fx.source && fx.as_of
-              ? `USD/INR ${fx.value?.toFixed(4)} from ${fx.source}, as of ${formatTs(fx.as_of)}`
-              : fx?.status === "stale"
-                ? `USD/INR is stale as of ${fx.as_of ? formatTs(fx.as_of) : "an unknown time"}; combined INR totals are omitted.`
-                : "USD/INR is unavailable; combined INR totals are omitted and USD values remain in USD."}
-          </div>
+          </p>
         </div>
-
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {renderTile({
-            keyName: "zerodha",
-            title: "Zerodha",
-            value: zerodhaValue,
-            portfolioValue: zerodhaPortfolioValue,
-            cashValue: zerodhaMargin,
-            updatedAt: zerodhaUpdatedAt,
-            onRefresh: onRefreshZerodha,
-            refreshingTile: refreshingZerodha,
-          })}
-          {renderTile({
-            keyName: "indmoney",
-            title: "INDmoney",
-            value: indmoneyValue,
-            portfolioValue: indmoneyPortfolioValue,
-            cashValue: indmoneyFundsValue,
-            updatedAt: indmoneyUpdatedAt,
-            onRefresh: onRefreshIndmoney,
-            refreshingTile: refreshingIndmoney,
-            currency: fx?.status === "valid" ? "INR" : "USD",
-          })}
-          {renderTile({
-            keyName: "bullpen",
-            title: "Bullpen",
-            value: bullpenTotalValueInr,
-            portfolioValue: bullpenAccountValueInr,
-            cashValue: bullpenCashValueInr,
-            updatedAt: bullpenUpdatedAt,
-            onRefresh: onRefreshBullpen,
-            refreshingTile: refreshingBullpen,
-            currency: fx?.status === "valid" ? "INR" : "USD",
-          })}
+        <p className="mt-1 text-xs leading-5 text-slate-600">
+          Sources: Zerodha, INDmoney and Bullpen snapshots · Oldest snapshot:{" "}
+          {dataAge(
+            Math.min(
+              ...Object.values(totalStatuses)
+                .map((status) => Date.parse(status.capturedAt ?? ""))
+                .filter(Number.isFinite),
+            ),
+          )}
+          .
+          {Object.values(totalStatuses).some(
+            (status) => !status.complete || status.failed,
+          )
+            ? " Incomplete sources: combined total omitted."
+            : ""}
+        </p>
+      </div>
+      <details className="mt-3 text-xs text-slate-600">
+        <summary className="w-fit cursor-pointer rounded-sm font-semibold underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2">
+          How portfolio totals are calculated
+        </summary>
+        <div className="mt-3 space-y-2 leading-5">
+          {Object.entries(COMMAND_TILE_INFO).map(([key, details]) => (
+            <p key={key}>{details.body}</p>
+          ))}
         </div>
-
-        {info ? (
-          <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 px-4 backdrop-blur-sm"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="command-tile-info-title"
-            onClick={() => setInfoDialog(null)}
+      </details>
+      <Dialog.Root
+        open={info !== null}
+        onOpenChange={(open) => {
+          if (!open) setInfoDialog(null);
+        }}
+      >
+        <Dialog.Portal>
+          <Dialog.Overlay className="fixed inset-0 z-50 bg-slate-950/50" />
+          <Dialog.Content
+            onCloseAutoFocus={(event) => {
+              event.preventDefault();
+              infoTrigger.current?.focus();
+            }}
+            className="fixed left-1/2 top-1/2 z-50 w-[calc(100%-2rem)] max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-2xl bg-white p-5 text-slate-950 shadow-xl"
           >
-            <div
-              className="w-full max-w-sm rounded-[24px] border border-white/10 bg-slate-950 p-5 text-white shadow-2xl"
-              onClick={(event) => event.stopPropagation()}
-            >
-              <h2 id="command-tile-info-title" className="text-lg font-bold">
-                {info.title}
-              </h2>
-              <p className="mt-3 text-sm leading-6 text-slate-300">
-                {info.body}
-              </p>
-              <Button
-                type="button"
-                onClick={() => setInfoDialog(null)}
-                className="mt-5 rounded-full bg-white text-slate-950 hover:bg-slate-200"
-              >
+            <Dialog.Title className="text-lg font-semibold">
+              {info?.title}
+            </Dialog.Title>
+            <Dialog.Description className="mt-3 text-sm leading-6 text-slate-600">
+              {info?.body}
+            </Dialog.Description>
+            <Dialog.Close asChild>
+              <Button type="button" variant="outline" className="mt-5">
                 Close
               </Button>
-            </div>
-          </div>
-        ) : null}
-      </div>
-    </div>
+            </Dialog.Close>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
+    </>
   );
 }
 
@@ -1025,7 +1230,7 @@ function dashboardSummaryToState(
             walletValue: summary.bullpen.wallet_value,
           },
           fetchedAt: summary.bullpen.fetched_at ?? undefined,
-          positionsSource: "last-successful-live-snapshot",
+          positionsSource: summary.bullpen.source,
         }
       : null,
   };
@@ -1062,7 +1267,20 @@ function DashboardPageForUser({
   const [refreshing, setRefreshing] = useState(false);
   const [refreshingBullpenTile, setRefreshingBullpenTile] = useState(false);
   const [errorsBySection, setErrorsBySection] = useState<DashboardErrorsState>(
-    {},
+    () => {
+      if (!initialSummary) return {};
+      return Object.fromEntries(
+        [
+          ["zerodhaOverview", initialSummary.sections.zerodha],
+          ["indmoneyOverview", initialSummary.sections.indmoney_us],
+          ["bullpenPositions", initialSummary.sections.bullpen],
+        ].flatMap(([key, section]) =>
+          typeof section === "object" && section?.status === "unavailable"
+            ? [[key, "Source temporarily unavailable."]]
+            : [],
+        ),
+      );
+    },
   );
   const [dataProvenance, setDataProvenance] =
     useState<DashboardDataProvenance | null>(() => {
@@ -1074,6 +1292,17 @@ function DashboardPageForUser({
       }
       return readDashboardOverviewCacheProvenance(userId);
     });
+  const [cacheTimes, setCacheTimes] = useState<
+    Partial<Record<DashboardSectionKey, number>>
+  >(() => {
+    if (initialSummary) return {};
+    const entries = readDashboardOverviewCachePayload(userId).entries;
+    return Object.fromEntries(
+      DASHBOARD_SECTION_KEYS.flatMap((key) =>
+        entries[key] ? [[key, entries[key]!.cachedAt]] : [],
+      ),
+    );
+  });
   const requestIdRef = useRef(0);
   const loadDashboardPromiseRef = useRef<Promise<void> | null>(null);
   const loadThreatsPromiseRef = useRef<Promise<void> | null>(null);
@@ -1122,81 +1351,94 @@ function DashboardPageForUser({
       setRefreshing(true);
     }
 
-    const loadPromise = apiService
-      .getDashboardSummary()
-      .then((summary) => {
-        if (requestId !== requestIdRef.current) return;
-        const update = dashboardSummaryToState(summary);
-        setDataProvenance({
-          source: "live-summary",
-          asOf: Date.parse(summary.generated_at),
-        });
-        setDashboard((current) => {
-          const nextState = {
-            ...current,
-            ...update,
-            // A temporarily unavailable summary must never erase a verified
-            // Bullpen snapshot already displayed or cached in this browser.
-            bullpenPositions:
-              current.bullpenPositions ?? update.bullpenPositions ?? null,
-          };
-          for (const key of DASHBOARD_CRITICAL_KEYS) {
-            writeDashboardOverviewCacheEntry(userId, key, nextState[key]);
-          }
-          return nextState;
-        });
-        const sectionErrors: DashboardErrorsState = {};
-        if (summary.sections.zerodha?.status === "unavailable") {
-          sectionErrors.zerodhaOverview =
-            "India portfolio: temporarily unavailable.";
-        }
-        if (summary.sections.indmoney_us?.status === "unavailable") {
-          sectionErrors.indmoneyOverview =
-            "US portfolio: temporarily unavailable.";
-        }
-        if (summary.sections.bullpen?.status === "unavailable") {
-          sectionErrors.bullpenPositions =
-            "Bullpen wallet: no passive cached snapshot is available.";
-        }
-        setErrorsBySection(sectionErrors);
-      })
-      .catch((error) => {
-        if (requestId !== requestIdRef.current) return;
-        const cached = readDashboardOverviewCache(userId);
-        if (cached) {
-          logDashboardCacheFallback("zerodhaOverview", error);
-          setDashboard((current) => ({ ...current, ...cached }));
-          setDataProvenance(readDashboardOverviewCacheProvenance(userId));
-          setErrorsBySection({
-            zerodhaOverview:
-              "Dashboard summary: live refresh failed; showing last saved data.",
-          });
-          return;
-        }
-        setErrorsBySection({
-          zerodhaOverview: `Dashboard summary: ${normalizeError(error)}`,
-        });
-      })
-      .finally(() => {
-        if (requestId === requestIdRef.current) {
-          setPendingSections((current) => ({
-            ...current,
-            fx: false,
-            zerodhaStatus: false,
-            zerodhaOverview: false,
-            indmoneyOverview: false,
-            polymarketState: false,
-            bullpenPositions: false,
+      const loadPromise = apiService
+        .getDashboardSummary()
+        .then((summary) => {
+          if (requestId !== requestIdRef.current) return;
+          const update = dashboardSummaryToState(summary);
+          setCacheTimes((current) => ({
+            bullpenPositions: current.bullpenPositions,
           }));
-          setRefreshing(false);
-        }
-        if (loadDashboardPromiseRef.current === loadPromise) {
-          loadDashboardPromiseRef.current = null;
-        }
-      });
-    loadDashboardPromiseRef.current = loadPromise;
-    return loadPromise;
-  }, [userId]);
+          setDataProvenance({
+            source: "live-summary",
+            asOf: Date.parse(summary.generated_at),
+          });
+          setDashboard((current) => {
+            const nextState = {
+              ...current,
+              ...update,
+              // A temporarily unavailable summary must never erase a verified
+              // Bullpen snapshot already displayed or cached in this browser.
+              bullpenPositions:
+                current.bullpenPositions ?? update.bullpenPositions ?? null,
+            };
+            for (const key of DASHBOARD_CRITICAL_KEYS) {
+              writeDashboardOverviewCacheEntry(userId, key, nextState[key]);
+            }
+            return nextState;
+          });
+          const sectionErrors: DashboardErrorsState = {};
+          if (summary.sections.zerodha?.status === "unavailable") {
+            sectionErrors.zerodhaOverview =
+              "India portfolio: temporarily unavailable.";
+          }
+          if (summary.sections.indmoney_us?.status === "unavailable") {
+            sectionErrors.indmoneyOverview =
+              "US portfolio: temporarily unavailable.";
+          }
+          if (summary.sections.bullpen?.status === "unavailable") {
+            sectionErrors.bullpenPositions =
+              "Bullpen wallet: no passive cached snapshot is available.";
+          }
+          setErrorsBySection(sectionErrors);
+        })
+        .catch((error) => {
+          if (requestId !== requestIdRef.current) return;
+          const cached = readDashboardOverviewCache(userId);
+          if (cached) {
+            logDashboardCacheFallback("zerodhaOverview", error);
+            setDashboard((current) => ({ ...current, ...cached }));
+            const entries = readDashboardOverviewCachePayload(userId).entries;
+            setCacheTimes(
+              Object.fromEntries(
+                DASHBOARD_SECTION_KEYS.flatMap((key) =>
+                  entries[key] ? [[key, entries[key]!.cachedAt]] : [],
+                ),
+              ),
+            );
+            setDataProvenance(readDashboardOverviewCacheProvenance(userId));
+            setErrorsBySection({
+              zerodhaOverview:
+                "Dashboard summary: live refresh failed; showing last saved data.",
+            });
+            return;
+          }
+          setErrorsBySection({
+            zerodhaOverview: `Dashboard summary: ${normalizeError(error)}`,
+          });
+        })
+        .finally(() => {
+          if (requestId === requestIdRef.current) {
+            setPendingSections((current) => ({
+              ...current,
+              fx: false,
+              zerodhaStatus: false,
+              zerodhaOverview: false,
+              indmoneyOverview: false,
+              polymarketState: false,
+              bullpenPositions: false,
+            }));
+            setRefreshing(false);
+          }
+          if (loadDashboardPromiseRef.current === loadPromise) {
+            loadDashboardPromiseRef.current = null;
+          }
+        });
+      loadDashboardPromiseRef.current = loadPromise;
+      return loadPromise;
+    },
+    [userId],
+  );
 
   const loadThreats = useCallback(() => {
     if (loadThreatsPromiseRef.current) return loadThreatsPromiseRef.current;
@@ -1317,15 +1559,20 @@ function DashboardPageForUser({
           0,
         )
       : null);
-  const zerodhaAvailableMargin = indiaSnapshot?.available_margin ?? 0;
-  const zerodhaCommandValue =
-    (indiaSnapshot?.holdings_market_value ?? 0) + zerodhaAvailableMargin;
+  const zerodhaAvailableMargin = indiaSnapshot?.available_margin ?? null;
+  const indiaComplete =
+    indiaSnapshot != null &&
+    Number.isFinite(indiaSnapshot.holdings_market_value) &&
+    indiaSnapshot.available_margin != null && Number.isFinite(indiaSnapshot.available_margin);
+  const zerodhaCommandValue = indiaComplete && indiaSnapshot.available_margin != null
+    ? indiaSnapshot.holdings_market_value + indiaSnapshot.available_margin
+    : null;
   const usdInrRate = validDashboardFxRate(dashboard.fx);
   const effectiveFx =
     dashboard.fx?.status === "valid" && usdInrRate == null
       ? { ...dashboard.fx, status: "stale" as const }
       : dashboard.fx;
-  const indmoneyInvestedValue = usSnapshot?.invested_value ?? 0;
+  const indmoneyInvestedValue = usSnapshot?.invested_value ?? null;
   const indmoneyPortfolioValue =
     usSnapshot?.current_value == null
       ? undefined
@@ -1334,8 +1581,14 @@ function DashboardPageForUser({
     usSnapshot?.wallet_balance == null
       ? undefined
       : usSnapshot.wallet_balance * (usdInrRate ?? 1);
-  const indmoneyCommandValue =
-    (indmoneyPortfolioValue ?? 0) + (indmoneyAvailableFundsValue ?? 0);
+  const usComplete =
+    indmoneyPortfolioValue != null &&
+    indmoneyAvailableFundsValue != null &&
+    Number.isFinite(indmoneyPortfolioValue) &&
+    Number.isFinite(indmoneyAvailableFundsValue);
+  const indmoneyCommandValue = usComplete
+    ? indmoneyPortfolioValue + indmoneyAvailableFundsValue
+    : null;
   const bullpenSummary = dashboard.bullpenPositions?.summary;
   const bullpenPositionRows = dashboard.bullpenPositions?.positions;
   const bullpenVerifiedActivePositions =
@@ -1383,21 +1636,26 @@ function DashboardPageForUser({
   const bullpenCashValue = bullpenDisplayValues.cashValue;
   const bullpenTotalValue = bullpenDisplayValues.totalValue;
   const totalCommandValue =
-    usdInrRate == null
+    usdInrRate == null ||
+    zerodhaCommandValue == null ||
+    indmoneyCommandValue == null ||
+    errorsBySection.zerodhaOverview ||
+    errorsBySection.indmoneyOverview ||
+    errorsBySection.bullpenPositions ||
+    bullpenPortfolioValue == null ||
+    bullpenCashValue == null
       ? null
       : bullpenTotalValue == null
         ? null
         : zerodhaCommandValue + indmoneyCommandValue + bullpenTotalValue;
-  const indmoneyAvailableFunds = usSnapshot?.wallet_balance ?? 0;
+  const indmoneyAvailableFunds = usSnapshot?.wallet_balance ?? null;
   const persistedIndiaTrend = buildPersistedDashboardTrend(
     dashboard.portfolioHistory?.india ?? [],
   );
   const portfolioCommandTrend =
     persistedIndiaTrend.length > 0
       ? persistedIndiaTrend
-      : buildGenuineInrPortfolioTrend(
-          dashboard.zerodhaOverview?.history ?? [],
-        );
+      : buildGenuineInrPortfolioTrend(dashboard.zerodhaOverview?.history ?? []);
   const persistedIndmoneyTrend = buildPersistedDashboardTrend(
     dashboard.portfolioHistory?.indmoney ?? [],
   );
@@ -1436,10 +1694,52 @@ function DashboardPageForUser({
     dashboard.bullpenPositions?.lastSuccessfulLiveSnapshot?.fetchedAt ??
     dashboard.bullpenPositions?.health?.timestamp ??
     null;
+  const totalStatuses: Record<CommandTileInfoKey, TotalDataStatusInfo> = {
+    zerodha: {
+      source: indiaSnapshot?.source ? `Zerodha · ${indiaSnapshot.source}` : "Zerodha",
+      snapshotKnown: indiaSnapshot != null,
+      historyHref: "/console/zerodha#saved-portfolio-snapshots",
+      historyLabel: "View India saved portfolio history",
+      capturedAt: indiaSnapshot?.captured_at,
+      cachedAt: cacheTimes.zerodhaOverview,
+      complete: indiaComplete,
+      pending: pendingSections.zerodhaOverview,
+      failed: Boolean(errorsBySection.zerodhaOverview),
+    },
+    indmoney: {
+      source: usSnapshot?.source ? `INDmoney · ${usSnapshot.source}` : "INDmoney",
+      snapshotKnown: usSnapshot != null,
+      historyHref: "/console/indmoney-us#us-snapshot-panel-saved",
+      historyLabel: "View US saved portfolio history",
+      capturedAt: usSnapshot?.captured_at,
+      cachedAt: cacheTimes.indmoneyOverview,
+      complete: usComplete,
+      pending: pendingSections.indmoneyOverview,
+      failed: Boolean(
+        errorsBySection.indmoneyOverview ||
+        errorsBySection.zerodhaOverview?.startsWith("Dashboard summary:"),
+      ),
+    },
+    bullpen: {
+      source: dashboard.bullpenPositions?.positionsSource ? `Bullpen · ${dashboard.bullpenPositions.positionsSource}` : "Bullpen",
+      snapshotKnown: dashboard.bullpenPositions != null,
+      capturedAt: bullpenUpdatedAt,
+      cachedAt: cacheTimes.bullpenPositions,
+      complete:
+        bullpenPortfolioValue != null &&
+        bullpenCashValue != null &&
+        bullpenTotalValue != null,
+      pending: refreshingBullpenTile || pendingSections.bullpenPositions,
+      failed: Boolean(
+        errorsBySection.bullpenPositions ||
+        errorsBySection.zerodhaOverview?.startsWith("Dashboard summary:"),
+      ),
+    },
+  };
   const combinedChartCapturedAt =
     [indiaSnapshot?.captured_at, usSnapshot?.captured_at, bullpenUpdatedAt]
       .filter((value): value is string => Boolean(value))
-      .sort((left, right) => Date.parse(right) - Date.parse(left))[0] ?? null;
+      .sort((left, right) => Date.parse(left) - Date.parse(right))[0] ?? null;
   const portfolioChartOptions: Record<
     "india" | "indmoney" | "bullpen" | "combined",
     PortfolioCommandChartOption
@@ -1449,30 +1749,45 @@ function DashboardPageForUser({
       currentValue: zerodhaCommandValue,
       trendPoints: portfolioCommandTrend,
       capturedAt: indiaSnapshot?.captured_at,
+      dataStatus: totalStatuses.zerodha,
     },
     indmoney: {
       label: "IndMoney portfolio value",
       currentValue: usdInrRate == null ? null : indmoneyCommandValue,
       trendPoints: indmoneyCommandTrend,
       capturedAt: usSnapshot?.captured_at,
+      dataStatus: totalStatuses.indmoney,
+      historyUnavailable: usdInrRate == null,
     },
     bullpen: {
       label: "Bullpen portfolio value",
       currentValue: usdInrRate == null ? null : (bullpenTotalValue ?? null),
       trendPoints: bullpenCommandTrend,
       capturedAt: bullpenUpdatedAt,
+      dataStatus: totalStatuses.bullpen,
+      historyUnavailable: usdInrRate == null,
     },
     combined: {
       label: "Combined portfolio value",
       currentValue: totalCommandValue,
       trendPoints: combinedCommandTrend,
+      historyUnavailable: usdInrRate == null,
       capturedAt: combinedChartCapturedAt,
+      dataStatus: {
+        source: "Zerodha + INDmoney + Bullpen · Verified FX required",
+        failed: Object.values(totalStatuses).some((status) => status.failed),
+        pending: Object.values(totalStatuses).some((status) => status.pending),
+        cachedAt: Object.values(totalStatuses).find((status) => status.cachedAt !== undefined)?.cachedAt,
+        capturedAt: combinedChartCapturedAt,
+        complete: totalCommandValue != null,
+      },
     },
   };
   const refreshBullpenTile = useCallback(async (forceFresh = true) => {
     setRefreshingBullpenTile(true);
     try {
       const positions = await fetchBullpenPositions(forceFresh);
+      setCacheTimes((current) => ({ ...current, bullpenPositions: undefined }));
       setDashboard((current) => {
         const nextState = { ...current, bullpenPositions: positions };
         writeDashboardOverviewCacheEntry(
@@ -1518,54 +1833,6 @@ function DashboardPageForUser({
         showHeroSkeleton ? undefined : "dashboard-summary"
       }
     >
-      <section
-        className="rounded-3xl border border-indigo-100 bg-white p-6 shadow-sm"
-        data-performance-usable="dashboard-portfolio-summary"
-      >
-        <p className="text-sm font-semibold uppercase tracking-[0.22em] text-indigo-600">
-          Portfolio overview
-        </p>
-        <h1 className="mt-2 text-3xl font-bold tracking-tight text-slate-950">
-          Dashboard
-        </h1>
-        <div className="mt-5 grid gap-3 sm:grid-cols-3">
-          {[
-            {
-              label: "India total (portfolio + cash)",
-              value: formatInr(zerodhaCommandValue),
-            },
-            {
-              label: "INDmoney total (portfolio + cash)",
-              value:
-                usdInrRate == null
-                  ? "Unavailable"
-                  : formatInr(indmoneyCommandValue),
-            },
-            {
-              label: "Bullpen total (portfolio + cash)",
-              value:
-                usdInrRate == null || bullpenTotalValue == null
-                  ? "Unavailable"
-                  : formatInr(bullpenTotalValue),
-            },
-          ].map((metric) => (
-            <div key={metric.label} className="rounded-2xl bg-slate-50 p-4">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                {metric.label}
-              </p>
-              <p className="mt-2 text-2xl font-semibold text-slate-950">
-                {metric.value}
-              </p>
-            </div>
-          ))}
-        </div>
-        <p className="mt-4 text-xs text-slate-500">
-          {usdInrRate != null && effectiveFx?.source && effectiveFx.as_of
-            ? `USD/INR ${usdInrRate.toFixed(4)} from ${effectiveFx.source}; as of ${formatTs(effectiveFx.as_of)}.`
-            : "USD/INR conversion unavailable or stale. INDmoney and Bullpen INR totals are omitted until a verified rate is available."}
-        </p>
-      </section>
-
       {dataProvenance ? (
         <div
           className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs leading-5 text-slate-600 shadow-sm"
@@ -1575,7 +1842,7 @@ function DashboardPageForUser({
             {dataProvenance.source === "server-summary"
               ? "Server dashboard summary"
               : dataProvenance.source === "live-summary"
-                ? "Live dashboard summary"
+                ? "Reloaded stored dashboard summary"
                 : "Browser cache"}
           </span>
           {` • ${formatDataAge(dataProvenance.asOf)}`}
@@ -1587,81 +1854,71 @@ function DashboardPageForUser({
             : ""}
         </div>
       ) : null}
-      {showHeroSkeleton ? (
-        <DashboardHeroSkeleton />
-      ) : (
-        <section className="relative overflow-hidden rounded-[36px] border border-slate-200 bg-linear-to-br from-slate-950 via-slate-900 to-slate-800 text-white shadow-lg">
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(245,158,11,0.22),_transparent_30%),radial-gradient(circle_at_bottom_right,_rgba(59,130,246,0.22),_transparent_35%)]" />
-
-          <div className="relative px-6 py-7 lg:px-8">
-            <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
-              <div>
-                <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/8 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-100">
-                  <Sparkles className="size-3.5" />
-                  Investments Control Room
-                </div>
-                <h1 className="mt-4 max-w-3xl font-serif text-3xl tracking-tight text-white md:text-4xl">
-                  Portfolio Command Center
-                </h1>
-              </div>
-              <div className="flex shrink-0 flex-wrap gap-3">
-                <Button
-                  onClick={() => {
-                    window.dispatchEvent(
-                      new Event(ZERODHA_DASHBOARD_SYNC_NOW_EVENT),
-                    );
-                    void Promise.allSettled([
-                      loadDashboard(false),
-                      refreshBullpenTile(true),
-                    ]);
-                  }}
-                  disabled={refreshing}
-                  className="rounded-full bg-amber-400 text-slate-950 hover:bg-amber-300"
-                >
-                  {refreshing ? (
-                    <Loader2 className="mr-2 size-4 animate-spin" />
-                  ) : (
-                    <RefreshCw className="mr-2 size-4" />
-                  )}
-                  Refresh Board
-                </Button>
-              </div>
-            </div>
-
-            <div className="mt-7 grid gap-6 xl:grid-cols-2 xl:items-stretch">
-              <PortfolioCommandSummary
-                totalValue={totalCommandValue}
-                zerodhaValue={zerodhaCommandValue}
-                zerodhaPortfolioValue={indiaSnapshot?.holdings_market_value}
-                zerodhaMargin={zerodhaAvailableMargin}
-                indmoneyValue={indmoneyCommandValue}
-                indmoneyPortfolioValue={indmoneyPortfolioValue}
-                indmoneyFundsValue={indmoneyAvailableFundsValue}
-                bullpenTotalValueInr={bullpenTotalValue}
-                bullpenAccountValueInr={bullpenPortfolioValue}
-                bullpenCashValueInr={bullpenCashValue}
-                zerodhaUpdatedAt={indiaSnapshot?.captured_at}
-                indmoneyUpdatedAt={usSnapshot?.captured_at}
-                bullpenUpdatedAt={bullpenUpdatedAt}
-                onRefreshZerodha={refreshZerodhaTile}
-                onRefreshIndmoney={refreshIndmoneyTile}
-                onRefreshBullpen={() => void refreshBullpenTile(true)}
-                refreshingZerodha={pendingSections.zerodhaOverview}
-                refreshingIndmoney={pendingSections.indmoneyOverview}
-                refreshingBullpen={
-                  refreshingBullpenTile || pendingSections.bullpenPositions
-                }
-                fx={effectiveFx}
-              />
-
-              <PortfolioCommandChart
-                userId={userId}
-                options={portfolioChartOptions}
-              />
+      <section
+        className="rounded-3xl border border-indigo-100 bg-indigo-50/70 text-slate-950 shadow-sm"
+        data-performance-usable="dashboard-portfolio-summary"
+      >
+        <div className="relative p-4 sm:p-5">
+          <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <h1 className="text-2xl font-semibold tracking-tight text-slate-950">
+                Dashboard
+              </h1>
+              <p className="mt-1 text-sm text-slate-600">
+                Portfolio overview · Saved snapshots
+              </p>
             </div>
           </div>
-        </section>
-      )}
+
+          <div className="mt-4">
+            <PortfolioCommandSummary
+              onRefreshBoard={() => {
+                window.dispatchEvent(
+                  new Event(ZERODHA_DASHBOARD_SYNC_NOW_EVENT),
+                );
+                void Promise.allSettled([
+                  loadDashboard(false),
+                  refreshBullpenTile(true),
+                ]);
+              }}
+              refreshingBoard={refreshing}
+              totalStatuses={totalStatuses}
+              totalValue={totalCommandValue}
+              zerodhaValue={zerodhaCommandValue}
+              zerodhaPortfolioValue={indiaSnapshot?.holdings_market_value}
+              zerodhaMargin={zerodhaAvailableMargin}
+              indmoneyValue={indmoneyCommandValue}
+              indmoneyPortfolioValue={indmoneyPortfolioValue}
+              indmoneyFundsValue={indmoneyAvailableFundsValue}
+              bullpenTotalValueInr={bullpenTotalValue}
+              bullpenAccountValueInr={bullpenPortfolioValue}
+              bullpenCashValueInr={bullpenCashValue}
+              zerodhaUpdatedAt={indiaSnapshot?.captured_at}
+              indmoneyUpdatedAt={usSnapshot?.captured_at}
+              bullpenUpdatedAt={bullpenUpdatedAt}
+              onRefreshZerodha={refreshZerodhaTile}
+              onRefreshIndmoney={refreshIndmoneyTile}
+              onRefreshBullpen={() => void refreshBullpenTile(true)}
+              refreshingZerodha={pendingSections.zerodhaOverview}
+              refreshingIndmoney={pendingSections.indmoneyOverview}
+              refreshingBullpen={
+                refreshingBullpenTile || pendingSections.bullpenPositions
+              }
+              fx={effectiveFx}
+            />
+          </div>
+        </div>
+      </section>
+
+      <section
+        className="rounded-3xl bg-slate-950 p-5 text-white"
+        aria-label="Portfolio history"
+      >
+        <PortfolioCommandChart
+          userId={userId}
+          options={portfolioChartOptions}
+        />
+      </section>
 
       {errors.length > 0 ? (
         <div className="flex items-start gap-3 rounded-[24px] border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
@@ -1674,16 +1931,19 @@ function DashboardPageForUser({
 
       <section className="grid gap-6 xl:grid-cols-2">
         {showIndiaPortfolioSkeleton ? (
-          <DashboardMarketCardSkeleton />
+          <DashboardMarketCardSkeleton label="Loading saved Zerodha India snapshot…" />
         ) : (
           <MarketPortfolioCard
+            dataStatus={totalStatuses.zerodha}
             market="india"
             title="Zerodha India"
             description="Live broker-backed holdings, P&L, and top concentration pockets from your latest synced India book."
             statusPills={[
               {
                 label: "Connection",
-                value: dashboard.zerodhaStatus?.connected
+                value: !dashboard.zerodhaStatus && (totalStatuses.zerodha.failed || totalStatuses.zerodha.pending)
+                  ? "Unverified"
+                  : dashboard.zerodhaStatus?.connected
                   ? "Connected"
                   : "Disconnected",
                 tone: dashboard.zerodhaStatus?.connected ? "success" : "danger",
@@ -1692,7 +1952,7 @@ function DashboardPageForUser({
                 label: "Snapshot",
                 value: indiaSnapshot
                   ? formatSnapshotDate(indiaSnapshot.snapshot_date)
-                  : "Missing",
+                  : snapshotAvailability(totalStatuses.zerodha),
                 detail: indiaSnapshot
                   ? formatSnapshotTime(indiaSnapshot.captured_at)
                   : undefined,
@@ -1726,7 +1986,7 @@ function DashboardPageForUser({
                 value: formatInr(zerodhaAvailableMargin),
                 detail: indiaSnapshot
                   ? `Captured ${formatTs(indiaSnapshot.captured_at)}`
-                  : "No synced snapshot yet",
+                  : snapshotAvailability(totalStatuses.zerodha),
               },
             ]}
             topHoldings={buildIndiaTopHoldings(dashboard.zerodhaOverview)}
@@ -1759,22 +2019,28 @@ function DashboardPageForUser({
             emptyMessage={
               indiaSnapshot
                 ? null
-                : "Connect Zerodha and sync at least one snapshot to unlock India portfolio cards and threat prioritization here."
+                : totalStatuses.zerodha.failed || totalStatuses.zerodha.pending || totalStatuses.zerodha.cachedAt !== undefined
+                  ? snapshotAvailability(totalStatuses.zerodha)
+                  : "Connect Zerodha and sync at least one snapshot to unlock India portfolio cards and threat prioritization here."
             }
           />
         )}
 
         {showUsPortfolioSkeleton ? (
-          <DashboardMarketCardSkeleton />
+          <DashboardMarketCardSkeleton label="Loading saved INDmoney US snapshot…" />
         ) : (
           <MarketPortfolioCard
+            dataStatus={{
+              ...totalStatuses.indmoney,
+              source: `${totalStatuses.indmoney.source} · ${usdInrRate == null ? "USD · INR conversion unavailable" : `FX ${effectiveFx?.source ?? "unknown"}, ${formatDataAge(effectiveFx?.as_of)}`}`,
+            }}
             market="us"
             title="INDmoney US"
             description="Manual US snapshot tracking, top allocations, and return posture for the INDmoney portfolio."
             statusPills={[
               {
                 label: "Parse",
-                value: usSnapshot?.parse_status ?? "Missing",
+                value: usSnapshot?.parse_status ?? "Unverified",
                 tone:
                   usSnapshot?.parse_status?.toLowerCase() === "parsed"
                     ? "success"
@@ -1784,7 +2050,7 @@ function DashboardPageForUser({
                 label: "Snapshot",
                 value: usSnapshot
                   ? formatSnapshotDate(usSnapshot.snapshot_date)
-                  : "Missing",
+                  : snapshotAvailability(totalStatuses.indmoney),
                 detail: usSnapshot
                   ? formatSnapshotTime(usSnapshot.captured_at)
                   : undefined,
@@ -1827,7 +2093,7 @@ function DashboardPageForUser({
                 value: formatUsdValueAsInr(indmoneyAvailableFunds, usdInrRate),
                 detail: usSnapshot
                   ? `Captured ${formatTs(usSnapshot.captured_at)}`
-                  : "No pasted snapshot yet",
+                  : snapshotAvailability(totalStatuses.indmoney),
               },
             ]}
             topHoldings={buildUsTopHoldings(
@@ -1863,7 +2129,9 @@ function DashboardPageForUser({
             emptyMessage={
               usSnapshot
                 ? null
-                : "Paste an INDmoney US snapshot to surface allocations, return metrics, and threat signals on the dashboard."
+                : totalStatuses.indmoney.failed || totalStatuses.indmoney.pending || totalStatuses.indmoney.cachedAt !== undefined
+                  ? snapshotAvailability(totalStatuses.indmoney)
+                  : "Paste an INDmoney US snapshot to surface allocations, return metrics, and threat signals on the dashboard."
             }
           />
         )}
@@ -1877,17 +2145,23 @@ function DashboardPageForUser({
           Automated Rebalance
         </h2>
         <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
-          Start and monitor the complete multi-stage workflow in its dedicated
-          console. Its histories, editors, polling, and model output stay out
-          of the dashboard runtime.
+          Start and monitor each market’s multi-stage workflow below its portfolio page. Review shared Rebalance Stock Flow on Dashboard; use the existing workflow and history links for their full controls and records.
         </p>
         <div className="mt-5 flex flex-wrap gap-3">
           <Button asChild className="rounded-full">
             <Link
-              href={URLs.routes.console.automatedRebalance()}
+              href={`${URLs.routes.console.zerodha()}#india-workflow`}
               prefetch={false}
             >
-              Open automated workflow
+              Review India workflow
+            </Link>
+          </Button>
+          <Button asChild variant="outline" className="rounded-full">
+            <Link
+              href={`${URLs.routes.console.indmoneyUs()}#us-workflow`}
+              prefetch={false}
+            >
+              Review US workflow
             </Link>
           </Button>
           <Button asChild variant="outline" className="rounded-full">
@@ -1917,8 +2191,7 @@ function DashboardPageForUser({
           Final Actionables
         </h2>
         <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
-          Full histories, model evidence, and action tables load only when you
-          open the market-specific report.
+          Open the market-specific report for full histories, model evidence, and action tables. Dashboard also provides shared Rebalance Stock Flow review.
         </p>
         <div className="mt-5 flex flex-wrap gap-3">
           <Button asChild variant="outline" className="rounded-full">
@@ -1945,8 +2218,8 @@ function DashboardPageForUser({
         minHeight={360}
         fallback={
           <section className="grid gap-6 xl:grid-cols-2">
-            <DashboardThreatCardSkeleton />
-            <DashboardThreatCardSkeleton />
+            <DashboardThreatCardSkeleton title="India Threat Pulse" deferred />
+            <DashboardThreatCardSkeleton title="US Threat Pulse" deferred />
           </section>
         }
         onVisible={() => {
@@ -1955,11 +2228,13 @@ function DashboardPageForUser({
       >
         <section className="grid gap-6 xl:grid-cols-2">
         {showIndiaThreatSkeleton ? (
-          <DashboardThreatCardSkeleton />
+          <DashboardThreatCardSkeleton title="India Threat Pulse" />
         ) : (
           <ThreatMarketCard
             market="india"
             title="India Threat Pulse"
+            readPending={pendingSections.zerodhaThreat}
+            readStatus={pendingSections.zerodhaThreat ? "Refreshing saved report…" : errorsBySection.zerodhaThreat ? "Saved report read failed. Displayed data has not been refreshed." : dashboard.zerodhaThreat?.report ? "Saved report loaded · See latest scan time below." : "No saved report available."}
             description="Summary of the most important downside signals, protection cues, and severity mix from the latest India threat scan."
             summaryPoints={getThreatSummaryPoints(dashboard.zerodhaThreat)}
             severityCounts={countThreatSeverities(
@@ -1971,6 +2246,8 @@ function DashboardPageForUser({
             emptyMessage={
               dashboard.zerodhaThreat?.report
                 ? null
+                : errorsBySection.zerodhaThreat
+                  ? "The saved report could not be loaded. Reopen the dashboard to retry the read."
                 : indiaSnapshot
                   ? "Run a Zerodha threat scan to populate Table 10 actionables and the India severity pulse."
                   : "Threat insights will appear here after your first India portfolio sync."
@@ -1979,11 +2256,13 @@ function DashboardPageForUser({
         )}
 
         {showUsThreatSkeleton ? (
-          <DashboardThreatCardSkeleton />
+          <DashboardThreatCardSkeleton title="US Threat Pulse" />
         ) : (
           <ThreatMarketCard
             market="us"
             title="US Threat Pulse"
+            readPending={pendingSections.indmoneyThreat}
+            readStatus={pendingSections.indmoneyThreat ? "Refreshing saved report…" : errorsBySection.indmoneyThreat ? "Saved report read failed. Displayed data has not been refreshed." : dashboard.indmoneyThreat?.report ? "Saved report loaded · See latest scan time below." : "No saved report available."}
             description="Quick read on crowded winners, event risk, and capital-protection ideas from the latest INDmoney US threat radar."
             summaryPoints={getThreatSummaryPoints(dashboard.indmoneyThreat)}
             severityCounts={countThreatSeverities(
@@ -1995,6 +2274,8 @@ function DashboardPageForUser({
             emptyMessage={
               dashboard.indmoneyThreat?.report
                 ? null
+                : errorsBySection.indmoneyThreat
+                  ? "The saved report could not be loaded. Reopen the dashboard to retry the read."
                 : usSnapshot
                   ? "Run the INDmoney US threat scan to surface Table 10 actionables on the dashboard."
                   : "Threat insights will appear here after your first INDmoney US snapshot."
@@ -2003,6 +2284,7 @@ function DashboardPageForUser({
         )}
         </section>
       </LazyMount>
+      <DashboardStockFlowSlot deferred />
     </div>
   );
 }

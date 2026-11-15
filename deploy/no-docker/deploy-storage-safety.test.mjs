@@ -29,3 +29,37 @@ test('failed and scheduled deploys cannot launch destructive recovery', () => {
   assert.doesNotMatch(triggers, /workflow_run:|schedule:|cron:/);
   assert.match(recovery, /if: github\.event_name == 'workflow_dispatch'/);
 });
+
+
+test('recovery deployment never starts the normal financial service path', () => {
+  const start = deploy.indexOf('            RECOVERY_DEPLOY=true');
+  const end = deploy.indexOf('            if [[ "$DEPLOY_SCOPE" == backend-only ]]; then', start);
+  assert.ok(start > 0 && end > start);
+  const selection = deploy.slice(start, end).split('\n').map(line => line.slice(12)).join('\n');
+  for (const [mode, scope, status, calls] of [
+    ['1', 'full-stack', 0, ['recovery', 'redeploy:frontend-only']],
+    ['1', 'backend-only', 0, ['recovery']],
+    ['1', 'frontend-only', 0, ['redeploy:frontend-only']],
+    ['0', 'backend-only', 1, []],
+    ['invalid', 'full-stack', 1, []],
+  ]) {
+    const script = `set -euo pipefail
+APP_ROOT=/unused APP_USER=test BACKEND_ENV_FILE=/unused.env
+contained_driver=/unused
+DEPLOY_SCOPE=${scope} remote_artifact=/unused EXPECTED_FRONTEND_SHA=test DEPLOY_COMMIT_SHA=test
+bash() {
+  case "$1" in
+    */deploy-recovery.sh) if [[ "\${2:-}" == --preflight ]]; then [[ '${mode}' == 1 ]]; else echo recovery; fi ;;
+    */configure-postgres-recovery.sh) echo postgres-policy ;;
+    */redeploy.sh) echo "redeploy:$2" ;;
+    *) echo unexpected-script; return 1 ;;
+  esac
+}
+if [[ "$DEPLOY_SCOPE" != frontend-only ]]; then bash /unused/deploy-recovery.sh --preflight; fi
+${selection}`;
+    const result = spawnSync('bash', ['-c', script], { encoding: 'utf8' });
+    assert.equal(result.status, status, `${mode}/${scope}: ${result.stderr}`);
+    assert.deepEqual(result.stdout.trim().split('\n').filter(Boolean), calls);
+  }
+  assert.doesNotMatch(deploy, /configure-postgres-recovery\.sh|sudo systemctl restart postgresql/);
+});

@@ -137,3 +137,9 @@ export function deduplicateThreatStageInputs(inputs: ThreatStageInput[], market:
     ]));
   });
 }
+
+/** Validate dependencies before reserving a workflow or starting any provider. */
+export function technicalInputPlanIssue(runTechnical: boolean, runRebalance: boolean, selected: ReadonlySet<string>): string | null {
+  if (!runTechnical || runRebalance || !selected.has("technical:next")) return null;
+  return "Technical Scan selects Next Rebalance, but Rebalance is not selected in this workflow. Next means a new result from this invocation; a previous passed/partial tile is not that source. Select Rebalance too, or open Technical Scan → Select Inputs, uncheck Next Rebalance and explicitly choose saved completed/partial Rebalance jobs. No workflow or provider job has been started.";
+}

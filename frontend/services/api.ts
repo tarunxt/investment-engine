@@ -1,3 +1,10 @@
+import { recoverIndmoneyWallet } from "@/lib/indmoneyWallet";
+import type { VerifiedUsListing } from "@/lib/usSecurityIdentity";
+import type { UsVendorDisplayQuotes, ZerodhaDisplayQuoteResponse } from "@/types/api";
+import type { LogoutResponse } from "@/lib/logoutOutcome";
+import type { StockSourceObservationPage } from "@/types/api";
+
+import type { BasketScoreHistory } from "@/lib/basketDisplayCalculations";
 import { resolveApiReadTransportCandidates, URLs } from "@/lib/urls";
 import { deriveApiErrorMessage } from "@/lib/apiErrors";
 import {
@@ -108,6 +115,7 @@ import {
   FinalActionableHistoryBulkCreateRequest,
   FinalActionableHistoryBulkCreateResponse,
   FinalActionableHistoryListResponse,
+  HistoricalScoreEvidenceResponse,
   RunResponse,
   UpdatePasswordRequest,
   UpdateProfileRequest,
@@ -147,6 +155,8 @@ const DEFAULT_API_READ_TOTAL_TIMEOUT_MS = 5_000;
 const DEFAULT_API_READ_PRIMARY_ATTEMPT_TIMEOUT_MS = 1_500;
 const CAPTURED_DETAILS_READ_TIMEOUT_MS = 20_000;
 const FINAL_ACTIONABLE_HISTORY_READ_TIMEOUT_MS = 20_000;
+// Stored portfolio history uses the BFF's bounded 18s database-read budget.
+const PORTFOLIO_HISTORY_READ_TIMEOUT_MS = 20_000;
 // History can use the backend's 12-second database deadline and the BFF's
 // 14-second transport budget. The generic five-second browser cap cuts these
 // valid reads off before either layer can return its result or bounded error.
@@ -261,6 +271,7 @@ async function reconcileTimedOutAutoRebalanceStart<TResponse>(
 type ApiRequestOptions = RequestInit & {
   skipAuth?: boolean;
   skipUnauthorizedRefresh?: boolean;
+  logoutRequest?: boolean;
 } & ApiRequestControl;
 
 type RequestAbortContext = {
@@ -472,6 +483,12 @@ const apiReadCircuitBreaker = new ApiReadCircuitBreaker();
  */
 class apiServiceClass implements IApiService {
   private readonly readDeduplicator = new PrivateRequestDeduplicator();
+  private logoutInProgress = false;
+
+  beginLogout() {
+    this.logoutInProgress = true;
+    this.readDeduplicator.setSessionGeneration("anonymous");
+  }
 
   setSessionGeneration(generation: string) {
     this.readDeduplicator.setSessionGeneration(generation);
@@ -507,6 +524,9 @@ class apiServiceClass implements IApiService {
     this.groupCollapsed(`🚀 API Request: ${method} ${url}`);
 
     try {
+      if (this.logoutInProgress && !options.logoutRequest) {
+        throw new APIError(401, "Sign-out is in progress.");
+      }
       const headers: Record<string, string> = {
         "Content-Type": "application/json",
         ...((options.headers as Record<string, string>) || {}),
@@ -519,6 +539,7 @@ class apiServiceClass implements IApiService {
       const {
         skipAuth: _skipAuth,
         skipUnauthorizedRefresh: _skipUnauthorizedRefresh,
+        logoutRequest: _logoutRequest,
         timeoutMs: _timeoutMs,
         validate: _validate,
         signal: callerSignal,
@@ -526,6 +547,7 @@ class apiServiceClass implements IApiService {
       } = options;
       void _skipAuth;
       void _skipUnauthorizedRefresh;
+      void _logoutRequest;
       void _timeoutMs;
       void _validate;
       abortContext = createRequestAbortContext(callerSignal, timeoutMs);
@@ -543,6 +565,9 @@ class apiServiceClass implements IApiService {
         signal: abortContext.signal,
       });
 
+      if (this.logoutInProgress && !options.logoutRequest) {
+        throw new APIError(401, "Sign-out is in progress.");
+      }
       if (!response.ok) {
         // The same-origin BFF already performed the one permitted server-side
         // refresh within this request's absolute deadline. A remaining 401 is
@@ -551,10 +576,14 @@ class apiServiceClass implements IApiService {
         if (
           response.status === 401 &&
           !options.skipUnauthorizedRefresh &&
-          !devAuthDisabled
+          !devAuthDisabled &&
+          !this.logoutInProgress
         ) {
           if (typeof window !== "undefined") {
-            await signOut({ redirect: true, callbackUrl: "/login" });
+            // Navigation stays here so an already-running generic sign-out
+            // cannot overwrite the dedicated logout warning/retry flow.
+            await signOut({ redirect: false, callbackUrl: "/login" });
+            if (!this.logoutInProgress) window.location.href = "/login";
           }
         }
 
@@ -603,6 +632,9 @@ class apiServiceClass implements IApiService {
       }
       if (durationMs >= SLOW_API_REQUEST_THRESHOLD_MS) {
         this.warn("Slow API request:", { method, url, durationMs });
+      }
+      if (this.logoutInProgress && !options.logoutRequest) {
+        throw new APIError(401, "Sign-out is in progress.");
       }
       return data as T;
 
@@ -847,8 +879,8 @@ class apiServiceClass implements IApiService {
   /**
    * Logout user
    */
-  logout(): Promise<void> {
-    return this.post<void>(URLs.auth.logout(), {});
+  logout(): Promise<LogoutResponse> {
+    return this.post<LogoutResponse>(URLs.auth.logout(), {}, { skipUnauthorizedRefresh: true, logoutRequest: true });
   }
 
   /**
@@ -868,8 +900,8 @@ class apiServiceClass implements IApiService {
   /**
    * Get user profile
    */
-  getProfile(): Promise<UpdateProfileRequest> {
-    return this.get<UpdateProfileRequest>(URLs.auth.getProfile());
+  getProfile(): Promise<import("@/types/api").ProfilePreferencesResponse> {
+    return this.get<import("@/types/api").ProfilePreferencesResponse>(URLs.auth.getProfile());
   }
 
   /**
@@ -993,8 +1025,8 @@ class apiServiceClass implements IApiService {
     return this.post<RunResponse>(URLs.runs.create(), data);
   }
 
-  reserveAutoRebalanceRunLabel(portfolio: AutoRebalancePortfolioKey): Promise<AutoRebalanceRunReservationResponse> {
-    return this.post<AutoRebalanceRunReservationResponse>(URLs.runs.autoRebalanceLabel(), { portfolio });
+  reserveAutoRebalanceRunLabel(portfolio: AutoRebalancePortfolioKey, analysisOnly = false): Promise<AutoRebalanceRunReservationResponse> {
+    return this.post<AutoRebalanceRunReservationResponse>(URLs.runs.autoRebalanceLabel(), { portfolio, ...(analysisOnly ? { side_effect_policy: { version: 1, mode: "analysis_only" } } : {}) });
   }
 
   queueAutoRebalanceCompletionEmail(data: AutoRebalanceCompletionEmailRequest): Promise<{ status: string }> {
@@ -1019,6 +1051,24 @@ class apiServiceClass implements IApiService {
     );
   }
 
+  getStockSourceObservations(params: { market: "india" | "us"; symbol: string; cursor?: string | null }): Promise<StockSourceObservationPage> {
+    const query = new URLSearchParams({ market: params.market, symbol: params.symbol });
+    if (params.cursor) query.set("cursor", params.cursor);
+    return this.get<StockSourceObservationPage>(`${URLs.runs.create()}/final-actionables/stock-observations?${query}`, { timeoutMs: FINAL_ACTIONABLE_HISTORY_READ_TIMEOUT_MS });
+  }
+
+  getBasketScoreHistory(params: { market: "india" | "us"; symbols: string[]; days: number; as_of?: string }): Promise<BasketScoreHistory> {
+    const query = new URLSearchParams({ market: params.market, days: String(params.days) });
+    params.symbols.forEach(symbol => query.append("symbols", symbol));
+    if (params.as_of) query.set("as_of", params.as_of);
+    return this.get<BasketScoreHistory>(`${URLs.runs.create()}/final-actionables/score-history?${query}`, { timeoutMs: FINAL_ACTIONABLE_HISTORY_READ_TIMEOUT_MS });
+  }
+
+  getHistoricalScoreEvidence(params: { run_id: number; market: "india" | "us"; symbol: string; exchange: string; covered_at: string; history_id?: number }): Promise<HistoricalScoreEvidenceResponse> {
+    const query = new URLSearchParams(Object.entries(params).map(([key, value]) => [key, String(value)]));
+    return this.get<HistoricalScoreEvidenceResponse>(`${URLs.runs.create()}/recommendation-audit/historical-score?${query}`, { timeoutMs: FINAL_ACTIONABLE_HISTORY_READ_TIMEOUT_MS });
+  }
+
   saveFinalActionableHistory(
     data: FinalActionableHistoryBulkCreateRequest,
   ): Promise<FinalActionableHistoryBulkCreateResponse> {
@@ -1035,13 +1085,24 @@ class apiServiceClass implements IApiService {
     );
   }
 
+  private getPortfolioHistory<T>(url: string, options: ApiRequestOptions = {}): Promise<T> {
+    // One browser request; the BFF owns the bounded backend transport fallback.
+    // Share only active reads within the existing authenticated session scope.
+    return this.readDeduplicator.run({ method: "GET", url, signal: options.signal }, () => this.fetch<T>(url, {
+      method: "GET", cache: "no-store", timeoutMs: PORTFOLIO_HISTORY_READ_TIMEOUT_MS, ...options,
+    }));
+  }
+
   getAutoRebalanceHistory(
     portfolio: AutoRebalancePortfolioKey,
-    params?: { limit?: number },
+    params?: { limit?: number; offset?: number },
+    options: ApiRequestControl = {},
   ): Promise<AutoRebalanceHistoryListResponse> {
-    const suffix = params?.limit ? `&limit=${params.limit}` : "";
-    return this.get<AutoRebalanceHistoryListResponse>(
+    const suffix = (params?.limit ? `&limit=${params.limit}` : "") +
+      (params?.offset ? `&offset=${params.offset}` : "");
+    return this.getPortfolioHistory<AutoRebalanceHistoryListResponse>(
       `${URLs.runs.autoRebalanceHistory(portfolio)}${suffix}`,
+      options,
     );
   }
 
@@ -1066,16 +1127,21 @@ class apiServiceClass implements IApiService {
     );
   }
 
-  getRuns(params?: { page?: number; limit?: number; summary?: boolean }): Promise<PaginatedResponse<RunListItem>> {
+  getRuns(params?: { page?: number; limit?: number; summary?: boolean }, options: ApiRequestControl = {}): Promise<PaginatedResponse<RunListItem>> {
     const qs = new URLSearchParams();
     if (params?.page) qs.set("page", String(params.page));
     if (params?.limit) qs.set("limit", String(params.limit));
     if (params?.summary) qs.set("summary", "true");
     const query = qs.toString();
-    return this.get<PaginatedResponse<RunListItem>>(
-      `${URLs.runs.list()}${query ? `?${query}` : ""}`,
-      { validate: isPaginatedResponse<RunListItem> },
-    );
+    const url = `${URLs.runs.list()}${query ? `?${query}` : ""}`;
+    // The BFF owns bounded fallback for history. Avoid a second browser-level
+    // race abandoning its primary transport at 1.5s while DB work continues.
+    if (params?.summary) return this.getPortfolioHistory<PaginatedResponse<RunListItem>>(url, {
+      validate: isPaginatedResponse<RunListItem>, ...options,
+    });
+    return this.get<PaginatedResponse<RunListItem>>(url, {
+      validate: isPaginatedResponse<RunListItem>, ...options,
+    });
   }
 
   getAllFullRuns(): Promise<RunResponse[]> {
@@ -1227,7 +1293,9 @@ class apiServiceClass implements IApiService {
   // ===== Zerodha Endpoints =====
 
   zerodhaLoginUrl(): Promise<ZerodhaLoginUrlResponse> {
-    return this.get<ZerodhaLoginUrlResponse>(URLs.zerodha.loginUrl());
+    return this.get<ZerodhaLoginUrlResponse>(URLs.zerodha.loginUrl(), {
+      timeoutMs: CAPTURED_DETAILS_READ_TIMEOUT_MS,
+    });
   }
 
   zerodhaCallback(request_token: string): Promise<ZerodhaStatusResponse> {
@@ -1237,11 +1305,24 @@ class apiServiceClass implements IApiService {
   zerodhaStatus(): Promise<ZerodhaStatusResponse> {
     return this.get<ZerodhaStatusResponse>(URLs.zerodha.status(), {
       validate: isZerodhaStatusResponse,
+      timeoutMs: CAPTURED_DETAILS_READ_TIMEOUT_MS,
     });
   }
 
+  zerodhaDisplayQuotes(instruments: string[], signal?: AbortSignal): Promise<ZerodhaDisplayQuoteResponse> {
+    const query = new URLSearchParams();
+    instruments.forEach(instrument => query.append("instruments", instrument));
+    return this.get<ZerodhaDisplayQuoteResponse>(`${URLs.zerodha.portfolio()}/quotes?${query}`, { skipUnauthorizedRefresh: true, signal });
+  }
+
+  zerodhaQuoteCapabilities(): Promise<{ upstox_ltp_enabled: boolean }> {
+    return this.get<{ upstox_ltp_enabled: boolean }>(`${URLs.zerodha.portfolio()}/quote-capabilities`, { skipUnauthorizedRefresh: true });
+  }
+
   zerodhaPortfolioOverview(): Promise<ZerodhaPortfolioOverviewResponse> {
-    return this.get<ZerodhaPortfolioOverviewResponse>(URLs.zerodha.portfolio());
+    return this.get<ZerodhaPortfolioOverviewResponse>(URLs.zerodha.portfolio(), {
+      timeoutMs: CAPTURED_DETAILS_READ_TIMEOUT_MS,
+    });
   }
 
   zerodhaPortfolioSnapshot(snapshotDate: string): Promise<ZerodhaPortfolioSnapshotDetail> {
@@ -1271,11 +1352,11 @@ class apiServiceClass implements IApiService {
   }
 
   zerodhaPlaceProtectedMarketOrders(data: ZerodhaProtectedMarketRequest): Promise<ZerodhaProtectedMarketResponse> {
-    return this.post<ZerodhaProtectedMarketResponse>(URLs.zerodha.placeProtectedMarketOrders(), data);
+    return this.post<ZerodhaProtectedMarketResponse>(URLs.zerodha.placeProtectedMarketOrders(), data, { timeoutMs: 190_000 });
   }
 
   zerodhaPlaceProtectedMarketOrdersSequenced(data: ZerodhaSequencedProtectedMarketRequest): Promise<ZerodhaSequencedProtectedMarketResponse> {
-    return this.post<ZerodhaSequencedProtectedMarketResponse>(URLs.zerodha.placeProtectedMarketOrdersSequenced(), data);
+    return this.post<ZerodhaSequencedProtectedMarketResponse>(URLs.zerodha.placeProtectedMarketOrdersSequenced(), data, { timeoutMs: 190_000 });
   }
 
   zerodhaDisconnect(): Promise<{ message: string }> {
@@ -1395,18 +1476,31 @@ class apiServiceClass implements IApiService {
     }
   }
 
-  indmoneyUsPortfolioOverview(): Promise<IndMoneyUsPortfolioOverviewResponse> {
-    return this.get<IndMoneyUsPortfolioOverviewResponse>(URLs.indmoneyUs.portfolio());
+  async indmoneyUsPortfolioOverview(): Promise<IndMoneyUsPortfolioOverviewResponse> {
+    const overview = await this.get<IndMoneyUsPortfolioOverviewResponse>(URLs.indmoneyUs.portfolio(), { cache: "no-store" });
+    if (!overview.latest) return overview;
+    const latest = recoverIndmoneyWallet(overview.latest);
+    return { ...overview, latest, history: overview.history.map(row => row.id === latest.id ? { ...row, wallet_balance: latest.wallet_balance } : row) };
   }
 
   indmoneyUsPortfolioSnapshot(snapshotId: number): Promise<IndMoneyUsPortfolioSnapshotDetail> {
-    return this.get<IndMoneyUsPortfolioSnapshotDetail>(URLs.indmoneyUs.portfolioSnapshot(snapshotId));
+    return this.get<IndMoneyUsPortfolioSnapshotDetail>(URLs.indmoneyUs.portfolioSnapshot(snapshotId)).then(recoverIndmoneyWallet);
   }
 
   indmoneyUsCreatePortfolioSnapshot(
     data: IndMoneyUsPortfolioSnapshotCreateRequest,
   ): Promise<IndMoneyUsPortfolioSnapshotDetail> {
-    return this.post<IndMoneyUsPortfolioSnapshotDetail>(URLs.indmoneyUs.portfolio(), data);
+    return this.post<IndMoneyUsPortfolioSnapshotDetail>(URLs.indmoneyUs.portfolio(), data).then(recoverIndmoneyWallet);
+  }
+
+  indmoneyVerifiedListings(): Promise<{ listings: VerifiedUsListing[]; reason: string | null }> {
+    return this.get(`${URLs.indmoneyUs.displayListings()}`, { skipUnauthorizedRefresh: true });
+  }
+
+  indmoneyDisplayQuotes(instruments: string[]): Promise<UsVendorDisplayQuotes> {
+    const query = new URLSearchParams();
+    instruments.forEach(instrument => query.append("instruments", instrument));
+    return this.get<UsVendorDisplayQuotes>(`${URLs.indmoneyUs.displayQuotes()}?${query}`, { skipUnauthorizedRefresh: true });
   }
 
   indmoneyUsCurrentPrices(
@@ -1503,7 +1597,7 @@ class apiServiceClass implements IApiService {
   }
 
   async indmoneyUsRunThreats(
-    data?: PortfolioEventRunRequest,
+    data?: PortfolioEventRunRequest & { expected_snapshot_id?: number },
   ): Promise<IndMoneyUsThreatRunResponse> {
     try {
       return await this.post<IndMoneyUsThreatRunResponse>(
@@ -1525,6 +1619,9 @@ class apiServiceClass implements IApiService {
             throw new Error(
               "Queued INDmoney threats job is missing snapshot metadata.",
             );
+          }
+          if (data?.expected_snapshot_id != null && analysis.snapshot_id !== data.expected_snapshot_id) {
+            throw new Error("Queued INDmoney threats job uses a different snapshot than the reviewed source.");
           }
           return {
             job_id: analysis.job_id,

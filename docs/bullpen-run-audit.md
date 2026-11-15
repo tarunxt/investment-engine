@@ -2680,3 +2680,169 @@ Server terminal-run reconstruction remains the durable history path. This does
 not repair or rewrite historical records created before source validation.
 Closed Calculations dialogs no longer mount their expensive computation child.
 No action formulas, execution controls, or frozen audit evidence are changed.
+## Analysis-only recovery containment
+
+When CREDX_RECOVERY_MODE=1, no Bullpen bot initialization, runtime CLI command, direct live order, or background redeem/claim submission is admitted. All Bullpen commands, including reads and auth refresh, are refused before subprocess execution. Recovery exposes a narrow INDmoney/auth/results API surface; it does not mutate frozen historical audit evidence or classify refused work as executed. INDmoney jobs retain their portfolio/stage metadata; optional sheet exports and completion emails are suppressed, with run export_status disabled. Normal behavior remains available only outside explicit recovery mode.
+
+Celery analysis uses the dedicated credx_recovery_analysis queue and credx:recovery:analysis:v1: broker/result prefix, which isolates legacy unacked, unacked_index and queues. Only execute_ai_job and the read-only Zerodha portfolio snapshot task are published/executed, with an INDmoney equity-context check before registration or status mutation. Existing scheduler and financial consumers must remain stopped; recovery startup hooks do not enqueue old recovery/outbox/sports work. Changing the mode does not authorize restoring financial execution or acknowledge, purge, migrate or requeue reserved tasks.
+
+
+Recovery equity analysis now also admits Zerodha India threats/events and matching India run/job contexts. This expands analysis only: broker order routes, Bullpen commands, bots, scheduler, exports, and legacy financial queues remain blocked. No historical audit evidence is rewritten.
+
+# Read-only display quote fallback
+
+The owner-scoped Upstox fallback at `GET /zerodha/portfolio/quotes` can supply
+missing Kite prices. The additive `upstox_quotes` field separately supplies
+provider comparison prices for the Upstox LTP display column; it does not mutate
+executable quantities or amounts. Quote responses preserve the existing `instrument`, `price`,
+`as_of`, and `source` fields, with Upstox source and exchange last-trade timestamp
+retained by `technicalPriceEvidence` in `TECHNICAL_PRICE_ANCHORS_V1` when used as
+Technical validation input. This does not change Stage 1–3 algorithms, allocation,
+execution guards, or frozen audit snapshots. No historical quote provenance is
+rewritten. See `docs/upstox-ltp-fallback.md` for freshness and failure rules.
+
+## Executable basket Units explanation
+
+The Units value between the existing decrement/increment buttons opens a stacked,
+read-only calculation summary above the basket. This uses executable row sizing,
+not the independent allocation Shares/Target Weight display calculation. New
+basket rows capture their actual formula-estimate/holding base, requested percent,
+unrounded and rounded quantity, cap and final baseline. Manual unit changes,
+percentage changes and quote-refresh caps retain the original baseline and record
+the latest quantity transition. The current displayed quantity remains authoritative;
+missing or unreconciled history is explicitly unavailable. No historic LLM inputs
+or frozen audit evidence are reconstructed or rewritten. The optional `unitsTrace`
+metadata does not change executable sizing, selection, order guards or broker payloads.
+
+## Basket display columns and original sell groups
+
+Weight Difference and Zerodha Stocks are the displayed header names. A dedicated
+trailing column control opens a stacked checkbox picker; visibility is session
+state held above the keyed snapshot/open remount and never mutates orders,
+selection or execution guards. Group/detail/empty
+row spans follow visible columns. The removed banners' estimate and provenance
+details remain in calculation popups and value tooltips. A read-only,
+authenticated owner-scoped quote-capabilities flag identifies actual Upstox
+configuration, independently of provider quote success.
+
+For original Sell All and Trim basket actions, Zerodha Stocks shows the exact
+listing's current Kite snapshot holding quantity, including settled plus T1
+units. This is a display total, not a claim about sellable quantity. Matching
+multiple holding entries is additive; a complete snapshot can verify zero, while
+missing/incomplete/invalid snapshots remain unavailable. Zerodha Amount is that
+quantity times valid Quoted LTP, falling back to genuine Upstox LTP; it never uses
+a Limit Price estimate for these actions. Calculation summaries retain holding
+source/as-of and price source/as-of. Buy, Add and Hold allocation semantics and
+all executable Units/Amount and broker payloads remain unchanged.
+
+### Unknown runtime display (2026-11-01)
+
+The console treats absent run evidence as unknown execution, including workflow
+stage labels and Stage 1 coverage. It does not infer queue membership from a
+workflow template. Saved run status identifies the run and its recorded start or
+completion time; it does not verify current worker execution. Portfolio counts
+without position/runtime evidence render as unavailable, while reported zero
+counts retain their source and observation/freshness qualification. This is a
+presentation change only: audit capture, frozen snapshots, schema, validators,
+calculations, execution and recovery behavior are unchanged.
+
+The scoped source-state correction also covers lower Events Summary counts,
+empty-state text, missing-run timings/history and LLM diagnostics. Missing saved
+snapshots do not imply zero activity or invite execution; verified empty saved
+snapshots retain zero counts. An overview read settling without data clears only
+its transient loading note, preserving cached values, source notes and timestamps.
+Audit capture, frozen snapshots and execution remain unchanged.
+
+The remaining Stage 1 event-action labels use unknown counts when source evidence
+is not evaluated. Filtered/scanned export names, their tooltips and adjacent
+included-active labels follow the same existing display guard. Verified zero and
+saved known counts remain visible. Action handlers, disabled predicates, audit
+capture, frozen snapshots, calculations and execution remain unchanged.
+
+### Audit6 A6-07: Bullpen 008 source presentation
+
+The Bullpen 008 workspace renders runtime, settings, schedule, alerts and history
+only after bootstrap succeeds. A later retrieval failure preserves the last
+successful response with an explicit retrieval timestamp and stale-data warning;
+it does not rewrite saved run or audit records. Wallet values are labelled as
+saved run snapshots, and absent snapshots do not establish zero positions.
+Missing stage records do not establish pending status or zero progress. Separate
+Stage 4 detail failures leave bootstrap configuration and history available while
+marking target rows and certified exits unavailable. Monitoring queries omitted
+by bootstrap during queued/running runs are labelled unavailable, not empty.
+This is presentation only: audit capture, frozen snapshots, formulas, API shapes,
+execution permissions and mutation endpoints are unchanged.
+
+Controlled synthetic coverage: `frontend/tests/bullpen008-source-state.test.mjs`.
+
+### Runs Audit list read provenance (A6-12)
+
+The list treats a successful paginated summary response as evidence only for its
+requested filters and page. Loading and failed reads do not imply an empty history
+or a filter mismatch. Last successful snapshot records remain visible during a
+refresh or failure with the read time and original page, explicitly marked as
+possibly using previous filters. Pagination counts and controls are available only
+for the successfully verified current request. Filtered zero results describe a
+filter match, never the existence of all saved history. The supplemental Bullpen
+run source remains independent and is labeled as unfiltered. A history retry only
+repeats the existing list read; it does not invoke explicit materialization.
+
+
+### Trade-analysis presentation evidence
+
+Trade-analysis list and detail views preserve missing or invalid confidence as
+not evaluated, separate failed retrieval from empty learning categories, and mark
+legacy learning fields as unvalidated hypotheses. A stored exit-timing or
+confidence-alignment field alone does not establish evaluated advice. Its original
+value remains available in the raw-evidence disclosure. Filter scope and displayed
+record counts are visible; aggregate totals do not establish complete outcome or
+fee coverage. Coverage denominators, declared exit windows/units and version
+provenance require the analytics response contract before evaluated display.
+This presentation change does not alter capture, frozen snapshots, formulas,
+execution permissions or API responses. Offline component/browser fixtures are in
+`frontend/tests/bullpen-trade-analysis-source-state.test.mjs` and
+`frontend/scripts/audit10-trade-analysis-offline.mjs`; neither requires production
+navigation or provider calls.
+## Stage 1 nested source evidence (2 November 2026)
+
+The shared Stage 1 detail popup preserves unknown versus verified-empty source
+semantics independently of normalized fallback arrays. Unavailable, partial or
+incomplete evidence does not establish zero totals or absent positions. Saved
+known totals retain their completion timestamp, and retained rows remain visible.
+This is presentation-only: no audit schema, frozen snapshot, validator, execution
+input or financial calculation changes. Regression evidence is recorded in
+`docs/evidence/a6-06-nested-stage1-regression.md`.
+
+## Post-trade descriptive analysis v2 (Audit10, 2026-11-01)
+
+`bullpen-descriptive-v2` is a derived post-trade review algorithm, separate from
+Stage 1/2/3 decision formulas and frozen run snapshots. Single outcomes do not
+establish calibration, causality or validated learning. Reinforcement and policy
+change flags are withheld; no training, routing, prompt or trading consumer was
+found in the repository. Legacy stored analysis remains original evidence.
+
+Detail GET computes a labelled transient review without writes. The existing
+explicit recompute action appends an `ANALYSIS_VERSION` to the existing trade
+snapshot table with algorithm version, calculation time, source trade identity
+and calculation inputs. It does not overwrite the original analysis columns,
+source snapshots, units or executions. Repeated revisions are separate snapshots;
+there is no bulk recomputation/backfill or new schema/migration. Analysis revision
+is not a changed execution or original decision-time evidence.
+
+Only declared `cents`/`unit_price` operands normalize. New in-position monitor
+maxima declare their existing heldProbability × 100 source; legacy units remain
+unknown. Execution-summary extraction no longer substitutes order intent for
+missing fill fields, and genuine zero fills survive. In-hold maxima never prove
+an executable post-exit opportunity; post-exit advice remains Not evaluated until
+a bounded horizon and executable liquidity/size/spread/fee convention are approved.
+
+Null outcome and execution fees remain unknown. Closed population, known/unknown
+outcomes, known-outcome denominator, recorded subtotals and fee component coverage
+are separate. Known zero is a non-win (`net_pnl > 0` is a win). Metrics describe
+the selected cohort; raw-dollar ranks do not establish comparable risk-adjusted
+performance. Tax/spread/FX coverage is not asserted. Existing financial execution,
+exit/partial-close lifecycle policy and run-audit capture remain unchanged.
+
+Acceptance and task-specific unresolved gates are tracked in
+`docs/audit10-bullpen-analysis-acceptance.md`; frozen run audit schemas need no
+change because this revision neither changes nor backfills decision-time runs.

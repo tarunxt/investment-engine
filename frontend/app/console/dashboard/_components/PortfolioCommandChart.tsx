@@ -10,19 +10,20 @@ import {
   type PortfolioHistoryRange,
 } from "@/lib/portfolioHistory";
 
+import { TotalDataStatus, type TotalDataStatusInfo } from "./TotalDataStatus";
+
 import { formatInr } from "./dashboardOverviewUtils";
 
 export type PortfolioCommandChartKey =
-  | "india"
-  | "indmoney"
-  | "bullpen"
-  | "combined";
+  "india" | "indmoney" | "bullpen" | "combined";
 
 export type PortfolioCommandChartOption = {
   label: string;
   currentValue: number | null;
   trendPoints: GenuinePortfolioPoint[];
   capturedAt?: string | null;
+  dataStatus?: TotalDataStatusInfo;
+  historyUnavailable?: boolean;
 };
 
 const PORTFOLIO_COMMAND_CHART_KEYS: PortfolioCommandChartKey[] = [
@@ -199,8 +200,9 @@ export function PortfolioCommandChart({
   userId: number | null | undefined;
   options: Record<PortfolioCommandChartKey, PortfolioCommandChartOption>;
 }) {
-  const [selectedChart, setSelectedChart] =
-    useState<PortfolioCommandChartKey>(() => readChartPreference(userId));
+  const [selectedChart, setSelectedChart] = useState<PortfolioCommandChartKey>(
+    () => readChartPreference(userId),
+  );
   const [selectedRange, setSelectedRange] =
     useState<PortfolioHistoryRange>("ALL");
   const [hoveredPointIndex, setHoveredPointIndex] = useState<number | null>(
@@ -212,10 +214,7 @@ export function PortfolioCommandChart({
 
   useEffect(() => {
     try {
-      window.localStorage.setItem(
-        chartPreferenceKey(userId),
-        selectedChart,
-      );
+      window.localStorage.setItem(chartPreferenceKey(userId), selectedChart);
     } catch {
       // The in-memory selection still works when browser storage is blocked.
     }
@@ -261,6 +260,9 @@ export function PortfolioCommandChart({
   }, [options, userId]);
 
   const selectedOption = options[selectedChart];
+  const historyUnverified = Boolean(selectedOption.historyUnavailable ||
+    selectedOption.dataStatus?.failed || selectedOption.dataStatus?.pending ||
+    selectedOption.dataStatus?.cachedAt !== undefined);
   const trendPoints =
     selectedOption.trendPoints.length >= MIN_GENUINE_PORTFOLIO_POINTS
       ? selectedOption.trendPoints
@@ -291,16 +293,28 @@ export function PortfolioCommandChart({
         <div className="mt-5 text-4xl font-semibold tracking-tight text-white md:text-5xl">
           {formatInr(selectedOption.currentValue)}
         </div>
+        {selectedOption.dataStatus ? (
+          <TotalDataStatus info={selectedOption.dataStatus} compact />
+        ) : null}
         <div className="mt-2 text-xs uppercase tracking-[0.16em] text-slate-400">
           Current portfolio + cash
         </div>
         <div
           className="mt-5 rounded-2xl border border-white/10 bg-white/5 px-4 py-5 text-sm leading-6 text-slate-300"
-          data-portfolio-history-state="insufficient"
+          role="status"
+          aria-live="polite"
+          data-portfolio-history-state={historyUnverified ? "unknown" : "insufficient"}
         >
-          Insufficient genuine snapshot history for {displayedRangeLabel}. The
-          chart appears after at least {MIN_GENUINE_PORTFOLIO_POINTS} verified
-          snapshots are available.
+          {historyUnverified ? (
+            <>Cannot verify saved snapshot history for {displayedRangeLabel}. History sufficiency is unknown; view saved portfolio history.</>
+          ) : (
+            <>Insufficient genuine snapshot history for {displayedRangeLabel}. The
+            chart appears after at least {MIN_GENUINE_PORTFOLIO_POINTS} verified
+            snapshots are available.</>
+          )}
+          {selectedOption.dataStatus?.historyHref ? <a className="mt-2 block underline focus-visible:outline-2" href={selectedOption.dataStatus.historyHref}>
+            {selectedOption.dataStatus.historyLabel ?? "View saved portfolio history"}
+          </a> : null}
         </div>
       </div>
     );
@@ -360,10 +374,13 @@ export function PortfolioCommandChart({
           {selector}
           <div className="mt-5 flex items-center gap-4">
             <div className="text-4xl font-semibold tracking-tight text-white md:text-5xl">
-              {formatInr(selectedOption.currentValue ?? latestTrendValue)}
+              {formatInr(selectedOption.currentValue)}
             </div>
             <Upload className="size-6 text-slate-200" aria-hidden="true" />
           </div>
+          {selectedOption.dataStatus ? (
+            <TotalDataStatus info={selectedOption.dataStatus} compact />
+          ) : null}
           <div
             className={`mt-3 text-base font-semibold ${
               selectedRangeChangeValue >= 0

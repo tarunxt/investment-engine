@@ -1,5 +1,7 @@
 "use client";
 
+import { BotStateReadError } from "@/components/console/BotStateReadError";
+
 import { useEffect, useRef, useState } from "react";
 import {
   Activity,
@@ -1696,16 +1698,14 @@ export default function PolymarketBotPage() {
     return (
       <div className="flex items-center gap-3 text-sm text-slate-500">
         <Loader2 className="size-4 animate-spin" />
-        Loading Polymarket Copy Bot…
+        Loading Polymarket Direct Bot…
       </div>
     );
   }
 
   if (!state) {
     return (
-      <div className="rounded-[24px] border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-800">
-        {error || "Unable to load Polymarket bot state."}
-      </div>
+      <BotStateReadError pageName="Polymarket Direct Bot" error={error} />
     );
   }
 
@@ -2284,9 +2284,7 @@ export default function PolymarketBotPage() {
       ) : (
         <>
           {error ? (
-            <div className="rounded-[20px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
-              {error}
-            </div>
+            <BotStateReadError pageName="Polymarket Direct Bot" error={error} retained />
           ) : null}
           {actionError ? (
             <div className="rounded-[20px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">

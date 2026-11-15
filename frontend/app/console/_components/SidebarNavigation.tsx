@@ -1,33 +1,24 @@
 'use client';
 
 import {
+    createContext,
+    useContext,
+    lazy,
+    Suspense,
     useEffect,
     useMemo,
+    useRef,
     useState,
     useSyncExternalStore,
     type FormEvent,
+    type ReactNode,
+    type ComponentType,
+    type CSSProperties,
     type MouseEvent as ReactMouseEvent,
 } from 'react';
 import Link from 'next/link';
-import {
-    DndContext,
-    KeyboardSensor,
-    MouseSensor,
-    TouchSensor,
-    closestCenter,
-    useSensor,
-    useSensors,
-    type DraggableAttributes,
-    type DragEndEvent,
-} from '@dnd-kit/core';
-import {
-    SortableContext,
-    arrayMove,
-    sortableKeyboardCoordinates,
-    useSortable,
-    verticalListSortingStrategy,
-} from '@dnd-kit/sortable';
-import { CSS } from '@dnd-kit/utilities';
+import type { DraggableAttributes, DragEndEvent } from '@dnd-kit/core';
+import type { useSortable } from '@dnd-kit/sortable';
 import {
     ChevronDown,
     ChevronRight,
@@ -39,7 +30,7 @@ import {
 import type { User } from '@/hooks/useAuth';
 import { cn } from '@/lib/utils';
 
-import { SidebarThemeToggle } from './SidebarThemeToggle';
+const SidebarThemeToggle = lazy(() => import('./SidebarThemeToggle').then((module) => ({ default: module.SidebarThemeToggle })));
 import {
     ACCOUNT_ACTIONS,
     ACCOUNT_NAVIGATION,
@@ -76,6 +67,33 @@ import {
     subscribeToNavigationNames,
     type NavigationNameOverrides,
 } from './sidebarNavigationPreferences';
+
+const NAVIGATION_FOCUS_OFFSET = 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar';
+const NAVIGATION_FOCUS = 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring';
+const NAVIGATION_ROW = 'flex min-h-10 w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-medium transition';
+const ACTIVE_ROW = 'bg-sidebar-accent text-sidebar-primary ring-1 ring-sidebar-border';
+const IDLE_ROW = 'text-sidebar-foreground/75 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground';
+const ITEM_OPTIONS = 'rounded-md px-2 py-1 text-lg leading-none text-muted-foreground hover:bg-sidebar hover:text-sidebar-foreground';
+const CONTEXT_ACTION = 'flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left transition hover:bg-sidebar-accent';
+
+const SidebarDragRuntime = lazy(() => import('./SidebarDragRuntime'));
+type SortableState = ReturnType<typeof useSortable> & { style: CSSProperties };
+export type SidebarDragBindings = {
+    Item: ComponentType<{ id: string; children: (state: SortableState) => ReactNode }>;
+    List: ComponentType<{ items: string[]; children: ReactNode }>;
+};
+const SidebarDragContext = createContext<SidebarDragBindings | null>(null);
+function SortableContext({ items, children }: { items: string[]; children: ReactNode }) {
+    const drag = useContext(SidebarDragContext);
+    return drag ? <drag.List items={items}>{children}</drag.List> : <>{children}</>;
+}
+function arrayMove<T>(array: T[], from: number, to: number) {
+    const copy = array.slice();
+    copy.splice(to < 0 ? copy.length + to : to, 0, copy.splice(from, 1)[0]);
+    return copy;
+}
+
+const NavigationDirectory = lazy(() => import('./NavigationDirectory'));
 
 type SidebarNavigationProps = {
     pathname: string;
@@ -353,7 +371,7 @@ function DragHandle({
             ref={setActivatorNodeRef}
             type="button"
             aria-label={label}
-            className="flex h-8 w-8 shrink-0 touch-none cursor-grab items-center justify-center rounded-md text-muted-foreground transition hover:bg-sidebar hover:text-sidebar-foreground active:cursor-grabbing focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
+            className={cn('flex h-8 w-8 shrink-0 touch-none cursor-grab items-center justify-center rounded-md text-muted-foreground transition hover:bg-sidebar hover:text-sidebar-foreground active:cursor-grabbing', NAVIGATION_FOCUS_OFFSET)}
             {...attributes}
             {...listeners}
         >
@@ -385,13 +403,13 @@ function NavigationLeafLink({
             aria-current={active ? 'page' : undefined}
             title={leaf.title ?? leaf.name}
             className={cn(
-                'group flex w-full items-center rounded-xl text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar',
+                'group flex min-h-10 w-full items-center rounded-xl text-sm font-medium transition', NAVIGATION_FOCUS_OFFSET,
                 isChild
                     ? 'gap-2 px-3 py-2.5'
-                    : 'gap-3 px-3.5 py-3',
+                    : 'gap-3 px-3.5 py-2.5',
                 active
-                    ? 'bg-sidebar-accent text-sidebar-primary ring-1 ring-sidebar-border'
-                    : 'text-sidebar-foreground/75 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+                    ? ACTIVE_ROW
+                    : IDLE_ROW,
             )}
         >
             {isChild ? (
@@ -442,10 +460,12 @@ function NavigationGroupRow({
                     defaultName: DEFAULT_NAVIGATION_NAMES[`folder:${group.id}`] ?? group.name,
                 }, event)}
                 className={cn(
-                    'flex w-full items-center gap-3 rounded-2xl px-3.5 py-3 text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar',
-                    active
-                        ? 'bg-sidebar-accent text-sidebar-primary shadow-sm ring-1 ring-sidebar-border'
-                        : 'text-sidebar-foreground/75 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+                    NAVIGATION_ROW, NAVIGATION_FOCUS_OFFSET,
+                    active && !expanded
+                        ? ACTIVE_ROW
+                        : active
+                            ? 'text-sidebar-primary hover:bg-sidebar-accent'
+                            : IDLE_ROW,
                 )}
             >
                 <group.icon
@@ -492,20 +512,12 @@ function SortableNavigationChild({
     groupName,
     onContextMenu,
 }: SortableNavigationChildProps) {
-    const {
-        attributes,
-        isDragging,
-        listeners,
-        setActivatorNodeRef,
-        setNodeRef,
-        transform,
-        transition,
-    } = useSortable({ id: child.id });
-
-    return (
+    const drag = useContext(SidebarDragContext);
+    if (!drag) throw new Error('Reorder child requires drag runtime');
+    return <drag.Item id={child.id}>{({ attributes, isDragging, listeners, setActivatorNodeRef, setNodeRef, style }) => (
         <div
             ref={setNodeRef}
-            style={{ transform: CSS.Transform.toString(transform), transition }}
+            style={style}
             className={cn(
                 'flex items-center gap-2 rounded-xl border border-transparent bg-sidebar-accent/45 px-2 py-1.5 text-sm text-sidebar-foreground/75',
                 isDragging ? 'relative z-20 border-sidebar-border bg-sidebar shadow-lg' : '',
@@ -528,12 +540,12 @@ function SortableNavigationChild({
                     name: child.name,
                     defaultName: DEFAULT_NAVIGATION_NAMES[`item:${child.id}`] ?? child.name,
                 }, event)}
-                className="rounded-md px-2 py-1 text-lg leading-none text-muted-foreground hover:bg-sidebar hover:text-sidebar-foreground"
+                className={ITEM_OPTIONS}
             >
                 &hellip;
             </button>
         </div>
-    );
+    )}</drag.Item>;
 }
 
 function SortableNavigationEntry({
@@ -546,29 +558,16 @@ function SortableNavigationEntry({
     pathname,
     sectionLabel,
 }: SortableNavigationEntryProps) {
-    const {
-        attributes,
-        isDragging,
-        listeners,
-        setActivatorNodeRef,
-        setNodeRef,
-        transform,
-        transition,
-    } = useSortable({
-        id: entry.id,
-        disabled: !isReordering,
-    });
+    const drag = useContext(SidebarDragContext);
     const active = isEntryActive(pathname, entry);
-    const style = {
-        transform: CSS.Transform.toString(transform),
-        transition,
-    };
-
+    if (!isReordering) return <div>{isNavigationGroup(entry) ? <NavigationGroupRow active={active} expanded={expandedGroupIds.has(entry.id)} group={entry} onContextMenu={onContextMenu} onNavigate={onNavigate} onToggle={() => onToggleGroup(entry.id)} pathname={pathname} /> : <NavigationLeafLink leaf={entry} active={active} onContextMenu={onContextMenu} onNavigate={onNavigate} />}</div>;
+    if (!drag) throw new Error('Reorder entry requires drag runtime');
+    return <drag.Item id={entry.id}>{({ attributes, isDragging, listeners, setActivatorNodeRef, setNodeRef, style }) => {
     const rowClassName = cn(
-        'flex w-full items-center gap-3 rounded-2xl px-3.5 py-3 text-sm font-medium transition',
+        NAVIGATION_ROW,
         active
             ? 'bg-sidebar-accent text-sidebar-primary shadow-sm ring-1 ring-sidebar-border'
-            : 'text-sidebar-foreground/75 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+            : IDLE_ROW,
         isDragging ? 'bg-sidebar shadow-lg ring-1 ring-sidebar-border' : '',
         isReordering ? 'select-none' : '',
     );
@@ -606,7 +605,7 @@ function SortableNavigationEntry({
                                 name: entry.name,
                                 defaultName: DEFAULT_NAVIGATION_NAMES[`${isNavigationGroup(entry) ? 'folder' : 'item'}:${entry.id}`] ?? entry.name,
                             }, event)}
-                            className="rounded-md px-2 py-1 text-lg leading-none text-muted-foreground hover:bg-sidebar hover:text-sidebar-foreground"
+                            className={ITEM_OPTIONS}
                         >
                             &hellip;
                         </button>
@@ -614,7 +613,6 @@ function SortableNavigationEntry({
                     {isNavigationGroup(entry) ? (
                         <SortableContext
                             items={entry.children.map((child) => child.id)}
-                            strategy={verticalListSortingStrategy}
                         >
                             <div className="ml-7 space-y-1 border-l border-sidebar-border pl-2">
                                 {entry.children.map((child) => (
@@ -649,6 +647,7 @@ function SortableNavigationEntry({
             )}
         </div>
     );
+    }}</drag.Item>;
 }
 
 function SidebarSection({
@@ -675,14 +674,13 @@ function SidebarSection({
             >
                 <h2
                     id={headingId}
-                    className="text-[11px] font-semibold uppercase tracking-[0.22em] text-muted-foreground"
+                    className="text-[11px] font-semibold tracking-wide text-muted-foreground"
                 >
                     {section.label}
                 </h2>
             </div>
             <SortableContext
                 items={section.entries.map((entry) => entry.id)}
-                strategy={verticalListSortingStrategy}
             >
                 <div className="space-y-1.5">
                     {section.entries.map((entry) => (
@@ -712,66 +710,94 @@ function AccountFooter({
 }: AccountFooterProps) {
     const displayName = user?.full_name || user?.username || 'User';
     const LogoutIcon = ACCOUNT_ACTIONS.logout.icon;
+    const detailsRef = useRef<HTMLDetailsElement>(null);
+    const [appearanceOpen, setAppearanceOpen] = useState(false);
+    const accountActive = ACCOUNT_NAVIGATION.some((item) => isLeafActive(pathname, item));
+
+    useEffect(() => {
+        const details = detailsRef.current;
+        if (!details) return;
+        const dismiss = (event: PointerEvent) => {
+            if (!details.contains(event.target as Node)) details.open = false;
+        };
+        const escape = (event: KeyboardEvent) => {
+            if (event.key === 'Escape' && details.open) {
+                details.open = false;
+                details.querySelector('summary')?.focus();
+            }
+        };
+        document.addEventListener('pointerdown', dismiss);
+        document.addEventListener('keydown', escape);
+        return () => {
+            document.removeEventListener('pointerdown', dismiss);
+            document.removeEventListener('keydown', escape);
+        };
+    }, []);
+
+    const navigateFromAccount = () => {
+        if (detailsRef.current) detailsRef.current.open = false;
+        onNavigate();
+    };
 
     return (
-        <div className="border-t border-sidebar-border/80 pt-4">
-            <div className="px-3">
-                <h2 className="text-[11px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">
-                    Account
-                </h2>
-            </div>
+        <details ref={detailsRef} className="group/account relative border-t border-sidebar-border/80 px-3 pt-2">
+            <summary
+                className={cn(
+                    'flex cursor-pointer list-none items-center gap-3 rounded-xl px-3 py-2 text-sm [&::-webkit-details-marker]:hidden', NAVIGATION_FOCUS,
+                    accountActive ? ACTIVE_ROW : 'hover:bg-sidebar-accent',
+                )}
+                aria-label={accountActive ? 'Account and appearance, current section' : 'Account and appearance'}
+            >
+                <span aria-hidden="true" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-indigo-600 text-xs font-semibold text-white">{getUserInitials(user)}</span>
+                <span className="min-w-0 flex-1 text-left">
+                    <span className="block font-semibold">Account</span>
+                    <span className="block truncate text-xs text-muted-foreground">{displayName}</span>
+                </span>
+                <ChevronDown aria-hidden="true" className="h-4 w-4 shrink-0 transition group-open/account:rotate-180" />
+            </summary>
+            <div role="region" aria-label="Account and appearance" className="absolute bottom-full left-2 right-2 z-30 mb-2 max-h-[min(32rem,70dvh)] overflow-y-auto overscroll-contain rounded-2xl border border-sidebar-border bg-sidebar pb-3 shadow-xl">
+                <div className="mx-3 mt-3 rounded-2xl border border-sidebar-border bg-sidebar-accent/80 p-3">
+                    <p className="truncate text-sm font-semibold">{displayName}</p>
+                    <p className="truncate text-xs text-muted-foreground">{user?.email}</p>
 
-            <div className="mx-3 mt-3 rounded-2xl border border-sidebar-border bg-sidebar-accent/80 p-3">
-                <div className="flex items-center gap-3">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-linear-to-r from-indigo-600 to-purple-600 text-sm font-semibold text-white">
-                        {getUserInitials(user)}
-                    </div>
-                    <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold text-sidebar-accent-foreground">
-                            {displayName}
-                        </p>
-                        <p className="truncate text-xs text-muted-foreground">
-                            {user?.email}
-                        </p>
+                    <div className="mt-3 grid grid-cols-2 gap-2">
+                        {ACCOUNT_NAVIGATION.map((item) => (
+                            <div
+                                key={item.id}
+                                className={item.id === 'usage-costs' ? 'col-span-2' : undefined}
+                            >
+                                <NavigationLeafLink
+                                    leaf={item}
+                                    active={isLeafActive(pathname, item)}
+                                    onNavigate={navigateFromAccount}
+                                />
+                            </div>
+                        ))}
                     </div>
                 </div>
 
-                <div className="mt-3 grid grid-cols-2 gap-2">
-                    {ACCOUNT_NAVIGATION.map((item) => (
-                        <div
-                            key={item.id}
-                            className={item.id === 'usage-costs' ? 'col-span-2' : undefined}
+                <details onToggle={(event) => setAppearanceOpen(event.currentTarget.open)} className="mx-3 mt-3 rounded-xl border border-sidebar-border">
+                    <summary className={cn('cursor-pointer rounded-xl px-3 py-2 text-sm font-semibold', NAVIGATION_FOCUS)}>Appearance</summary>
+                    {appearanceOpen ? <Suspense fallback={null}><SidebarThemeToggle /></Suspense> : null}
+                </details>
+
+                {onLogout ? (
+                    <div className="px-3 pt-3">
+                        <button
+                            type="button"
+                            onClick={() => {
+                                navigateFromAccount();
+                                void onLogout();
+                            }}
+                            className={cn('flex w-full items-center justify-center gap-2 rounded-xl border border-sidebar-border bg-sidebar px-3 py-2.5 text-sm font-semibold text-sidebar-foreground transition hover:bg-sidebar-accent hover:text-sidebar-accent-foreground', NAVIGATION_FOCUS_OFFSET)}
                         >
-                            <NavigationLeafLink
-                                leaf={item}
-                                active={isLeafActive(pathname, item)}
-                                onNavigate={onNavigate}
-                            />
-                        </div>
-                    ))}
-                </div>
+                            <LogoutIcon className="h-4 w-4" />
+                            {ACCOUNT_ACTIONS.logout.label}
+                        </button>
+                    </div>
+                ) : null}
             </div>
-
-            <div className="mt-3">
-                <SidebarThemeToggle />
-            </div>
-
-            {onLogout ? (
-                <div className="px-3 pt-3">
-                    <button
-                        type="button"
-                        onClick={() => {
-                            onNavigate();
-                            void onLogout();
-                        }}
-                        className="flex w-full items-center justify-center gap-2 rounded-xl border border-sidebar-border bg-sidebar px-3 py-2.5 text-sm font-semibold text-sidebar-foreground transition hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
-                    >
-                        <LogoutIcon className="h-4 w-4" />
-                        {ACCOUNT_ACTIONS.logout.label}
-                    </button>
-                </div>
-            ) : null}
-        </div>
+        </details>
     );
 }
 
@@ -782,7 +808,9 @@ export function SidebarNavigation({
     onLogout,
     onNavigate,
 }: SidebarNavigationProps) {
+    const navigationRef = useRef<HTMLElement>(null);
     const [isReordering, setIsReordering] = useState(false);
+    const [directoryOpen, setDirectoryOpen] = useState<boolean | null>(null);
     const [contextMenu, setContextMenu] = useState<NavigationContextMenuState | null>(null);
     const [renameEditor, setRenameEditor] = useState<NavigationRenameState | null>(null);
     const defaultOrder = useMemo(() => createDefaultSidebarOrder(SIDEBAR_SECTIONS), []);
@@ -885,22 +913,24 @@ export function SidebarNavigation({
         [expandedGroupId],
     );
 
-    const sensors = useSensors(
-        useSensor(MouseSensor, {
-            activationConstraint: {
-                distance: 6,
-            },
-        }),
-        useSensor(TouchSensor, {
-            activationConstraint: {
-                delay: 120,
-                tolerance: 6,
-            },
-        }),
-        useSensor(KeyboardSensor, {
-            coordinateGetter: sortableKeyboardCoordinates,
-        }),
-    );
+
+
+    useEffect(() => {
+        const navigation = navigationRef.current;
+        if (!navigation || isReordering) return;
+        const revealActiveRoute = () => {
+            const active = navigation.querySelector<HTMLElement>('[aria-current="page"]');
+            if (!active) return;
+            const bounds = navigation.getBoundingClientRect();
+            const item = active.getBoundingClientRect();
+            if (item.top < bounds.top) navigation.scrollTop += item.top - bounds.top - 4;
+            else if (item.bottom > bounds.bottom) navigation.scrollTop += item.bottom - bounds.bottom + 4;
+        };
+        revealActiveRoute();
+        const observer = new ResizeObserver(revealActiveRoute);
+        observer.observe(navigation);
+        return () => observer.disconnect();
+    }, [pathname, expandedGroupId, sections, isReordering]);
 
     const persistNameOverrides = (next: NavigationNameOverrides) => {
         persistNavigationNameOverrides(namesStorageKey, next);
@@ -1026,10 +1056,11 @@ export function SidebarNavigation({
         <div className="flex h-full min-h-0 flex-col">
             <div className="shrink-0 px-3">
                 <div className="flex items-center justify-between gap-3">
-                    <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                    <span className="text-[11px] font-semibold tracking-wide text-muted-foreground">
                         Navigation
                     </span>
                     <div className="flex items-center gap-2">
+                        {!isReordering ? <button type="button" onClick={() => setDirectoryOpen(true)} aria-haspopup="dialog" className={cn('rounded text-[11px] font-medium text-sidebar-primary hover:underline', NAVIGATION_FOCUS)}>All destinations</button> : null}
                         {isReordering ? (
                             <button
                                 type="button"
@@ -1038,7 +1069,7 @@ export function SidebarNavigation({
                                     persistNavigationChildOrder(childOrderStorageKey, defaultChildOrder, defaultChildOrder);
                                     persistNameOverrides({});
                                 }}
-                                className="text-xs font-medium text-muted-foreground transition hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
+                                className={cn('text-xs font-medium text-muted-foreground transition hover:text-sidebar-foreground', NAVIGATION_FOCUS_OFFSET)}
                             >
                                 Reset
                             </button>
@@ -1049,7 +1080,7 @@ export function SidebarNavigation({
                             aria-label={isReordering ? 'Finish reordering navigation' : 'Reorder navigation'}
                             title={isReordering ? 'Finish reordering navigation' : 'Reorder navigation'}
                             className={cn(
-                                'rounded-full border border-sidebar-border text-xs font-semibold text-sidebar-foreground/75 transition hover:border-sidebar-ring hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar',
+                                'rounded-full border border-sidebar-border text-xs font-semibold text-sidebar-foreground/75 transition hover:border-sidebar-ring hover:text-sidebar-foreground', NAVIGATION_FOCUS_OFFSET,
                                 isReordering
                                     ? 'px-3 py-1.5'
                                     : 'flex h-9 w-9 items-center justify-center p-0',
@@ -1067,12 +1098,9 @@ export function SidebarNavigation({
             </div>
 
             <div className="mt-4 min-h-0 flex-1">
-                <nav aria-label="Console navigation" className="h-full overflow-y-auto px-2 pb-4">
-                    <DndContext
-                        sensors={sensors}
-                        collisionDetection={closestCenter}
-                        onDragEnd={handleDragEnd}
-                    >
+                <nav ref={navigationRef} aria-label="Console navigation" className="h-full overflow-y-auto overscroll-contain px-2 pb-4 pt-1">
+                    {isReordering ? <Suspense fallback={<p role="status">Loading reorder controls…</p>}>
+                        <SidebarDragRuntime onDragEnd={handleDragEnd}>{bindings => <SidebarDragContext.Provider value={bindings}>
                         <div className="space-y-5 pr-1">
                             {sections.map((section) => (
                                 <SidebarSection
@@ -1094,7 +1122,31 @@ export function SidebarNavigation({
                                 />
                             ))}
                         </div>
-                    </DndContext>
+                        </SidebarDragContext.Provider>}</SidebarDragRuntime>
+                    </Suspense> : (
+                        <div className="space-y-5 pr-1">
+                            {sections.map((section) => (
+                                <SidebarSection
+                                    key={section.id}
+                                    expandedGroupIds={expandedGroupIds}
+                                    isReordering={isReordering}
+                                    onContextMenu={openContextMenu}
+                                    onNavigate={onNavigate}
+                                    onToggleGroup={(groupId) => {
+                                        setNavigationExpansion({
+                                            pathname,
+                                            expandedGroupId: expandedGroupId === groupId
+                                                ? null
+                                                : groupId,
+                                        });
+                                    }}
+                                    pathname={pathname}
+                                    section={section}
+                                />
+                            ))}
+                        </div>
+                    )}
+
                 </nav>
             </div>
 
@@ -1106,6 +1158,12 @@ export function SidebarNavigation({
                     user={user}
                 />
             </div>
+
+            {directoryOpen !== null ? (
+                <Suspense fallback={<span role="status" className="sr-only">Opening destinations…</span>}>
+                    <NavigationDirectory open={directoryOpen} pathname={pathname} sections={sections} onClose={() => setDirectoryOpen(false)} onNavigate={onNavigate} />
+                </Suspense>
+            ) : null}
 
             {contextMenu ? (
                 <>
@@ -1125,7 +1183,7 @@ export function SidebarNavigation({
                             type="button"
                             role="menuitem"
                             onClick={openRenameEditor}
-                            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left transition hover:bg-sidebar-accent"
+                            className={CONTEXT_ACTION}
                         >
                             <Pencil className="h-4 w-4" />
                             Rename
@@ -1135,7 +1193,7 @@ export function SidebarNavigation({
                             role="menuitem"
                             disabled={contextMenu.name === contextMenu.defaultName}
                             onClick={resetContextTargetName}
-                            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left transition hover:bg-sidebar-accent disabled:cursor-not-allowed disabled:opacity-40"
+                            className={cn('disabled:cursor-not-allowed disabled:opacity-40', CONTEXT_ACTION)}
                         >
                             <RotateCcw className="h-4 w-4" />
                             Restore default name
@@ -1148,7 +1206,7 @@ export function SidebarNavigation({
                                 setContextMenu(null);
                                 setIsReordering(true);
                             }}
-                            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left transition hover:bg-sidebar-accent"
+                            className={CONTEXT_ACTION}
                         >
                             <GripVertical className="h-4 w-4" />
                             Reorder this section

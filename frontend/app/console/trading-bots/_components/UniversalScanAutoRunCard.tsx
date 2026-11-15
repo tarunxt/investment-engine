@@ -102,6 +102,11 @@ async function requestStatus(body?: Record<string, unknown>) {
       `Operation: ${operation}\nHTTP: ${response.status} ${response.statusText || "Request failed"}\nServer response: ${serverMessage}\n\nHow to fix:\n${recoverySteps}`,
     );
   }
+  if (!Array.isArray(payload.history)
+    || !(payload.last_failed_at === null || typeof payload.last_failed_at === "string")
+    || !(payload.last_error === null || typeof payload.last_error === "string")) {
+    throw new Error("Universal Scan auto-run status response is incomplete. Refresh status to retry.");
+  }
   return payload;
 }
 
@@ -249,8 +254,9 @@ export function UniversalScanAutoRunCard({
       </div>}
       <div className="mt-3 grid gap-3 md:grid-cols-2">
         <div className="rounded-xl border border-slate-100 bg-white p-4"><div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Next scheduled run</div><div className="mt-2 text-sm font-semibold text-slate-900">{dateTime(status?.next_run_at ?? null)}</div></div>
-        <div className={`rounded-xl border p-4 ${status?.last_failed_at ? "border-red-200 bg-red-50" : "border-slate-100 bg-white"}`}><div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Last failed run</div><div className="mt-2 text-sm font-semibold text-slate-900">{dateTime(status?.last_failed_at ?? null)}</div><div className="mt-1 text-xs text-slate-600">{status?.last_error ?? "No failed Universal Scan auto-run."}</div></div>
+        <div className={`rounded-xl border p-4 ${status?.last_failed_at ? "border-red-200 bg-red-50" : "border-slate-100 bg-white"}`}><div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Last failed run</div><div className="mt-2 text-sm font-semibold text-slate-900">{dateTime(status?.last_failed_at ?? null)}</div><div className="mt-1 text-xs text-slate-600">{status ? status.last_error ?? (status.last_failed_at ? "Failure details unavailable." : "No failed Universal Scan auto-run.") : error ? "Failed-run status unavailable." : "Loading failed-run status…"}</div></div>
       </div>
+      {error && status && <p role="status" className="mt-2 text-xs text-amber-800">Showing the last successful auto-run status from {dateTime(lastRefresh)}; current status could not be refreshed.</p>}
       {busy === "save" && <p className="mt-3 text-xs text-slate-500">Saving auto-run settings…</p>}
       {error && <div role="alert" className="mt-3"><button type="button" aria-haspopup="dialog" onClick={() => setShowErrorDetails(true)} className="block text-left text-sm font-semibold text-red-700 underline decoration-dotted underline-offset-4 hover:text-red-900">{error.message}</button></div>}
 
@@ -265,11 +271,12 @@ export function UniversalScanAutoRunCard({
       {showHistory && <div className="fixed inset-0 z-[160] flex items-center justify-center bg-slate-950/55 p-4">
         <div role="dialog" aria-modal="true" aria-label="Universal Scan auto-run history" className="max-h-[80vh] w-full max-w-3xl overflow-auto rounded-2xl bg-white p-6 shadow-xl">
           <div className="flex items-center justify-between"><h3 className="text-lg font-semibold text-slate-950">Universal Scan Auto-Run History</h3><button type="button" aria-label="Close history" onClick={() => setShowHistory(false)}><X className="h-5 w-5" /></button></div>
+          {error && status && <p role="status" className="mt-3 text-sm text-amber-800">Could not refresh auto-run history. Showing the last successful status from {dateTime(lastRefresh)}.</p>}
           <div className="mt-4 divide-y divide-slate-100">
             {status?.history.length ? status.history.map(item => <div key={item.id} className="grid gap-1 py-3 text-sm sm:grid-cols-[1fr_auto]">
               <div><span className="font-semibold capitalize text-slate-900">{item.status}</span> · {item.triggered_by}<div className="mt-1 text-xs text-slate-500">Started {dateTime(item.started_at)}</div>{item.error && <div className="mt-1 text-xs text-red-700">{item.error}</div>}</div>
               <div className="text-left text-xs text-slate-600 sm:text-right">{item.total_events === null ? "—" : `${item.total_events.toLocaleString("en-IN")} events`}<div className="mt-1">Finished {dateTime(item.completed_at)}</div></div>
-            </div>) : <p className="py-8 text-center text-sm text-slate-500">No Universal Scan auto-runs yet.</p>}
+            </div>) : <p role="status" className="py-8 text-center text-sm text-slate-500">{status ? "No Universal Scan auto-runs yet." : error ? "Universal Scan auto-run history unavailable. Refresh status to retry." : "Loading Universal Scan auto-run history…"}</p>}
           </div>
         </div>
       </div>}

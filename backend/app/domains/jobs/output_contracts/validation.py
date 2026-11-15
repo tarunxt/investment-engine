@@ -125,7 +125,7 @@ def prepare_holdings(holdings: Sequence[Mapping[str, Any]] | None) -> tuple[dict
 def validate_row(
     source_values: Mapping[str, Any], columns: Sequence[Column], source: Provenance,
     metadata: Mapping[str, Any], holdings: Mapping[tuple[str, str], Mapping[str, Any]],
-    kind: str, *, derive_arithmetic: bool,
+    kind: str, *, derive_arithmetic: bool, non_buy_candidates: frozenset[tuple[str, str]] = frozenset(),
 ) -> tuple[dict[str, Any], tuple[str, ...], list[Finding]]:
     row = dict(source_values)
     findings: list[Finding] = []
@@ -140,15 +140,15 @@ def validate_row(
         findings.append(Finding("authoritative_fill", reason, "info", source, key))
 
     for key in METADATA_KEYS.intersection(c.key for c in columns):
-        # Explicit null/unknown stays unknown. Only absent or empty metadata is filled.
-        if (row.get(key, MISSING) is MISSING or row.get(key) == "") and key in metadata:
-            fill(key, metadata[key], "Filled from caller-supplied run/model/time metadata.")
+        # Runtime identity is authoritative; model-authored identity is not evidence.
+        if key in metadata and row.get(key, MISSING) != metadata[key]:
+            fill(key, metadata[key], "Set from authoritative runtime run/model/time metadata.")
     key = holding_identity(row, holdings)
     holding = holdings.get(key) if key is not None else None
     if kind == "rebalance" and holding is not None:
         if row.get("current_units", MISSING) is MISSING or row.get("current_units") == "":
             fill("current_units", holding["current_units"], "Copied current units from the supplied snapshot.")
-        elif number(row.get("current_units")) != number(holding["current_units"]):
+        elif not unknown(row.get("current_units")) and number(row.get("current_units")) != number(holding["current_units"]):
             error("holding_units_mismatch", "Current units contradict the supplied snapshot.", "current_units")
         if "currency" in holding and "currency" in row and row["currency"] != holding["currency"]:
             error("currency_mismatch", "Row currency contradicts the supplied snapshot.", "currency")
@@ -162,6 +162,10 @@ def validate_row(
     for column in columns:
         field, value = column.key, row.get(column.key, MISSING)
         if unknown(value):
+            if kind == "rebalance" and field not in {"exchange_symbol", "stock_symbol"}:
+                row[field] = "-"
+                findings.append(Finding("missing_field_excluded", f"{column.label} unavailable; retained as '-' and excluded from arithmetic.", "warning", source, field))
+                continue
             error("required_field_unknown", f"Required field {column.label!r} is missing or unknown.", field)
             continue
         if field in NUMERIC_KEYS:
@@ -200,17 +204,20 @@ def validate_row(
     if amount is not None and price is not None and buy is not None and _sum(amount, _product(buy, price).copy_negate()).copy_abs() > Decimal("0.005"):
         error("amount_arithmetic", "Total Buy Amount contradicts Units to Buy × Price per Unit at currency-cent precision.", "total_buy_amount")
     if kind == "rebalance":
-        _validate_action(row, holding, error)
+        _validate_action(row, holding, error, non_buy_candidates)
     return row, tuple(filled), findings
 
 
-def _validate_action(row: Mapping[str, Any], holding: Mapping[str, Any] | None, error: Any) -> None:
+def _validate_action(row: Mapping[str, Any], holding: Mapping[str, Any] | None, error: Any, non_buy_candidates: frozenset[tuple[str, str]] = frozenset()) -> None:
     action = row.get("action")
     allowed = {"Buy", "Add", "Buy/Add", "Add more", "Buy New", "Sell All", "Trim", "Hold"}
+    if unknown(action):
+        return
     if not isinstance(action, str) or action not in allowed:
         error("invalid_action", "Action must be an explicit supported decision label.", "action")
         return
-    if holding is None and action != "Buy New":
+    non_buy = holding is None and action == "Hold" and identity(row) in non_buy_candidates and all(number(row.get(key)) == 0 for key in ("current_units", "units_change", "final_units", "units_to_buy", "total_buy_amount"))
+    if holding is None and action != "Buy New" and not non_buy:
         error("holding_not_in_snapshot", "Existing-position decision has no exact exchange/symbol match in the snapshot.", "current_units")
     if holding is not None and action == "Buy New":
         error("buy_new_existing_holding", "Buy New contradicts an existing snapshot holding.", "action")

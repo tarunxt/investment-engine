@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react';
 
 type LlmUsageBreakdownItem = {
@@ -53,6 +53,20 @@ type LlmUsageBreakdownResponse = {
   fx_status: string;
   request_metric: string;
   coverage_note: string;
+  attempt_coverage?: {
+    persisted_read_state?: string;
+    invocation_coverage_state?: string;
+    processed_event_rows: number;
+    read_cutoff?: string;
+    summary: {
+      tariff_freshness?: string;
+      tariff_versions?: Record<string, number>;
+      cache_fields?: Record<string, {
+        reported_tokens: number | null; inferred_tokens: number | null;
+        reported_attempts: number; inferred_attempts: number; unknown_attempts: number;
+      }>;
+    };
+  };
   items: LlmUsageBreakdownItem[];
   runs: LlmUsageRunItem[];
 };
@@ -251,8 +265,11 @@ export default function LlmUsageBreakdown() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const today = todayUsageIso();
+  const latestRequest = useRef(0);
+  const [loadedAt, setLoadedAt] = useState<string | null>(null);
 
   const load = useCallback(async (signal?: AbortSignal) => {
+    const request = ++latestRequest.current;
     setLoading(true);
     setError(null);
     const query = new URLSearchParams({
@@ -281,8 +298,11 @@ export default function LlmUsageBreakdown() {
           || 'Failed to load LLM usage breakdown.',
         );
       }
+      if (request !== latestRequest.current || signal?.aborted) return;
       setData(payload as LlmUsageBreakdownResponse);
+      setLoadedAt(new Date().toISOString());
     } catch (loadError) {
+      if (request !== latestRequest.current || signal?.aborted) return;
       if (loadError instanceof DOMException && loadError.name === 'AbortError') {
         return;
       }
@@ -292,7 +312,7 @@ export default function LlmUsageBreakdown() {
           : 'Failed to load LLM usage breakdown.',
       );
     } finally {
-      if (!signal?.aborted) setLoading(false);
+      if (request === latestRequest.current && !signal?.aborted) setLoading(false);
     }
   }, [selectedDate]);
 
@@ -317,32 +337,43 @@ export default function LlmUsageBreakdown() {
   );
 
   return (
-    <section className="border border-gray-200 bg-white p-4">
+    <section aria-label="Daily LLM usage" className="rounded-xl border border-indigo-200 bg-indigo-50/60 p-4 text-slate-900 [&_button]:focus-visible:outline-2 [&_button]:focus-visible:outline-offset-2 [&_button]:focus-visible:outline-indigo-600 [&_input]:focus-visible:outline-2 [&_input]:focus-visible:outline-indigo-600">
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold text-gray-950">
+          <h2 className="text-lg font-semibold text-slate-900">
             LLM API Usage Breakdown
           </h2>
           <p className="text-sm text-gray-600">
-            Actual provider-ledger usage where available; older days fall back to
-            reconstructed Cred-X job estimates.
+            Tariff estimates and provider day totals are distinct from settled billed charges.
+            Invocation coverage and hidden SDK retries remain unknown.
           </p>
         </div>
         <button
           type="button"
-          onClick={() => void load()}
-          disabled={loading}
-          className="inline-flex h-9 items-center border border-gray-200 bg-white px-3 text-sm font-medium text-gray-900 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+          onClick={() => { if (!loading) void load(); }}
+          aria-disabled={loading}
+          className="inline-flex min-h-9 items-center border rounded-md border-indigo-600 bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
         >
           <RefreshCw className={`mr-2 size-4 ${loading ? 'animate-spin' : ''}`} />
-          Refresh
+          {loading ? 'Refreshing daily breakdown…' : error ? 'Retry daily breakdown' : 'Refresh daily breakdown'}
         </button>
       </div>
 
+      {error ? (
+        <div role="alert" className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          {error} Usage has not been verified. Use Retry daily breakdown to retry.
+        </div>
+      ) : null}
+      {data && (error || loading || data.from_date !== selectedDate) ? (
+        <p role="status" className="mb-3 text-xs text-amber-900">
+          Showing previously loaded usage for {formatDate(data.from_date)} · {data.timezone}.
+          {loadedAt ? ` Loaded ${formatTimestamp(loadedAt)}.` : ''} {error ? 'The latest request failed; these values may be out of date.' : 'Refreshing selected day…'}
+        </p>
+      ) : null}
       <div className="mb-4 flex flex-wrap items-end gap-3">
         <label className="text-sm">
           <span className="mb-1 block text-xs text-gray-600">Breakdown day</span>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={() => setSelectedDate((current) => shiftIsoDate(current, -1))}
@@ -353,10 +384,11 @@ export default function LlmUsageBreakdown() {
             </button>
             <input
               type="date"
+              aria-label="Breakdown date"
               value={selectedDate}
               max={today}
-              onChange={(event) => setSelectedDate(event.target.value)}
-              className="h-9 min-w-44 border border-gray-300 bg-white px-2 text-sm text-gray-900"
+              onChange={(event) => { if (event.target.value && event.target.value <= today) setSelectedDate(event.target.value); }}
+              className="h-9 min-w-0 w-40 border border-gray-300 bg-white px-2 text-sm text-gray-900"
             />
             <button
               type="button"
@@ -369,21 +401,18 @@ export default function LlmUsageBreakdown() {
             </button>
           </div>
         </label>
+
         <div className="pb-2 text-sm font-medium text-gray-700">
           {formatDate(selectedDate)} · {data?.timezone ?? API_TIMEZONE}
         </div>
       </div>
 
-      {error ? (
-        <div className="mb-4 border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {error}
-        </div>
-      ) : null}
-
-      {loading && !data ? (
+      {loading && (!data || groups.length === 0) ? (
         <div className="py-10 text-center text-sm text-gray-500">
           Loading LLM usage breakdown...
         </div>
+      ) : groups.length === 0 && (error || !data || data.from_date !== selectedDate) ? (
+        <p role="status" className="py-6 text-sm text-slate-600">Usage unavailable for the selected day. No zero-usage conclusion can be drawn.</p>
       ) : groups.length === 0 ? (
         <div className="border border-dashed border-gray-200 px-4 py-10 text-center text-sm text-gray-500">
           No non-zero LLM token usage was recorded for {formatDate(selectedDate)}.
@@ -392,7 +421,7 @@ export default function LlmUsageBreakdown() {
         <div className="space-y-4">
           {groups.map((group) => (
             <div key={group.key} className="overflow-hidden border border-gray-200">
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-200 bg-gray-50 px-4 py-3">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-200 bg-indigo-100/60 px-4 py-3">
                 <div>
                   <div className="font-semibold text-gray-950">
                     {group.providerName} · {group.model}
@@ -406,7 +435,7 @@ export default function LlmUsageBreakdown() {
                   {formatCost(group.totals.costInr, group.totals.costUsd)}
                 </div>
               </div>
-              <div className="space-y-4 p-3">
+              <div className="space-y-4 bg-white p-3">
                 {buildUsageAreas(group, data?.usd_inr_rate ?? null).map((area) => (
                   <section key={area.key} className="overflow-hidden border border-gray-200">
                     <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 bg-white px-4 py-3">
@@ -478,11 +507,11 @@ export default function LlmUsageBreakdown() {
                                     {formatUsd(run.estimated_cost)}
                                   </div>
                                   {run.measurement === 'actual' ? (
-                                    <div className="text-xs font-semibold text-emerald-700">Actual</div>
+                                    <div className="text-xs font-semibold text-emerald-700">Provider day total · settlement unknown</div>
                                   ) : run.measurement === 'reconciled' ? (
-                                    <div className="text-xs font-semibold text-amber-700">Reconciled</div>
+                                    <div className="text-xs font-semibold text-amber-700">Allocated provider day total</div>
                                   ) : (
-                                    <div className="text-xs text-gray-500">Estimated</div>
+                                    <div className="text-xs text-gray-500">Tariff estimate</div>
                                   )}
                                 </td>
                               </tr>
@@ -497,7 +526,7 @@ export default function LlmUsageBreakdown() {
                     )}
                     {area.runs.some((run) => run.measurement === 'reconciled') ? (
                       <p className="border-t border-amber-100 bg-amber-50 px-4 py-2 text-xs text-amber-800">
-                        Reconciled rows preserve the provider&apos;s exact daily total and allocate it across runs using persisted run telemetry.
+                        Allocated rows preserve the provider&apos;s exact daily total and allocate it across runs using persisted run telemetry.
                       </p>
                     ) : null}
                   </section>
@@ -508,6 +537,29 @@ export default function LlmUsageBreakdown() {
         </div>
       )}
 
+      {data?.attempt_coverage ? (
+        <details className="mt-3 text-xs text-gray-600" open>
+          <summary>Saved attempt coverage and tariff provenance</summary>
+          <p role="status">
+            Selected persisted read: {data.attempt_coverage.persisted_read_state ?? 'unknown'}
+            {' · '}{data.attempt_coverage.processed_event_rows} saved events.
+            {' '}Invocation and billed-charge completeness remain unknown.
+            {data.attempt_coverage.read_cutoff ? ` Read cutoff ${formatTimestamp(data.attempt_coverage.read_cutoff)}.` : ''}
+          </p>
+          <p>Tariff freshness: {data.attempt_coverage.summary.tariff_freshness ?? 'unknown'}; effective date unknown.</p>
+          {Object.entries(data.attempt_coverage.summary.tariff_versions ?? {}).map(([version, count]) => (
+            <p key={version} className="break-all">{version}: {count} attempts</p>
+          ))}
+          {Object.entries(data.attempt_coverage.summary.cache_fields ?? {}).map(([field, values]) => (
+            <p key={field}>
+              {field === 'cache_read_input_tokens' ? 'Cache read' : 'Cache miss'} tokens:
+              {' '}reported {values.reported_tokens ?? 'unknown'}, inferred {values.inferred_tokens ?? 'unknown'}
+              {' · '}{values.unknown_attempts} attempts without this field.
+            </p>
+          ))}
+          <p>Attempt estimates are separate from daily totals and are never added to them.</p>
+        </details>
+      ) : null}
       {data?.coverage_note ? (
         <p className="mt-3 text-xs text-gray-500">{data.coverage_note}</p>
       ) : null}

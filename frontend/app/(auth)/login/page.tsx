@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
+import { logoutWarning } from "@/lib/logoutOutcome";
 import { isClientAuthBypassed, resolveAuthRedirectTarget } from "@/lib/authRedirect";
 import { AuthRedirect } from "@/components/AuthRedirect";
 import { Button } from "@/components/ui/button";
@@ -11,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { FormAlert } from "@/components/auth/FormAlert";
 import { Loader2 } from "lucide-react";
+import { GoogleSignIn } from "@/components/auth/GoogleSignIn";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -20,6 +22,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [validationError, setValidationError] = useState<string | null>(null);
   const redirectTo = resolveAuthRedirectTarget(searchParams.get("redirectTo"));
+  const signOutWarning = logoutWarning(searchParams.get("logout"));
 
   const validateForm = () => {
     if (!email) {
@@ -58,6 +61,8 @@ export default function LoginPage() {
             <CardDescription>Sign in to your account to continue</CardDescription>
           </CardHeader>
           <CardContent>
+            {signOutWarning && <p role="status" className="mb-4 text-sm">{signOutWarning}</p>}
+            <GoogleSignIn redirectTo={redirectTo} />
             <form onSubmit={handleSubmit} className="space-y-4">
               {/* Error Alert */}
               {(error || validationError) && (

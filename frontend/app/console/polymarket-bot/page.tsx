@@ -2,6 +2,7 @@
 
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
+import { BotStateReadError } from "@/components/console/BotStateReadError";
 import {
   Activity,
   AlertTriangle,
@@ -2172,9 +2173,7 @@ export default function PolymarketBotPage() {
 
   if (!state) {
     return (
-      <div className="rounded-[24px] border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-800">
-        {error || "Unable to load Polymarket bot state."}
-      </div>
+      <BotStateReadError pageName="Polymarket Copy Bot" error={error} />
     );
   }
 
@@ -2871,9 +2870,7 @@ export default function PolymarketBotPage() {
       ) : (
         <>
           {error ? (
-            <div className="rounded-[20px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
-              {error}
-            </div>
+            <BotStateReadError pageName="Polymarket Copy Bot" error={error} retained />
           ) : null}
           {actionError ? (
             <div className="rounded-[20px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">

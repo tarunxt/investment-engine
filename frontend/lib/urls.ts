@@ -398,6 +398,7 @@ export const URLs = {
   auth: {
     register: () => `${resolveApiBaseUrl()}/auth/register`,
     login: () => `${resolveApiBaseUrl()}/auth/login`,
+    google: () => `${resolveApiBaseUrl()}/auth/google`,
     logout: () => `${resolveApiBaseUrl()}/auth/logout`,
     refresh: () => `${resolveApiBaseUrl()}/auth/refresh`,
     me: () => `${resolveApiBaseUrl()}/auth/me`,
@@ -483,6 +484,8 @@ export const URLs = {
     portfolio: () => `${resolveApiBaseUrl()}/indmoney-us/portfolio`,
     portfolioSnapshot: (snapshotId: number) => `${resolveApiBaseUrl()}/indmoney-us/portfolio/${snapshotId}`,
     currentPrices: () => `${resolveApiBaseUrl()}/indmoney-us/prices/current`,
+    displayQuotes: () => `${resolveApiBaseUrl()}/indmoney-us/prices/display`,
+    displayListings: () => `${resolveApiBaseUrl()}/indmoney-us/prices/listings`,
     eventsLatest: () => `${resolveApiBaseUrl()}/indmoney-us/events/latest`,
     eventsHistory: () => `${resolveApiBaseUrl()}/indmoney-us/events/history`,
     eventJob: (jobId: number) => `${resolveApiBaseUrl()}/indmoney-us/events/${jobId}`,
@@ -668,7 +671,6 @@ export const URLs = {
       bullpenSports30Days: () => "/console/bullpen-sports?tab=30-days",
       bullpenSportsEndOfMonth: () =>
         "/console/bullpen-sports?tab=end-of-month",
-      googleSheets: () => "/console/google-sheets",
       apis: () => "/console/apis",
       llms: () => "/console/llms",
       technicalSetups: () => "/console/technical-setups",

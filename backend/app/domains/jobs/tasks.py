@@ -1,3 +1,5 @@
+
+from app.core.recovery import recovery_mode, require_equity_analysis
 import json
 from datetime import date, datetime
 import re
@@ -23,7 +25,7 @@ from app.domains.jobs.usage_identity import resolve_job_usage_identity
 from app.domains.jobs.output_runtime import (
     OutputPreflightError, active_contract_hash, configure_output_context, contract_issue,
     current_output_context, merge_swing_fragments, normalize_runtime_output,
-    output_validation_metadata, reset_output_context,
+    output_validation_metadata, rebalance_serialization_instructions, reset_output_context,
 )
 from app.domains.jobs.repository import SyncJobRepository
 from app.domains.jobs.models import Job
@@ -35,6 +37,7 @@ from app.domains.polymarket.bullpen_llm_execution import execute_bullpen_llm_tar
 from app.domains.polymarket.event_preflight import prepare_polymarket_event_context
 from app.domains.runs.schemas import PolymarketEventRunContext
 from app.infrastructure.messaging.task_registry import register_job_task_sync
+from app.domains.jobs.stage_status import aggregate_stage_status
 from app.shared.types import JobStatus
 
 logger = get_logger("app.domains.jobs.tasks")
@@ -370,6 +373,8 @@ def _extract_rebalance_current_holdings_from_prompt(prompt: str) -> list[dict[st
     except ValueError:
         return []
     exchange_idx = headers.index("exchange") if "exchange" in headers else None
+    if exchange_idx is None and "market" in headers:
+        exchange_idx = headers.index("market")
 
     holdings: list[dict[str, str]] = []
     seen_symbols: set[str] = set()
@@ -452,6 +457,7 @@ def _validate_rebalance_table_content(content: str, prompt: str = "") -> tuple[s
 
 
 def _build_rebalance_table_repair_prompt(prompt: str, previous_output: str, reason: str) -> str:
+    prompt += rebalance_serialization_instructions()
     return (
         f"{prompt}\n\n"
         "[REBALANCE_TABLE_REPAIR]\n"
@@ -460,7 +466,9 @@ def _build_rebalance_table_repair_prompt(prompt: str, previous_output: str, reas
         "Regenerate the FULL rebalance answer and return ONLY one markdown table with the exact rebalance columns from the original prompt.\n"
         "Requirements:\n"
         "- Include one complete decision row for EVERY current portfolio holding from the Latest Portfolio Snapshot; do not omit holdings and do not stop after a subset.\n"
-        "- Consider every stock from the supplied swing-trade tables as a possible fresh Buy New candidate, and include Buy New rows for the candidates that are stronger than existing holdings after threats/opportunity-cost review.\n"
+        "- Evaluate every stock from the supplied swing-trade tables. If its exchange/symbol identity is already in the Latest Portfolio Snapshot, include it only in that holding's single Hold, Buy/Add, Trim, or Sell All decision; never label it Buy New or add a second row for the SAME exchange/symbol. Keep different concrete venues separate. For a US snapshot labeled US, a matching symbol at a known US venue is the same existing holding, not a fresh candidate. The US snapshot supplies market only. Carry forward the exact listing exchange from the selected model outputs for the same security. Verify unresolved venues. Never copy US into Exchange Symbol or duplicate a holding under a country alias.\n"
+        "- Include EVERY selected Swing exchange/symbol, even when not selected for buying. For an unheld non-buy use Hold, all position/change/buy quantities and Total Buy Amount 0, and your original non-buy reason. Never invent a reason or omit the row.\n"
+        "- Consider Buy New only for candidates not already present in the Latest Portfolio Snapshot, after threats/opportunity-cost review.\n"
         "- Every row must include Exchange Symbol, Stock Symbol, Current Units, Action, Units Change, Final Units, price/risk fields, Upside Horizon (% return), Weeks, confidence, and all rationale columns.\n"
         "- Put the action label only in Action; put the signed numeric unit delta only in Units Change; never swap these two columns.\n"
         "- Current Units, Units Change, Final Units, Units to Buy, Price Per Unit, Total Buy Amount, Upside Horizon, Weeks, confidence, and rationale-score cells must be numeric-only.\n"
@@ -671,7 +679,8 @@ def _publish_job_update(job: Job) -> None:
     r: _sync_redis.Redis | None = None
     try:
         status_val = job.status.value if hasattr(job.status, "value") else str(job.status)
-        payload = json.dumps({
+        from app.domains.jobs.public_projection import public_job_details
+        payload = json.dumps(public_job_details({
             "type": "job.updated",
             "job_id": job.id,
             "provider": job.provider,
@@ -691,7 +700,7 @@ def _publish_job_update(job: Job) -> None:
             "exported_at": job.exported_at.isoformat() if job.exported_at else None,
             "exported_sheet_url": job.exported_sheet_url,
             "updated_at": job.updated_at.isoformat() if job.updated_at else None,
-        })
+        }))
         
         redis_url = settings.redis_url
         logger.info("Publishing WS update for job_id=%s to Redis at %s", job.id, redis_url)
@@ -840,6 +849,8 @@ def _publish_run_update(
 
 def _queue_run_completion_email_once(run_id: int, status: JobStatus) -> None:
     """Queue a single completion email for this run/status using Redis SETNX."""
+    if recovery_mode():
+        return  # Do not enqueue emails or consume old outbox work.
     if status not in {JobStatus.COMPLETED, JobStatus.PARTIAL, JobStatus.FAILED}:
         return
 
@@ -950,21 +961,7 @@ def _refresh_run_status(db, job_id: int) -> None:
                         "updated_at": updated_job.updated_at.isoformat() if updated_job.updated_at else None,
                     })
 
-            statuses = {j.status for j in stage_jobs}
-            active = {JobStatus.PENDING, JobStatus.PROCESSING, JobStatus.SCHEDULED}
-
-            if statuses & active:
-                # At least one child job is still running
-                new_status = JobStatus.PROCESSING
-            elif any(j.status == JobStatus.COMPLETED for j in stage_jobs):
-                # All terminal, at least one succeeded
-                new_status = JobStatus.COMPLETED
-            elif any(j.status == JobStatus.PARTIAL for j in stage_jobs):
-                # All terminal and at least one usable-but-incomplete model output exists.
-                new_status = JobStatus.PARTIAL
-            else:
-                # All terminal, all failed
-                new_status = JobStatus.FAILED
+            new_status = aggregate_stage_status(j.status for j in stage_jobs)
 
             if run.status != new_status:
                 run_repo.update_status(run, new_status)
@@ -984,7 +981,8 @@ def _refresh_run_status(db, job_id: int) -> None:
             # Trigger auto-export per model as soon as a model completes, or when
             # a failed model still produced complete stock rows that can be exported.
             if (
-                updated_job is not None
+                not recovery_mode()
+                and updated_job is not None
                 and updated_job.status in {JobStatus.COMPLETED, JobStatus.PARTIAL, JobStatus.FAILED}
                 and auto_export_enabled
                 and export_spreadsheet_url
@@ -1182,6 +1180,14 @@ def _job_was_cancelled(repo: SyncJobRepository, job_id: int) -> bool:
     queue="ai",
 )
 def execute_ai_job(self, job_id: int) -> None:
+    if recovery_mode():
+        # Validate before task registration, status writes, or provider work.
+        with SyncSessionLocal() as recovery_db:
+            recovery_job = SyncJobRepository(recovery_db).get(job_id)
+            require_equity_analysis(
+                getattr(recovery_job, "auto_rebalance_portfolio", None),
+                getattr(recovery_job, "request_context_json", None),
+            )
     from app.domains.ai_providers.factory import ProviderFactory
 
     db = SyncSessionLocal()
@@ -1198,6 +1204,12 @@ def execute_ai_job(self, job_id: int) -> None:
     job: Job | None = None
     provider_usage_token = None
     output_context_token = None
+    execution_token = None
+    returned_response = None
+    ownership = None
+    from app.domains.jobs.execution_claim import (
+        admit, reconcile, LostExecutionOwner, ExecutionOwnership, KEY,
+    )
 
     def with_output_validation(metadata: dict | None) -> dict | None:
         validation = output_validation_metadata(content)
@@ -1219,8 +1231,6 @@ def execute_ai_job(self, job_id: int) -> None:
         )
 
     try:
-        if self.request.id:
-            register_job_task_sync(job_id, self.request.id)
         job = repo.get(job_id)
         if not job:
             logger.warning("Job %s not found", job_id)
@@ -1228,6 +1238,29 @@ def execute_ai_job(self, job_id: int) -> None:
         if job.status in {JobStatus.COMPLETED, JobStatus.PARTIAL, JobStatus.FAILED}:
             logger.info("Skipping terminal job redelivery %s", job_id)
             return
+        # Preserve the excluded specialized executor's existing contract. The
+        # recovery policy above still rejects this path before any execution.
+        specialized = (isinstance(job.request_context_json, dict) and
+                       str(job.request_context_json.get("kind") or "").strip() == "polymarket_bullpen_event")
+        if not specialized:
+            from app.core.recovery import ANALYSIS_QUEUE, TRANSPORT_PREFIX
+            from app.domains.jobs.execution_progress import receipt_scope
+            execution_token = admit(db, job_id, getattr(self.request, "id", None),
+                receipt_scope=receipt_scope(self, recovery=recovery_mode(),
+                                            queue=ANALYSIS_QUEUE, prefix=TRANSPORT_PREFIX))
+            if execution_token is None:
+                logger.info("Job %s delivery not admitted: terminal, owned, or reconciliation needed", job_id)
+                return
+            repo.execution_token = execution_token
+            if self.request.id:
+                register_job_task_sync(job_id, self.request.id)
+            ownership = ExecutionOwnership(SyncSessionLocal, job_id, execution_token)
+            repo.execution_owner_lost = ownership.lost_event.is_set
+            ownership.start()
+        elif self.request.id:
+            # Preserve delivery registration for the unchanged specialized path.
+            # This is bookkeeping, never authorization for ordinary execution.
+            register_job_task_sync(job_id, self.request.id)
         usage_dimensions = resolve_job_usage_identity(db, job)
         if _job_was_cancelled(repo, job_id):
             logger.info("Skipping cancelled job %s", job_id)
@@ -1250,7 +1283,7 @@ def execute_ai_job(self, job_id: int) -> None:
         _publish_job_update(job)
         _refresh_run_status(db, job_id)
 
-        prompt_to_execute = job.prompt
+        prompt_to_execute = job.prompt + rebalance_serialization_instructions()
         polymarket_event_context: PolymarketEventRunContext | None = None
         request_context_json = getattr(job, "request_context_json", None)
         if isinstance(request_context_json, dict):
@@ -1365,7 +1398,22 @@ def execute_ai_job(self, job_id: int) -> None:
                 )
                 return
 
-        provider = ProviderFactory.create(job.provider)
+        if ownership is None:
+            raise LostExecutionOwner("Ordinary provider execution requires a durable claim")
+        provider_impl = ProviderFactory.create(job.provider)
+        class OwnedProvider:
+            def generate(self, **kwargs):
+                nonlocal returned_response
+                ownership.before_call()
+                try:
+                    result = provider_impl.generate(**kwargs)
+                except Exception:
+                    ownership.block()
+                    raise
+                returned_response = result
+                ownership.after_call()
+                return result
+        provider = OwnedProvider()
         with provider_usage_phase("initial_generation"):
             result = provider.generate(prompt=prompt_to_execute, model=job.model)
         if _job_was_cancelled(repo, job_id):
@@ -1386,11 +1434,15 @@ def execute_ai_job(self, job_id: int) -> None:
             raise RuntimeError(
                 f"{job.provider}/{job.model} returned empty output after generation"
             )
+        from app.domains.jobs.technical_prices import validate_technical_prices
+        validate_technical_prices(job.prompt, content)
         if _requires_generic_table_output(job.prompt):
             if _is_rebalance_output(job.prompt):
                 content, rebalance_table_issue, _parsed_rebalance_rows = _validate_rebalance_table_content(content, job.prompt)
                 for attempt in range(_MAX_STOCK_REPAIR_ATTEMPTS):
-                    if not rebalance_table_issue:
+                    if not rebalance_table_issue or (
+                        _parsed_rebalance_rows and rebalance_table_issue.startswith("partial rebalance table")
+                    ):
                         break
                     if _job_was_cancelled(repo, job_id):
                         logger.info("Stopping cancelled rebalance repair job %s", job_id)
@@ -1587,10 +1639,14 @@ def execute_ai_job(self, job_id: int) -> None:
             logger.info("Skipping completion update for cancelled job %s", job_id)
             return
 
+        from app.domains.jobs.partial_output import has_partial_output, PARTIAL_NOTICE
+        completion_metadata = with_output_validation(runtime_metadata_json)
+        partial_usage = has_partial_output(completion_metadata)
         _update_job_status(
             repo,
             job,
-            JobStatus.COMPLETED,
+            JobStatus.PARTIAL if partial_usage else JobStatus.COMPLETED,
+            error_message=PARTIAL_NOTICE if partial_usage else None,
             response=content,
             tokens_in=tokens_in,
             tokens_out=tokens_out,
@@ -1598,7 +1654,7 @@ def execute_ai_job(self, job_id: int) -> None:
             web_search_used=web_search_used,
             web_search_queries=web_search_queries,
             web_sources=web_sources,
-            runtime_metadata_json=with_output_validation(runtime_metadata_json),
+            runtime_metadata_json=completion_metadata,
         )
         _publish_job_update(job)
         _refresh_run_status(db, job_id)
@@ -1606,6 +1662,19 @@ def execute_ai_job(self, job_id: int) -> None:
             "execute_ai_job", "n/a", (monotonic() - started_at) * 1000, job_id
         )
 
+    except LostExecutionOwner:
+        try:
+            evidence = None
+            if returned_response is not None:
+                evidence = {"response": (returned_response.content or "").strip(),
+                            "tokens_in": returned_response.tokens_in,
+                            "tokens_out": returned_response.tokens_out,
+                            "estimated_cost": returned_response.cost}
+            reconcile(db, job_id, execution_token, evidence=evidence)
+        except Exception:
+            logger.exception("Could not record lost ownership for job %s", job_id)
+        logger.warning("Job %s result discarded after ownership loss", job_id)
+        return
     except MaxRetriesExceededError as exc:
         _mark_failed(
             db,
@@ -1624,6 +1693,51 @@ def execute_ai_job(self, job_id: int) -> None:
         logger.exception("Job %s exhausted all retries", job_id)
 
     except Exception as exc:
+        if execution_token:
+            if content is None and returned_response is not None:
+                content = (returned_response.content or "").strip()
+                tokens_in = returned_response.tokens_in
+                tokens_out = returned_response.tokens_out
+                estimated_cost = returned_response.cost
+            # Provider acceptance and DB commit failures can be ambiguous. Keep
+            # lineage and usage evidence; never turn this into a Celery replay.
+            try:
+                db.rollback()
+                current = repo.get_fresh(job_id)
+                record = (current.runtime_metadata_json or {}).get(KEY, {}) if current else {}
+                if (ownership is not None and not ownership.lost_event.is_set()
+                        and record.get("pending_calls", 0) == 0):
+                    # A returned provider response followed by deterministic validation
+                    # failure is known, unlike a timeout or uncertain commit.
+                    _mark_failed(
+                        db, repo, job_id, str(exc), response=content,
+                        tokens_in=tokens_in, tokens_out=tokens_out,
+                        estimated_cost=estimated_cost,
+                        web_search_used=web_search_used,
+                        web_search_queries=web_search_queries, web_sources=web_sources,
+                        runtime_metadata_json=failure_metadata(exc, retry_safe=False),
+                    )
+                else:
+                    reconcile(db, job_id, execution_token, evidence={
+                        "response": content, "tokens_in": tokens_in,
+                        "tokens_out": tokens_out, "estimated_cost": estimated_cost,
+                        "runtime_metadata_json": failure_metadata(exc, retry_safe=False),
+                    })
+            except Exception:
+                logger.exception("Could not persist reconciliation state for job %s", job_id)
+                # A diagnostic/cancellation projection can fail independently of
+                # the locked ownership record. Retain the original failure via
+                # the conservative path; never certify a terminal result here.
+                try:
+                    reconcile(db, job_id, execution_token, evidence={
+                        "response": content, "tokens_in": tokens_in,
+                        "tokens_out": tokens_out, "estimated_cost": estimated_cost,
+                        "runtime_metadata_json": failure_metadata(exc, retry_safe=False),
+                    })
+                except Exception:
+                    logger.exception("Could not retain original failure for job %s", job_id)
+            logger.exception("Job %s failure recorded without automatic replay", job_id)
+            return
         try:
             if _job_was_cancelled(repo, job_id):
                 return
@@ -1673,6 +1787,8 @@ def execute_ai_job(self, job_id: int) -> None:
             logger.exception("Job %s exhausted all retries after: %s", job_id, exc)
 
     finally:
+        if ownership is not None:
+            ownership.close()
         reset_output_context(output_context_token)
         reset_provider_usage_context(provider_usage_token)
         db.close()

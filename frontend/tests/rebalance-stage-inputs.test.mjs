@@ -9,6 +9,7 @@ const read = (path) => readFileSync(new URL(path, import.meta.url), 'utf8');
 const modules = {};
 modules['react/jsx-runtime'] = jsxRuntime;
 function load(source, bindings = {}) {
+  bindings = { apiService: {}, runtimeOwner: {}, isCurrentWorkflowOwner: () => true, ...bindings };
   const compiled = ts.transpileModule(source, { compilerOptions: {
     module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX,
   } }).outputText;
@@ -25,9 +26,13 @@ modules['@/lib/rebalanceRunIdentity'] = load(read('../lib/rebalanceRunIdentity.t
 modules['@/lib/rebalanceStageInputs'] = load(read('../lib/rebalanceStageInputs.ts'));
 modules['@/lib/autoRebalanceAudit'] = load(read('../lib/autoRebalanceAudit.ts'));
 modules['@/lib/outputSourceJobs'] = load(read('../lib/outputSourceJobs.ts'), { crypto: webcrypto });
+const auditAst = ts.createSourceFile('audit.ts', read('../services/recommendationAudit.ts'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+const auditHasher = load(auditAst.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === 'auditResponseHashes').getText(auditAst), { crypto: webcrypto }).auditResponseHashes;
 const inputs = modules['@/lib/rebalanceStageInputs'];
 const rebalance = load(read('../lib/rebalance.ts'));
-const portfolioSnapshot = { parse_status: 'parsed', reported_holdings_count: 1,
+modules['@/lib/rebalance'] = rebalance;
+const snapshotSource = load(read('../lib/indmoneySnapshotSource.ts'));
+const portfolioSnapshot = { id: 7001, captured_at: '2026-10-02T20:30:00Z', parse_status: 'parsed', reported_holdings_count: 1,
   holdings: [{ symbol: 'ABC', quantity: 0.125 }] };
 const swing = load(read('../lib/swingTrade.ts'));
 const scope = { market: 'us', stage: 'swing' };
@@ -56,7 +61,7 @@ function run(id = 50, jobIds = [501, 502], stage = 'swing', market = 'us') {
 function threat(jobId = 99, origin = 'selected', market = 'us') {
   return {
     identity: { kind: 'threat-job', stage: 'threats', market, jobId }, origin,
-    analysis: { job_id: jobId, status: 'completed', provider: 'openai', model: 'same-model',
+    analysis: { snapshot_id: 7001, job_id: jobId, status: 'completed', provider: 'openai', model: 'same-model',
       created_at: timestamp, updated_at: timestamp, snapshot_date: '2026-10-02', captured_at: timestamp,
       report: { raw_markdown: 'Keep the current risk and the dissenting view.' },
     },
@@ -173,22 +178,66 @@ test('INDmoney rejects Explore, missing, incomplete and ambiguous holdings befor
     threats: null, previousClose: new Date(), swingRuns: [] }));
 });
 
-const workflowSource = read('../app/console/dashboard/_components/RebalanceWorkflowSections.tsx');
+
+test('rebalance retains each Swing schema and exact evidence instead of a shared positional legend', () => {
+  const current = run(50, [501]);
+  const legacy = run(51, [502]);
+  const headers = [
+    'LLM Name + Model', 'Exchange Symbol', 'Stock Symbol', 'Stock Name',
+    'Technical Setup', 'Entry Range', 'Stop Loss', 'Target', 'Analyst Source',
+    'Units to Buy', 'Price per Unit', 'Total Buy Amount', 'Upside Horizon (%)',
+    'Weeks', 'Confidence Score (0-100)', 'Rationale Cruxx', 'Score Rationale Cruxx',
+    'Rationale - Technical Setup (Medium Term)', 'Score Rationale - Technical Setup (Medium Term)',
+    'Rationale - Technical Setup (Long Term)', 'Score Rationale - Technical Setup (Long Term)',
+    'Rationale - Fundamentals Short Term', 'Score Rationale - Fundamentals Short Term',
+    'Rationale - Fundamentals Medium/Long Term', 'Score Rationale - Fundamentals Medium/Long Term',
+    'Rationale Technical Setup Short Term 1–3 Months', 'Score Rationale Technical Setup Short Term 1–3 Months',
+    'Run #', 'Run Date', 'Run Time', 'LLM',
+  ];
+  assert.equal(headers.length, 31);
+  const row = '| ' + headers.map((_, index) => index === 16 ? '-3' : `supplied-${index}`).join(' | ') + ' |';
+  const response = '## Original source\n\n| ' + headers.join(' | ') + ' |\n| ' +
+    headers.map(() => '---').join(' | ') + ' |\n' + row + '\n' + row +
+    '\n\nDissent: preserve  double spaces and supplied context.\n';
+  const historical = '| Stock Symbol | Rationale Cruxx |\n| --- | --- |\n| ABC | Historical evidence |\n';
+  current.run_jobs[0].job.response = response;
+  legacy.run_jobs[0].job.response = historical;
+  const before = structuredClone([current, legacy]);
+  const result = rebalance.buildRebalanceInputBundle({ market: 'us', portfolio: portfolioSnapshot,
+    threats: null, previousClose: new Date('2026-10-02T20:00:00Z'), swingRuns: [current, legacy] });
+  assert.ok(result.includes(response), 'all 31 headers, scores, repeated rows and source whitespace survive');
+  assert.ok(result.includes(historical), 'historical schemas retain their own headers');
+  assert.ok(!result.includes('Columns for all compacted swing rows:'));
+  assert.deepEqual([current, legacy], before);
+});
+
+test('rebalance prompts distinguish existing holdings from overlapping Swing candidates', () => {
+  for (const market of ['india', 'us']) {
+    const prompt = rebalance.buildRebalancePrompt(market);
+    assert.match(prompt, /never label it Buy New or add a second row/);
+    assert.match(prompt, /Consider Buy New only for candidates not already present in the Latest Portfolio Snapshot/);
+    assert.match(prompt, /snapshot labeled US, a matching symbol at a known US venue is the same existing holding/);
+  }
+});
+
+const workflowSource = read('../app/console/dashboard/_components/RebalanceWorkflowSections.tsx') + '\n' + read('../components/shared/WorkflowStageTile.tsx');
 const ast = ts.createSourceFile('workflow.tsx', workflowSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const declarations = new Map();
 function visit(node) {
-  if (node.name && ['runWorkflow', 'STAGE_ORDER', 'buildRunPayload', 'RecordedWorkflowStageFailure'].includes(node.name.getText(ast))) {
+  if (node.name && ['runWorkflow', 'loadInputCandidates', 'resetDefaultInputCandidates', 'STAGE_ORDER', 'buildRunPayload', 'RecordedWorkflowStageFailure', 'markRunning'].includes(node.name.getText(ast))) {
     declarations.set(node.name.getText(ast), node);
   }
   ts.forEachChild(node, visit);
 }
 visit(ast);
 const callbackSource = declarations.get('runWorkflow').initializer.arguments[0].getText(ast);
-const helpers = load(`${declarations.get('buildRunPayload').getText(ast)}\n${declarations.get('RecordedWorkflowStageFailure').getText(ast)}\nexport const STAGE_ORDER = ${declarations.get('STAGE_ORDER').initializer.getText(ast)};\nexport { buildRunPayload, RecordedWorkflowStageFailure };`);
+const helpers = load(`${declarations.get('buildRunPayload').getText(ast)}\n${declarations.get('RecordedWorkflowStageFailure').getText(ast)}\nexport const STAGE_ORDER = ${declarations.get('STAGE_ORDER').initializer.getText(ast)};\nexport { buildRunPayload, RecordedWorkflowStageFailure };`, { recommendationAuditEnabled: false });
 
 async function executeWorkflow({ stages = ['sync', 'threats', 'swing', 'rebalance', 'technical', 'actionables'], selected = {}, runOverrides = {}, threatOverrides = {}, snapshot = portfolioSnapshot,
-  sourceHasher = modules['@/lib/outputSourceJobs'].buildOutputSourceJobs, cancelRequestedRef = { current: false } } = {}) {
+  sourceHasher = modules['@/lib/outputSourceJobs'].buildOutputSourceJobs, cancelRequestedRef = { current: false }, rebalanceStatus = "completed" } = {}) {
   const created = [];
+  const alerts = [];
+  let reservations = 0;
   const completed = [];
   const errors = [];
   const threatReads = [];
@@ -196,6 +245,8 @@ async function executeWorkflow({ stages = ['sync', 'threats', 'swing', 'rebalanc
   const consensusInputs = [];
   const generatedSwing = run();
   const generatedRebalance = run(60, [601, 602], 'rebalance');
+  generatedRebalance.status = rebalanceStatus;
+  if (rebalanceStatus === 'partial') generatedRebalance.run_jobs[1].job.status = 'partial';
   const selectedInputs = { indmoneyUs: {
     swing: new Set(['swing:next', 'threat:99', 'threat:98']),
     rebalance: new Set(['rebalance:next', 'run:50:job:501', 'run:51:job:503']),
@@ -208,7 +259,7 @@ async function executeWorkflow({ stages = ['sync', 'threats', 'swing', 'rebalanc
   const apiService = {
     getProviders: async () => [],
     indmoneyUsPortfolioOverview: async () => ({ latest: snapshot }),
-    indmoneyUsRunThreats: async () => { created.push({ stage: 'threats', targets: [targets[0]] }); return { job_id: 99 }; },
+    indmoneyUsRunThreats: async () => { created.push({ stage: 'threats', targets: [targets[0]] }); return { job_id: 99, snapshot_id: snapshot?.id }; },
     indmoneyUsThreatJob: async (id) => { threatReads.push(id); return threatOverrides[id] ?? threat(id).analysis; },
     indmoneyUsThreatsLatest: async () => ({ analysis: threat(99).analysis }),
     getRuns: async () => ({ items: [generatedSwing] }),
@@ -222,8 +273,14 @@ async function executeWorkflow({ stages = ['sync', 'threats', 'swing', 'rebalanc
     queueAutoRebalanceCompletionEmail: async () => {},
   };
   const bindings = {
-    ...inputs, ...rebalance, ...swing, ...helpers, ...modules['@/lib/rebalanceRunIdentity'],
+    requireWorkflowOwner: () => ({ id: 7 }), actionablesActivityKey: () => "test", announceActionablesActivity: () => () => {},
+    readLatestIndmoneySnapshot: () => apiService.indmoneyUsPortfolioOverview(),
+    recommendationAuditEnabled: false,
+    scoreMatrixFormulaConfig: {},
+    auditResponseHashes: auditHasher,
+    ...inputs, ...rebalance, ...snapshotSource, ...swing, ...helpers, ...modules['@/lib/rebalanceRunIdentity'],
     ...modules['@/lib/autoRebalanceAudit'], ...modules['@/lib/outputSourceJobs'], buildOutputSourceJobs: sourceHasher, apiService,
+    analysisOnlyRuns: { indmoneyUs: false }, setAnalysisOnlyRuns: noop,
     specificMode: { indmoneyUs: true }, selectedStages: { indmoneyUs: new Set(stages) }, selectedInputs,
     isWorkflowExecutingRef: { current: false }, activeExecutionRefsRef: { current: [] },
     activeAutoRebalanceMetadataRef: { current: {} }, cancelRequestedRef, pauseRequestedRef: { current: false },
@@ -235,26 +292,28 @@ async function executeWorkflow({ stages = ['sync', 'threats', 'swing', 'rebalanc
     updateStage: (_portfolio, stage, info) => { if (info.error) errors.push({ stage, error: info.error }); },
     markRunning: noop, markCompleted: (_portfolio, stage) => { completed.push(stage); },
     completeSkippedStage: noop, onDashboardRefresh: async () => {}, recordAutoRebalanceStage: async () => {},
-    reserveAutoRebalanceRunMetadata: async () => ({ auto_rebalance_portfolio: 'indmoney_us', auto_rebalance_sequence: 100, auto_rebalance_label: 'IndMoney US Run #100' }),
+    reserveAutoRebalanceRunMetadata: async () => { reservations++; return { auto_rebalance_portfolio: 'indmoney_us', auto_rebalance_sequence: 100, auto_rebalance_label: 'IndMoney US Run #100' }; },
     retryWorkflowRead: async (read) => read(), getSavedStageTargets: () => targets,
     waitForThreatCompletion: async () => threat(99, 'generated').analysis,
-    waitForRunWithStageHandling: async (_portfolio, stage) => stage === 'swing' ? generatedSwing : stage === 'rebalance' ? generatedRebalance : { id: 70 },
+    waitForRunWithStageHandling: async (_portfolio, stage) => stage === 'swing' ? generatedSwing : stage === 'rebalance' ? generatedRebalance : { id: 70, run_jobs: [] },
     summarizeThreat: () => ({}), summarizeRun: () => ({}), getRunProgress: () => ({}), countUniqueStocksFromRun: () => 2,
     parseTimestampMs: (date) => Date.parse(date), getPreviousMarketClose: () => new Date('2026-10-02T20:00:00Z'),
     getLatestMatchingRebalanceRuns: (runs) => runs.filter((r) => modules['@/lib/rebalanceRunIdentity'].isAnalysisRunForStage(r, 'rebalance', 'us')),
     fetchAllFullRuns: async () => [generatedRebalance],
     buildConsensusRows: (runs) => { consensusInputs.push(runs); return runs.map((r) => ({ id: r.id, jobs: r.run_jobs.map((link) => link.job.response) })); },
+    buildTechnicalScanMap: () => ({}),
+    buildDashboardActionRows: (rows) => rows.map(row => ({ stock: { exchange: 'NASDAQ', symbol: 'TEST', totalSuggestions: 1 }, formulaAction: 'Hold', formulaScore: 0, formulaEstimate: {}, detail: {} })),
     buildTechnicalScanPrompt: (rows) => JSON.stringify(rows), getStageTileLabel: (stage) => stage,
-    window: { setTimeout: noop, dispatchEvent: noop }, CustomEvent: class {},
+    window: { alert: message => alerts.push(message), setTimeout: noop, dispatchEvent: noop }, CustomEvent: class {},
     WORKFLOW_COMPLETION_RESET_DELAY_MS: 0, normalizeError: (error) => error.message,
   };
   const { execute } = load(`export const execute = ${callbackSource};`, bindings);
   await execute('indmoneyUs');
-  return { created, completed, errors, threatReads, runReads, consensusInputs, targets };
+  return { created, completed, errors, alerts, reservations, threatReads, runReads, consensusInputs, targets };
 }
 
 test('invalid saved INDmoney snapshot fails sync before any paid stage is queued', async () => {
-  const result = await executeWorkflow({ snapshot: { parse_status: 'unparsed', holdings: [] } });
+  const result = await executeWorkflow({ snapshot: { ...portfolioSnapshot, parse_status: 'unparsed', holdings: [] } });
   assert.deepEqual(result.created, []);
   assert.deepEqual(result.completed, []);
   assert.equal(result.errors[0].stage, 'sync');
@@ -309,7 +368,7 @@ test('offline workflow rejects stale/conflicting and out-of-scope sources before
     { runOverrides: { 60: conflictingRebalance }, expectedStages: ['threats', 'swing', 'rebalance'], failed: 'technical' },
     { threatOverrides: { 99: conflictingThreat }, expectedStages: ['threats'], failed: 'swing' },
     { stages: ['rebalance'], runOverrides: { 50: run(50, [501], 'swing', 'india') }, expectedStages: [], failed: 'rebalance' },
-    { stages: ['technical'], runOverrides: { 60: run(60, [601], 'swing') }, expectedStages: [], failed: 'technical' },
+    { stages: ['technical'], selected: { technical: new Set(['run:60:job:601']) }, runOverrides: { 60: run(60, [601], 'swing') }, expectedStages: [], failed: 'technical' },
     { stages: ['swing'], threatOverrides: { 99: { ...threat(99).analysis, job_id: 777 } }, expectedStages: [], failed: 'swing' },
     { stages: ['rebalance'], selected: { rebalance: new Set(['run:50:job:999']) }, expectedStages: [], failed: 'rebalance' },
   ];
@@ -322,13 +381,14 @@ test('offline workflow rejects stale/conflicting and out-of-scope sources before
   }
 });
 
-test('offline latest fallback deduplicates generated runs without changing selected stages or model samples', async () => {
+test('Next uses only generated runs without historical fallback', async () => {
   const result = await executeWorkflow({ selected: {
     rebalance: new Set(['rebalance:next']), technical: new Set(['technical:next']),
   } });
   assert.deepEqual(result.errors, []);
   assert.deepEqual(result.created.map((call) => [call.stage, call.targets.length]), [['threats', 1], ['swing', 2], ['rebalance', 2], ['technical', 1]]);
   assert.deepEqual(keys(result.consensusInputs[1]), ['60:601', '60:602']);
+  assert.deepEqual(result.runReads, [], 'Next does not fetch any historical scan');
   const prompt = result.created.find((call) => call.stage === 'rebalance').prompt;
   for (const jobId of [501, 502]) assert.equal(prompt.match(new RegExp(`Bullish rationale ${jobId}`, 'g'))?.length, 1);
 });
@@ -379,4 +439,146 @@ test('manual rebalance shows actionable validation errors and blocks submit with
     if (reason) assert.equal(findElement(tree, (node) => node.props?.role === 'alert').props.children, reason);
   }
   assert.equal(submissions, 1, 'only the valid form invokes the original submit handler');
+});
+
+ test('Next cannot silently substitute history when Swing was skipped', async () => {
+  const result = await executeWorkflow({ stages: ['rebalance'], selected: { rebalance: new Set(['rebalance:next']) } });
+  assert.deepEqual(result.created, []);
+  assert.match(result.errors[0].error, /Next Swing output is unavailable/);
+});
+
+test('snapshot drift fails before paid Rebalance', async () => {
+  const result = await executeWorkflow({ snapshot: { ...portfolioSnapshot, captured_at: '2026-10-02T21:30:00Z' } });
+  assert.deepEqual(result.created.map(call => call.stage), ['threats', 'swing']);
+  assert.match(result.errors[0].error, /different snapshots/);
+});
+
+
+test('opening the Rebalance picker exposes saved jobs even after market close without rewriting selections', async () => {
+  let candidates = [], reads = 0;
+  const callback = declarations.get('loadInputCandidates').initializer.arguments[0].getText(ast);
+  const { openPicker } = load(`export const openPicker = ${callback};`, {
+    setInputCandidatesLoading: () => {}, setInputCandidatesError: () => {}, setInputCandidates: value => { candidates = value; },
+    setSelectedInputs: () => { throw new Error('Opening a picker must not alter selection'); },
+    buildNextCandidate: stage => ({ id: `${stage}:next`, source: 'next' }),
+    fetchAllFullRuns: () => { throw new Error('Unbounded history fetch'); },
+    fetchDashboardRecentFullRuns: async () => { reads++; return [run(446, [2232,2233]), run(443, [2226,2227])]; },
+    getPreviousMarketClose: () => new Date('2026-10-03'), parseTimestampMs: Date.parse,
+    isAnalysisRunForStage: () => true, sortRunsByLatestTimestamp: value => value,
+    buildRunJobCandidates: runs => runs.flatMap(r => r.run_jobs.map(j => ({ id: `run:${r.id}:job:${j.job_id}` }))),
+  });
+  await openPicker('indmoneyUs','rebalance');
+  assert.equal(reads, 1);
+  assert.deepEqual(candidates.map(c => c.id), ['rebalance:next','run:446:job:2232','run:446:job:2233','run:443:job:2226','run:443:job:2227']);
+  await openPicker('indmoneyUs','actionables');
+  assert.equal(reads, 1, 'Final uses this workflow sources without a historical picker fetch');
+  assert.deepEqual(candidates.map(c => c.id), ['actionables:next']);
+});
+
+test('Reset Defaults selects only the upcoming output for every stage', () => {
+  const callback = declarations.get('resetDefaultInputCandidates').initializer.arguments[0].getText(ast);
+  for (const stage of ['threats','swing','rebalance','technical','actionables']) {
+    let state = { zerodha: { [stage]: new Set(['run:443:job:2227']) } };
+    const { reset } = load(`export const reset = ${callback};`, {
+      inputDialog: { portfolio: 'zerodha', stage }, inputCandidates: [{id:'run:443:job:2227',source:'run-job'}],
+      setSelectedInputs: update => { state = update(state); },
+    });
+    reset();
+    assert.deepEqual([...state.zerodha[stage]], [`${stage}:next`]);
+  }
+});
+
+test('Technical Next without selected Rebalance is rejected before reservation, source reads or provider work',async()=>{
+ const result=await executeWorkflow({stages:['technical']});assert.equal(result.reservations,0);assert.deepEqual(result.created,[]);assert.deepEqual(result.runReads,[]);assert.deepEqual(result.errors,[]);assert.equal(result.alerts.length,1);assert.match(result.alerts[0],/Next means a new result from this invocation/);assert.match(result.alerts[0],/saved completed\/partial/);
+ const issue=inputs.technicalInputPlanIssue(true,false,new Set(['technical:next','run:60:job:601']));assert.ok(issue,'saved jobs do not silently replace a missing requested Next source');
+ assert.equal(inputs.technicalInputPlanIssue(false,false,new Set(['technical:next'])),null);
+});
+
+test('Technical accepts completed/partial generated or explicitly selected saved Rebalance without substituting latest',async()=>{
+ for(const rebalanceStatus of ['completed','partial']){
+  const full=await executeWorkflow({rebalanceStatus});assert.deepEqual(full.alerts,[]);assert.deepEqual(full.errors,[]);assert.ok(full.created.some(call=>call.stage==='technical'));
+  const selected=await executeWorkflow({stages:['technical'],selected:{technical:new Set(['run:60:job:601','run:60:job:602'])},rebalanceStatus});assert.deepEqual(selected.alerts,[]);assert.deepEqual(selected.errors,[]);assert.deepEqual(selected.created.map(call=>call.stage),['technical']);assert.deepEqual(selected.runReads,[60]);assert.deepEqual(keys(selected.consensusInputs[0]),['60:601','60:602']);
+ }
+ const source=read('../app/console/dashboard/_components/RebalanceWorkflowSections.tsx');const preflight=source.indexOf('const inputPlanIssue =');assert.ok(preflight<source.indexOf('const zerodhaPopup =',preflight));assert.match(source,/Choose saved Rebalance inputs/);assert.match(source,/lastRunId: null, activeRunId: null, recommendedStocks: null/);assert.match(source,/errorDetails: \[\]/);
+});
+
+
+test('starting a stage clears previous run/listing/provider diagnostics without changing retained run data',()=>{
+ const previous={state:'failed',lastRunId:448,recommendedStocks:22,error:'Old failure',errorDetails:[{message:'old'}],partialNotice:'old',costUsd:1,provider:'old',model:'old',frozenFinal:{rows:[1]}};const before=structuredClone(previous);let visible={...previous};
+ const callback=declarations.get('markRunning').initializer.arguments[0].getText(ast);
+ const {mark}=load(`export const mark = ${callback};`,{updateStage:(_portfolio,_stage,info)=>{visible={...visible,...info};},recordAutoRebalanceStage:()=>{}});mark('zerodha','technical',{totalLlms:1});
+ assert.equal(visible.state,'running');assert.equal(visible.lastRunId,null);assert.equal(visible.activeRunId,null);assert.equal(visible.recommendedStocks,null);assert.equal(visible.error,null);assert.deepEqual(visible.errorDetails,[]);assert.equal(visible.provider,null);assert.equal(visible.frozenFinal,undefined);assert.equal(visible.totalLlms,1);assert.deepEqual(previous,before);
+});
+
+
+test('Zerodha unknown numeric exposure fails before input generation without inventing zero', () => {
+  const holding = { quantity: 2, t1_quantity: 0, last_price: 10 };
+  const base = { holdings_count: 1, holdings: [holding], available_margin: 0, positions: { net: [], day: [] } };
+  assert.doesNotThrow(() => rebalance.assertZerodhaNumericExposure(base));
+  for (const key of ['quantity', 't1_quantity', 'last_price']) for (const value of [null, undefined, NaN, Infinity]) {
+    const snapshot = { ...base, holdings: [{ ...holding, [key]: value }] };
+    assert.throws(() => rebalance.buildRebalanceInputBundle({ market: 'india', portfolio: snapshot, swingRuns: [], threats: null, previousClose: new Date() }), /unknown numeric exposure/);
+  }
+  assert.throws(() => rebalance.assertZerodhaNumericExposure({ ...base, available_margin: null }), /available margin/);
+  assert.doesNotThrow(() => rebalance.assertZerodhaNumericExposure({ ...base, holdings: [{ quantity: 0, t1_quantity: 0, last_price: 0 }] }));
+});
+
+test('funds context preserves captured units, zero and unknown without inventing a budget', () => {
+  for (const [market, field, currency] of [['india', 'available_margin', 'INR'], ['us', 'wallet_balance', 'USD']]) {
+    for (const value of [0, -5, 0.125, 100, null, undefined, NaN, Infinity, '123']) {
+      const snapshot = { snapshot_date: '2020-01-01', captured_at: '2020-01-01T00:00:00Z', [field]: value };
+      const before = structuredClone(snapshot);
+      const actual = rebalance.formatRebalanceFunds(market, snapshot);
+      const expected = typeof value === 'number' && Number.isFinite(value) ? String(value) : 'Unknown (missing or invalid)';
+      assert.ok(actual.includes(`snapshot.${field}; currency: ${currency}; stored value: ${expected}`));
+      assert.ok(actual.includes('captured at: 2020-01-01T00:00:00Z'));
+      assert.ok(actual.includes('not a live funds refresh'));
+      assert.ok(actual.includes('no deployable-budget rule'));
+      assert.ok(actual.includes('Funded sizing remains unverified'));
+      assert.deepEqual(snapshot, before);
+      assert.equal(rebalance.formatRebalanceFunds(market, snapshot), actual);
+    }
+    assert.ok(rebalance.formatRebalanceFunds(market, null).includes('stored value: Unknown'));
+    assert.ok(rebalance.formatRebalanceFunds(market, {}).includes('captured at: Unknown'));
+  }
+  assert.ok(rebalance.formatRebalanceFunds('india', { available_margin: 0 }).includes('does not prove broker-confirmed zero'));
+  assert.ok(rebalance.formatRebalanceFunds('us', { wallet_balance: 1 }).includes('Buying power and margin are unknown'));
+});
+
+test('full model input and summary preview retain the same versioned funds evidence', () => {
+  for (const swingDisplayMode of ['full', 'summary']) {
+    const portfolio = { ...portfolioSnapshot, wallet_balance: 0 };
+    const bundle = rebalance.buildRebalanceInputBundle({market: 'us', portfolio, swingRuns: [], threats: null,
+      previousClose: new Date(timestamp), swingDisplayMode});
+    assert.ok(bundle.includes(rebalance.formatRebalanceFunds('us', portfolio)));
+    assert.equal(bundle.split('rebalance-funds/v1').length, 2);
+    assert.ok(bundle.indexOf('rebalance-funds/v1') < bundle.indexOf('## 2. Completed Swing'));
+  }
+});
+
+test('capture ages preserve exact timestamps, zero, old, missing, malformed and future provenance', () => {
+  const now = new Date('2026-11-01T12:00:00Z');
+  assert.equal(rebalance.describeRebalanceSourceAge('2026-11-01T12:00:00Z', now), 'source timestamp: 2026-11-01T12:00:00Z; age: 0 ms at 2026-11-01T12:00:00.000Z');
+  assert.equal(rebalance.describeRebalanceSourceAge('2026-10-30T12:00:00Z', now), 'source timestamp: 2026-10-30T12:00:00Z; age: 172800000 ms at 2026-11-01T12:00:00.000Z');
+  for (const value of [null, undefined, '', 'broken']) assert.equal(rebalance.describeRebalanceSourceAge(value, now), `source timestamp: ${value || 'unknown'}; age: unknown`);
+  assert.equal(rebalance.describeRebalanceSourceAge('2026-11-02T12:00:00Z', now), 'source timestamp: 2026-11-02T12:00:00Z; age: unknown (future or invalid reference time)');
+});
+
+test('full and summary bundles honestly describe historical selection and unknown source freshness without mutation', () => {
+  const now = new Date('2026-11-01T12:00:00Z');
+  const selected = run();
+  selected.created_at = '2020-01-01T00:00:00Z';
+  const before = JSON.stringify(selected);
+  for (const swingDisplayMode of ['full', 'summary']) {
+    const args = { market: 'us', portfolio: portfolioSnapshot, threats: null, swingRuns: [selected], previousClose: now, now, swingDisplayMode };
+    const result = rebalance.buildRebalanceInputBundle(args);
+    assert.equal(rebalance.buildRebalanceInputBundle(args), result);
+    assert.match(result, /Swing run #50 creation: source timestamp: 2020-01-01T00:00:00Z; age: 215697600000 ms/);
+    assert.match(result, /Threat report creation: source timestamp: unknown; age: unknown/);
+    assert.match(result, /exchange holidays and early closes are not validated/);
+    assert.match(result, /Price as-of and exchange-session age: unknown/);
+    assert.match(result, /Explicit selections may be historical/);
+    assert.doesNotMatch(result, /runs found after previous market close/);
+  }
+  assert.equal(JSON.stringify(selected), before);
 });

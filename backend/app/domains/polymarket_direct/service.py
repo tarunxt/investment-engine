@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.core.recovery import recovery_mode, require_financial_writes_allowed
+
 import asyncio
 from pathlib import Path
 
@@ -27,6 +29,8 @@ class PolymarketDirectBotManager:
         self._lock = asyncio.Lock()
 
     async def get_bot(self, user_id: int) -> PolymarketPaperCopyBot:
+        if recovery_mode():
+            require_financial_writes_allowed()  # No bot init/background jobs in recovery.
         async with self._lock:
             existing = self._bots.get(user_id)
             if existing:

@@ -852,7 +852,9 @@ export function buildBullpenAutoRunWorkflowView(
         ? (readString(stage?.outputs?.llm_execution_mode) ??
           readString(stage?.inputs?.llm_execution_mode))
         : null;
-    const progressLabel = !shouldShowStageData
+    const progressLabel = !normalizedRun && !pendingRunId
+      ? "Unknown"
+      : !shouldShowStageData
       ? runStatus === "failed" ? "Blocked by upstream failure" : "Queued"
       : explicitPhase === "cancelled"
         ? "Cancelled"
@@ -911,7 +913,9 @@ export function buildBullpenAutoRunWorkflowView(
             )
           : null;
     let detail =
-      (shouldShowStageData ? stage?.reason : null) ||
+      !normalizedRun && !pendingRunId
+        ? "Workflow description only; execution status is unknown."
+        : (shouldShowStageData ? stage?.reason : null) ||
       (state === "current" && index === 0 && runStatus === "running"
         ? "Bullpen scan started. Waiting for the worker handoff to complete."
         : state === "finished"
@@ -983,7 +987,7 @@ export function buildBullpenAutoRunWorkflowView(
             ? "Last run failed"
             : runStatus === "skipped"
               ? "Last run was skipped"
-              : "Queued for the next auto-run");
+              : normalizedRun ? "Queued for the next auto-run" : "Execution status unknown");
   const statusCopy =
     taskLifecycleLabel ??
     (runStatus === "failed"
@@ -1016,7 +1020,9 @@ export function buildBullpenAutoRunWorkflowView(
                 normalizedRun?.summary,
                 "The latest Bullpen Scan + LLM + Exit and Invest run was skipped.",
               )
-            : "The next Bullpen Scan + LLM + Exit and Invest run is waiting in queue.");
+            : normalizedRun
+              ? "The saved run reports waiting in queue; this does not verify current worker execution."
+              : "No saved run evidence is available. The stages describe the workflow; queue and execution status are unknown.");
 
   return {
     stages,

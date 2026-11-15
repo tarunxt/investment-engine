@@ -153,22 +153,23 @@ def test_no_rationale_score_inference_or_relaxed_integer_contract(score):
     assert result.content == original
 
 
-def test_authoritative_metadata_fills_missing_fields_but_preserves_existing_provenance():
+def test_authoritative_metadata_replaces_model_identity_and_preserves_source_values():
     row = swing_row()
     del row["run_number"]
     del row["llm"]
     row["run_time"] = ""
     result = normalize_output(json.dumps([row]), "swing", metadata={"run_number": 7, "llm": "persisted model",
-                                                                               "run_time": "01:00", "llm_name_model": "do not overwrite"})
+                                                                               "run_time": "01:00", "llm_name_model": "actual/provider"})
     assert result.safe_to_replace, result.findings
     assert result.rows[0].values["run_number"] == 7
     assert result.rows[0].values["llm"] == "persisted model"
-    assert result.rows[0].values["llm_name_model"] == "Provider / Model 1"
-    assert set(result.rows[0].filled_fields) == {"run_number", "llm", "run_time"}
+    assert result.rows[0].values["llm_name_model"] == "actual/provider"
+    assert result.rows[0].source_values["llm_name_model"] == "Provider / Model 1"
+    assert set(result.rows[0].filled_fields) == {"run_number", "llm", "run_time", "llm_name_model"}
     assert "run_number" not in result.rows[0].source_values
     null = normalize_output(json.dumps([swing_row(run_number=None)]), "swing", metadata={"run_number": 7})
-    assert not null.safe_to_replace
-    assert null.rows[0].values["run_number"] is None
+    assert null.safe_to_replace
+    assert null.rows[0].values["run_number"] == 7
 
 
 def test_metadata_cannot_fill_price_stop_score_or_judgment():
@@ -217,19 +218,19 @@ def test_missing_current_units_only_copy_from_snapshot_and_final_units_need_opt_
     assert result.rows[0].values["final_units"] == "10"
     assert set(result.rows[0].filled_fields) == {"current_units", "final_units"}
     no_arithmetic = normalize_output(original, "rebalance", holdings=[holding()])
-    assert not no_arithmetic.safe_to_replace
-    assert "final_units" not in no_arithmetic.rows[0].values
+    assert no_arithmetic.safe_to_replace
+    assert no_arithmetic.rows[0].values["final_units"] == "-"
     no_snapshot = normalize_output(original, "rebalance", holdings=[], derive_arithmetic=True)
     assert not no_snapshot.safe_to_replace
-    assert "current_units" not in no_snapshot.rows[0].values
+    assert no_snapshot.rows[0].values["current_units"] == "-"
 
 
 def test_missing_buy_new_current_units_are_not_assumed_zero():
     row = rebalance_row(action="Buy New", current_units=None, units_change=1, final_units=1, units_to_buy=1, total_buy_amount=100)
     original = json.dumps([row])
     result = normalize_output(original, "rebalance", holdings=[], derive_arithmetic=True)
-    assert not result.safe_to_replace
-    assert result.rows[0].values["current_units"] is None
+    assert result.safe_to_replace
+    assert result.rows[0].values["current_units"] == "-"
 
 
 @pytest.mark.parametrize("action,delta,final,buy,amount", [
@@ -358,7 +359,7 @@ def test_technical_eight_column_table_and_unknown_levels_are_preserved():
 
 
 def test_hashes_are_stable_and_distinguish_schema_and_source():
-    assert CONTRACT_VERSION == "credx-output-v1"
+    assert CONTRACT_VERSION == "credx-output-v3"
     assert contract_hash("swing") == contract_hash("swing")
     assert len({contract_hash(kind) for kind in ("swing", "rebalance", "technical", "threat")}) == 4
     assert source_hash("one") != source_hash("two")
@@ -395,3 +396,128 @@ def test_extreme_json_exponent_is_blocked_without_exception_or_replacement():
     source=json.dumps([swing_row()]).replace('"upside_horizon": 20','"upside_horizon": 1e99999999999999999999999')
     result=normalize_output(source,'swing')
     assert not result.safe_to_replace and result.content==source
+
+
+@pytest.mark.parametrize('extra_cells', [4, 6])
+def test_rebalance_extra_cells_preserve_original_and_retain_usable_prefix(extra_cells):
+    # Synthetic reproduction of screenshot widths, not job 2221 raw evidence.
+    original = table(REBALANCE_COLUMNS, [rebalance_row()])
+    original = original + ' extra |' * extra_cells
+    result = normalize_output(original, 'rebalance', holdings=[holding()])
+    assert result.safe_to_replace
+    assert result.original == original
+    assert result.rows[0].values['unaligned_source_cells'].count('extra') == extra_cells
+    assert result.rows[0].values['score_rationale_cruxx'] == '-'
+    assert any(f.code == 'row_width' and f'received {29 + extra_cells}' in f.message
+               for f in result.findings)
+
+
+@pytest.mark.parametrize('literal', [r'bull \| bear', 'bull &#124; bear'])
+def test_rebalance_escaped_pipe_remains_in_one_of_29_cells(literal):
+    original = table(REBALANCE_COLUMNS, [rebalance_row(rationale_remarks=literal)])
+    result = normalize_output(original, 'rebalance', holdings=[holding()])
+    assert result.safe_to_replace, result.findings
+    assert result.rows[0].values['rationale_remarks'] == 'bull | bear'
+    assert normalize_output(result.content, 'rebalance', holdings=[holding()]).safe_to_replace
+
+
+@pytest.mark.parametrize('literal', ['bull | bear', '`bull | bear`', '"bull | bear"'])
+def test_rebalance_unescaped_pipe_is_never_guessed_or_truncated(literal):
+    original = table(REBALANCE_COLUMNS, [rebalance_row(rationale_remarks=literal)])
+    result = normalize_output(original, 'rebalance', holdings=[holding()])
+    assert result.safe_to_replace
+    assert result.original == original
+    assert literal in result.rows[0].values['unaligned_source_cells']
+    assert result.rows[0].values['score_rationale_cruxx'] == '-'
+    assert normalize_output(result.content, 'rebalance', holdings=[holding()]).safe_to_replace
+
+
+def test_rebalance_separator_must_match_29_column_header():
+    original = table(REBALANCE_COLUMNS, [rebalance_row()])
+    lines = original.splitlines()
+    lines[1] += ' --- |'
+    original = '\n'.join(lines)
+    result = normalize_output(original, 'rebalance', holdings=[holding()])
+    assert not result.safe_to_replace
+    assert result.content == original
+    assert 'separator_width' in codes(result)
+
+
+@pytest.mark.parametrize('extra_count', [4, 6])
+def test_rebalance_named_superset_maps_reordered_required_fields(extra_count):
+    from app.domains.jobs.output_contracts.schemas import Column
+    extras = tuple(Column(f'extra_{i}', f'Evidence {i}') for i in range(extra_count))
+    columns = (*extras[:2], *reversed(REBALANCE_COLUMNS), *extras[2:])
+    row = rebalance_row(**{c.key: f'original {c.key}' for c in extras})
+    original = table(columns, [row])
+    result = normalize_output(original, 'rebalance', holdings=[holding()])
+    assert result.safe_to_replace, result.findings
+    assert result.original == original
+    assert any(f.code == 'named_superset_mapping' for f in result.findings)
+    for c in REBALANCE_COLUMNS:
+        assert str(result.rows[0].values[c.key]) == str(row[c.key])
+    for c in extras:
+        assert result.rows[0].values['extra:' + c.label] == row[c.key]
+    assert len(export_tables(result)[0].headers) == 29 + extra_count
+
+
+def test_rebalance_superset_duplicate_required_header_blocks():
+    from app.domains.jobs.output_contracts.schemas import Column
+    original = table((*REBALANCE_COLUMNS, Column('stock_symbol', 'Stock Symbol')), [rebalance_row()])
+    result = normalize_output(original, 'rebalance', holdings=[holding()])
+    assert not result.safe_to_replace
+    assert result.content == original
+    assert 'duplicate_columns' in codes(result)
+
+
+@pytest.mark.parametrize('defect', ['missing', 'invalid'])
+def test_rebalance_named_superset_does_not_bypass_required_field_validation(defect):
+    from app.domains.jobs.output_contracts.schemas import Column
+    columns = tuple(c for c in REBALANCE_COLUMNS if defect != 'missing' or c.key != 'stop_loss')
+    original = table((*columns, Column('evidence', 'Evidence')),
+                     [rebalance_row(stop_loss='not a number', evidence='extra')])
+    result = normalize_output(original, 'rebalance', holdings=[holding()])
+    if defect == 'missing':
+        assert result.safe_to_replace
+        assert result.rows[0].values['stop_loss'] == '-'
+    else:
+        assert not result.safe_to_replace
+        assert result.content == original
+
+
+def test_rebalance_commas_inside_cells_are_data():
+    original = table(REBALANCE_COLUMNS, [rebalance_row(rationale_remarks='earnings, volume, trend')])
+    result = normalize_output(original, 'rebalance', holdings=[holding()])
+    assert result.safe_to_replace, result.findings
+    assert result.rows[0].values['rationale_remarks'] == 'earnings, volume, trend'
+
+
+def test_short_rebalance_rows_remain_usable_without_guessing_shifted_rationales():
+    rows = [rebalance_row(symbol) for symbol in ("BEL", "CDSL", "ETERNAL", "GOOD")]
+    original = table(REBALANCE_COLUMNS, rows)
+    lines = original.splitlines()
+    for index in range(2, 5):
+        cells = lines[index].strip("| ").split(" | ")
+        del cells[23:25]  # omitted long-term technical pair, shifting fundamentals
+        lines[index] = "| " + " | ".join(cells) + " |"
+    result = normalize_output("\n".join(lines), "rebalance", holdings=[holding(r['stock_symbol']) for r in rows])
+    assert result.safe_to_replace, result.findings
+    assert result.coverage.validated_rows == 4
+    for row in result.rows[:3]:
+        assert row.values['current_units'] == '10'
+        assert row.values['score_rationale_technical_long_term'] == '-'
+        assert 'Supplied rationale_fundamentals_medium_long_term' in row.values['unaligned_source_cells']
+    assert result.rows[3].values['score_rationale_technical_long_term'] == '0'
+    again = normalize_output(result.content, 'rebalance', holdings=[holding(r['stock_symbol']) for r in rows])
+    assert again.safe_to_replace
+    assert again.content == result.content
+
+
+def test_missing_rebalance_values_are_excluded_not_zero_and_bad_values_still_fail():
+    row = rebalance_row(stop_loss=None, target='-', score_rationale_cruxx='-', action='-')
+    result = normalize_output(json.dumps([row]), 'rebalance', holdings=[holding()])
+    assert result.safe_to_replace
+    assert result.rows[0].values['stop_loss'] == '-'
+    assert number(result.rows[0].values['score_rationale_cruxx']) is None
+    row['score_rationale_cruxx'] = 99
+    assert not normalize_output(json.dumps([row]), 'rebalance', holdings=[holding()]).safe_to_replace

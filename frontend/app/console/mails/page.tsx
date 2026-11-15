@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AlertTriangle,
   CheckCircle2,
@@ -461,7 +461,12 @@ function SellWorkflowOverview() {
   );
 }
 
-function SellBatchPreparation({ history }: { history: MailHistoryItem[] }) {
+function SellBatchPreparation({ history, verified, loading, error }: {
+  history: MailHistoryItem[];
+  verified: boolean;
+  loading: boolean;
+  error: string | null;
+}) {
   type BatchRow = {
     key: string;
     event: string;
@@ -544,11 +549,20 @@ function SellBatchPreparation({ history }: { history: MailHistoryItem[] }) {
     (total, row) => total + (row.expectedProceeds || 0),
     0,
   );
+  const cached = verified && (loading || Boolean(error));
+  const sourceStatus = !verified
+    ? loading
+      ? 'Loading mail-history source. Sell batch counts are unknown.'
+      : 'Mail-history source unavailable. Sell batch counts are unknown.'
+    : cached
+      ? 'Showing cached mail-history records. Current Sell batch state is unverified.'
+      : 'Source: successfully loaded mail-history records. This summary covers those records only.';
 
   return (
     <section
       className="mt-8 overflow-hidden rounded-3xl border border-blue-200 bg-card shadow-sm"
       aria-label="Sell batch preparation"
+      aria-busy={loading}
     >
       <div className="border-b border-blue-200 bg-blue-50/70 px-6 py-5">
         <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-700">
@@ -560,14 +574,15 @@ function SellBatchPreparation({ history }: { history: MailHistoryItem[] }) {
         <p className="mt-1 text-sm text-muted-foreground">
           Include a position only when its fresh live held-side Bullpen odds are strictly below 80.0%. LLM odds are ignored.
         </p>
+        <p className="mt-3 text-sm text-muted-foreground" role={error ? 'alert' : 'status'}>{sourceStatus}</p>
         <div className="mt-4 grid gap-3 sm:grid-cols-4">
-          <div className="rounded-xl border border-red-200 bg-white p-3"><p className="text-xs text-muted-foreground">Included</p><p className="mt-1 text-2xl font-bold text-red-700">{included.length}</p></div>
-          <div className="rounded-xl border border-emerald-200 bg-white p-3"><p className="text-xs text-muted-foreground">Recovered / excluded</p><p className="mt-1 text-2xl font-bold text-emerald-700">{recovered.length}</p></div>
-          <div className="rounded-xl border border-amber-200 bg-white p-3"><p className="text-xs text-muted-foreground">Awaiting live validation</p><p className="mt-1 text-2xl font-bold text-amber-700">{unverified.length}</p></div>
-          <div className="rounded-xl border border-blue-200 bg-white p-3"><p className="text-xs text-muted-foreground">Expected proceeds</p><p className="mt-1 text-2xl font-bold text-blue-700">${expectedTotal.toFixed(2)}</p></div>
+          <div className="rounded-xl border border-red-200 bg-white p-3"><p className="text-xs text-muted-foreground">Included</p><p className="mt-1 text-2xl font-bold text-red-700">{verified ? included.length : 'Unknown'}</p></div>
+          <div className="rounded-xl border border-emerald-200 bg-white p-3"><p className="text-xs text-muted-foreground">Recovered / excluded</p><p className="mt-1 text-2xl font-bold text-emerald-700">{verified ? recovered.length : 'Unknown'}</p></div>
+          <div className="rounded-xl border border-amber-200 bg-white p-3"><p className="text-xs text-muted-foreground">Awaiting live validation</p><p className="mt-1 text-2xl font-bold text-amber-700">{verified ? unverified.length : 'Unknown'}</p></div>
+          <div className="rounded-xl border border-blue-200 bg-white p-3"><p className="text-xs text-muted-foreground">Expected proceeds</p><p className="mt-1 text-2xl font-bold text-blue-700">{verified ? `$${expectedTotal.toFixed(2)}` : 'Unknown'}</p></div>
         </div>
       </div>
-      {rows.length ? (
+      {verified && rows.length > 0 ? (
         <div className="overflow-x-auto">
           <table className="min-w-[1380px] w-full text-left text-xs">
             <thead className="border-b border-border bg-muted/50 uppercase tracking-wide text-muted-foreground">
@@ -608,11 +623,11 @@ function SellBatchPreparation({ history }: { history: MailHistoryItem[] }) {
             </tbody>
           </table>
         </div>
-      ) : (
+      ) : verified ? (
         <div className="p-6 text-sm text-muted-foreground">
-          No Sell alerts have been evaluated against live Bullpen odds yet.
+          No evaluated Sell alerts are present in these mail-history records.
         </div>
-      )}
+      ) : null}
     </section>
   );
 }
@@ -625,19 +640,28 @@ export default function MailsPage() {
   const [history, setHistory] = useState<MailHistoryItem[]>([]);
   const [historyLoading, setHistoryLoading] = useState(true);
   const [historyError, setHistoryError] = useState<string | null>(null);
+  const [historyVerified, setHistoryVerified] = useState(false);
+  const historyRequest = useRef(0);
+  const historyRefreshPending = useRef(false);
   const [githubRuns, setGithubRuns] = useState<GitHubWorkflowRun[]>([]);
   const [githubLoading, setGithubLoading] = useState(true);
   const [githubError, setGithubError] = useState<string | null>(null);
+  const [githubVerified, setGithubVerified] = useState(false);
+  const githubRequest = useRef(0);
   const [historyTab, setHistoryTab] = useState<MailHistoryTab>('all');
   const [preferences, setPreferences] = useState<MailPreference[]>([]);
-  const [preferencesLoading, setPreferencesLoading] = useState(true);
+  const [preferencesLoadState, setPreferencesLoadState] = useState<'loading' | 'ready' | 'error'>('loading');
+  const preferencesLoading = preferencesLoadState === 'loading';
+  const preferencesUnavailable = preferencesLoadState !== 'ready';
+  const preferencesRequest = useRef(0);
   const [preferencesSaving, setPreferencesSaving] = useState(false);
   const [preferencesDirty, setPreferencesDirty] = useState(false);
   const [preferencesError, setPreferencesError] = useState<string | null>(null);
   const [preferencesSaved, setPreferencesSaved] = useState(false);
 
   const loadPreferences = useCallback(async () => {
-    setPreferencesLoading(true);
+    const request = ++preferencesRequest.current;
+    setPreferencesLoadState('loading');
     setPreferencesError(null);
     try {
       const response = await fetch(URLs.mails.preferences(), {
@@ -650,16 +674,18 @@ export default function MailsPage() {
       if (!response.ok || !Array.isArray(payload?.items)) {
         throw new Error('Mail preferences could not be loaded.');
       }
+      if (request !== preferencesRequest.current) return;
       setPreferences(payload.items);
       setPreferencesDirty(false);
+      setPreferencesLoadState('ready');
     } catch (preferenceFailure) {
+      if (request !== preferencesRequest.current) return;
+      setPreferencesLoadState('error');
       setPreferencesError(
         preferenceFailure instanceof Error
           ? preferenceFailure.message
           : 'Mail preferences could not be loaded.',
       );
-    } finally {
-      setPreferencesLoading(false);
     }
   }, []);
 
@@ -667,6 +693,7 @@ export default function MailsPage() {
     // Initial network synchronization is intentionally performed after mount.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadPreferences();
+    return () => { preferencesRequest.current += 1; };
   }, [loadPreferences]);
 
   function setPreference(key: string, enabled: boolean) {
@@ -684,7 +711,7 @@ export default function MailsPage() {
   }
 
   async function savePreferences() {
-    if (preferencesSaving || !preferencesDirty) return;
+    if (preferencesUnavailable || preferencesSaving || !preferencesDirty) return;
     setPreferencesSaving(true);
     setPreferencesError(null);
     setPreferencesSaved(false);
@@ -722,6 +749,7 @@ export default function MailsPage() {
   }
 
   const loadHistory = useCallback(async () => {
+    const request = ++historyRequest.current;
     setHistoryLoading(true);
     setHistoryError(null);
     try {
@@ -735,15 +763,18 @@ export default function MailsPage() {
       if (!response.ok || !Array.isArray(payload?.items)) {
         throw new Error('Mail history could not be loaded.');
       }
+      if (request !== historyRequest.current) return;
       setHistory(payload.items);
+      setHistoryVerified(true);
     } catch (historyFailure) {
+      if (request !== historyRequest.current) return;
       setHistoryError(
         historyFailure instanceof Error
           ? historyFailure.message
           : 'Mail history could not be loaded.',
       );
     } finally {
-      setHistoryLoading(false);
+      if (request === historyRequest.current) setHistoryLoading(false);
     }
   }, []);
 
@@ -764,6 +795,7 @@ export default function MailsPage() {
   }, [historyLoading, history]);
 
   const loadGitHubRuns = useCallback(async () => {
+    const request = ++githubRequest.current;
     setGithubLoading(true);
     setGithubError(null);
     try {
@@ -783,15 +815,18 @@ export default function MailsPage() {
       if (!response.ok || !Array.isArray(payload?.workflow_runs)) {
         throw new Error(payload?.message || 'GitHub workflow history could not be loaded.');
       }
+      if (request !== githubRequest.current) return;
       setGithubRuns(payload.workflow_runs);
+      setGithubVerified(true);
     } catch (githubFailure) {
+      if (request !== githubRequest.current) return;
       setGithubError(
         githubFailure instanceof Error
           ? githubFailure.message
           : 'GitHub workflow history could not be loaded.',
       );
     } finally {
-      setGithubLoading(false);
+      if (request === githubRequest.current) setGithubLoading(false);
     }
   }, []);
 
@@ -802,7 +837,13 @@ export default function MailsPage() {
   }, [loadGitHubRuns]);
 
   async function refreshHistory() {
-    await Promise.all([loadHistory(), loadGitHubRuns()]);
+    if (historyLoading || githubLoading || historyRefreshPending.current) return;
+    historyRefreshPending.current = true;
+    try {
+      await Promise.all([loadHistory(), loadGitHubRuns()]);
+    } finally {
+      historyRefreshPending.current = false;
+    }
   }
 
   async function sendMail() {
@@ -870,8 +911,23 @@ export default function MailsPage() {
           .find((tab) => tab.id === historyTab)
           ?.label.toLowerCase()} mails have been recorded yet.`;
 
+  // STATE-Mails-History-FailedVersusEmpty: only a verified, current success
+  // can establish emptiness. Failed refreshes retain the last successful rows.
+  const selectedGitHub = historyTab === 'github';
+  const resultsLoading = selectedGitHub ? githubLoading : historyLoading;
+  const resultsError = selectedGitHub ? githubError : historyError;
+  const resultsVerified = selectedGitHub ? githubVerified : historyVerified;
+  const resultsCount = selectedGitHub ? githubRuns.length : visibleHistory.length;
+  const historyStatus = resultsLoading
+    ? `${selectedGitHub ? 'Loading GitHub workflow history' : 'Loading mail history'}…${resultsVerified ? ' Previously loaded results and counts remain visible.' : ''}`
+    : resultsError
+      ? `${resultsError} ${resultsVerified ? 'Previously loaded results and counts remain visible and may be out of date.' : 'No empty-history conclusion is available.'}`
+      : resultsVerified && resultsCount === 0
+        ? selectedGitHub ? 'No GitHub workflow notifications are available.' : emptyHistoryMessage
+        : null;
+
   return (
-    <main className="mx-auto w-full max-w-4xl px-4 py-8 sm:px-6 lg:px-8">
+    <main className="mx-auto w-full max-w-4xl px-4 py-8 sm:px-6 lg:max-w-none lg:px-0">
       <section className="overflow-hidden rounded-3xl border border-border bg-card shadow-sm">
         <div className="border-b border-border bg-linear-to-r from-violet-600 to-indigo-600 px-6 py-7 text-white sm:px-8">
           <div className="flex items-center gap-3">
@@ -905,7 +961,7 @@ export default function MailsPage() {
                 <button
                   type="button"
                   onClick={() => setAllPreferences(true)}
-                  disabled={preferencesLoading || preferencesSaving}
+                  disabled={preferencesUnavailable || preferencesSaving}
                   className="rounded-lg border border-border px-3 py-2 text-xs font-semibold text-foreground transition hover:bg-muted disabled:opacity-50"
                 >
                   Select all
@@ -913,7 +969,7 @@ export default function MailsPage() {
                 <button
                   type="button"
                   onClick={() => setAllPreferences(false)}
-                  disabled={preferencesLoading || preferencesSaving}
+                  disabled={preferencesUnavailable || preferencesSaving}
                   className="rounded-lg border border-border px-3 py-2 text-xs font-semibold text-foreground transition hover:bg-muted disabled:opacity-50"
                 >
                   Deselect all
@@ -922,7 +978,7 @@ export default function MailsPage() {
             </div>
 
             {preferencesLoading ? (
-              <div className="mt-4 flex items-center gap-2 text-sm text-muted-foreground">
+              <div role="status" className="mt-4 flex items-center gap-2 text-sm text-muted-foreground">
                 <RefreshCw className="h-4 w-4 animate-spin" />
                 Loading notification settings…
               </div>
@@ -930,7 +986,8 @@ export default function MailsPage() {
               <div className="mt-4 grid gap-3 sm:grid-cols-2">
                 <CompletionPreferences
                   items={preferences.filter((item) => item.group === 'completion')}
-                  disabled={preferencesSaving}
+                  disabled={preferencesUnavailable || preferencesSaving}
+                  available={!preferencesUnavailable}
                   onApply={(values) => {
                     setPreferences((current) => current.map((item) => item.key in values ? { ...item, enabled: values[item.key] } : item));
                     setPreferencesDirty(true);
@@ -946,7 +1003,7 @@ export default function MailsPage() {
                       type="checkbox"
                       checked={preference.enabled}
                       onChange={(event) => setPreference(preference.key, event.target.checked)}
-                      disabled={preferencesSaving}
+                      disabled={preferencesUnavailable || preferencesSaving}
                       className="mt-0.5 h-4 w-4 shrink-0 accent-violet-600"
                     />
                     <span>
@@ -976,7 +1033,17 @@ export default function MailsPage() {
 
             {preferencesError ? (
               <div role="alert" className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
-                {preferencesError}
+                <p>{preferencesError}</p>
+                {preferencesLoadState === 'error' ? (
+                  <button
+                    type="button"
+                    onClick={() => void loadPreferences()}
+                    className="mt-2 inline-flex items-center gap-2 rounded-lg border border-red-300 px-3 py-2 font-semibold focus-visible:outline-2 focus-visible:outline-offset-2"
+                  >
+                    <RefreshCw aria-hidden="true" className="h-4 w-4" />
+                    Retry settings
+                  </button>
+                ) : null}
               </div>
             ) : null}
             {preferencesSaved ? (
@@ -989,7 +1056,7 @@ export default function MailsPage() {
             <button
               type="button"
               onClick={() => void savePreferences()}
-              disabled={preferencesLoading || preferencesSaving || !preferencesDirty}
+              disabled={preferencesUnavailable || preferencesSaving || !preferencesDirty}
               className="mt-4 inline-flex items-center justify-center gap-2 rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <Save className="h-4 w-4" />
@@ -1087,15 +1154,15 @@ export default function MailsPage() {
 
       <SellWorkflowOverview />
 
-      <SellBatchPreparation history={history} />
+      <SellBatchPreparation history={history} verified={historyVerified} loading={historyLoading} error={historyError} />
 
-      <section className="mt-8 overflow-hidden rounded-3xl border border-border bg-card shadow-sm">
+      <section aria-labelledby="mail-history-heading" className="mt-8 overflow-hidden rounded-3xl border border-border bg-card shadow-sm">
         <div className="flex flex-col gap-3 border-b border-border px-6 py-5 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-violet-600">
               Delivery audit
             </p>
-            <h2 className="mt-1 text-xl font-bold text-foreground">Sent mail history</h2>
+            <h2 id="mail-history-heading" className="mt-1 text-xl font-bold text-foreground">Sent mail history</h2>
             <p className="mt-1 text-sm text-muted-foreground">
               Every email sent through Cred-X SMTP, grouped by purpose. New mail types appear in All Cred-X automatically.
             </p>
@@ -1103,39 +1170,57 @@ export default function MailsPage() {
           <button
             type="button"
             onClick={() => void refreshHistory()}
-            disabled={historyLoading || githubLoading}
-            className="inline-flex items-center justify-center gap-2 rounded-xl border border-border px-4 py-2 text-sm font-semibold text-foreground transition hover:bg-muted disabled:opacity-50"
+            aria-disabled={historyLoading || githubLoading}
+            className="inline-flex items-center justify-center gap-2 rounded-xl border border-border px-4 py-2 text-sm font-semibold text-foreground transition hover:bg-muted aria-disabled:opacity-50"
           >
             <RefreshCw className={`h-4 w-4 ${historyLoading || githubLoading ? 'animate-spin' : ''}`} />
             Refresh
           </button>
         </div>
 
-        <div className="border-b border-border px-6 pt-4">
-          <div className="flex gap-1 overflow-x-auto" role="tablist" aria-label="Mail history categories">
-            {historyTabs.map((tab) => (
-              <button
-                key={tab.id}
-                type="button"
-                role="tab"
-                aria-selected={historyTab === tab.id}
-                onClick={() => setHistoryTab(tab.id)}
-                className={`shrink-0 border-b-2 px-4 py-3 text-sm font-semibold transition ${
-                  historyTab === tab.id
-                    ? 'border-violet-600 text-violet-700'
-                    : 'border-transparent text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                {tab.label}
-                <span className="ml-2 rounded-full bg-muted px-2 py-0.5 text-xs">
-                  {tab.count}
-                </span>
-              </button>
-            ))}
+        <div className="border-b border-border bg-muted/20 px-4 py-4 sm:px-6">
+          <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-4 rounded-t-xl border border-border bg-slate-100 px-4 py-2 text-xs font-semibold text-slate-700 dark:bg-muted dark:text-muted-foreground" aria-hidden="true">
+            <span>Category</span><span>Displayed count</span>
+          </div>
+          <div className="overflow-hidden rounded-b-xl border-x border-b border-border bg-card" role="tablist" aria-orientation="vertical" aria-label="Mail history categories">
+            {historyTabs.map((tab, index) => {
+              const verified = tab.id === 'github' ? githubVerified : historyVerified;
+              const cached = verified && (tab.id === 'github' ? githubLoading || !!githubError : historyLoading || !!historyError);
+              return (
+                <button
+                  key={tab.id}
+                  id={`mail-history-tab-${tab.id}`}
+                  type="button"
+                  role="tab"
+                  aria-controls="mail-history-results"
+                  aria-selected={historyTab === tab.id}
+                  tabIndex={historyTab === tab.id ? 0 : -1}
+                  onClick={() => setHistoryTab(tab.id)}
+                  onKeyDown={(event) => {
+                    const next = event.key === 'Home' ? 0 : event.key === 'End' ? historyTabs.length - 1 : event.key === 'ArrowDown' ? (index + 1) % historyTabs.length : event.key === 'ArrowUp' ? (index + historyTabs.length - 1) % historyTabs.length : null;
+                    if (next === null) return;
+                    event.preventDefault();
+                    setHistoryTab(historyTabs[next].id);
+                    document.getElementById(`mail-history-tab-${historyTabs[next].id}`)?.focus();
+                  }}
+                  className={`grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-4 border-b border-border px-4 py-2 text-left text-sm transition last:border-b-0 focus-visible:relative focus-visible:z-10 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-violet-600 ${historyTab === tab.id ? 'bg-violet-50 font-semibold text-violet-800 dark:bg-violet-950 dark:text-violet-200' : 'text-foreground hover:bg-muted'}`}
+                >
+                  <span>{tab.label}</span>
+                  <span className="rounded-md bg-muted px-2 py-0.5 text-xs tabular-nums">
+                    {verified ? tab.count : 'Unavailable'}{cached ? ' · cached' : ''}
+                  </span>
+                </button>
+              );
+            })}
           </div>
         </div>
 
-        <div className="space-y-4 p-6">
+        <div id="mail-history-results" role="tabpanel" aria-labelledby={`mail-history-tab-${historyTab}`} tabIndex={0} aria-busy={resultsLoading} className="space-y-4 p-4 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-violet-600 sm:p-6">
+          {historyStatus ? (
+            <div role={resultsError ? 'alert' : 'status'} className={`rounded-xl border px-4 py-3 text-sm ${resultsError ? 'border-amber-200 bg-amber-50 text-amber-950 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100' : 'border-border bg-muted/30 text-muted-foreground'}`}>
+              {historyStatus}
+            </div>
+          ) : null}
           {historyTab === 'github' ? (
             <>
               <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm leading-6 text-blue-950">
@@ -1147,16 +1232,6 @@ export default function MailsPage() {
                   These are the live workflow records behind GitHub PR and deployment emails. They are shown separately because GitHub—not Cred-X SMTP—sends those messages.
                 </p>
               </div>
-              {githubError ? (
-                <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
-                  {githubError}
-                </div>
-              ) : null}
-              {!githubLoading && !githubError && githubRuns.length === 0 ? (
-                <div className="rounded-2xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
-                  No GitHub workflow notifications are available.
-                </div>
-              ) : null}
               {githubRuns.map((run) => {
                 const failed = run.conclusion === 'failure';
                 const complete = run.status === 'completed';
@@ -1202,18 +1277,6 @@ export default function MailsPage() {
                 );
               })}
             </>
-          ) : null}
-
-          {historyTab !== 'github' && historyError ? (
-            <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
-              {historyError}
-            </div>
-          ) : null}
-
-          {historyTab !== 'github' && !historyLoading && visibleHistory.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
-              {emptyHistoryMessage}
-            </div>
           ) : null}
 
           {visibleHistory.map((item) => {

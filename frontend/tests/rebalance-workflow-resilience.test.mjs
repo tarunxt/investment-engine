@@ -9,6 +9,7 @@ const source = readFileSync(
   ),
   "utf8",
 );
+const stageTileSource = readFileSync(new URL("../components/shared/WorkflowStageTile.tsx", import.meta.url), "utf8");
 const bridgeSource = readFileSync(
   new URL(
     "../app/console/automated-rebalance/_components/AutomatedRebalanceReliabilityBridge.tsx",
@@ -159,8 +160,8 @@ test("technical output opens the exact latest run even when that run failed", ()
     source,
     /if \(stage === "technical"\)\s+return isTechnicalScanRun\(run, market\);/,
   );
-  assert.match(source, /DeepSeek credits were insufficient for this run/);
-  assert.match(source, /no\\s\+credits\?\\s\+remaining/);
+  assert.match(stageTileSource, /Provider credits insufficient/);
+  assert.match(stageTileSource, /no\\s\+credits\?\\s\+remaining/);
 });
 
 test("ambiguous threat starts reconcile against durable history instead of producing Error null", () => {
@@ -179,7 +180,7 @@ test("Zerodha Run preserves the popup user gesture and surfaces start failures",
   const runWorkflowSource = source.slice(start, end);
   const popupIndex = runWorkflowSource.indexOf('window.open("about:blank"');
   const reservationIndex = runWorkflowSource.indexOf(
-    "await reserveAutoRebalanceRunMetadata(portfolio)",
+    "await reserveAutoRebalanceRunMetadata(portfolio, analysisOnlyRuns[portfolio])",
   );
   assert.ok(popupIndex >= 0, "Zerodha popup should be pre-opened");
   assert.ok(reservationIndex >= 0, "run metadata should still be reserved");
@@ -192,8 +193,8 @@ test("Zerodha Run preserves the popup user gesture and surfaces start failures",
   assert.match(runWorkflowSource, /Could not start \$\{/);
   assert.match(runWorkflowSource, /window\.alert\(message\)/);
   assert.match(
-    source,
-    /if \(info\.error\) rows\.push\(\{ label: "Error", value: info\.error \}\);/,
+    stageTileSource,
+    /rows\.push\(getStageTileError\(info\)\);/,
   );
 });
 
@@ -203,11 +204,11 @@ test("Zerodha login waits for durable token readiness and retries sync only once
   assert.match(source, /ZERODHA_AUTH_CLOSE_GRACE_MS/);
   assert.match(source, /async function queueZerodhaPortfolioSyncWithAuthRetry/);
   assert.match(source, /if \(!isZerodhaAuthPropagationError\(error\)\) throw error/);
-  assert.match(source, /await confirmZerodhaConnectionReady\(\)/);
+  assert.match(source, /await confirmZerodhaConnectionReady\(undefined, owner\)/);
   assert.equal(
-    (source.match(/queueZerodhaPortfolioSyncWithAuthRetry\(\)/g) ?? []).length,
-    3,
-    "the helper plus full-run and Sync Now callers should be present",
+    (source.match(/queueZerodhaPortfolioSyncWithAuthRetry\(runtimeOwner\)/g) ?? []).length,
+    2,
+    "full-run and Sync Now callers must retain their captured owner",
   );
   assert.match(apiSource, /zerodhaSyncPortfolio\(\)[\s\S]*?skipUnauthorizedRefresh: true/);
 });

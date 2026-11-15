@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import app.models  # noqa: F401 - register mapped relationship targets
 from app.domains.auth.models import ActivityLog, User
+from app.domains.api_usage.models import ApiUsageAttemptEvent
 from app.domains.jobs.models import Job
 from app.domains.prompts.models import Prompt
 from app.domains.runs import router as routes
@@ -26,7 +27,7 @@ from app.shared.types import JobStatus
 
 TABLES = [model.__table__ for model in (
     User, Prompt, Job, Run, RunJob, AutoRebalanceWorkflow,
-    AutoRebalanceWorkflowStage, ActivityLog,
+    AutoRebalanceWorkflowStage, ActivityLog, ApiUsageAttemptEvent,
 )]
 OWNER = SimpleNamespace(id=7)
 START = datetime(2026, 1, 2, 8, 0, tzinfo=timezone.utc)
@@ -238,6 +239,47 @@ async def test_history_still_derives_legacy_run_without_parent(audit_db):
         result = await routes.get_auto_rebalance_history_detail("india", 43, db, OWNER)
     assert result.status == "completed" and result.current_stage == "swing"
     assert result.runs[0].jobs[0].id == 8001
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("portfolio", ["india", "indmoney_us"])
+async def test_saved_output_provenance_is_scoped_and_does_not_rewrite_history(audit_db, portfolio):
+    original = "Model: Claude Sonnet 4.5 (Anthropic)\nSource date: 2026-01-01\nSynthetic value: 123.45"
+    async with audit_db.sessions() as db:
+        job = Job(id=8101, user_id=7, prompt="synthetic", response=original,
+                  provider="deepseek", model="deepseek-v4-flash", status=JobStatus.COMPLETED,
+                  auto_rebalance_portfolio=portfolio, auto_rebalance_sequence=44,
+                  tokens_in=12, tokens_out=34, estimated_cost=0.01)
+        db.add(job)
+        await db.flush()
+        for index, overrides in enumerate([
+            {}, {"actual_model": None}, {"user_id": 8, "actual_provider": "private-other-owner"},
+            {"status": "error", "actual_provider": "failed-provider"},
+            {"phase": "search", "actual_provider": "search-provider"},
+        ]):
+            fields = dict(user_id=7, job_id=job.id, actual_provider="deepseek",
+                          actual_model="deepseek-v4-flash", status="success", phase="request")
+            fields.update(overrides)
+            db.add(ApiUsageAttemptEvent(
+                event_id=f"synthetic-event-{index}", attempt_id=f"synthetic-attempt-{index}",
+                event_kind="finished", requested_provider="deepseek", requested_model="deepseek-v4-flash",
+                started_at=START, finished_at=FINISH, instrumentation_scope="synthetic", **fields,
+            ))
+        await db.commit()
+        detail = await routes.get_auto_rebalance_history_detail(portfolio, 44, db, OWNER)
+        saved = detail.standalone_jobs[0]
+        assert saved.response == original
+        assert (saved.provider, saved.model, saved.tokens_in, saved.tokens_out, saved.estimated_cost) == (
+            "deepseek", "deepseek-v4-flash", 12, 34, 0.01,
+        )
+        assert [identity.model_dump() for identity in saved.output_provenance.identities] == [
+            {"provider": "deepseek", "model": None},
+            {"provider": "deepseek", "model": "deepseek-v4-flash"},
+        ]
+        assert saved.output_provenance.observed_to.replace(tzinfo=timezone.utc) == FINISH
+        with pytest.raises(HTTPException) as denied:
+            await routes.get_auto_rebalance_history_detail(portfolio, 44, db, SimpleNamespace(id=8))
+        assert denied.value.status_code == 404
 
 
 @pytest.mark.anyio
@@ -776,3 +818,49 @@ async def test_history_keeps_legacy_fallback_for_records_without_canonical_ident
     assert (stages["threats"].job_id, stages["threats"].provider_count, stages["threats"].estimated_cost) == (702, 1, 0.5)
     assert detail.total_estimated_cost == 2.5
     assert (detail.status, detail.current_stage, detail.completed_at) == ("queued", "sync", None)
+
+@pytest.mark.anyio
+async def test_completed_parent_with_failed_provider_is_partial(audit_db):
+    from app.domains.runs.auto_rebalance_audit import validate_execution
+    async with audit_db.sessions() as db:
+        db.add(Run(id=800, user_id=7, prompt='scan', prompt_preview='scan', status=JobStatus.COMPLETED,
+                   auto_rebalance_portfolio='india', auto_rebalance_sequence=42,
+                   auto_rebalance_label='India Run #42 (Rebalance Scan)'))
+        for i, status in [(801, JobStatus.COMPLETED), (802, JobStatus.FAILED)]:
+            db.add(Job(id=i, user_id=7, prompt='scan', provider='test', model='test', status=status))
+        await db.flush()
+        db.add_all([RunJob(run_id=800, job_id=i, stage=1) for i in (801,802)])
+        await db.commit()
+        await validate_execution(db,user_id=7,portfolio='india',sequence=42,stage='rebalance',run_id=800,job_id=None,expected_status='partial')
+        with pytest.raises(HTTPException):
+            await validate_execution(db,user_id=7,portfolio='india',sequence=42,stage='rebalance',run_id=800,job_id=None,expected_status='completed')
+
+@pytest.mark.anyio
+async def test_final_capture_validates_revisions_and_preserves_first_snapshot(audit_db):
+    import hashlib
+    async with audit_db.sessions() as db:
+        for i, stage in [(810,'Rebalance'),(820,'Technical')]:
+            db.add(Run(id=i,user_id=7,prompt='scan',prompt_preview='scan',status=JobStatus.COMPLETED,
+                       auto_rebalance_portfolio='india',auto_rebalance_sequence=42,
+                       auto_rebalance_label=f'India Run #42 ({stage} Scan)'))
+            db.add(Job(id=i+1,user_id=7,prompt='scan',response='saved output',provider='test',model='test',status=JobStatus.COMPLETED))
+        await db.flush()
+        db.add_all([RunJob(run_id=i,job_id=i+1,stage=1) for i in (810,820)])
+        await db.commit()
+    payload = {'schema':'workflow-final-v1','rebalance_run_id':810,'technical_run_id':820,
+               'response_hashes':{str(i+1):hashlib.sha256(b'saved output').hexdigest() for i in (810,820)},
+               'rows':[{'exchange':'NSE','symbol':'BEL','score':1.5,'action':'Hold'}]}
+    bad = {**payload, 'response_hashes':{}}
+    with pytest.raises(HTTPException):
+        await write(audit_db,'actionables','completed',summary={'frozen_final':bad})
+    # Existing v1 history is preserved; the new-save path requires v2.
+    await write(audit_db,'actionables','completed',summary={})
+    async with audit_db.sessions() as db:
+        stage = (await db.execute(select(AutoRebalanceWorkflowStage).where(
+            AutoRebalanceWorkflowStage.stage == 'actionables'))).scalar_one()
+        stage.summary_json = {'frozen_final': payload}
+        await db.commit()
+    first = await write(audit_db,'actionables','completed',summary={'frozen_final':payload})
+    changed = {**payload,'rows':[{'exchange':'NSE','symbol':'BEL','score':3,'action':'Buy New'}]}
+    replay = await write(audit_db,'actionables','completed',summary={'frozen_final':changed})
+    assert replay.summary['frozen_final'] == first.summary['frozen_final'] == payload

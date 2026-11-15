@@ -67,7 +67,8 @@ class JWTUtils:
         user_id: int,
         email: str,
         role: str,
-        expires_delta: Optional[timedelta] = None
+        expires_delta: Optional[timedelta] = None,
+        session_id: Optional[str] = None
     ) -> str:
         """
         Create JWT access token.
@@ -94,13 +95,14 @@ class JWTUtils:
             "iat": datetime.utcnow()
         }
         
-        encoded_jwt = jwt.encode(
-            token_data, settings.jwt_secret_key.get_secret_value(), algorithm=ALGORITHM
-        )
+        if session_id is not None:
+            token_data["sid"] = session_id
+
+        encoded_jwt = jwt.encode(token_data, settings.jwt_signing_key.get_secret_value(), algorithm=ALGORITHM)
         return encoded_jwt
     
     @staticmethod
-    def create_refresh_token(user_id: int, email: str) -> str:
+    def create_refresh_token(user_id: int, email: str, session_id: Optional[str] = None, refresh_id: Optional[str] = None) -> str:
         """
         Create JWT refresh token.
         
@@ -121,9 +123,12 @@ class JWTUtils:
             "iat": datetime.utcnow()
         }
         
-        encoded_jwt = jwt.encode(
-            token_data, settings.jwt_secret_key.get_secret_value(), algorithm=ALGORITHM
-        )
+        if session_id is not None:
+            token_data["sid"] = session_id
+        if refresh_id is not None:
+            token_data["jti"] = refresh_id
+
+        encoded_jwt = jwt.encode(token_data, settings.jwt_signing_key.get_secret_value(), algorithm=ALGORITHM)
         return encoded_jwt
     
     @staticmethod
@@ -139,12 +144,29 @@ class JWTUtils:
         """
         try:
             payload = jwt.decode(
-                token, settings.jwt_secret_key.get_secret_value(), algorithms=[ALGORITHM]
+                token, settings.jwt_signing_key.get_secret_value(),
+                algorithms=[ALGORITHM], options={"require_exp": True},
             )
             return payload
-        except JWTError:
+        except (JWTError, TypeError, ValueError, OverflowError):
             return None
     
+    @staticmethod
+    def verify_access_token(token: str) -> Optional[Dict[str, Any]]:
+        """Accept the existing access shape, which has no type claim."""
+        payload = JWTUtils.verify_token(token)
+        if payload is None or "type" in payload:
+            return None
+        return payload
+
+    @staticmethod
+    def verify_refresh_token(token: str) -> Optional[Dict[str, Any]]:
+        """Accept only the existing explicitly typed refresh shape."""
+        payload = JWTUtils.verify_token(token)
+        if payload is None or payload.get("type") != "refresh":
+            return None
+        return payload
+
     @staticmethod
     def decode_token(token: str) -> Optional[Dict[str, Any]]:
         """
@@ -159,7 +181,7 @@ class JWTUtils:
         try:
             payload = jwt.decode(
                 token,
-                key=settings.jwt_secret_key.get_secret_value(),
+                key=settings.jwt_signing_key.get_secret_value(),
                 options={"verify_signature": False}
             )
             return payload
@@ -171,7 +193,7 @@ class AuthUtils:
     """Combined authentication utilities."""
     
     @staticmethod
-    def create_tokens(user_id: int, email: str, role: str) -> Dict[str, str]:
+    def create_tokens(user_id: int, email: str, role: str, session_id: Optional[str] = None, refresh_id: Optional[str] = None) -> Dict[str, str]:
         """
         Create both access and refresh tokens.
         
@@ -184,7 +206,7 @@ class AuthUtils:
             Dictionary with access_token and refresh_token
         """
         return {
-            "access_token": JWTUtils.create_access_token(user_id, email, role),
-            "refresh_token": JWTUtils.create_refresh_token(user_id, email),
+            "access_token": JWTUtils.create_access_token(user_id, email, role, session_id=session_id),
+            "refresh_token": JWTUtils.create_refresh_token(user_id, email, session_id=session_id, refresh_id=refresh_id),
             "token_type": "bearer"
         }

@@ -7,7 +7,7 @@ The database must be empty initially; this script never resets an existing DB.
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-import hashlib
+from copy import deepcopy
 import json
 import os
 from pathlib import Path
@@ -35,9 +35,6 @@ TEST_ENVIRONMENT = {
     "DATABASE_URL": TEST_DATABASE_URL,
     "REDIS_URL": "redis://127.0.0.1:6379/15",
 }
-# Public deterministic fixture for disposable migration imports only. Never use
-# this value as a runtime credential or inherit a real signing key from the host.
-TEST_JWT_SECRET_KEY = hashlib.sha256(b"credx-api-attempt-migration-tests-only").hexdigest()
 
 
 def guarded_environment(environment: Mapping[str, str]) -> dict[str, str]:
@@ -51,10 +48,10 @@ def guarded_environment(environment: Mapping[str, str]) -> dict[str, str]:
     # Do not pass inherited provider credentials, libpq overrides, or service URLs
     # into Alembic/model imports. The fixed URL can address only the CI service.
     return {
-        **TEST_ENVIRONMENT,
-        "PATH": environment.get("PATH", ""),
-        "PYTHONPATH": str(BACKEND),
-        "JWT_SECRET_KEY": TEST_JWT_SECRET_KEY,
+        **TEST_ENVIRONMENT, "PATH": environment.get("PATH", ""), "PYTHONPATH": str(BACKEND),
+        # Model discovery imports auth settings. Only this deterministic test
+        # fixture enters the guarded subprocess; never inherit a real key.
+        "JWT_SIGNING_KEY": bytes(range(32)).hex(),
     }
 
 
@@ -79,16 +76,18 @@ def revision(engine: sa.Engine) -> str:
         return connection.execute(sa.select(table.c.version_num)).scalar_one()
 
 
-def baseline_snapshot(engine: sa.Engine) -> dict:
+def baseline_snapshot(engine: sa.Engine, *, exclude_tables=frozenset({EVENT_TABLE}), include_tables=None) -> dict:
     """Capture every baseline table's schema and synthetic rows, excluding the revision."""
     inspector = sa.inspect(engine)
     snapshot = {}
     with engine.connect() as connection:
-        for name in sorted(set(inspector.get_table_names()) - {"alembic_version", EVENT_TABLE}):
+        names=set(inspector.get_table_names()) - {"alembic_version"} - set(exclude_tables)
+        if include_tables is not None: names &= set(include_tables)
+        for name in sorted(names):
             table = sa.Table(name, sa.MetaData(), autoload_with=connection)
             snapshot[name] = {
                 "columns": [
-                    (column["name"], str(column["type"]), column["nullable"], column["default"])
+                    (column["name"], column["type"].compile(dialect=engine.dialect), column["nullable"], column["default"])
                     for column in inspector.get_columns(name)
                 ],
                 "indexes": inspector.get_indexes(name),
@@ -104,9 +103,81 @@ def baseline_snapshot(engine: sa.Engine) -> dict:
     return snapshot
 
 
+def verify_forward_baseline(before: dict, after: dict) -> None:
+    """Permit exact registered additive policy/dispatch changes; preserve old facts."""
+    observed = deepcopy(after)
+    workflow = observed.get("auto_rebalance_workflows")
+    prior = before.get("auto_rebalance_workflows")
+    if workflow is not None and prior is not None:
+        policy = ("side_effect_policy_json", "JSON", True, None)
+        additions = [column for column in workflow["columns"] if column[0] == policy[0]]
+        require(additions == [policy], "Forward policy column contract changed")
+        require(not any(column[0] == policy[0] for column in prior["columns"]), "Baseline unexpectedly contains forward policy")
+        workflow["columns"].remove(policy)
+        rows = []
+        for raw in workflow["rows"]:
+            row = json.loads(raw)
+            require(policy[0] in row and row.pop(policy[0]) is None, "Forward policy changed legacy row defaults")
+            rows.append(json.dumps(row, sort_keys=True, default=str))
+        workflow["rows"] = sorted(rows)
+    outbox = observed.get("outbox")
+    prior_outbox = before.get("outbox")
+    if outbox is not None and prior_outbox is not None:
+        additions = [
+            ("job_id", "INTEGER", True, None),
+            ("state", "VARCHAR(32)", True, None),
+            ("claim_token", "VARCHAR(36)", True, None),
+            ("next_attempt_at", "TIMESTAMP WITH TIME ZONE", True, None),
+            ("last_error_type", "VARCHAR(100)", True, None),
+        ]
+        for column in additions:
+            require(not any(c[0] == column[0] for c in prior_outbox["columns"]),
+                    "Baseline unexpectedly contains A11 dispatch column")
+            require([c for c in outbox["columns"] if c[0] == column[0]] == [column],
+                    "Forward dispatch column contract changed")
+            outbox["columns"].remove(column)
+        rows = []
+        for raw in outbox["rows"]:
+            row = json.loads(raw)
+            for column in additions:
+                require(column[0] in row and row.pop(column[0]) is None,
+                        "Forward dispatch changed legacy row defaults")
+            rows.append(json.dumps(row, sort_keys=True, default=str))
+        outbox["rows"] = sorted(rows)
+
+        def remove_exact(category, expected):
+            matches = [item for item in outbox[category] if item.get("name") == expected["name"]]
+            require(len(matches) == 1, "Missing or duplicated A11 dispatch constraint/index")
+            item = deepcopy(matches[0])
+            # SQLAlchemy versions differ only in reporting these default metadata
+            # fields. Validate their exact benign values, never ignore options.
+            if "comment" in item:
+                require(item.pop("comment") is None, "Unexpected dispatch comment")
+            if "include_columns" in item:
+                require(item.pop("include_columns") == [], "Unexpected covering columns")
+            options = item.pop("dialect_options", {})
+            require(all((key == "postgresql_include" and value == []) or
+                        (key == "postgresql_nulls_not_distinct" and value is False)
+                        for key, value in options.items()), "Unexpected dispatch index options")
+            require(item == expected, "Forward dispatch constraint/index contract changed")
+            require(not any(old.get("name") == expected["name"] for old in prior_outbox[category]),
+                    "Baseline unexpectedly contains A11 dispatch constraint/index")
+            outbox[category].remove(matches[0])
+
+        remove_exact("foreign_keys", {
+            "name": "fk_outbox_job_id", "constrained_columns": ["job_id"],
+            "referred_schema": None, "referred_table": "jobs", "referred_columns": ["id"], "options": {},
+        })
+        remove_exact("unique", {"name": "uq_outbox_job_id", "column_names": ["job_id"]})
+        remove_exact("indexes", {"name": "ix_outbox_state", "unique": False, "column_names": ["state"]})
+        remove_exact("indexes", {"name": "uq_outbox_job_id", "unique": True,
+                                 "column_names": ["job_id"], "duplicates_constraint": "uq_outbox_job_id"})
+    require(observed == before, "Forward head upgrade changed existing schema/data")
+
+
 def seed_baseline(engine: sa.Engine) -> None:
     metadata = sa.MetaData()
-    metadata.reflect(engine, only=["users", "jobs", "universal_scan_settings", "universal_scan_states"])
+    metadata.reflect(engine, only=["users", "jobs", "outbox", "universal_scan_settings", "universal_scan_states"])
     now = datetime.now(UTC).replace(tzinfo=None)
     with engine.begin() as connection:
         connection.execute(metadata.tables["users"].insert().values(
@@ -118,6 +189,10 @@ def seed_baseline(engine: sa.Engine) -> None:
             id=1, user_id=1, prompt="Synthetic migration fixture; never executed",
             provider="synthetic", model="synthetic", status="completed",
             created_at=now, updated_at=now,
+        ))
+        connection.execute(metadata.tables["outbox"].insert().values(
+            id=uuid4(), topic="historical.synthetic", payload={"preserve": "legacy evidence"},
+            created_at=now, published_at=None, attempts=0,
         ))
         for name in ("universal_scan_settings", "universal_scan_states"):
             connection.execute(metadata.tables[name].insert().values(
@@ -226,15 +301,35 @@ def main() -> None:
         require(revision(engine) == BASELINE, "Downgrade revision mismatch")
         require(set(sa.inspect(engine).get_table_names()) == baseline_tables, "Downgrade removed unrelated tables")
         require(baseline_snapshot(engine) == original, "Downgrade changed baseline schema/data")
-        alembic("upgrade", "head")
-        require(revision(engine) == REVISION, "Re-upgrade did not reach the attempt migration head")
-        alembic("current", "--check-heads")
+        # Round-trip only this reversible named revision. Later audit history
+        # migrations are forward-only and must never enter this downgrade path.
+        alembic("upgrade", REVISION)
+        require(revision(engine) == REVISION, "Re-upgrade did not reach the named attempt migration")
         verify_schema(engine)
         require(baseline_snapshot(engine) == original, "Re-upgrade changed baseline schema/data")
         table = sa.Table(EVENT_TABLE, sa.MetaData(), autoload_with=engine)
         with engine.connect() as connection:
             require(connection.scalar(sa.select(sa.func.count()).select_from(table)) == 0, "Recreated event table is not empty")
-        print("PASS: baseline upgrade; attempt schema, indexes, append and uniqueness; isolated downgrade; head re-upgrade; baseline data preserved.")
+        verify_events(engine)
+        before=baseline_snapshot(engine,exclude_tables=frozenset())
+        # Exercise env.py and the complete revision chain, including version
+        # stamping. Calling a migration's upgrade() directly cannot prove this.
+        from alembic.config import Config
+        from alembic.script import ScriptDirectory
+        scripts=ScriptDirectory.from_config(Config(str(BACKEND/"alembic.ini")))
+        head=scripts.get_current_head()
+        require(bool(head), "Migration chain has no single head")
+        require(REVISION in {item.revision for item in scripts.walk_revisions()}, "Named revision absent from chain")
+        alembic("upgrade", "head")
+        require(revision(engine)==head, "Full-chain upgrade did not stamp its exact head")
+        alembic("current", "--check-heads")
+        verify_schema(engine)
+        verify_forward_baseline(before, baseline_snapshot(engine,exclude_tables=frozenset(),include_tables=before))
+        after=baseline_snapshot(engine,exclude_tables=frozenset())
+        alembic("upgrade", "head")
+        require(revision(engine)==head, "Idempotent upgrade changed head stamp")
+        require(baseline_snapshot(engine,exclude_tables=frozenset())==after, "Repeated head upgrade changed schema/data")
+        print(f"PASS: named attempt migration roundtrip; complete forward chain stamped {head}; prior synthetic data and schema preserved; repeated upgrade unchanged.")
     finally:
         engine.dispose()
 

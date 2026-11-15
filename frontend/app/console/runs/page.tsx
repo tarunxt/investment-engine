@@ -10,10 +10,11 @@ import {
   ChevronRight,
   Clock3,
   Loader2,
-  RefreshCw,
 } from 'lucide-react';
 
-import { Button } from '@/components/ui/button';
+import { PortfolioWorkflowHistoryCard } from './_components/PortfolioWorkflowHistoryCard';
+import { buildPortfolioHistoryEntries } from '@/lib/portfolioStageHistory';
+import { ReportRefreshButton } from '@/components/ui/report-refresh-button';
 import { formatApiTimestamp } from '@/lib/datetime';
 import {
   getAutoRebalanceRunDisplayLabel,
@@ -21,7 +22,7 @@ import {
 } from '@/lib/runPresentation';
 import { cn } from '@/lib/utils';
 import { apiService, APIError } from '@/services/api';
-import type { BullpenAutoLiveHistoryItem, RunListItem } from '@/types/api';
+import type { AutoRebalanceHistoryItemResponse, AutoRebalancePortfolioKey, BullpenAutoLiveHistoryItem, RunListItem } from '@/types/api';
 import { INDIA_TIMEZONE } from '../dashboard/_context';
 
 const STATUS_STYLES: Record<string, string> = {
@@ -54,6 +55,7 @@ const TABS = [
 
 type RunTab = (typeof TABS)[number]['id'];
 type PortfolioTab = Exclude<RunTab, 'bullpen'>;
+type RunErrors = Record<'portfolio' | 'india' | 'indmoney_us' | 'bullpen', string | null>;
 
 const PAGE_SIZE = 20;
 const API_PAGE_SIZE = 100;
@@ -114,24 +116,41 @@ function getPortfolioTab(run: RunListItem): PortfolioTab | null {
   return null;
 }
 
-async function loadAllPortfolioRuns() {
-  const first = await apiService.getRuns({
-    page: 1,
-    limit: API_PAGE_SIZE,
-    summary: true,
-  });
-  if (first.pages <= 1) return first.items;
+async function loadWorkflowHistory(portfolio: AutoRebalancePortfolioKey, signal?: AbortSignal) {
+  const items: AutoRebalanceHistoryItemResponse[] = [];
+  // Each group hydrates saved stages and jobs. Keep individual DB projections
+  // small instead of loading 250 groups' output bodies on a cold request.
+  const limit = 50;
+  let total: number | undefined;
+  for (let offset = 0; total === undefined || offset < total; offset += limit) {
+    signal?.throwIfAborted();
+    const response = await apiService.getAutoRebalanceHistory(portfolio, { limit, offset }, { signal });
+    signal?.throwIfAborted();
+    if (!Number.isSafeInteger(response.total) || response.total < 0) throw new Error('Saved history returned an invalid total. Refresh to retry.');
+    total ??= response.total;
+    if (response.items.length < Math.min(limit, total - offset)) throw new Error('Saved history changed while loading. Refresh to retry the complete history.');
+    items.push(...response.items);
+  }
+  if (new Set(items.map(group => `${group.portfolio}:${group.sequence}`)).size !== items.length) throw new Error('Saved history changed while loading. Refresh to retry the complete history.');
+  return items;
+}
 
-  const remaining = await Promise.all(
-    Array.from({ length: first.pages - 1 }, (_, index) =>
-      apiService.getRuns({
-        page: index + 2,
-        limit: API_PAGE_SIZE,
-        summary: true,
-      }),
-    ),
-  );
-  return [first, ...remaining].flatMap((response) => response.items);
+async function loadAllPortfolioRuns(signal?: AbortSignal) {
+  signal?.throwIfAborted();
+  const first = await apiService.getRuns({ page: 1, limit: API_PAGE_SIZE, summary: true }, { signal });
+  signal?.throwIfAborted();
+  const items = [...first.items];
+  // A bounded batch avoids issuing every summary page into the connection pool
+  // alongside both grouped histories and Bullpen. Never publish a partial list.
+  for (let page = 2; page <= first.pages; page += 2) {
+    signal?.throwIfAborted();
+    const batch = await Promise.all(Array.from({ length: Math.min(2, first.pages - page + 1) }, (_, index) =>
+      apiService.getRuns({ page: page + index, limit: API_PAGE_SIZE, summary: true }, { signal }),
+    ));
+    signal?.throwIfAborted();
+    items.push(...batch.flatMap(response => response.items));
+  }
+  return items;
 }
 
 async function loadAllBullpenRuns(signal?: AbortSignal) {
@@ -165,14 +184,14 @@ async function loadAllBullpenRuns(signal?: AbortSignal) {
   return items;
 }
 
-function StatusBadge({ status }: { status?: string | null }) {
+function StatusBadge({ status, label }: { status?: string | null; label?: string }) {
   const normalized = normalizeStatus(status);
-  const StatusIcon = STATUS_ICONS[normalized] ?? Clock3;
+  const StatusIcon = label ? Clock3 : STATUS_ICONS[normalized] ?? Clock3;
   return (
     <span
       className={cn(
         'inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold capitalize ring-1',
-        STATUS_STYLES[normalized] ?? 'bg-gray-50 text-gray-700 ring-gray-200',
+        label ? 'bg-amber-50 text-amber-700 ring-amber-200' : STATUS_STYLES[normalized] ?? 'bg-gray-50 text-gray-700 ring-gray-200',
       )}
     >
       <StatusIcon
@@ -181,7 +200,7 @@ function StatusBadge({ status }: { status?: string | null }) {
           (normalized === 'processing' || normalized === 'running') && 'animate-spin',
         )}
       />
-      {normalized.replaceAll('_', ' ')}
+      {label ?? normalized.replaceAll('_', ' ')}
     </span>
   );
 }
@@ -208,7 +227,7 @@ function PortfolioRunTile({
             {run.prompt_preview || 'Run details and generated results'}
           </p>
         </div>
-        <StatusBadge status={run.status} />
+        <StatusBadge status={run.status} label={normalizeStatus(run.status) === 'completed' ? 'Finished · completeness unverified' : undefined} />
       </div>
       <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-gray-100 pt-4 text-xs text-gray-500">
         <span>Run #{run.id}</span>
@@ -287,36 +306,52 @@ export default function RunsPage() {
   const [bullpenRuns, setBullpenRuns] = useState<BullpenAutoLiveHistoryItem[]>([]);
   const [page, setPage] = useState(() => Math.max(1, Number(searchParams.get('page')) || 1));
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [sourceErrors, setSourceErrors] = useState<RunErrors>({ portfolio: null, india: null, indmoney_us: null, bullpen: null });
+  const error = [sourceErrors.portfolio, activeTab === 'zerodha' ? sourceErrors.india : activeTab === 'indmoney' ? sourceErrors.indmoney_us : sourceErrors.bullpen].filter(Boolean).join(' ') || null;
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const loadAbortControllerRef = useRef<AbortController | null>(null);
+
+  const [workflowGroups, setWorkflowGroups] = useState<AutoRebalanceHistoryItemResponse[]>([]);
+
+  const [loadedSources, setLoadedSources] = useState<Partial<Record<keyof RunErrors, boolean>>>({});
+  const categoryLoaded = (tab: RunTab) => tab === 'bullpen'
+    ? Boolean(loadedSources.bullpen)
+    : Boolean(loadedSources.portfolio && loadedSources[tab === 'zerodha' ? 'india' : 'indmoney_us']);
+
+  const categoryEmptyVerified = (tab: RunTab) => categoryLoaded(tab) && !loading
+    && !sourceErrors[tab === 'bullpen' ? 'bullpen' : tab === 'zerodha' ? 'india' : 'indmoney_us']
+    && (tab === 'bullpen' || !sourceErrors.portfolio);
 
   const loadRuns = useCallback(async () => {
     loadAbortControllerRef.current?.abort();
     const controller = new AbortController();
     loadAbortControllerRef.current = controller;
     setLoading(true);
-    setError(null);
-    const [portfolioResult, bullpenResult] = await Promise.allSettled([
-      loadAllPortfolioRuns(),
-      loadAllBullpenRuns(controller.signal),
+    setSourceErrors({ portfolio: null, india: null, indmoney_us: null, bullpen: null });
+    // Publish each successful source immediately. A slow/failed market or
+    // Bullpen must not erase another source, or delay its already saved groups.
+    const publish = async <T,>(source: keyof RunErrors, label: string, read: () => Promise<T>, save: (value: T) => void) => {
+      try {
+        const value = await read();
+        if (!controller.signal.aborted) {
+          save(value);
+          setLoadedSources(current => ({ ...current, [source]: true }));
+        }
+      } catch (error) {
+        if (!controller.signal.aborted) setSourceErrors(current => ({ ...current, [source]: label + normalizeError(error) }));
+      }
+    };
+    await Promise.allSettled([
+      publish('portfolio', 'IndMoney/Zerodha: ', () => loadAllPortfolioRuns(controller.signal), setPortfolioRuns),
+      ...(['india', 'indmoney_us'] as const).map(portfolio => publish(
+        portfolio, portfolio === 'india' ? 'Zerodha grouped history: ' : 'IndMoney grouped history: ',
+        () => loadWorkflowHistory(portfolio, controller.signal),
+        groups => setWorkflowGroups(current => [...current.filter(group => group.portfolio !== portfolio), ...groups]),
+      )),
+      publish('bullpen', 'Bullpen: ', () => loadAllBullpenRuns(controller.signal), setBullpenRuns),
     ]);
     if (controller.signal.aborted) return;
 
-    const errors: string[] = [];
-    if (portfolioResult.status === 'fulfilled') {
-      setPortfolioRuns(portfolioResult.value);
-    } else {
-      errors.push('IndMoney/Zerodha: ' + normalizeError(portfolioResult.reason));
-    }
-
-    if (bullpenResult.status === 'fulfilled') {
-      setBullpenRuns(bullpenResult.value);
-    } else {
-      errors.push('Bullpen: ' + normalizeError(bullpenResult.reason));
-    }
-
-    setError(errors.length ? errors.join(' ') : null);
     setLastUpdated(new Date());
     setLoading(false);
   }, []);
@@ -337,8 +372,12 @@ export default function RunsPage() {
     [portfolioRuns],
   );
 
+  const groupedRuns = useMemo(() => ({
+    indmoney: buildPortfolioHistoryEntries(workflowGroups.filter(group => group.portfolio === 'indmoney_us'), categorizedRuns.indmoney),
+    zerodha: buildPortfolioHistoryEntries(workflowGroups.filter(group => group.portfolio === 'india'), categorizedRuns.zerodha),
+  }), [workflowGroups, categorizedRuns]);
   const selectedItems =
-    activeTab === 'bullpen' ? bullpenRuns : categorizedRuns[activeTab];
+    activeTab === 'bullpen' ? bullpenRuns : groupedRuns[activeTab];
   const pages = Math.max(1, Math.ceil(selectedItems.length / PAGE_SIZE));
   const safePage = Math.min(page, pages);
   const visibleItems = selectedItems.slice(
@@ -366,31 +405,34 @@ export default function RunsPage() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
+  function adjacentPortfolioGroups(group: AutoRebalanceHistoryItemResponse) {
+    const groups = groupedRuns[group.portfolio === 'india' ? 'zerodha' : 'indmoney'].flatMap(entry => entry.group ? [entry.group] : []);
+    const index = groups.findIndex(item => item.portfolio === group.portfolio && item.sequence === group.sequence);
+    return [groups[index - 1], groups[index + 1]].filter((item): item is AutoRebalanceHistoryItemResponse => Boolean(item));
+  }
+
   const from = selectedItems.length === 0 ? 0 : (safePage - 1) * PAGE_SIZE + 1;
   const to = Math.min(safePage * PAGE_SIZE, selectedItems.length);
 
   return (
-    <div className="mx-auto flex max-w-7xl flex-col gap-6">
+    <div className="mx-auto flex max-w-7xl flex-col gap-6 lg:max-w-none">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-gray-950">Run History</h1>
           <p className="mt-1 text-sm text-gray-600">
             {lastUpdated
-              ? 'Last updated ' +
+              ? 'Last refreshed ' +
                 lastUpdated.toLocaleTimeString('en-IN', { timeZone: INDIA_TIMEZONE })
               : 'Loading all runs…'}
           </p>
         </div>
-        <Button
+        <ReportRefreshButton
           type="button"
-          variant="outline"
           onClick={() => void loadRuns()}
           disabled={loading}
           className="w-full sm:w-auto"
-        >
-          <RefreshCw className={cn('mr-2 size-4', loading && 'animate-spin')} />
-          Refresh
-        </Button>
+          loading={loading}
+        />
       </div>
 
       <div
@@ -402,7 +444,7 @@ export default function RunsPage() {
           const count =
             tab.id === 'bullpen'
               ? bullpenRuns.length
-              : categorizedRuns[tab.id].length;
+              : groupedRuns[tab.id].length;
           return (
             <button
               key={tab.id}
@@ -419,7 +461,7 @@ export default function RunsPage() {
             >
               <span>{tab.label}</span>
               <span className="ml-2 rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-500">
-                {count}
+                {count > 0 || categoryEmptyVerified(tab.id) ? count : '—'}
               </span>
             </button>
           );
@@ -429,11 +471,13 @@ export default function RunsPage() {
       {error ? (
         <div className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
           <AlertCircle className="mt-0.5 size-4 shrink-0" />
-          <span>{error}</span>
+          <span>{error} Available saved results remain visible; use Refresh to retry unavailable history.</span>
         </div>
       ) : null}
 
-      <div className="space-y-3" role="tabpanel">
+      {loading ? <p role="status" className="text-sm text-gray-600">Refreshing run history… Available saved results remain visible.</p> : null}
+
+      <div className="space-y-3" role="tabpanel" aria-busy={loading}>
         {loading && selectedItems.length === 0 ? (
           <div className="rounded-2xl border border-gray-200 bg-white px-5 py-16 text-center text-sm text-gray-500">
             <Loader2 className="mx-auto mb-3 size-5 animate-spin text-gray-400" />
@@ -441,7 +485,7 @@ export default function RunsPage() {
           </div>
         ) : visibleItems.length === 0 ? (
           <div className="rounded-2xl border border-gray-200 bg-white px-5 py-16 text-center text-sm text-gray-500">
-            No runs found in this category.
+            {error ? 'History could not be fully loaded. Use Refresh to retry; saved runs have not been deleted.' : 'No runs found in this category.'}
           </div>
         ) : activeTab === 'bullpen' ? (
           (visibleItems as BullpenAutoLiveHistoryItem[]).map((run) => (
@@ -454,23 +498,19 @@ export default function RunsPage() {
             />
           ))
         ) : (
-          (visibleItems as RunListItem[]).map((run) => (
-            <PortfolioRunTile
-              key={run.id}
-              run={run}
-              onOpen={() =>
-                router.push(getRunDetailPathFromPrompt(run.id, run.prompt_preview))
-              }
-            />
-          ))
+          (visibleItems as ReturnType<typeof buildPortfolioHistoryEntries>).map((entry) => entry.group ? (
+            <PortfolioWorkflowHistoryCard key={entry.key} group={entry.group} runs={portfolioRuns} runLinksAvailable={!loading && !sourceErrors.portfolio} lastRefreshed={lastUpdated?.toLocaleTimeString('en-IN', { timeZone: INDIA_TIMEZONE })} adjacentGroups={adjacentPortfolioGroups(entry.group)} onOpen={path => router.push(path)} />
+          ) : entry.run ? (
+            <PortfolioRunTile key={entry.key} run={entry.run} onOpen={() => router.push(getRunDetailPathFromPrompt(entry.run.id, entry.run.prompt_preview))} />
+          ) : null)
         )}
       </div>
 
       <div className="flex items-center justify-between rounded-xl border border-gray-200 bg-white px-5 py-3 shadow-sm">
         <span className="text-xs text-gray-500">
           {selectedItems.length === 0
-            ? 'No results'
-            : from + '–' + to + ' of ' + selectedItems.length + ' runs'}
+            ? loading ? 'Loading results…' : error || !categoryLoaded(activeTab) ? 'Results unavailable' : 'No results'
+            : from + '–' + to + ' of ' + selectedItems.length + (activeTab === 'bullpen' ? ' runs' : ' run groups')}
         </span>
         <div className="flex items-center gap-1">
           <button

@@ -10,6 +10,7 @@ def test_build_portfolio_snapshot_computes_totals_and_ist_date():
             "tradingsymbol": "SBIN",
             "exchange": "NSE",
             "quantity": 10,
+            "t1_quantity": 0,
             "average_price": 700,
             "last_price": 720,
             "pnl": 200,
@@ -20,6 +21,7 @@ def test_build_portfolio_snapshot_computes_totals_and_ist_date():
             "tradingsymbol": "INFY",
             "exchange": "NSE",
             "quantity": 5,
+            "t1_quantity": 0,
             "average_price": 1500,
             "last_price": 1490,
             "pnl": -50,
@@ -46,6 +48,8 @@ def test_build_portfolio_snapshot_computes_totals_and_ist_date():
                 "tradingsymbol": "NIFTY26JUNFUT",
                 "exchange": "NFO",
                 "day_buy_quantity": 1,
+                "day_buy_value": 25100,
+                "day_sell_value": 0,
                 "day_sell_quantity": 0,
                 "realised": 0,
                 "unrealised": 1200,
@@ -57,6 +61,7 @@ def test_build_portfolio_snapshot_computes_totals_and_ist_date():
     snapshot = build_portfolio_snapshot(
         holdings,
         positions,
+        {"equity": {"available": {"live_balance": 0}}},
         captured_at=captured_at,
         source="scheduled",
     )
@@ -73,3 +78,14 @@ def test_build_portfolio_snapshot_computes_totals_and_ist_date():
     assert snapshot["positions_m2m"] == 900.0
     assert snapshot["holdings"][0]["tradingsymbol"] == "INFY"
     assert snapshot["holdings"][0]["market_value"] >= snapshot["holdings"][1]["market_value"]
+
+
+def test_saved_market_value_preserves_settled_basis_with_t1_exposure():
+    raw = {"tradingsymbol": "SYNTHETIC", "exchange": "NSE", "quantity": 10,
+           "t1_quantity": 2, "last_price": 100, "average_price": 80, "pnl": 200, "day_change": 0}
+    snapshot = build_portfolio_snapshot([raw], {"net": [], "day": []}, {"equity": {"available": {"live_balance": 300}, "net": 300}})
+    assert snapshot["holdings_market_value"] == 1000
+    assert snapshot["holdings"][0]["market_value"] == 1000
+    assert snapshot["holdings"][0]["t1_quantity"] == 2
+    assert raw == {"tradingsymbol": "SYNTHETIC", "exchange": "NSE", "quantity": 10,
+                   "t1_quantity": 2, "last_price": 100, "average_price": 80, "pnl": 200, "day_change": 0}

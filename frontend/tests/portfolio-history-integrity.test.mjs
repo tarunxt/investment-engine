@@ -82,3 +82,10 @@ test("a sparse selected range stays empty instead of borrowing older points", ()
   ];
   assert.deepEqual(filterGenuinePortfolioTrend(monthlyPoints, "1M"), []);
 });
+
+
+test("unknown margin cannot become inferred cash in portfolio history", () => {
+  const source = Array.from({ length: 4 }, (_, i) => ({ ...snapshot(i + 1, 1000), available_margin: null }));
+  assert.deepEqual(buildGenuineInrPortfolioTrend(source), []);
+  assert.equal(buildGenuineInrPortfolioTrend(source.map(item => ({ ...item, available_margin: 0 })))[0].value, 1000);
+});

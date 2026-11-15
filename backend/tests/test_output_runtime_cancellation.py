@@ -37,3 +37,25 @@ def test_cancellation_refreshes_cached_worker_job_from_another_session():
             assert job.error_message == "Cancelled by user"
     finally:
         engine.dispose()
+
+
+def test_stale_same_status_completion_cannot_replace_historical_output():
+    engine = create_engine("sqlite:///:memory:")
+    Job.__table__.create(engine)
+    try:
+        with Session(engine, expire_on_commit=False) as worker:
+            job = Job(prompt="Synthetic frozen output", provider="test", model="test",
+                      status=JobStatus.COMPLETED, response="original completed output",
+                      tokens_in=7, runtime_metadata_json={"evidence": "original"})
+            worker.add(job)
+            worker.commit()
+            SyncJobRepository(worker).update_status(
+                job, JobStatus.COMPLETED, response="stale replacement", tokens_in=99,
+                runtime_metadata_json={"evidence": "stale"},
+            )
+            worker.refresh(job)
+            assert job.status == JobStatus.COMPLETED
+            assert job.response == "original completed output" and job.tokens_in == 7
+            assert job.runtime_metadata_json == {"evidence": "original"}
+    finally:
+        engine.dispose()

@@ -1,3 +1,5 @@
+
+from app.core.recovery import recovery_mode
 import hashlib
 import json
 from datetime import UTC, datetime, timedelta
@@ -41,6 +43,8 @@ from celery.signals import worker_ready
 
 @worker_ready.connect
 def prime_rankings_on_start(sender=None, **kwargs):
+    if recovery_mode():
+        return
     from redis import Redis
     from app.core.config import settings
     try:

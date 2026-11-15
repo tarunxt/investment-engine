@@ -56,7 +56,7 @@ test("historical cache merges rather than replacing older rows", () => {
   assert.match(source, /HISTORICAL_ACTION_ROWS_CACHE_VERSION = 4/);
   assert.match(source, /mergeHistoricalActionRows\(\s*rows,\s*readHistoricalActionRowsCache\(market\)/);
   assert.match(source, /mergeHistoricalActionRows\(historicalRows, readHistoricalActionRowsCache\(market\)\)/);
-  assert.match(source, /new Set\(persistedHistory\.map\(\(item\) => item\.rebalance_run_id\)\)/);
+  assert.match(source, /new Set\(persistedHistory\.filter\(\(item\) => item\.coverage_status === "suggested"\)\.map\(\(item\) => item\.rebalance_run_id\)\)/);
   assert.doesNotMatch(source, /action: currentRow\.formulaAction/);
   assert.doesNotMatch(source, /score: currentRow\.formulaScore/);
   assert.doesNotMatch(source, /buildCanonicalCurrentHistoryRows/);

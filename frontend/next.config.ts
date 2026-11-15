@@ -1,10 +1,6 @@
 import type { NextConfig } from "next";
 
 const isProduction = process.env.NODE_ENV === "production";
-const databaseViewerUrl = (
-  process.env.DATABASE_VIEWER_INTERNAL_URL || "http://127.0.0.1:8080"
-).replace(/\/+$/, "");
-
 const securityHeaders = [
   {
     key: "X-DNS-Prefetch-Control",
@@ -34,8 +30,9 @@ const securityHeaders = [
       "frame-ancestors 'none'",
       "object-src 'none'",
       "form-action 'self' https://kite.zerodha.com",
-      "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
-      "style-src 'self' 'unsafe-inline'",
+      "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://accounts.google.com/gsi/client",
+      "style-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/style",
+      "frame-src 'self' https://accounts.google.com/gsi/",
       "img-src 'self' data: blob: https:",
       "font-src 'self' data:",
       "connect-src 'self' https: wss:",
@@ -65,20 +62,6 @@ const nextConfig: NextConfig = {
   distDir: process.env.NEXT_DIST_DIR || ".next",
   allowedDevOrigins: ["192.168.10.2", "localhost"],
   poweredByHeader: false,
-  async rewrites() {
-    return {
-      beforeFiles: [
-        {
-          source: "/database",
-          destination: databaseViewerUrl,
-        },
-        {
-          source: "/database/:path*",
-          destination: `${databaseViewerUrl}/:path*`,
-        },
-      ],
-    };
-  },
   async headers() {
     return [
       {

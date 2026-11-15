@@ -9,20 +9,15 @@ const bridgeSource = readFileSync(
   ),
   "utf8",
 );
-const clientSource = readFileSync(
-  new URL(
-    "../app/console/automated-rebalance/_components/AutomatedRebalanceClient.tsx",
-    import.meta.url,
-  ),
-  "utf8",
-);
-const workflowSource = readFileSync(
+const baseWorkflowSource = readFileSync(
   new URL(
     "../app/console/dashboard/_components/RebalanceWorkflowSections.tsx",
     import.meta.url,
   ),
   "utf8",
 );
+const workflowSource = baseWorkflowSource + "\n" + readFileSync(new URL("../components/shared/WorkflowStageTile.tsx", import.meta.url), "utf8");
+const sharedTileSource = readFileSync(new URL("../components/shared/WorkflowStageTile.tsx", import.meta.url), "utf8");
 const stockFlowSource = readFileSync(
   new URL(
     "../app/console/dashboard/_components/StockFlowTabs.tsx",
@@ -54,10 +49,10 @@ test("one slow historic run cannot reject the current automated-rebalance workfl
   assert.match(bridgeSource, /getCachedRunDetail\(item\.id, options\)/);
 });
 
-test("the dedicated automated-rebalance route installs the reliability bridge", () => {
+test("the workflow installs the reliability bridge inside its visible surface", () => {
   assert.match(
-    clientSource,
-    /<AutomatedRebalanceReliabilityBridge>[\s\S]*?<RebalanceWorkflowSections/,
+    workflowSource,
+    /<AutomatedRebalanceReliabilityBridge>[\s\S]*?<WorkflowStageLedgerViews/,
   );
 });
 
@@ -79,7 +74,7 @@ test("LLMs completed opens an inline provider/model dialog with layered saved-da
 test("Actionables View Output renders the shared widget natively instead of framing the dashboard", () => {
   assert.match(
     workflowSource,
-    /\["swing", "rebalance", "technical", "actionables"\]\.includes\(stage\)/,
+    /const routeUrl = getStageOutputRoute\(portfolio, stage\)/,
   );
   assert.match(
     workflowSource,
@@ -107,9 +102,9 @@ test("shared order previews expose the correct broker in the close action", () =
 });
 
 test("stage cards keep every shortcut as an independent native button", () => {
-  const tileStart = workflowSource.indexOf("function WorkflowStageTile");
-  const tileEnd = workflowSource.indexOf("function ZerodhaBasketPreviewDialog", tileStart);
-  const tileSource = workflowSource.slice(tileStart, tileEnd);
+  const tileStart = sharedTileSource.indexOf("function WorkflowStageTile");
+  const tileEnd = sharedTileSource.length;
+  const tileSource = sharedTileSource.slice(tileStart, tileEnd);
 
   assert.match(tileSource, /<article[\s\S]*?aria-label=\{`\$\{selectable/);
   assert.doesNotMatch(tileSource, /<button[\s\S]*?role="button"/);
@@ -127,23 +122,20 @@ test("stage cards keep every shortcut as an independent native button", () => {
   );
 });
 
-test("stage failures automatically open a detailed modal and remain manually reopenable", () => {
-  assert.match(workflowSource, /createPortal\(/);
-  assert.match(workflowSource, /document\.body/);
-  assert.match(workflowSource, /lastAutoOpenedErrorRef/);
-  assert.match(workflowSource, /setOpenErrorDetail\(stageErrorFingerprint\)/);
-  assert.match(workflowSource, /info\.state !== "failed"/);
-  assert.doesNotMatch(
-    workflowSource,
-    /stageErrorFingerprint = stageErrorRow[\s\S]{0,300}errorDetails:/,
-  );
-  assert.match(workflowSource, /aria-modal="true"/);
-  assert.match(workflowSource, /className="pointer-events-auto fixed inset-0 z-\[200\]/);
-  assert.match(workflowSource, /Error message/);
-  assert.match(workflowSource, /Provider and job details/);
-  assert.match(workflowSource, /What to do next/);
-  assert.match(workflowSource, /The backend did not return an underlying provider exception or job identifier/);
-  assert.match(workflowSource, /aria-label="Show detailed LLM error"/);
+test("stage errors open a compact user-invoked dialog with intact source diagnostics", () => {
+  const popup = readFileSync(new URL("../components/shared/StageErrorDetails.tsx", import.meta.url), "utf8");
+  assert.match(sharedTileSource, /<StageErrorDetails stageLabel=/);
+  assert.doesNotMatch(sharedTileSource, /lastAutoOpenedErrorRef|setOpenErrorDetail/);
+  assert.match(popup, /createPortal\(/);
+  assert.match(popup, /showModal\(\)/);
+  assert.match(popup, /<dialog/);
+  assert.match(popup, /max-w-md/);
+  assert.match(popup, /aria-haspopup="dialog"/);
+  assert.match(popup, /error details for/);
+  assert.match(popup, /row\.detail/);
+  assert.match(popup, /detail\.providerResponseBody/);
+  assert.match(popup, /detail\.traceReference/);
+  assert.match(popup, /info\.jobId/);
 });
 
 test("stage failures preserve provider diagnostics and are recorded only once", () => {
@@ -171,7 +163,7 @@ test("duplicate LLM runs retain the full denominator and receive ordinal summary
 
 
 test("stock-flow reloads after completed requests and hides impossible Zerodha sells", () => {
-  assert.match(stockFlowSource, /fetchDashboardRecentFullRuns\(\)/);
+  assert.match(stockFlowSource, /fetchDashboardRecentFullRuns\(/);
   assert.doesNotMatch(stockFlowSource, /fetchAllFullRuns\(\)/);
   assert.match(stockFlowSource, /STOCK_FLOW_TRANSIENT_FALLBACK_MAX_AGE_MS = 5 \* 60 \* 1000/);
   assert.match(stockFlowSource, /stockFlowLastSuccessfulSources\.get\(portfolio\)/);
@@ -201,10 +193,32 @@ test("Zerodha basket validates sells against live holdings and labels the score 
   );
   assert.match(
     workflowSource,
-    /Stock score scan completed: \{formatTimestamp\(scoreScanCompletedAt\)\}/,
+    /Last score scan: \{formatCompactStageTime\(scoreScanCompletedAt\)\}/,
   );
   assert.match(
     finalActionablesSource,
     /createdAt: job\.updated_at \?\? job\.created_at/,
   );
+});
+
+test("saved outputs use authenticated native reads and retain safe stage links without framing", () => {
+  const loader = baseWorkflowSource.slice(baseWorkflowSource.indexOf("  const showStageOutput = useCallback("), baseWorkflowSource.indexOf("  const persistLlmDialogSelection"));
+  assert.doesNotMatch(baseWorkflowSource, /<iframe/);
+  assert.doesNotMatch(loader, /if \(routeUrl\) return|\.run\(|\.execute\(|\.sync\(/);
+  assert.match(loader, /await apiService\.zerodhaThreatsLatest\(\)/);
+  assert.match(loader, /await apiService\.indmoneyUsThreatsLatest\(\)/);
+  assert.match(loader, /No saved threat output is available yet/);
+  assert.match(loader, /savedAt = latest\?\.updated_at/);
+  assert.match(loader, /Job #\$\{latest\.job_id\}/);
+  assert.match(loader, /if \(requestId !== outputRequestRef\.current\) return/);
+  assert.match(loader, /requestedRunId !== undefined && run\.id !== requestedRunId/);
+  assert.match(baseWorkflowSource, /showStageOutput\(outputDialog\.portfolio, outputDialog\.stage, outputDialog\.requestedRunId\)/);
+  const dialog = readFileSync(new URL("../components/shared/SavedOutputDialog.tsx", import.meta.url), "utf8");
+  assert.match(dialog, /role="dialog" aria-modal="true" aria-labelledby/);
+  assert.match(dialog, /target="_blank" rel="noopener noreferrer"/);
+  assert.match(dialog, /element\.inert = true/);
+  assert.match(dialog, /opener\.focus\(\)/);
+  assert.match(dialog, /event\.key === "Escape"/);
+  const security = readFileSync(new URL("../next.config.ts", import.meta.url), "utf8");
+  assert.match(security, /frame-ancestors 'none'/);
 });

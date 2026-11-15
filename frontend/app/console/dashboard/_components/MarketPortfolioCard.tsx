@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { TotalDataStatus, type TotalDataStatusInfo } from './TotalDataStatus';
 import { Wallet } from 'lucide-react';
 
 import { TradingViewSymbolLink } from '@/components/shared/TradingViewSymbolLink';
@@ -96,7 +97,9 @@ export function MarketPortfolioCard({
   threatsHref,
   actionLinks,
   emptyMessage,
+  dataStatus,
 }: {
+  dataStatus?: TotalDataStatusInfo;
   market: DashboardMarket;
   title: string;
   description: string;
@@ -179,6 +182,7 @@ export function MarketPortfolioCard({
                     {metric.label}
                   </div>
                   <div className="mt-2 text-lg font-semibold">{metric.value}</div>
+                  {dataStatus ? <TotalDataStatus info={dataStatus} compact /> : null}
                   {metric.detail ? (
                     <div className="mt-1 text-xs text-slate-500">{metric.detail}</div>
                   ) : null}
@@ -232,7 +236,9 @@ export function MarketPortfolioCard({
                 </div>
               ) : (
                 <div className="mt-4 rounded-[22px] border border-dashed border-slate-200 bg-slate-50/80 px-4 py-5 text-sm text-slate-500">
-                  No holdings are available yet for this market snapshot.
+                  {dataStatus?.failed || dataStatus?.pending || dataStatus?.cachedAt !== undefined
+                    ? "Holdings availability is unverified. View saved portfolio history."
+                    : "No holdings are available yet for this market snapshot."}
                 </div>
               )}
             </div>

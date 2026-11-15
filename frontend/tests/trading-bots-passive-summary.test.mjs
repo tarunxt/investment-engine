@@ -51,7 +51,7 @@ for (const fail of [false, true]) {
       isTimeoutError: () => false, normalizeError: (error) => error.message,
       normalizeTradingBotsSummaryResponse: () => ({}), mergeTradingBotsOverview: () => ({}),
       buildPolymarketTradingBotSummary: () => ({}), buildBullpenAiAutoLiveTradingBotSummary: () => ({}),
-      upsertBotSummary: () => ({}),
+      upsertBotSummary: () => ({}), settleTradingBotsOverviewRead: (value) => value,
     };
     for (const name of ['setIsRefreshing', 'setIsLoadingLatest', 'setLoadError', 'setOverview', 'setDetails']) {
       bindings[name] = (value) => { if (typeof value === 'function') value({}); };
@@ -75,7 +75,8 @@ test('cold and unavailable states keep unknown metrics, mode and risk without st
   assert.equal(presentation.getTradingBotRiskStatus(card, details).label, 'Unknown');
   assert.match(presentation.getTradingBotExecutionModeDetail(card), /unavailable/);
   const total = presentation.buildTradingBotsPortfolioSummary([card], details, null);
-  assert.equal(total.botsPausedStopped, 0);
+  assert.equal(total.botsPausedStopped, null);
+  assert.equal(total.botsRunning, null);
   assert.equal(total.totalMoneyInvested, null);
   assert.match(source, /unavailable: "Unavailable"/);
   assert.match(source, /unknown: "Unknown"/);
@@ -92,4 +93,29 @@ test('saved CopyTrader evidence never emits live doctor/lock/armed warnings', ()
   assert.equal(warnings.length, 1);
   assert.equal(warnings[0].label, 'Runtime unavailable');
   assert.equal(warnings[0].tone, 'warning');
+});
+
+for (const fixture of ['loading', 'failed', 'partial', 'success-zero', 'populated', 'stale-response']) {
+  test(`runtime totals retain unknown versus reported counts: ${fixture}`, () => {
+    const bot = helpers.buildTradingBotsOverviewShell().bots[0];
+    const known = { ...bot, status: 'stopped', source: fixture === 'stale-response' ? 'fallback' : 'api', activePositionsCount: 0 };
+    const bots = fixture === 'partial' ? [known, bot] : ['loading', 'failed'].includes(fixture) ? [bot] : [{ ...known, status: fixture === 'populated' ? 'running' : 'stopped' }];
+    const summary = presentation.buildTradingBotsPortfolioSummary(bots, {}, '2026-11-01T00:00:00Z');
+    const unknown = ['loading', 'failed', 'partial'].includes(fixture);
+    assert.equal(summary.botsRunning, unknown ? null : fixture === 'populated' ? 1 : 0);
+    assert.equal(summary.botsPausedStopped, unknown ? null : fixture === 'populated' ? 0 : 1);
+  });
+}
+
+
+test('failed-after-loading settles transient notes while preserving cached/verified values', () => {
+  const loading = helpers.buildTradingBotsOverviewShell(helpers.TRADING_BOTS_LOADING_NOTE);
+  assert.equal(loading.bots[0].note, helpers.TRADING_BOTS_LOADING_NOTE);
+  const cached = { ...loading.bots[1], note: 'Saved snapshot from 2026-11-01T00:00:00Z', source: 'fallback', activePositionsCount: 0 };
+  const settled = helpers.settleTradingBotsOverviewRead({ ...loading, bots: [loading.bots[0], cached] });
+  assert.match(settled.bots[0].note, /status is unavailable/);
+  assert.doesNotMatch(settled.bots[0].note, /Loading/);
+  assert.equal(settled.bots[1], cached);
+  assert.equal(settled.bots[1].activePositionsCount, 0);
+  assert.equal(loading.bots[0].note, helpers.TRADING_BOTS_LOADING_NOTE);
 });

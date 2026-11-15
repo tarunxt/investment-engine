@@ -21,15 +21,19 @@ function load(path, bindings = {}, exports = '') {
 const actionColors = load('../lib/actionColorScheme.ts');
 const parser = load('../components/InvestmentRecommendationTable.tsx', actionColors);
 const bindings = {
+  AlertTriangle: () => null,
+  cn: (...values) => values.filter(Boolean).join(" "),
   ...parser,
   ...actionColors,
   ...load('../lib/technicalSetups.ts'),
   ...load('../lib/scoreMatrixMath.ts'),
   ...load('../lib/rebalanceRunIdentity.ts'),
   ...load('../lib/runPresentation.ts'),
+  ...load('../lib/usSecurityIdentity.ts'),
+  ...load('../lib/actionableQuantityDisplay.ts'),
 };
 const helpers = load('../app/console/_components/FinalActionablesConsole.tsx', bindings,
-  'export { buildScoreMatrixDetail, buildSummaryRowCells, resolveMatrixUnitsForAction, DEFAULT_SCORE_MATRIX_FORMULA_CONFIG };');
+  'export { buildActionablesCalculationRows, getPositionContextLabel, getZerodhaHoldingForStock, getZerodhaBuyTransactionsForStock, historyRationaleInputsPresent, evaluateScoreMatrixRules, buildScoreMatrixDetail, buildSummaryRowCells, resolveMatrixUnitsForAction, DEFAULT_SCORE_MATRIX_FORMULA_CONFIG };');
 const actionHeader = 'Action (Buy/Add/Sell All/Trim/Hold/Buy New)';
 const timestamp = '2026-09-01T10:00:00Z';
 
@@ -190,4 +194,159 @@ test('historical reconstruction ignores today holdings and scans, retaining capt
     const reconstructed = helpers.buildHistoricalDashboardActionRows([run, lateOrUnknownOutput], 'india', snapshot(60), {}, helpers.DEFAULT_SCORE_MATRIX_FORMULA_CONFIG);
     assert.equal(reconstructed[0].detail.technicalScanSourceRunId, null, 'old run metadata cannot admit a future or undated job output');
   }
+});
+
+
+test('existing exact score ranges and holdings actions remain unchanged at every boundary', () => {
+  const cases = [[-4, 'Sell All'], [-3, 'Sell All'], [-2.00000001, 'Sell All'], [-2, 'Trim'], [-1.00000001, 'Trim'], [-1, 'Hold'], [-0.00000001, 'Hold'], [0, 'Hold'], [0.99999999, 'Hold'], [1, 'positive'], [1.99999999, 'positive'], [2, 'positive'], [3, 'positive'], [4, 'positive'], [null, 'Hold'], [NaN, 'Hold']];
+  for (const currentUnits of [0, null, 0.5, 10]) {
+    for (const [score, expected] of cases) {
+      const rules = helpers.evaluateScoreMatrixRules({ currentUnits, calculatedScore: score, meanScore: null });
+      const matched = rules.filter(rule => rule.matched);
+      assert.equal(matched.length, 1);
+      assert.equal(matched[0].action, expected === 'positive' ? (currentUnits > 0 ? 'Add more' : 'Buy New') : expected);
+    }
+  }
+  const nearBoundary = helpers.evaluateScoreMatrixRules({ currentUnits: 3, calculatedScore: 0.99999999, meanScore: null }).find(rule => rule.matched);
+  assert.equal(nearBoundary.action, 'Hold', 'rounding to 1.00 must not move the decision across a boundary');
+  assert.equal(nearBoundary.label, '[0, 1)');
+});
+
+
+test('history score basis is identified from saved inputs only and remains unknown for incomplete records', () => {
+  const check = snapshot_json => helpers.historyRationaleInputsPresent({ snapshot_json });
+  assert.equal(check({ rows: [{ score: 2.83 }, { score: null }] }), true);
+  assert.equal(check({ rows: [{ score: null }] }), false);
+  for (const value of [null, {}, { rows: [] }, { rows: [null] }, { rows: [{}] }, { rows: [{ score: '2.83' }] }]) assert.equal(check(value), undefined);
+});
+
+test('explicit unheld zero-quantity non-buy decisions stay visible as evidence but never gain formula allocation or orders',()=>{
+ const original={ 'Exchange Symbol':'NSE','Stock Symbol':'KAYNES',[actionHeader]:'Hold','Current Units':'0','Units Change':'0','Final Units':'0','Units to Buy':'0','Total Buy Amount':'0','Rationale Cruxx':'Original non-buy reason' };
+ const source=runWithRows([original]);const stocks=helpers.buildConsensusRows([source],'india',{holdings:[]});assert.equal(stocks.length,1);assert.equal(stocks[0].consensusAction,'Hold');const actions=helpers.buildDashboardActionRows(stocks,'india',{});assert.equal(actions.length,1);assert.equal(actions[0].formulaScore,helpers.buildScoreMatrixDetail(stocks[0],undefined).calculatedScore);
+ assert.equal(helpers.buildConsensusRows([source],'india',{holdings:[]})[0].rows[0].cells['Rationale Cruxx'],'Original non-buy reason');
+});
+
+test('same-symbol Indian venues remain separate decisions and cannot inherit another venue holding',()=>{
+ const base={ 'Stock Symbol':'CGPOWER',[actionHeader]:'Hold','Units Change':'0','Units to Buy':'0','Total Buy Amount':'0' };
+ const source=runWithRows([{...base,'Exchange Symbol':'BSE','Current Units':'13','Final Units':'13'},{...base,'Exchange Symbol':'NSE','Current Units':'0','Final Units':'0'}]);
+ const stocks=helpers.buildConsensusRows([source],'india',{holdings:[{exchange:'BSE',tradingsymbol:'CGPOWER',quantity:13,market_value:7403.85}]});assert.equal(stocks.length,2);assert.equal(stocks.find(stock=>stock.exchange==='BSE').positionContext.currentUnits,13);assert.equal(stocks.find(stock=>stock.exchange==='NSE').positionContext.currentUnits,0);assert.equal(helpers.buildDashboardActionRows(stocks,'india',{}).length,2);
+});
+
+
+test('holding detail and buy provenance require the exact venue, including reversed holding order', () => {
+  const holdings = ['BSE', 'NSE'].map((exchange, index) => ({ exchange, tradingsymbol: 'TESTINDIA', quantity: index + 3, average_price: index + 100 }));
+  const orders = holdings.map((holding, index) => ({ ...holding, status: 'COMPLETE', transaction_type: 'BUY', filled_quantity: 1, order_id: `synthetic-${index}` }));
+  for (const ordered of [holdings, [...holdings].reverse()]) {
+    for (const exchange of ['BSE', 'NSE']) {
+      const stock = { symbol: 'TESTINDIA', exchange };
+      assert.equal(helpers.getZerodhaHoldingForStock({ holdings: ordered, positions: {} }, stock).exchange, exchange);
+      assert.deepEqual(helpers.getZerodhaBuyTransactionsForStock(orders, stock).map(row => row.orderId), [exchange === 'BSE' ? 'synthetic-0' : 'synthetic-1']);
+    }
+  }
+  assert.equal(helpers.getZerodhaHoldingForStock({ holdings: [holdings[0]], positions: {} }, { symbol: 'TESTINDIA', exchange: 'NSE' }), null);
+  assert.deepEqual(helpers.getZerodhaBuyTransactionsForStock([{ ...orders[0], exchange: undefined }], { symbol: 'TESTINDIA', exchange: 'NSE' }), []);
+});
+
+test('snapshot absence is disclosed separately from a matched zero and captured fallback', () => {
+  const run = runWithRows([modelRow(0, { [actionHeader]: 'Hold' })]);
+  const [absent] = helpers.buildConsensusRows([run], 'india', { holdings: [] });
+  const [matched] = helpers.buildConsensusRows([run], 'india', snapshot(0));
+  const [captured] = helpers.buildConsensusRows([run], 'india', null);
+  assert.equal(absent.positionContext.holdingMatch, 'absent');
+  assert.equal(matched.positionContext.holdingMatch, 'matched');
+  assert.match(helpers.getPositionContextLabel(absent), /zero inferred from snapshot absence/);
+  assert.match(helpers.getPositionContextLabel(matched), /matched holding/);
+  assert.match(helpers.getPositionContextLabel(captured), /Captured model holdings/);
+  for (const stock of [absent, matched, captured]) {
+    const detail = helpers.buildScoreMatrixDetail(stock);
+    const cells = helpers.buildSummaryRowCells(stock, detail, detail.calculatedAction, detail.calculatedUnitsChange);
+    assert.equal(Number(cells['Current Units']) + Number(cells['Units Change']), Number(cells['Final Units']));
+    assert.equal(stock.rows[0].cells[actionHeader], 'Hold');
+  }
+});
+
+
+test('partial rows with unavailable model units use frozen holdings for final action and summary', () => {
+  for (const missing of ['—', '-', 'malformed']) {
+    const source = runWithRows([modelRow(2, { 'Current Units': missing, 'Final Units': '—' })]);
+    source.status = 'partial';
+    const before = structuredClone(source);
+    for (const units of [0, 6, 0.125]) {
+      const frozen = snapshot(units);
+      frozen.captured_at = '2020-01-01T00:00:00Z';
+      const [stock] = helpers.buildConsensusRows([source], 'india', frozen);
+      const [row] = helpers.buildDashboardActionRows([stock], 'india', {});
+      assert.equal(row.detail.currentUnits, units);
+      assert.equal(row.formulaAction, units > 0 ? 'Add more' : 'Buy New');
+      assert.equal(row.formulaEstimate.currentUnits, units);
+      assert.equal(helpers.buildSummaryRowCells(stock, row.detail, row.formulaAction, row.detail.calculatedUnitsChange)['Current Units'], String(units));
+      assert.equal(stock.rows[0].cells['Current Units'], '0', 'existing Buy New parser normalization remains unchanged');
+    }
+    assert.deepEqual(source, before, 'captured evidence is unchanged');
+  }
+});
+
+// Synthetic 20-security/33-row shape only; no real portfolio data or live vendor calls.
+const syntheticUsMapping = (symbol, exchange='NASDAQ', suffix='') => ({instrument:`${exchange}:${symbol}`,symbol,listing_mic:exchange==='NASDAQ'?'XNAS':'XNYS',share_class:'common',security_id:`synthetic:${symbol}:${exchange}${suffix}`,vendor_symbol:`${symbol}${suffix}`,currency:'USD',verified:true});
+function oneUsJob(rows,id=12300) {
+ const run=runWithRows([rows[0]],'us',id),headers=parser.REBALANCE_HEADER_ORDER;
+ run.run_jobs[0].job.response=`| ${headers.join(' | ')} |\n| ${headers.map(()=>'---').join(' | ')} |\n${rows.map(row=>`| ${headers.map(header=>row[header]??(header.startsWith('Score Rationale')?'3':'—')).join(' | ')} |`).join('\n')}`;
+ return run;
+}
+function syntheticUsFixture() {
+ const mappings=Array.from({length:20},(_,i)=>syntheticUsMapping(`SIM${String(i).padStart(2,'0')}`,i%2?'NYSE':'NASDAQ'));
+ const explicit=mappings.map(item=>modelRow(1,{'Stock Symbol':item.symbol,'Exchange Symbol':item.instrument.split(':')[0]}));
+ const rows=[...explicit,...explicit.slice(0,13).map(row=>({...row,'Exchange Symbol':'US'}))];
+ const snapshot={parse_status:'parsed',captured_at:timestamp,holdings_count:20,reported_holdings_count:20,holdings:mappings.map(item=>({symbol:item.symbol,company_name:'Synthetic fixture',quantity:1,current_value:100,invested_value:80}))};
+ return {mappings,rows,snapshot};
+}
+test('verified US mapping resolves synthetic Run123 33 raw rows into 20 securities before consensus and holding attachment',()=>{
+ const f=syntheticUsFixture(),run=oneUsJob(f.rows),before=structuredClone(run);
+ const stocks=helpers.buildConsensusRows([run],'us',f.snapshot,[run],f.mappings);
+ assert.equal(stocks.length,20);assert.equal(helpers.calculationsCountSummary(stocks,false),"LLMs consolidated in this view: 1. Stocks: 20.");assert.equal(stocks.reduce((n,s)=>n+s.rows.length,0),33);assert.equal(stocks.reduce((n,s)=>n+s.consensusRows.length,0),20);
+ assert.equal(stocks.reduce((n,s)=>n+s.positionContext.currentUnits,0),20);assert.equal(stocks.reduce((n,s)=>n+s.positionContext.currentInvestmentAmount,0),2000);
+ assert.equal(stocks.reduce((n,s)=>n+s.sourceRowLinks.length,0),33);
+ const linked=stocks.flatMap(s=>s.sourceRowLinks);assert.equal(new Set(linked.map(link=>`${link.runId}:${link.jobId}:${link.rowIndex}`)).size,33);
+ for(const stock of stocks){assert.equal(stock.identityIssue,null);assert.equal(stock.actionCounts['Buy New'],1);assert.equal(stock.totalSuggestions,1);assert.equal(stock.positionContext.holdingMatch,'matched');assert.ok(stock.usIdentity.listing);}
+ assert.equal(stocks.filter(s=>s.rows.some(row=>row.cells['Exchange Symbol']==='US')).length,13);
+ const visible=helpers.buildActionablesCalculationRows(stocks,'us',{},helpers.DEFAULT_SCORE_MATRIX_FORMULA_CONFIG);assert.equal(visible.length,73);assert.equal(new Set(visible.map(row=>row.id)).size,73,'all 33 original rows and both summary rows per security have unique render identities');
+ assert.deepEqual(run,before,'source jobs and original alias cells are never rewritten');
+});
+test('contradictory aliases in one US job retain both originals, receive no duplicate vote, and block the decision',()=>{
+ const f=syntheticUsFixture();f.rows[20]={...f.rows[20],[actionHeader]:'Sell All'};
+ const run=oneUsJob(f.rows),stocks=helpers.buildConsensusRows([run],'us',f.snapshot,[run],f.mappings),conflict=stocks.find(s=>s.symbol==='SIM00');
+ assert.equal(stocks.length,20);assert.equal(conflict.rows.length,2);assert.equal(conflict.consensusRows.length,0);assert.match(conflict.identityIssue,/contradictory/);assert.equal(conflict.actionCounts['Buy New'],0);assert.equal(conflict.actionCounts['Sell All'],0);assert.equal(conflict.sourceRowLinks.length,2);assert.equal(conflict.positionContext.currentUnits,1);
+ const entry=conflict.breakupEntries[0];assert.equal(entry.row,null);assert.equal(entry.sourceRows.length,2);
+});
+test('different US source jobs retain legitimate contradictory votes after verified alias resolution',()=>{
+ const mapping=syntheticUsMapping('SIM00'),row=modelRow(1,{'Stock Symbol':'SIM00','Exchange Symbol':'US'}),a=oneUsJob([row],12301),b=oneUsJob([{...row,'Exchange Symbol':'NASDAQ',[actionHeader]:'Sell All'}],12302);
+ const [stock]=helpers.buildConsensusRows([a,b],'us',null,[a,b],[mapping]);assert.equal(stock.rows.length,2);assert.equal(stock.consensusRows.length,2);assert.equal(stock.actionCounts['Buy New'],1);assert.equal(stock.actionCounts['Sell All'],1);assert.equal(stock.totalSuggestions,2);assert.equal(stock.identityIssue,null);
+});
+test('missing verified mapping preserves all synthetic 33 identities as unresolved and never attaches holdings or invents zeros',()=>{
+ const f=syntheticUsFixture(),run=oneUsJob(f.rows),stocks=helpers.buildConsensusRows([run],'us',f.snapshot,[run]);assert.equal(stocks.length,33);
+ for(const stock of stocks){assert.match(stock.identityIssue,/mapping unavailable/);assert.equal(stock.positionContext.currentUnits,null);assert.equal(stock.positionContext.currentInvestmentAmount,null);assert.equal(stock.positionContext.holdingMatch,'unresolved');}
+});
+test('true dual US listings stay distinct; generic alias and generic holding remain ambiguous',()=>{
+ const mappings=[syntheticUsMapping('DUAL','NASDAQ','A'),syntheticUsMapping('DUAL','NYSE','B')],rows=['US','NASDAQ','NYSE'].map(exchange=>modelRow(1,{'Stock Symbol':'DUAL','Exchange Symbol':exchange})),run=oneUsJob(rows),snapshot={parse_status:'parsed',captured_at:timestamp,holdings_count:1,reported_holdings_count:1,holdings:[{symbol:'DUAL',quantity:7,current_value:700}]};
+ const stocks=helpers.buildConsensusRows([run],'us',snapshot,[run],mappings);assert.equal(stocks.length,3);assert.equal(new Set(stocks.map(s=>s.key)).size,3);assert.equal(stocks.filter(s=>s.usIdentity.listing).length,2);
+ for(const stock of stocks){assert.ok(stock.identityIssue);assert.equal(stock.positionContext.currentUnits,null);}
+ assert.match(stocks.find(s=>s.exchange==='US').identityIssue,/Multiple verified listings/);
+});
+
+
+test('US identity resolution rejects conflicting symbol prefixes and forged model verification',()=>{
+ const mapping=syntheticUsMapping('SIM00');
+ assert.equal(bindings.resolveUsIdentity({symbol:'NASDAQ:SIM00',exchange:'US'},[mapping]).exchange,'NASDAQ');
+ assert.equal(bindings.resolveUsIdentity({symbol:'NYSE:SIM00',exchange:'US'},[mapping]).listing,null);
+ assert.match(bindings.resolveUsIdentity({symbol:'NYSE:SIM00',exchange:'NASDAQ'},[mapping]).issue,/prefix conflicts/);
+ assert.ok(bindings.resolveUsIdentity({symbol:'SIM00',exchange:'US'},[{...mapping,verified:false}]).issue);
+ const row=modelRow(1,{'Stock Symbol':'SIM00','Exchange Symbol':'US','verified':'true','security_id':'invented'}),run=oneUsJob([row]);
+ assert.ok(helpers.buildConsensusRows([run],'us')[0].identityIssue,'model cells cannot establish verified identity');
+});
+
+
+test('canonical US identity tuple encoding cannot merge distinct listings containing delimiters',()=>{
+ const a={...syntheticUsMapping('SIM01'),security_id:'synthetic:A',share_class:'class:XNYS:common'},b={...syntheticUsMapping('SIM02','NYSE'),security_id:'synthetic:A:XNAS:class',share_class:'common'};
+ const run=oneUsJob([modelRow(1,{'Stock Symbol':'SIM01','Exchange Symbol':'NASDAQ'}),modelRow(1,{'Stock Symbol':'SIM02','Exchange Symbol':'NYSE'})]);
+ const stocks=helpers.buildConsensusRows([run],'us',null,[run],[a,b]);assert.equal(stocks.length,2);assert.equal(new Set(stocks.map(stock=>stock.key)).size,2);
 });

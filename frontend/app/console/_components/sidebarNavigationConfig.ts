@@ -99,13 +99,6 @@ export const SIDEBAR_SECTIONS = [
                         matchMode: 'prefix',
                         title: 'US Portfolio — Connected through INDmoney',
                     },
-                    {
-                        type: 'item',
-                        id: 'automated-rebalance',
-                        name: 'Automated Rebalance',
-                        href: URLs.routes.console.automatedRebalance(),
-                        matchMode: 'exact',
-                    },
                 ],
             },
             {
@@ -279,13 +272,6 @@ export const SIDEBAR_SECTIONS = [
                         id: 'api-connections',
                         name: 'API Connections',
                         href: URLs.routes.console.apis(),
-                        matchMode: 'prefix',
-                    },
-                    {
-                        type: 'item',
-                        id: 'google-sheets',
-                        name: 'Google Sheets',
-                        href: URLs.routes.console.googleSheets(),
                         matchMode: 'prefix',
                     },
                 ],

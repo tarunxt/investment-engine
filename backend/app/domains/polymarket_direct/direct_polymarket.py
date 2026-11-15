@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.core.recovery import recovery_mode, require_financial_writes_allowed
+
 from datetime import datetime, timezone
 from typing import Iterable
 from urllib.parse import urlencode
@@ -133,6 +135,8 @@ def _build_clob_client(settings: DirectPolymarketSettings) -> Any:
 def _rpc_call(
     settings: DirectPolymarketSettings, method: str, params: list[Any]
 ) -> Any:
+    if recovery_mode() and method != "eth_call":
+        require_financial_writes_allowed()
     response = requests.post(
         settings.polygon_rpc_url,
         json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params},
@@ -238,6 +242,7 @@ class DirectPolymarketLiveExecutor:
         raise DirectPolymarketCommandError(DIRECT_EXECUTION_NOT_CONFIGURED)
 
     async def execute(self, decision: PolymarketLiveTradeDecision) -> str:
+        require_financial_writes_allowed()
         doctor = await self.doctor()
         guard = LiveTradeGuard(load_polymarket_config())
         block = guard.hard_block_reason(doctor)
@@ -492,6 +497,7 @@ def _resolve_token_id(decision: PolymarketLiveTradeDecision) -> str:
 def _place_order(
     settings: DirectPolymarketSettings, decision: PolymarketLiveTradeDecision
 ) -> str:
+    require_financial_writes_allowed()
     from py_clob_client.clob_types import OrderArgs
     from py_clob_client.order_builder.constants import BUY, SELL
 

@@ -67,6 +67,15 @@ export function restoreAutoRebalanceAuditState(state: unknown): AutoRebalanceAud
 
 const successfulStageStatuses = new Set(["completed", "partial", "skipped"]);
 
+function samePersistedJson(a: unknown, b: unknown) {
+  const canonical = (value: unknown): unknown => Array.isArray(value)
+    ? value.map(canonical)
+    : value !== null && typeof value === "object"
+      ? Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => [key, canonical(item)]))
+      : value;
+  return JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
+}
+
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
@@ -201,7 +210,7 @@ export class AutoRebalanceAuditSession {
           // History can infer a completed stage from worker jobs even when its
           // final audit write is missing. Require our submitted metadata too.
           Object.entries(expected.summary ?? {}).some(
-            ([key, value]) => actual.summary?.[key] !== value,
+            ([key, value]) => !samePersistedJson(actual.summary?.[key], value),
           )
         ) {
           throw new Error(`The server has not confirmed the ${stage} history for this workflow.`);
@@ -213,11 +222,23 @@ export class AutoRebalanceAuditSession {
       this.verificationError = null;
       return true;
     } catch (error) {
-      this.verificationError = errorMessage(error);
+      this.verificationError = [...this.failures.values()][0] ?? errorMessage(error);
       return false;
     } finally {
       this.pending -= 1;
       this.publish();
     }
   }
+}
+
+/** Same-browser activity for the client-side final calculation. The browser releases the lock on tab closure. */
+export function actionablesActivityKey(ownerId: number, portfolio: string, sequence: number) {
+  return `cred-x:actionables:${ownerId}:${portfolio}:${sequence}`;
+}
+
+export function announceActionablesActivity(key: string) {
+  let release = () => {};
+  const done = new Promise<void>(resolve => { release = resolve; });
+  void navigator.locks?.request(key, { mode: "shared" }, () => done).catch(() => {});
+  return release;
 }

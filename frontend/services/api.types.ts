@@ -1,3 +1,8 @@
+import type { LogoutResponse } from "@/lib/logoutOutcome";
+import type { ZerodhaDisplayQuoteResponse } from "@/types/api";
+import type { StockSourceObservationPage } from "@/types/api";
+
+import type { BasketScoreHistory } from "@/lib/basketDisplayCalculations";
 import {
     LoginResponse,
     LlmPerformanceResponse,
@@ -108,6 +113,7 @@ import {
     FinalActionableHistoryBulkCreateRequest,
     FinalActionableHistoryBulkCreateResponse,
     FinalActionableHistoryListResponse,
+    HistoricalScoreEvidenceResponse,
 } from '@/types/api';
 
 export type ApiRequestControl = {
@@ -119,11 +125,12 @@ export type ApiRequestControl = {
 // Define the API service interface with proper types
 export interface IApiService {
     setSessionGeneration(generation: string): void;
+    beginLogout(): void;
 
     // Auth endpoints
     login(data: { email?: string; username?: string; password: string }): Promise<LoginResponse>;
     register(data: { email: string; username: string; password: string; full_name?: string }): Promise<RegisterResponse>;
-    logout(token?: string): Promise<void>;
+    logout(token?: string): Promise<LogoutResponse>;
     getCurrentUser(token?: string): Promise<UserResponse>;
     updatePassword(data: UpdatePasswordRequest, token?: string): Promise<void>;
     getProfile(token?: string): Promise<UpdateProfileRequest>;
@@ -153,6 +160,10 @@ export interface IApiService {
         limit?: number;
         cursor?: string | null;
     }): Promise<FinalActionableHistoryListResponse>;
+    getStockSourceObservations(params: { market: "india" | "us"; symbol: string; cursor?: string | null }): Promise<StockSourceObservationPage>;
+
+    getBasketScoreHistory(params: { market: "india" | "us"; symbols: string[]; days: number; as_of?: string }): Promise<BasketScoreHistory>;
+    getHistoricalScoreEvidence(params: { run_id: number; market: "india" | "us"; symbol: string; exchange: string; covered_at: string; history_id?: number }): Promise<HistoricalScoreEvidenceResponse>;
     saveFinalActionableHistory(
         data: FinalActionableHistoryBulkCreateRequest,
     ): Promise<FinalActionableHistoryBulkCreateResponse>;
@@ -199,6 +210,7 @@ export interface IApiService {
     zerodhaLoginUrl(): Promise<ZerodhaLoginUrlResponse>;
     zerodhaCallback(request_token: string): Promise<ZerodhaStatusResponse>;
     zerodhaStatus(): Promise<ZerodhaStatusResponse>;
+    zerodhaDisplayQuotes(instruments: string[]): Promise<ZerodhaDisplayQuoteResponse>;
     zerodhaPortfolioOverview(): Promise<ZerodhaPortfolioOverviewResponse>;
     zerodhaPortfolioSnapshot(snapshotDate: string): Promise<ZerodhaPortfolioSnapshotDetail>;
     zerodhaSyncPortfolio(): Promise<ZerodhaPortfolioSyncResponse>;
@@ -231,7 +243,7 @@ export interface IApiService {
     indmoneyUsThreatsLatest(): Promise<IndMoneyUsThreatLatestResponse>;
     indmoneyUsThreatsHistory(params?: { limit?: number }): Promise<IndMoneyUsThreatHistoryResponse>;
     indmoneyUsThreatJob(jobId: number): Promise<IndMoneyUsThreatAnalysis>;
-    indmoneyUsRunThreats(data?: PortfolioEventRunRequest): Promise<IndMoneyUsThreatRunResponse>;
+    indmoneyUsRunThreats(data?: PortfolioEventRunRequest & { expected_snapshot_id?: number }): Promise<IndMoneyUsThreatRunResponse>;
 
     // Polymarket endpoints
     polymarketState(options?: ApiRequestControl): Promise<PolymarketBotState>;

@@ -1,0 +1,148 @@
+✔ stale persisted workflows cannot keep run controls active (1.611635ms)
+✔ Bullpen auto-run workflow view maps running stages to green, yellow, and blue containers (116.950146ms)
+✔ Bullpen auto-run workflow view freezes completed stage timers at the next stage start (48.11484ms)
+✔ Bullpen auto-run workflow view clamps stale overlapping stage timestamps to sequential boundaries (50.718732ms)
+✔ Bullpen auto-run workflow view exposes Stage 2 and Stage 3 inputs (19.131532ms)
+✔ Bullpen auto-run workflow view derives Stage 2 and Stage 3 inputs from upstream outputs (36.417478ms)
+✔ Bullpen auto-run workflow view merges derived Stage 1 positions into explicit Stage 2 inputs (36.181651ms)
+✔ Bullpen auto-run workflow view ignores completed_at on an actively running stage (33.654494ms)
+✔ Bullpen auto-run workflow view hides queued Stage 3 progress when Stage 2 is still the active worker stage (16.292434ms)
+✔ Bullpen auto-run workflow view explains Stage 3 counts as combined review rows (24.984955ms)
+✔ Bullpen auto-run workflow view treats a partial Stage 2 as finished so Stage 3 can proceed (27.275987ms)
+✔ Bullpen auto-run workflow view appends the exact Stage 3 gate reason to the detail copy (16.30937ms)
+✔ Bullpen auto-run workflow view explains when Stage 2 reuses saved LLM outputs (21.189106ms)
+✔ Bullpen auto-run workflow view treats legacy completed runs as fully finished (12.258639ms)
+✔ Bullpen auto-run workflow settled helper hides active controls once every stage is finished (12.83421ms)
+✔ Bullpen auto-run workflow treats a fully submitted running Stage 3 as settled (13.604993ms)
+✔ Bullpen auto-run workflow view does not show a failed run as actively working (25.104537ms)
+✔ Bullpen auto-run workflow does not fabricate Stage 1 for an active exact run with missing compact stages (22.218767ms)
+✔ Bullpen auto-run workflow view starts Stage 1 immediately for a pending run (11.890042ms)
+✖ Bullpen auto-run workflow view exposes Stage 1 output candidates (14.768933ms)
+✖ Bullpen auto-run workflow view exposes Stage 1 active Bullpen positions (13.677012ms)
+✔ Bullpen auto-run workflow view filters non-active Stage 1 rows from active_positions_found (14.267564ms)
+✔ Bullpen auto-run workflow view keeps derived Stage 3 inputs even when Invest never started (49.873231ms)
+✔ Bullpen auto-run workflow view keeps the failed stage highlighted when backend progress was persisted (16.06507ms)
+✔ Bullpen auto-run workflow view explains the saved Stage 2 execution mode (17.087986ms)
+✔ Bullpen auto-run workflow view exposes detailed Stage 1 progress commentary (11.991336ms)
+✔ an active Auto Run takes precedence over a saved independent scan (1.695211ms)
+✔ absent run evidence never claims that work is queued (27.089486ms)
+✔ queued Stage 3 does not show saved preview counts while an active run is still in Stage 2 (3.735183ms)
+✔ invest stage success is surfaced as soon as all planned orders are submitted (53.707077ms)
+✔ invest stage success stays hidden until every planned order reaches submitted status (9.62422ms)
+✔ latest completed Stage 1 snapshot verifies portfolio rows and occupied slots (164.779639ms)
+✔ an explicit newer empty Stage 1 snapshot supersedes older positions (93.844375ms)
+✔ incomplete Stage 1 data never overrides the live portfolio flow (44.354819ms)
+✔ missing wallet freshness lineage cannot verify an empty portfolio (55.949014ms)
+✔ Stage 1 with a wallet refresh error or non-pass status is never canonical (87.059524ms)
+✔ newer failed empty Stage 1 preserves the prior seven-row snapshot (50.607544ms)
+✔ twelve active rows preserve total, truncation, and occupancy (54.748872ms)
+✔ verified Stage 1 uses the largest additive active and occupied scalars (58.526979ms)
+✔ live positions snapshot takes precedence over historical Stage 1 portfolio (60.802707ms)
+✔ nonempty tracked fallback cannot supersede a seven-row verified Stage 1 portfolio (41.797565ms)
+✔ an active Stage 1 run keeps the prior verified seven-position portfolio (46.424896ms)
+✔ a degraded candidate-only Stage 1 cannot replace a prior verified portfolio (31.217963ms)
+✔ persisted Stage 1-only snapshot survives a newer active run (35.606442ms)
+✔ persisted non-fresh portfolio snapshot is rejected (29.38295ms)
+✔ persisted snapshot keeps claimable rows separate from active exposure (26.003414ms)
+✔ Sidebar navigation config defines the redesigned sections, labels, and route mappings (1.644354ms)
+✔ Trading Bots is a sibling group with explicit Bot Overview and badges, while Profile and Preferences stay out of primary navigation (2.423922ms)
+✔ Sidebar component keeps the accessibility, footer, and reorder hooks required by the redesign (0.552444ms)
+✔ Trading Bots overview page and Bullpen AI Auto-Live page stay wired to their console entrypoints (0.184879ms)
+✔ Legacy Bullpen AI Auto-Live route redirects to the Trading Bots parent route (0.175184ms)
+✔ Retired Google Sheets screen is absent from navigation and old bookmarks redirect safely (0.372653ms)
+✔ overview refresh invokes only passive APIs, including failed reads (false) (8.055099ms)
+✔ overview refresh invokes only passive APIs, including failed reads (true) (5.307287ms)
+✔ cold and unavailable states keep unknown metrics, mode and risk without stopped claims (0.709662ms)
+✔ saved CopyTrader evidence never emits live doctor/lock/armed warnings (0.423039ms)
+✔ runtime totals retain unknown versus reported counts: loading (0.388276ms)
+✔ runtime totals retain unknown versus reported counts: failed (0.140442ms)
+✔ runtime totals retain unknown versus reported counts: partial (0.213633ms)
+✔ runtime totals retain unknown versus reported counts: success-zero (0.166211ms)
+✔ runtime totals retain unknown versus reported counts: populated (0.130838ms)
+✔ runtime totals retain unknown versus reported counts: stale-response (0.154914ms)
+ℹ tests 62
+ℹ suites 0
+ℹ pass 60
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1219.580751
+
+✖ failing tests:
+
+test at tests/bullpen-auto-run-progress.test.mjs:880:1
+✖ Bullpen auto-run workflow view exposes Stage 1 output candidates (14.768933ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    {
+  +   bestAskCents: null,
+  +   bestBidCents: null,
+      closeTime: '2026-06-25T12:30:00Z',
+  +   conditionId: null,
+      currentNoOdds: 67.5,
+      currentYesOdds: 32.5,
+  +   eventDescription: null,
+      filterReasons: [],
+      forceInclude: true,
+  +   forceIncludedPosition: false,
+      liquidityUsd: 450,
+  +   marketContext: null,
+      marketId: null,
+      marketUrl: 'https://polymarket.com/event/no',
+  +   preflightEvidenceBlock: null,
+      question: 'Will the event resolve No?',
+      questionId: null,
+  +   resolutionSource: null,
+  +   returnsPerDay: null,
+  +   rules: null,
+      scanStatus: 'passed',
+  +   selected: null,
+      slug: 'event-no',
+  +   spreadCents: null,
+      theme: 'Politics',
+      volumeUsd: 1200.5
+    }
+  
+      at TestContext.<anonymous> (file:///workspace/investment-engine/frontend/tests/bullpen-auto-run-progress.test.mjs:930:10)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: { questionId: null, marketId: null, conditionId: null, question: 'Will the event resolve No?', marketUrl: 'https://polymarket.com/event/no', slug: 'event-no', closeTime: '2026-06-25T12:30:00Z', theme: 'Politics', currentYesOdds: 32.5, currentNoOdds: 67.5, volumeUsd: 1200.5, liquidityUsd: 450, bestBidCents: null, bestAskCents: null, spreadCents: null, returnsPerDay: null, forceInclude: true, forceIncludedPosition: false, selected: null, rules: null, eventDescription: null, marketContext: null, resolutionSource: null, preflightEvidenceBlock: null, scanStatus: 'passed', filterReasons: [] },
+    expected: { questionId: null, marketId: null, question: 'Will the event resolve No?', marketUrl: 'https://polymarket.com/event/no', slug: 'event-no', closeTime: '2026-06-25T12:30:00Z', theme: 'Politics', currentYesOdds: 32.5, currentNoOdds: 67.5, volumeUsd: 1200.5, liquidityUsd: 450, forceInclude: true, scanStatus: 'passed', filterReasons: [] },
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at tests/bullpen-auto-run-progress.test.mjs:954:1
+✖ Bullpen auto-run workflow view exposes Stage 1 active Bullpen positions (13.677012ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  ... Skipped lines
+  
+    {
+      averagePriceCents: 42.5,
+      classification: null,
+      closeTime: '2026-06-25T12:30:00Z',
+      conditionId: '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
+  ...
+      positionKey: 'market-1::YES',
+  +   returnsPerDay: null,
+      shares: 12.5,
+      side: 'YES',
+      slug: 'rates-fall',
+      theme: 'Macro'
+    }
+  
+      at TestContext.<anonymous> (file:///workspace/investment-engine/frontend/tests/bullpen-auto-run-progress.test.mjs:1001:10)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: { positionKey: 'market-1::YES', marketId: 'market-1', marketTitle: 'Will rates fall?', marketUrl: 'https://polymarket.com/event/rates-fall', slug: 'rates-fall', theme: 'Macro', side: 'YES', shares: 12.5, exposureUsd: 37.5, averagePriceCents: 42.5, currentYesOdds: 55, currentNoOdds: 45, closeTime: '2026-06-25T12:30:00Z', conditionId: '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef', isClaimable: false, classification: null, returnsPerDay: null },
+    expected: { positionKey: 'market-1::YES', marketId: 'market-1', marketTitle: 'Will rates fall?', marketUrl: 'https://polymarket.com/event/rates-fall', slug: 'rates-fall', theme: 'Macro', side: 'YES', shares: 12.5, exposureUsd: 37.5, averagePriceCents: 42.5, currentYesOdds: 55, currentNoOdds: 45, closeTime: '2026-06-25T12:30:00Z', conditionId: '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef', isClaimable: false, classification: null },
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }

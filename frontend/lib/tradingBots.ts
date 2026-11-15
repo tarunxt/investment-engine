@@ -433,6 +433,17 @@ export function sortTradingBots(bots: TradingBotSummary[]) {
   return TRADING_BOT_CARD_ORDER.map((id) => botById.get(id) || getBaseTradingBotSummary(id));
 }
 
+export const TRADING_BOTS_LOADING_NOTE = "Loading latest trading bot status in the background.";
+
+export function settleTradingBotsOverviewRead(overview: TradingBotsOverview): TradingBotsOverview {
+  return {
+    ...overview,
+    bots: overview.bots.map((bot) => bot.note === TRADING_BOTS_LOADING_NOTE
+      ? { ...bot, note: "Current trading bot status is unavailable. No current source snapshot was returned." }
+      : bot),
+  };
+}
+
 export function buildTradingBotsOverviewShell(note?: string): TradingBotsOverview {
   return {
     generatedAt: new Date().toISOString(),

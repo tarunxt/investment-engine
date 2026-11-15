@@ -4,19 +4,19 @@ import { readFileSync } from "node:fs";
 const source = readFileSync(
   new URL("../app/console/dashboard/_components/RebalanceWorkflowSections.tsx", import.meta.url),
   "utf8",
-);
+) + readFileSync(new URL("../app/console/_components/WorkflowConfiguration.tsx", import.meta.url), "utf8");
 
 assert.match(source, /type ZerodhaExecutionMode = "direct_market" \| "publisher_limit";/);
-assert.match(source, /Open Kite protected LIMIT basket/);
-assert.match(source, /Place protected MARKET/);
-assert.match(source, /Protected MARKET: Sell first, then buy/);
-assert.match(source, /Refresh LTP/);
+assert.doesNotMatch(source, /Open Kite protected LIMIT basket/);
+assert.match(source, /const buttonText = isZerodhaPreview \? "Place Order"/);
+assert.doesNotMatch(source, /Protected MARKET: Sell first, then buy/);
+assert.doesNotMatch(source, /Refresh LTP/);
 assert.match(source, /Quoted LTP refreshed/);
 assert.match(source, /Quoted LTP/);
 assert.match(source, /Buy Threshold/);
-assert.match(source, /Buy New and Buy More rows auto-select only when the Final Score is greater than the Buy threshold/);
-assert.match(source, /Publisher-safe fallback uses \/connect\/basket only for protected LIMIT orders/);
-assert.match(source, /SELL trays first/);
+assert.doesNotMatch(source, /Buy New and Buy More rows auto-select only when the Final Score is greater than the Buy threshold/);
+assert.doesNotMatch(source, /Publisher-safe fallback uses \/connect\/basket only for protected LIMIT orders/);
+assert.doesNotMatch(source, /SELL rows first/);
 assert.match(source, /Refresh & Open Buy Basket/);
 assert.doesNotMatch(source, /Sell All, Trim, Buy New, and Buy More actionables are pre-selected/);
 assert.doesNotMatch(source, /Market with Zerodha auto protection/);

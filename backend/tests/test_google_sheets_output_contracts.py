@@ -67,7 +67,7 @@ def export_job(source):
     with ExitStack() as stack:
         session = stack.enter_context(patch.object(tasks, "SyncSessionLocal"))
         db = session.return_value.__enter__.return_value
-        db.execute.side_effect = [Result(SimpleNamespace(access_token_enc="unused", refresh_token_enc=None)), Result(source)]
+        db.execute.side_effect = [Result(source), Result(SimpleNamespace(access_token_enc="unused", refresh_token_enc=None))]
         repository = stack.enter_context(patch.object(tasks, "SyncJobRepository"))
         stack.enter_context(patch.object(tasks, "SyncRunRepository"))
         stack.enter_context(patch.object(tasks, "decrypt_token", return_value="mocked"))
@@ -113,8 +113,11 @@ def test_sixty_rows_five_tables_ancillary_prose_and_all_rationales_reach_sheet()
     assert len(exported) == 60
     assert {row["Stock Symbol"] for row in exported} == {f"STOCK{i}" for i in range(60)}
     for index, row in enumerate(exported):
+        expected = stock(f"STOCK{index}")
+        expected.update(llm_name_model="provider/model", llm="provider/model",
+                        run_number=77, run_date="2026-10-02", run_time="15:00:00")
         for column in SWING_COLUMNS:
-            assert row[column.label] == str(stock(f"STOCK{index}")[column.key])
+            assert row[column.label] == (expected[column.key] if column.key == "run_number" else str(expected[column.key]))
         assert row["Export Job ID"] == source.id
         assert row["Source Row"] == index % 12 + 1
         assert isinstance(row["Source Line"], int)
@@ -235,7 +238,7 @@ def test_run_keeps_independent_samples_and_blocks_invalid_current_outputs(invali
         session = stack.enter_context(patch.object(tasks, "SyncSessionLocal"))
         db = session.return_value.__enter__.return_value
         db.execute.side_effect = [
-            Result(SimpleNamespace(access_token_enc="unused", refresh_token_enc=None)), Result(run),
+            Result(run), Result(SimpleNamespace(access_token_enc="unused", refresh_token_enc=None)),
             Result([SimpleNamespace(job=source, stage=1) for source in sources]),
         ]
         stack.enter_context(patch.object(tasks, "SyncRunRepository"))
@@ -257,5 +260,5 @@ def test_run_keeps_independent_samples_and_blocks_invalid_current_outputs(invali
     assert len(exported) == 10
     assert {row["Export Job ID"] for row in exported} == {77, 78}
     assert {row["Rationale Cruxx"] for row in exported} == {"Sample 77 rationale", "Sample 78 rationale"}
-    assert all(row["Run #"] == 0 and row["LLM"] == "Original source model" for row in exported)
+    assert all(row["Run #"] == 12 and row["LLM"] == "provider/model" for row in exported)
     assert current_output_context() is None

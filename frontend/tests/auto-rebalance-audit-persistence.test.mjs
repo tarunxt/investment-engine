@@ -17,6 +17,13 @@ function compile(source) {
 const helperModule = { exports: {} };
 new Function("exports", "module", compile(readFileSync(new URL("../lib/autoRebalanceAudit.ts", import.meta.url), "utf8")))(helperModule.exports, helperModule);
 const { AutoRebalanceAuditSession, assertAutoRebalanceRunMetadata, autoRebalanceAuditKey, restoreAutoRebalanceAuditState } = helperModule.exports;
+const planSource = readFileSync(new URL("../lib/rebalanceStageInputs.ts", import.meta.url), "utf8");
+const planAst = ts.createSourceFile("inputs.ts", planSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+const planExports = {};
+new Function("exports", compile(planAst.statements.find(node => node.name?.getText(planAst) === "technicalInputPlanIssue").getText(planAst)))(planExports);
+const { technicalInputPlanIssue } = planExports;
+const priceExports = {};
+new Function("exports", compile(readFileSync(new URL("../lib/technicalPriceEvidence.ts", import.meta.url), "utf8")))(priceExports);
 const rebalanceSource = readFileSync(new URL("../lib/rebalance.ts", import.meta.url), "utf8");
 const rebalanceAst = ts.createSourceFile("rebalance.ts", rebalanceSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
 const holdingsGuard = rebalanceAst.statements.find((node) => node.name?.getText(rebalanceAst) === "assertIndmoneyHoldingsSnapshot");
@@ -24,8 +31,11 @@ assert.ok(holdingsGuard, "use the real holdings guard in the extracted workflow"
 const holdingsExports = {};
 new Function("exports", compile(holdingsGuard.getText(rebalanceAst)))(holdingsExports);
 const { assertIndmoneyHoldingsSnapshot } = holdingsExports;
+const snapshotExports = {};
+new Function("exports", "require", compile(readFileSync(new URL("../lib/indmoneySnapshotSource.ts", import.meta.url), "utf8")))(snapshotExports, () => holdingsExports);
+const { readIndmoneySnapshotSource } = snapshotExports;
 const holdingsSnapshot = {
-  parse_status: "parsed", reported_holdings_count: 1, captured_at: "2025-01-15T12:00:00Z",
+  id: 7001, parse_status: "parsed", reported_holdings_count: 1, captured_at: "2025-01-15T12:00:00Z",
   holdings: [{ symbol: "ABC", quantity: 0.125 }],
 };
 const workflowSource = readFileSync(new URL("../app/console/dashboard/_components/RebalanceWorkflowSections.tsx", import.meta.url), "utf8");
@@ -35,7 +45,7 @@ function extract(start, end) {
   assert.ok(index >= 0 && finish > index);
   return workflowSource.slice(index, finish);
 }
-const callbacks = extract("  const getAuditSession = useCallback(", "  useEffect(() => {");
+const callbacks = extract("  const getAuditSession = useCallback(", "  // Poll ownership changes");
 const workflow = extract("  const runWorkflow = useCallback(", "  const syncPortfolioNow = useCallback(");
 const executable = compile(`${callbacks}\n${workflow}\nreturn { getAuditSession, recordAutoRebalanceStage, markCompleted, runWorkflow };`);
 const stages = ["sync", "threats", "swing", "rebalance", "technical", "actionables"];
@@ -51,11 +61,12 @@ async function until(check) {
   assert.ok(check(), "expected asynchronous checkpoint was reached");
 }
 
-function harness({ intercept, read, email, reserve, snapshot = holdingsSnapshot, selection = ["swing", "actionables"] } = {}) {
+function harness({ analysisOnly = false, formulaScore = 0, intercept, read, email, reserve, quoteRead, snapshot = holdingsSnapshot, selection = ["swing", "rebalance", "technical", "actionables"] } = {}) {
   const durable = new Map();
   const auditWrites = [];
   const emails = [];
   const modelCalls = [];
+  const consensusCalls = [];
   const delays = [];
   const timers = [];
   const updates = [];
@@ -91,11 +102,19 @@ function harness({ intercept, read, email, reserve, snapshot = holdingsSnapshot,
     },
     getProviders: async () => [{ provider: "existing", model: "chosen" }],
     indmoneyUsPortfolioOverview: async () => ({ latest: snapshot }),
+    indmoneyUsThreatsLatest: async () => ({ analysis: { snapshot_id: snapshot?.id, captured_at: snapshot?.captured_at } }),
+    zerodhaPortfolioOverview: async () => ({ latest: { captured_at: "2026-10-29T09:17:00Z" } }),
+    zerodhaThreatsLatest: async () => ({ analysis: { captured_at: "2026-10-29T09:17:00Z" } }),
+    zerodhaDisplayQuotes: quoteRead ?? (async () => ({ quotes: [], missing: [] })),
     indmoneyUsCreatePortfolioSnapshot: async () => snapshot,
     createRun: async (payload) => { modelCalls.push(payload); return { id: modelCalls.length }; },
   };
   const bindings = {
-    useCallback: (fn) => fn, AutoRebalanceAuditSession, assertAutoRebalanceRunMetadata, autoRebalanceAuditKey, assertIndmoneyHoldingsSnapshot,
+    runtimeOwner: { id: 7 }, isCurrentWorkflowOwner: () => true, requireWorkflowOwner: owner => owner,
+    actionablesActivityKey: helperModule.exports.actionablesActivityKey, announceActionablesActivity: helperModule.exports.announceActionablesActivity,
+    savedStageReadGeneration: {current:0}, setWorkflowHistoryError: set("historyError"),
+    readLatestIndmoneySnapshot: () => apiService.indmoneyUsPortfolioOverview(),
+    readIndmoneySnapshotSource, useCallback: (fn) => fn, technicalInputPlanIssue, AutoRebalanceAuditSession, assertAutoRebalanceRunMetadata, autoRebalanceAuditKey, assertIndmoneyHoldingsSnapshot,
     activeAutoRebalanceMetadataRef: active, auditSessionsRef: sessions,
     apiService, sleep: async (ms) => { delays.push(ms); },
     setAuditStates: set("audits"), setCompletionEmailWarnings: set("warnings"), setStates: set("states"),
@@ -108,12 +127,21 @@ function harness({ intercept, read, email, reserve, snapshot = holdingsSnapshot,
     cancelRequestedRef: cancel, pauseRequestedRef: pause,
     setRunningPortfolio: set("running"), setWorkflowPaused: () => {},
     reserveAutoRebalanceRunMetadata: reserve ?? (async (p) => metadata(p === "zerodha" ? "india" : "indmoney_us")),
-    setActiveAutoRebalanceMetadata: () => {}, setSpecificMode: () => {}, setSelectedStages: () => {}, setSelectedInputs: () => {}, setLastAutoRebalanceCosts: () => {},
+    analysisOnlyRuns: { zerodha: analysisOnly, indmoneyUs: analysisOnly }, setAnalysisOnlyRuns: () => {}, setActiveAutoRebalanceMetadata: () => {}, setSpecificMode: () => {}, setSelectedStages: () => {}, setSelectedInputs: () => {}, setLastAutoRebalanceCosts: () => {},
     buildZerodhaPopupFeatures: () => "", ensureZerodhaConnectedForSync: async () => {},
-    onDashboardRefresh: async () => {}, waitForRunWithStageHandling: async (_, __, id) => ({ id, status: "completed" }),
+    onDashboardRefresh: async () => {}, waitForRunWithStageHandling: async (_, __, id) => ({ id, status: "completed", run_jobs: [] }),
     retryWorkflowRead: (read) => read(),
     getSavedStageTargets: () => [{ provider: "existing", model: "chosen", sample_count: 3 }],
     buildSwingTradePrompt: () => "unchanged strategy", getSwingTradeDefaultInvestmentAmount: () => "existing amount", getSwingTradeDefaultExportSheetName: () => "existing sheet",
+    getLatestMatchingRebalanceRuns: runs => runs,
+    getSelectedStageRunIds: () => [], selectStageRunInputs: () => [], deduplicateStageRunInputs: runs => runs,
+    buildOutputSourceJobs: async () => [], getPreviousMarketClose: () => new Date(),
+    buildRebalanceInputBundle: () => "snapshot", ensureRebalanceFlowMarker: p => p,
+    buildRebalancePrompt: () => "rebalance", getRebalanceDefaultExportSheetName: () => "sheet",
+    scoreMatrixFormulaConfig: {}, auditResponseHashes: async () => ({}),
+    buildConsensusRows: (...args) => { consensusCalls.push(args); return [{ key: "NSE:TEST", exchange: "NSE", symbol: "TEST" }]; },
+    buildTechnicalScanMap: () => ({}), resolveTechnicalPriceEvidence: quoteRead ? priceExports.resolveTechnicalPriceEvidence : async () => "", buildTechnicalScanPrompt: () => "technical",
+    buildDashboardActionRows: rows => rows.map(stock => ({ stock, formulaAction: "Hold", formulaScore, formulaEstimate: {}, detail: {} })),
     getSelectedThreatJobIds: () => [], deduplicateThreatStageInputs: (input) => input,
     buildRunPayload: (payload) => payload, summarizeRun: () => ({ runStatus: "completed" }), getRunProgress: () => ({ completedLlms: 1, totalLlms: 1 }), countUniqueStocksFromRun: () => 1,
     getStageTileLabel: (stage) => stage, normalizeError: (error) => error.message,
@@ -122,7 +150,7 @@ function harness({ intercept, read, email, reserve, snapshot = holdingsSnapshot,
     window: { setTimeout: (fn) => { timers.push(fn); }, dispatchEvent: () => {}, alert: (message) => { alerts.push(message); } },
     CustomEvent: class {}, console: { error: () => {} },
   };
-  return { ...new Function(...Object.keys(bindings), executable)(...Object.values(bindings)), view, active, sessions, execution, cancel, pause, auditWrites, emails, modelCalls, delays, timers, durable, updates, alerts };
+  return { ...new Function(...Object.keys(bindings), executable)(...Object.values(bindings)), view, active, sessions, execution, cancel, pause, auditWrites, emails, modelCalls, consensusCalls, delays, timers, durable, updates, alerts };
 }
 
 for (const rejectedStage of ["sync", "actionables"]) {
@@ -132,7 +160,7 @@ for (const rejectedStage of ["sync", "actionables"]) {
     } });
     await h.runWorkflow("zerodha");
     assert.equal(h.view.audits.zerodha.status, "failed");
-    assert.equal(h.modelCalls.length, 1, "audit failure must not repeat paid model work");
+    assert.equal(h.modelCalls.length, 3, JSON.stringify(h.updates.filter(x => x.info.error)));
     assert.deepEqual(h.modelCalls[0].targets, [{ provider: "existing", model: "chosen", sample_count: 3 }]);
     assert.equal(h.modelCalls[0].prompt, "unchanged strategy");
     assert.equal(h.view.states.zerodha.swing.state, "completed");
@@ -176,7 +204,7 @@ test("actual workflow waits for last stage and durable history before email", as
   assert.equal(h.emails.length, 1);
   assert.equal(h.view.audits.zerodha.status, "saved");
   assert.equal(h.timers.length, 1);
-  assert.equal(h.modelCalls.length, 1);
+  assert.equal(h.modelCalls.length, 3);
 });
 
 test("actual workflow retries only identical metadata and queues email once after recovery", async () => {
@@ -186,7 +214,7 @@ test("actual workflow retries only identical metadata and queues email once afte
   } });
   await h.runWorkflow("zerodha");
   assert.equal(attempts, 3);
-  assert.equal(h.modelCalls.length, 1);
+  assert.equal(h.modelCalls.length, 3);
   assert.equal(h.emails.length, 1);
   assert.deepEqual(h.delays, [500, 1000]);
 });
@@ -202,7 +230,7 @@ test("a lost final response reconciles committed audit without repeating model w
   await h.runWorkflow("zerodha");
   assert.equal(h.view.audits.zerodha.status, "saved");
   assert.equal(h.emails.length, 1);
-  assert.equal(h.modelCalls.length, 1);
+  assert.equal(h.modelCalls.length, 3);
 });
 
 for (const mismatch of ["sequence", "portfolio", "parent", "stage", "run", "summary"]) {
@@ -216,7 +244,7 @@ for (const mismatch of ["sequence", "portfolio", "parent", "stage", "run", "summ
     await h.runWorkflow("zerodha");
     assert.equal(h.emails.length, 0);
     assert.equal(h.view.audits.zerodha.status, "failed");
-    assert.equal(h.modelCalls.length, 1);
+    assert.equal(h.modelCalls.length, 3);
   });
 }
 
@@ -229,7 +257,7 @@ test("exhausted history reads preserve outputs and withhold completion email", a
   assert.equal(h.view.audits.zerodha.status, "failed");
   assert.match(h.view.audits.zerodha.message, /history unavailable/);
   assert.equal(h.view.states.zerodha.actionables.state, "completed");
-  assert.equal(h.modelCalls.length, 1);
+  assert.equal(h.modelCalls.length, 3);
 });
 
 test("late old-run persistence cannot update a newer run or another portfolio", async () => {
@@ -297,7 +325,7 @@ test("a second start and a previous run's reset timer cannot mutate an active ru
   h.execution.current = true;
   h.view.running = null; // Kill clears this while the original work unwinds.
   await h.runWorkflow("indmoneyUs");
-  assert.equal(h.modelCalls.length, 1);
+  assert.equal(h.modelCalls.length, 3);
   h.timers[0]();
   assert.deepEqual(h.view.states, before);
 });
@@ -308,24 +336,27 @@ test("email failure is visible and does not turn completed model work into a fai
   assert.match(h.view.warnings.zerodha, /Completion email was not confirmed/);
   assert.equal(h.view.audits.zerodha.status, "saved");
   assert.equal(h.view.states.zerodha.actionables.state, "completed");
-  assert.equal(h.modelCalls.length, 1);
+  assert.equal(h.modelCalls.length, 3);
 });
 
 test("actual workflow card renders pending and failed history independently of output controls", () => {
-  const source = compile(`${extract("  const renderSectionCard =", "  const zerodhaSection =")}\nreturn renderSectionCard;`);
+  const source = compile(`${extract("  const renderSectionCard =", "  useEffect(() => {")}\nreturn renderSectionCard;`);
   const workflowStates = Object.fromEntries(stages.map((stage) => [stage, { state: "completed" }]));
   for (const status of ["pending", "failed"]) {
     const bindings = {
-      exports: {},
+      exports: {}, technicalInputPlanIssue, selectedInputs: { zerodha: { technical: new Set(["technical:next"]) } },
       require: (name) => { assert.equal(name, "react/jsx-runtime"); return jsxRuntime; },
       auditStates: { zerodha: { key: "india:42", label: "India 42", status, message: "History not acknowledged" } },
       completionEmailWarnings: {}, runningPortfolio: null, states: { zerodha: workflowStates },
       hasActiveWorkflowStage: () => false, getQueuedStages: () => new Set(),
+      analysisOnlyRuns: { zerodha: false }, AnalysisOnlyRunControl: () => null,
       specificMode: { zerodha: false }, selectedStages: { zerodha: new Set() },
       shouldShowQuotaLlmSwitchWarning: () => false, Link: "a", History: "span", Loader2: "span", Play: "span", Button: "button",
       URLs: { routes: { console: { autoRebalanceRuns: () => "/console/auto-rebalance-runs?portfolio=zerodha" } } },
-      formatTimestamp: () => "03 Oct", lastRunByPortfolio: { zerodha: null }, isBusy: false, STAGE_ORDER: stages, now: 0,
+      formatTimestamp: () => "03 Oct", formatCompactStageTime: () => "03 Oct 00:00", lastRunByPortfolio: { zerodha: null }, isBusy: false, STAGE_ORDER: stages, now: 0,
       WorkflowStageTile: ({ stage }) => createElement("button", null, `View output ${stage}`),
+      stageLedger: false, ledgerView: "ledger", surface: undefined,
+      WorkflowStageLedger: ({ children }) => createElement("div", null, children),
       RebalanceStockFlowTrigger: () => null, getWorkflowRunDuration: () => null,
       getWorkflowRunCost: () => 0, formatInrCost: () => "0", usdInrRate: 1, lastAutoRebalanceCosts: { zerodha: 0 },
     };
@@ -333,6 +364,11 @@ test("actual workflow card renders pending and failed history independently of o
     const html = renderToStaticMarkup(card({ portfolio: "zerodha", title: "Run Zerodha Auto-Rebalance", buttonLabel: "Run" }));
     assert.match(html, status === "pending" ? /role="status"/ : /role="alert"/);
     assert.match(html, /Completed outputs remain available/);
+    const specificBindings = { ...bindings, specificMode: { zerodha: true }, selectedStages: { zerodha: new Set(["technical"]) } };
+    const specificCard = new Function(...Object.keys(specificBindings), source)(...Object.values(specificBindings));
+    const specificHtml = renderToStaticMarkup(specificCard({ portfolio: "zerodha", title: "Run Zerodha Auto-Rebalance", buttonLabel: "Run" }));
+    assert.match(specificHtml, /Choose saved Rebalance inputs/);
+    assert.match(specificHtml, /Next means a new result from this invocation/);
     if (status === "failed") {
       assert.match(html, /completion email has not been queued/);
       assert.match(html, /Check saved run history/);
@@ -391,11 +427,11 @@ test("pause after a completed swing records the next selected unstarted stage wi
   await h.runWorkflow("zerodha");
   const paused = h.auditWrites.filter(({ payload }) => payload.status === "paused");
   assert.equal(paused.length, 1, "the valid pause does not retry a terminal-stage conflict");
-  assert.equal(paused[0].stage, "actionables");
+  assert.equal(paused[0].stage, "rebalance");
   assert.equal(h.durable.get("india:42:swing").status, "completed");
-  assert.equal(h.durable.get("india:42:actionables").status, "paused");
+  assert.equal(h.durable.get("india:42:rebalance").status, "paused");
   assert.equal(h.view.states.zerodha.swing.state, "completed");
-  assert.equal(h.view.states.zerodha.actionables.runStatus, "Paused before this stage");
+  assert.equal(h.view.states.zerodha.rebalance.runStatus, "Paused before this stage");
   assert.equal(h.view.audits.zerodha.status, "saved");
   assert.equal(h.modelCalls.length, 1);
   assert.equal(h.emails.length, 0);
@@ -427,7 +463,7 @@ test("INDmoney's real holdings guard blocks invalid pasted and saved snapshots b
       assert.equal(h.emails.length, 0);
       assert.equal(h.auditWrites.some(({ stage, payload }) => stage === "sync" && payload.status === "completed"), false);
       assert.equal(h.durable.get("indmoney_us:42:sync").status, "failed");
-      assert.match(h.view.states.indmoneyUs.sync.error, /My US Stocks/);
+      assert.match(h.view.states.indmoneyUs.sync.error, /My US Stocks|Saved snapshot identity or capture time is unavailable/);
     }
   }
 });
@@ -474,4 +510,103 @@ test("kill during stage audit records cancellation on an unstarted stage and pre
   assert.equal(h.view.audits.zerodha.status, "saved");
   assert.equal(h.emails.length, 0);
   assert.equal(h.modelCalls.length, 1);
+});
+
+
+test("Personal API denial still creates Technical and completes frozen Actionables", async () => {
+  const h = harness({quoteRead: async () => {throw Object.assign(new Error("Zerodha denied market-data access (PermissionException). This connection cannot provide live quotes."),{status:403});}});
+  await h.runWorkflow("zerodha");
+  const technical = h.modelCalls.find(call => call.scanLabel === "Technical Scan");
+  assert.ok(technical);
+  assert.match(technical.prompt,/internet_research_no_broker_quotes/);
+  assert.match(technical.prompt,/TECHNICAL_REBALANCE_SOURCES_V1/);
+  assert.doesNotMatch(technical.prompt,/TECHNICAL_PRICE_ANCHORS_V1/);
+  assert.equal(h.view.states.zerodha.technical.state,"completed");
+  assert.equal(h.view.states.zerodha.actionables.state,"completed");
+});
+
+
+test("final capture uses the retained workflow snapshot on repeated runs", async () => {
+  const retained = { ...holdingsSnapshot, holdings: [{ symbol: "TEST", quantity: 6 }] };
+  const h = harness({ snapshot: retained });
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await h.runWorkflow("indmoneyUs");
+    const finalCall = h.consensusCalls.at(-1);
+    assert.ok(finalCall, JSON.stringify(h.updates.filter(x => x.info.error)));
+    assert.equal(finalCall[1], "us");
+    assert.equal(finalCall[2], retained, "final calculation uses the exact retained snapshot");
+    assert.equal(h.view.states.indmoneyUs.actionables.state, "completed");
+  }
+});
+for (const analysisOnly of [false, true]) {
+  test(`actual workflow freezes analysis-only selection=${analysisOnly} in reservation`, async () => {
+    const reservations = [];
+    const h = harness({ analysisOnly, reserve: async (portfolio, flag) => { reservations.push({ portfolio, flag }); return metadata(); } });
+    await h.runWorkflow("zerodha");
+    assert.deepEqual(reservations, [{ portfolio: "zerodha", flag: analysisOnly }]);
+  });
+}
+test("stale India quotes start unanchored Technical research with the exact listing and reason", async () => {
+  const h = harness({quoteRead: async instruments => ({
+    quotes: instruments.map(instrument => ({instrument,price:100,as_of:'2000-01-01T00:00:00Z',source:'synthetic stale fixture'})),
+    missing:[],
+  })});
+  await h.runWorkflow("zerodha");
+  const technicalCalls = h.modelCalls.filter(call => call.scanLabel === "Technical Scan");
+  assert.equal(technicalCalls.length, 1);
+  assert.match(technicalCalls[0].prompt, /\[TECHNICAL_PRICE_MODE_V1\]internet_research_no_broker_quotes\[\/TECHNICAL_PRICE_MODE_V1\]/);
+  assert.match(technicalCalls[0].prompt, /NSE:TEST \(stale quote\)/);
+  assert.doesNotMatch(technicalCalls[0].prompt, /\[TECHNICAL_PRICE_ANCHORS_V1\]/);
+});
+
+test("future-dated India quotes stop the actual workflow before Technical job creation and final acceptance", async () => {
+  const futureQuote = new Date(Date.now() + 10 * 60_000).toISOString();
+  const h = harness({quoteRead: async instruments => ({
+    quotes: instruments.map(instrument => ({instrument, price:100, as_of:futureQuote, source:'synthetic future fixture'})),
+    missing:[],
+  })});
+  await h.runWorkflow("zerodha");
+  assert.equal(h.modelCalls.filter(call => call.scanLabel === "Technical Scan").length,0);
+  assert.equal(h.view.states.zerodha.technical.state,"failed");
+  assert.notEqual(h.view.states.zerodha.actionables.state,"completed");
+  assert.equal(h.emails.length,0);
+  assert.equal(h.durable.get("india:42:technical").status,"failed");
+  assert.equal(h.durable.get("india:42:actionables")?.summary?.frozen_final, undefined);
+});
+for (const rawScore of [3.033333333333333, -3.033333333333333, 0, null]) {
+  test(`actual workflow freezes explicit v2 raw/effective evidence for ${rawScore}`, async () => {
+    const h = harness({ formulaScore: rawScore });
+    await h.runWorkflow("zerodha");
+    const frozen = h.durable.get("india:42:actionables").summary.frozen_final;
+    assert.equal(frozen.schema, "workflow-final-v2");
+    assert.equal(frozen.formula_version, "score-matrix-v1");
+    assert.equal(frozen.scorePolicy, "score-matrix-raw-effective-v2");
+    assert.equal(frozen.rows[0].score, rawScore);
+    assert.equal(frozen.rows[0].rawScore, rawScore);
+    assert.equal(frozen.rows[0].effectiveScore, rawScore === null ? null : Math.max(-3, Math.min(3, rawScore)));
+    assert.equal(frozen.rows[0].scorePolicy, frozen.scorePolicy);
+  });
+}
+
+test('actual selective workflow clears cached evidence before each reservation acknowledgement', async () => {
+  let gate=deferred();
+  const h=harness({selection:['swing'],reserve:()=>gate.promise});
+  for(let iteration=0;iteration<2;iteration++) {
+    const stale={state:'failed',error:'Previous run failure',errorDetails:[{message:'Previous detail'}],lastRunId:900,completedAt:'2026-10-01T00:00:00Z',recommendedStocks:99,evidence:{kind:'saved',references:['Old run']}};
+    for(const stage of stages)h.view.states.zerodha[stage]=structuredClone(stale);
+    const running=h.runWorkflow('zerodha');
+    assert.equal(h.view.running,'zerodha');
+    assert.equal(h.modelCalls.length,iteration,'reservation is still pending');
+    for(const stage of stages) {
+      const info=h.view.states.zerodha[stage];
+      for(const field of ['errorDetails','lastRunId','completedAt','recommendedStocks','evidence'])assert.equal(info[field],undefined,`${stage}.${field}`);
+      assert.notEqual(info.error,'Previous run failure');
+    }
+    gate.resolve(metadata('india',42+iteration));
+    await running;
+    assert.equal(h.view.running,null);
+    assert.equal(h.view.states.zerodha.swing.state,'completed');
+    assert.equal(h.modelCalls.length,iteration+1);
+    gate=deferred();
+  }
 });

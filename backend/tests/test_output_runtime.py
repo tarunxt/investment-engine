@@ -16,7 +16,12 @@ from app.domains.jobs.output_contracts import REBALANCE_COLUMNS, SWING_COLUMNS, 
 from app.domains.ai_providers.base import AIProviderResponse
 from app.shared.types import JobStatus
 from test_output_contracts import swing_row, rebalance_row, holding, table
-from test_job_table_validation import FakeDB, FakeRepo
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
+from app.domains.jobs.models import Job
+from app.domains.jobs.repository import SyncJobRepository
+from app.domains.jobs.execution_claim import KEY
 
 
 def make_job(kind='swing', market='india', **extra):
@@ -25,7 +30,7 @@ def make_job(kind='swing', market='india', **extra):
     prompt = prefix + '\n\nReturn only one markdown table.\nChoose exactly 5 stocks.\n' + table(columns, [])
     if kind == 'rebalance':
         prompt += '\n\n# Inputs considered at current time\n## 1. Latest Portfolio Snapshot\n| Exchange | Stock Symbol | Current Units |\n| --- | --- | --- |\n| NSE | ABC | 10 |\n\n## 2. Completed Swing Trade Runs\n'
-    return SimpleNamespace(**(dict(id=99,user_id=7,prompt=prompt,provider='deepseek',model='deepseek-v4-flash',
+    return Job(**(dict(id=99,user_id=7,prompt=prompt,provider='deepseek',model='deepseek-v4-flash',
         status=JobStatus.PENDING,response=None,error_message=None,tokens_in=None,tokens_out=None,estimated_cost=None,
         created_at=datetime(2026,10,3,tzinfo=timezone.utc),auto_rebalance_portfolio='india' if market=='india' else 'indmoney_us',
         auto_rebalance_label=f'{"India" if market=="india" else "IndMoney US"} Run #9 ({"Swing" if kind=="swing" else "Rebalance"} Scan)') | extra))
@@ -141,11 +146,43 @@ def test_deepseek_complete_json_skips_format_call(scoped):
 
 
 def execute_mocked(job, results):
-    db,repo,provider=FakeDB(),FakeRepo(job),MagicMock()
-    provider.generate.side_effect=results
-    with patch.object(tasks,'SyncSessionLocal',return_value=db),patch.object(tasks,'SyncJobRepository',return_value=repo),patch('app.domains.ai_providers.factory.ProviderFactory.create',return_value=provider) as factory,patch.object(tasks,'_publish_job_update'),patch.object(tasks,'_refresh_run_status'),patch.object(tasks,'_mark_failed') as failed:
-        tasks.execute_ai_job.run(job.id)
-    return db,provider,factory,failed
+    # Real persisted ownership and fenced repository writes; only provider/I/O
+    # adapters are synthetic. SQLite does not certify PostgreSQL row locking.
+    class TrackingSession(Session):
+        closed = False
+        def close(self):
+            # Preserve a loaded assertion snapshot after rollback expired it.
+            for instance in list(self.identity_map.values()):
+                for column in instance.__table__.columns:
+                    getattr(instance, column.key)
+            self.closed = True
+            super().close()
+
+    engine = create_engine("sqlite://", poolclass=StaticPool,
+                           connect_args={"check_same_thread": False})
+    Job.__table__.create(engine)
+    sessions = sessionmaker(engine, class_=TrackingSession, expire_on_commit=False)
+    db = sessions()
+    db.add(job); db.commit()
+    repo, provider = SyncJobRepository(db), MagicMock()
+    sequence = None if callable(results) else iter(results)
+    def generate(**kwargs):
+        try:
+            return results(**kwargs) if callable(results) else next(sequence)
+        finally:
+            # Model a cancellation committed by the API while the call is in flight.
+            if db.is_modified(job, include_collections=False):
+                db.commit()
+    provider.generate.side_effect = generate
+    initial_session = [db]
+    try:
+        with patch.object(tasks, 'SyncSessionLocal', side_effect=lambda: initial_session.pop() if initial_session else sessions()), patch.object(tasks, 'SyncJobRepository', return_value=repo), patch('app.domains.ai_providers.factory.ProviderFactory.create', return_value=provider) as factory, patch.object(tasks, '_publish_job_update'), patch.object(tasks, '_refresh_run_status'), patch.object(tasks, '_mark_failed') as failed:
+            tasks.execute_ai_job.run(job.id)
+        return db, provider, factory, failed
+    finally:
+        if not db.closed:
+            db.close()
+        engine.dispose()
 
 
 def test_worker_formats_complete_output_once_and_resets_context():
@@ -249,8 +286,235 @@ def test_failed_cancellation_read_preserves_original_failure(monkeypatch):
         nonlocal generation_failed
         generation_failed=True
         raise RuntimeError('p/m returned invalid output contract (synthetic)')
-    monkeypatch.setattr(FakeRepo,'get_fresh',get_fresh,raising=False)
+    monkeypatch.setattr(SyncJobRepository,'get_fresh',get_fresh)
     _,_,_,failed=execute_mocked(job,generate)
-    failed.assert_called_once()
-    assert failed.call_args.args[3]=='p/m returned invalid output contract (synthetic)'
+    failed.assert_not_called()
+    assert job.runtime_metadata_json[KEY]['state'] == 'reconciliation_needed'
+    assert job.runtime_metadata_json[KEY]['provider_started'] is True
+    assert 'p/m returned invalid output contract (synthetic)' in json.dumps(job.runtime_metadata_json)
+    assert 'Secondary state read failure' not in json.dumps(job.runtime_metadata_json)
+    assert current_output_context() is None
+
+
+def test_rebalance_repair_keeps_existing_holding_overlap_explicit(scoped):
+    job = scoped(make_job('rebalance'))
+    prompt = tasks._build_rebalance_table_repair_prompt(job.prompt, 'Original invalid output', 'row_width')
+    assert job.prompt in prompt
+    assert 'never label it Buy New or add a second row' in prompt
+    assert 'Consider Buy New only for candidates not already present in the Latest Portfolio Snapshot' in prompt
+    assert 'snapshot labeled US, a matching symbol at a known US venue is the same existing holding' in prompt
+    assert prompt.endswith('Original invalid output')
+
+
+def test_rebalance_serialization_rules_are_scoped_and_used_for_repairs(scoped):
+    from app.domains.jobs.output_runtime import rebalance_serialization_instructions
+    assert rebalance_serialization_instructions() == ''
+    scoped(make_job('swing'))
+    assert rebalance_serialization_instructions() == ''
+    job = scoped(make_job('rebalance'))
+    original = job.prompt
+    rules = rebalance_serialization_instructions()
+    assert 'exactly 29 cells' in rules
+    assert '&#124;' in rules
+    assert 'Backticks and quotes do not escape' in rules
+    assert rules in tasks._build_rebalance_table_repair_prompt(original, 'raw invalid output', 'row_width')
+    assert job.prompt == original
+
+
+def test_worker_superset_rebalance_needs_no_paid_format_retry():
+    from app.domains.jobs.output_contracts.schemas import Column
+    job = make_job('rebalance')
+    original_prompt = job.prompt
+    raw = table((Column('evidence', 'Evidence'), *reversed(REBALANCE_COLUMNS)),
+                [rebalance_row(evidence='preserved extra')])
+    result = AIProviderResponse(content=raw, tokens_in=1, tokens_out=2, cost=.001,
+                               provider=job.provider, model=job.model)
+    _, provider, _, failed = execute_mocked(job, [result])
+    failed.assert_not_called()
+    provider.generate.assert_called_once()
+    assert 'exactly 29 cells' in provider.generate.call_args.kwargs['prompt']
+    assert job.prompt == original_prompt
+    assert job.status == JobStatus.COMPLETED
+    assert 'preserved extra' in job.response
+
+
+def test_rebalance_requires_all_selected_swing_venues_without_fabrication(scoped):
+    from app.domains.jobs.output_contracts.consistency import FrozenSwingSource
+    from app.domains.jobs import output_runtime
+    from dataclasses import replace
+    scoped(make_job('rebalance'))
+    context = current_output_context()
+    sources = (FrozenSwingSource(2226, 'a'*64, (('NSE','KAYNES'),('NSE','SUNPHARMA'),('NSE','CGPOWER')), True),
+               FrozenSwingSource(2227, 'b'*64, (('NSE','BSE'),('NSE','HDFCBANK'),('NSE','KAYNES')), True))
+    token = output_runtime._context.set(replace(context, swing_sources=sources))
+    try:
+        original = table(REBALANCE_COLUMNS, [rebalance_row()])
+        result = normalize_runtime_output(original)
+        missing = [f.message for f in result.findings if f.code == 'missing_swing_candidate']
+        assert len(missing) == 5
+        assert all(any(symbol in message for message in missing) for symbol in ['KAYNES','SUNPHARMA','CGPOWER','BSE','HDFCBANK'])
+        assert result.content == original and not result.safe_to_replace
+    finally:
+        output_runtime._context.reset(token)
+
+
+def test_unheld_non_buy_is_allowed_only_for_exact_selected_candidate():
+    row = rebalance_row()
+    row.update(stock_symbol='KAYNES', action='Hold', current_units='0', units_change='0', final_units='0', units_to_buy='0', total_buy_amount='0')
+    content = table(REBALANCE_COLUMNS, [row])
+    selected = frozenset({('NSE','KAYNES')})
+    good = normalize_output(content, 'rebalance', holdings=[], non_buy_candidates=selected)
+    assert good.safe_to_replace
+    assert not normalize_output(content, 'rebalance', holdings=[]).safe_to_replace
+    assert not normalize_output(content, 'rebalance', holdings=[], non_buy_candidates=frozenset({('BSE','KAYNES')})).safe_to_replace
+    row['units_change'] = '1'
+    assert not normalize_output(table(REBALANCE_COLUMNS,[row]), 'rebalance', holdings=[], non_buy_candidates=selected).safe_to_replace
+
+
+def test_complete_union_keeps_holdings_zero_candidates_and_both_venues(scoped):
+    from app.domains.jobs.output_contracts.consistency import FrozenSwingSource
+    from app.domains.jobs import output_runtime
+    from dataclasses import replace
+    scoped(make_job('rebalance'))
+    sources = (FrozenSwingSource(2226,'a'*64,(('NSE','KAYNES'),('NSE','ABC')),True),
+               FrozenSwingSource(2227,'b'*64,(('BSE','ABC'),('NSE','KAYNES')),True))
+    context = current_output_context()
+    token = output_runtime._context.set(replace(context,swing_sources=sources))
+    rows = [rebalance_row(), rebalance_row('KAYNES',current_units=0,final_units=0), rebalance_row('ABC',exchange_symbol='BSE',current_units=0,final_units=0)]
+    content = table(REBALANCE_COLUMNS,rows)
+    try:
+        result = normalize_runtime_output(content)
+        assert result.safe_to_replace and len(result.rows) == 3
+        bad = normalize_runtime_output(table(REBALANCE_COLUMNS,rows[:2]))
+        assert any(f.code == 'missing_swing_candidate' and 'BSE:ABC' in f.message for f in bad.findings)
+        output_runtime._context.set(replace(context,swing_sources=(replace(sources[0],complete=False),)))
+        assert any(f.code == 'incomplete_swing_source' for f in normalize_runtime_output(content).findings)
+    finally:
+        output_runtime._context.reset(token)
+
+
+def test_new_union_contract_requires_authoritative_frozen_sources_before_provider():
+    from app.domains.jobs.output_runtime import OutputPreflightError
+    job = make_job('rebalance')
+    job.prompt = '[REBALANCE_UNIVERSE_V1]\n' + job.prompt
+    with pytest.raises(OutputPreflightError, match='frozen selected source'):
+        configure_output_context(job,{})
+
+
+def test_worker_retains_incomplete_rebalance_as_partial_without_retry():
+    from app.domains.jobs.partial_output import PARTIAL_NOTICE
+    job = make_job('rebalance')
+    result = AIProviderResponse(content=json.dumps([rebalance_row(score_rationale_cruxx='-')]),
+        tokens_in=1, tokens_out=2, cost=.001, provider=job.provider, model=job.model)
+    _, provider, _, failed = execute_mocked(job, [result])
+    assert job.status == JobStatus.PARTIAL
+    assert job.error_message == PARTIAL_NOTICE
+    provider.generate.assert_called_once()
+    failed.assert_not_called()
+    assert job.runtime_metadata_json['deterministic_output']['usage_status'] == 'partial'
+
+
+@pytest.mark.parametrize("extra_cells", [0, 4, 6])
+def test_legacy_missing_cell_failure_projects_partial_without_rewriting_job(extra_cells):
+    from app.domains.jobs.schemas import JobResponse
+    job = make_job('rebalance', status=JobStatus.FAILED, updated_at=datetime(2026,10,3,tzinfo=timezone.utc))
+    job.error_message = 'invalid output contract (row_width: Expected 29 cells; received 27)'
+    lines = table(REBALANCE_COLUMNS, [rebalance_row()]).splitlines()
+    cells = lines[-1].strip('| ').split(' | ')
+    if extra_cells:
+        cells[23:23] = ["unmapped rationale"] * extra_cells
+    else:
+        del cells[23:25]
+    lines[-1] = '| ' + ' | '.join(cells) + ' |'
+    job.response = '\n'.join(lines)
+    view = JobResponse.model_validate(job)
+    assert view.status == JobStatus.PARTIAL
+    assert 'Unaligned source cells (not scored)' in view.response
+    assert view.runtime_metadata_json['partial_recovery']['original_status'] == 'failed'
+    assert job.status == JobStatus.FAILED
+    assert 'row_width' in job.error_message
+    assert JobResponse.model_validate(view.model_dump()).status == JobStatus.PARTIAL
+
+
+@pytest.mark.parametrize('error, response', [('provider timeout', 'text'), ('invalid output contract', json.dumps([rebalance_row(current_units=999)])), ('invalid output contract', '')])
+def test_nonrecoverable_failures_stay_failed(error, response):
+    from app.domains.jobs.schemas import JobResponse
+    job = make_job('rebalance', status=JobStatus.FAILED, error_message=error, response=response,
+                   updated_at=datetime(2026,10,3,tzinfo=timezone.utc))
+    assert JobResponse.model_validate(job).status == JobStatus.FAILED
+
+def test_market_scoped_indmoney_snapshot_preserves_market_for_holding_match():
+    prompt = "## 1. Latest Portfolio Snapshot\n| Market | Stock Symbol | Current Units |\n|---|---|---|\n| US | SMCI | 3 |"
+    assert holdings_from_prompt(prompt) == ({"exchange_symbol": "US", "stock_symbol": "SMCI", "current_units": "3"},)
+    assert holdings_from_prompt(prompt.replace("| US |", "| Europe |")) is None
+
+def test_provider_result_after_owner_replacement_never_overwrites_new_owner():
+    job = make_job()
+    def generate(**kwargs):
+        claim = dict(job.runtime_metadata_json[KEY])
+        job.runtime_metadata_json = {**job.runtime_metadata_json, KEY: {**claim, "owner_token": "replacement-owner"}}
+        return AIProviderResponse(content="stale output", tokens_in=2, tokens_out=3, cost=.004, provider=job.provider, model=job.model)
+    _, provider, _, failed = execute_mocked(job, generate)
+    provider.generate.assert_called_once()
+    failed.assert_not_called()
+    assert job.status == JobStatus.PROCESSING
+    assert job.response is None
+    assert job.runtime_metadata_json[KEY]["owner_token"] == "replacement-owner"
+    assert job.runtime_metadata_json[KEY]["state"] == "owned"
+    assert current_output_context() is None
+
+
+def test_expired_owner_retains_returned_usage_for_reconciliation_without_terminal_success():
+    job = make_job()
+    def generate(**kwargs):
+        claim = dict(job.runtime_metadata_json[KEY])
+        job.runtime_metadata_json = {**job.runtime_metadata_json, KEY: {**claim, "expires_at": 0, "provider_started": True}}
+        return AIProviderResponse(content="retained uncommitted output", tokens_in=2, tokens_out=3, cost=.004, provider=job.provider, model=job.model)
+    _, provider, _, failed = execute_mocked(job, generate)
+    provider.generate.assert_called_once()
+    failed.assert_not_called()
+    assert job.status == JobStatus.PROCESSING
+    assert job.response == "retained uncommitted output"
+    assert (job.tokens_in, job.tokens_out, job.estimated_cost) == (2, 3, .004)
+    assert job.runtime_metadata_json[KEY]["state"] == "reconciliation_needed"
+    assert job.runtime_metadata_json[KEY]["provider_started"] is True
+    assert current_output_context() is None
+
+
+@pytest.mark.parametrize('interruption', ['canceled', 'replacement'])
+def test_failed_fresh_read_fallback_cannot_resurrect_or_replace_owner(monkeypatch, interruption):
+    job = make_job()
+    generation_failed = False
+
+    def get_fresh(repo, job_id):
+        if generation_failed:
+            raise RuntimeError('Secondary state read failure')
+        return repo.get(job_id)
+
+    def generate(**kwargs):
+        nonlocal generation_failed
+        generation_failed = True
+        if interruption == 'canceled':
+            job.status = JobStatus.FAILED
+            job.error_message = 'Cancelled by user'
+        else:
+            record = dict(job.runtime_metadata_json[KEY])
+            job.runtime_metadata_json = {
+                **job.runtime_metadata_json,
+                KEY: {**record, 'owner_token': 'replacement-owner'},
+            }
+        raise RuntimeError('Original synthetic provider failure')
+
+    monkeypatch.setattr(SyncJobRepository, 'get_fresh', get_fresh)
+    _, provider, _, failed = execute_mocked(job, generate)
+    provider.generate.assert_called_once()
+    failed.assert_not_called()
+    assert job.response is None
+    assert job.runtime_metadata_json[KEY]['state'] == 'owned'
+    if interruption == 'canceled':
+        assert job.status == JobStatus.FAILED
+        assert job.error_message == 'Cancelled by user'
+    else:
+        assert job.status == JobStatus.PROCESSING
+        assert job.runtime_metadata_json[KEY]['owner_token'] == 'replacement-owner'
     assert current_output_context() is None

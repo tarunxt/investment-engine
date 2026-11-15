@@ -395,3 +395,35 @@ test("history circuit still opens after its own failures", () => {
   assert.equal(circuit.acquire(trends, 1), "normal");
   assert.equal(circuit.acquire(direct, 1), "normal");
 });
+
+
+test("recovery policy is returned immediately without fallback or opening the circuit", async () => {
+  const circuit = new ApiOriginCircuitBreaker(2, 1000);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const calls = [];
+    const result = await executeBoundedApiRequest(baseOptions({
+      circuit,
+      fetchCandidate: async (candidate) => {
+        calls.push(candidate.transport);
+        return response(503, '{"code":"RECOVERY_CONTAINMENT","detail":"Endpoint unavailable during analysis-only recovery."}');
+      },
+    }));
+    assert.deepEqual(calls, ["direct"]);
+    assert.equal(result.response.status, 503);
+    assert.equal(circuit.snapshot(direct).phase, "closed");
+    assert.equal(JSON.parse(new TextDecoder().decode(result.response.body)).code, "RECOVERY_CONTAINMENT");
+  }
+});
+
+test('protected-order POST pre-execution 401/403/422 remains authoritative with bounded auth retry and no transport fallback', async () => {
+  for (const status of [401, 403, 422]) {
+    const calls=[];let refreshes=0;
+    const result=await executeBoundedApiRequest(baseOptions({method:'POST',
+      fetchCandidate:async candidate=>{calls.push(candidate.transport);return response(status);},
+      refreshAuthentication:async()=>{refreshes++;},
+    }));
+    assert.equal(result.response.status,status);
+    assert.deepEqual(calls,status===401?['direct','direct']:['direct']);
+    assert.equal(refreshes,status===401?1:0);
+  }
+});

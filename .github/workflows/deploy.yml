@@ -17,6 +17,16 @@ on:
           - backend
           - full
 
+      expected_sha:
+        description: Exact reviewed main SHA (required for frontend scope or a runner SSH window)
+        required: false
+        type: string
+
+      runner_ssh_window:
+        description: Publish each runner IPv4 and wait for operator-managed single-host SSH access
+        type: boolean
+        default: false
+
 permissions:
   actions: read
   contents: read
@@ -35,6 +45,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       scope: ${{ steps.scope.outputs.scope }}
+      frontend_base_sha: ${{ steps.scope.outputs.frontend_base_sha }}
 
     steps:
       - name: Checkout
@@ -48,86 +59,12 @@ jobs:
           BEFORE_SHA: ${{ github.event.before }}
           GH_TOKEN: ${{ github.token }}
           REQUESTED_SCOPE: ${{ github.event.inputs.scope }}
+          RUNNER_SSH_WINDOW: ${{ inputs.runner_ssh_window }}
+          EXPECTED_RELEASE_SHA: ${{ github.event.inputs.expected_sha }}
         run: |
           set -euo pipefail
 
-          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
-            if [[ "${GITHUB_REF}" != "refs/heads/main" ]]; then
-              echo "Manual production deployments must run from the main branch." >&2
-              exit 1
-            fi
-            case "${REQUESTED_SCOPE:-auto}" in
-              frontend) scope="frontend-only" ;;
-              backend) scope="backend-only" ;;
-              auto|full) scope="full-stack" ;;
-              *)
-                echo "Unsupported manual deployment scope: ${REQUESTED_SCOPE}" >&2
-                exit 1
-                ;;
-              esac
-
-            if [[ "$scope" != "full-stack" ]]; then
-              current_push_conclusion=""
-              if current_push_conclusion="$(
-                gh api \
-                  "/repos/${GITHUB_REPOSITORY}/actions/workflows/deploy.yml/runs?head_sha=${GITHUB_SHA}&event=push&per_page=20" \
-                  --jq '.workflow_runs | map(select(.event == "push")) | first | .conclusion // ""'
-              )"; then
-                echo "Current main push deployment conclusion: ${current_push_conclusion:-<missing>}"
-              else
-                echo "Unable to verify the current main push deployment." >&2
-              fi
-              if [[ "$current_push_conclusion" != "success" ]]; then
-                echo "Broadening manual scope to full-stack because the current main SHA has no successful push deployment."
-                scope="full-stack"
-              fi
-            fi
-          else
-            changed_paths="${RUNNER_TEMP}/deploy-changed-paths"
-            if [[ -z "${BEFORE_SHA:-}" || "${BEFORE_SHA}" =~ ^0+$ ]]; then
-              echo "No reliable previous push SHA; forcing a recovery-safe full-stack deployment."
-              scope="full-stack"
-            else
-              previous_conclusion=""
-              if previous_conclusion="$(
-                gh api \
-                  "/repos/${GITHUB_REPOSITORY}/actions/workflows/deploy.yml/runs?head_sha=${BEFORE_SHA}&per_page=20" \
-                  --jq '.workflow_runs | map(select(.event == "push")) | first | .conclusion // ""'
-              )"; then
-                echo "Previous push deployment conclusion: ${previous_conclusion:-<missing>}"
-              else
-                echo "Unable to verify the previous push deployment; forcing full-stack recovery." >&2
-              fi
-
-              if [[ "$previous_conclusion" != "success" ]]; then
-                scope="full-stack"
-              else
-                git diff --no-renames --name-only -z "${BEFORE_SHA}" "${GITHUB_SHA}" >"${changed_paths}"
-                scope="$(node scripts/detect-deploy-scope.mjs --null --file "${changed_paths}")"
-              fi
-            fi
-
-            directive="$(
-              git log -1 --pretty=%B |
-                sed -nE 's/^\[deploy-scope:(frontend|backend|full)\]$/\1/p' |
-                tail -n 1
-            )"
-            if [[ -n "$directive" ]]; then
-              case "$directive" in
-                frontend) requested_scope="frontend-only" ;;
-                backend) requested_scope="backend-only" ;;
-                full) requested_scope="full-stack" ;;
-              esac
-              scope="$(
-                node scripts/detect-deploy-scope.mjs \
-                  --combine "$scope" "$requested_scope"
-              )"
-              echo "Explicit release scope '$directive' safely combined with detected changes."
-            fi
-          fi
-
-          echo "scope=${scope}" >>"${GITHUB_OUTPUT}"
-          echo "Deployment scope: ${scope}"
+          node scripts/resolve-deploy-scope.mjs | tee -a "${GITHUB_OUTPUT}"
 
   build-frontend:
     name: Build production frontend artifact
@@ -154,6 +91,7 @@ jobs:
       NEXT_PUBLIC_DISABLE_AUTH: ${{ vars.PROD_NEXT_PUBLIC_DISABLE_AUTH || 'false' }}
       NEXT_PUBLIC_DISABLE_API_PROXY: ${{ vars.PROD_NEXT_PUBLIC_DISABLE_API_PROXY || 'false' }}
       NEXT_PUBLIC_API_DEBUG: ${{ vars.PROD_NEXT_PUBLIC_API_DEBUG || 'false' }}
+      NEXT_PUBLIC_RECOMMENDATION_AUDIT_ENABLED: "false"
       NEXTAUTH_URL: ${{ vars.PROD_NEXTAUTH_URL || 'https://cred-x.in' }}
       NEXTAUTH_SECRET: build-only-runtime-secret-is-loaded-on-ec2
       AUTH_TRUST_HOST: "true"
@@ -169,6 +107,90 @@ jobs:
       - name: Record checkout duration
         id: checkout-timing
         run: echo "seconds=$(( $(date +%s) - CHECKOUT_STARTED_AT ))" >>"${GITHUB_OUTPUT}"
+
+      - &record-runner-address
+        name: Identify this job's public IPv4
+        if: inputs.runner_ssh_window
+        id: runner-address
+        shell: bash
+        run: |
+          set -euo pipefail
+          ipv4=$(curl -4 --noproxy '*' --proto '=https' --fail --silent --show-error --max-time 10 --retry 2 https://checkip.amazonaws.com)
+          python3 - "$ipv4" <<'PY'
+          import ipaddress, sys
+          address = ipaddress.IPv4Address(sys.argv[1])
+          if not address.is_global or address.is_multicast:
+              sys.exit("Runner address is not public unicast IPv4")
+          PY
+          printf '%s/32\n' "$ipv4" > "$RUNNER_TEMP/runner-cidr.txt"
+          printf 'ipv4=%s\n' "$ipv4" >> "$GITHUB_OUTPUT"
+
+      - &publish-runner-address
+        name: Publish this job's SSH source for the operator
+        if: inputs.runner_ssh_window
+        uses: actions/upload-artifact@v7
+        with:
+          name: ssh-source-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}-${{ steps.runner-address.outputs.ipv4 }}
+          path: ${{ runner.temp }}/runner-cidr.txt
+          retention-days: 1
+          if-no-files-found: error
+
+      - &wait-for-ssh
+        name: Wait up to five minutes for this runner's SSH route
+        if: inputs.runner_ssh_window
+        timeout-minutes: 6
+        env:
+          DEPLOY_HOST: ${{ secrets.EC2_HOST }}
+        run: |
+          python3 - <<'PY'
+          import os, socket, time
+          target = (os.environ["DEPLOY_HOST"], 22)
+          deadline = time.monotonic() + 300
+          while time.monotonic() < deadline:
+              try:
+                  with socket.create_connection(target, timeout=3):
+                      break
+              except OSError:
+                  time.sleep(5)
+          else:
+              raise SystemExit("Timed out waiting for the approved SSH route")
+          PY
+
+      - name: Read canonical non-secret audit build flag
+        id: audit-public-flag
+        uses: appleboy/ssh-action@v1.2.4
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          fingerprint: ${{ secrets.EC2_SSH_FINGERPRINT }}
+          timeout: 120s
+          command_timeout: 30s
+          capture_stdout: true
+          script: |
+            sudo -n python3 -B - <<'PY'
+            import re
+            from pathlib import Path
+            matches=[]
+            for line in Path('/etc/investor/frontend.env').read_text().splitlines():
+                match=re.fullmatch(r'\s*NEXT_PUBLIC_RECOMMENDATION_AUDIT_ENABLED\s*=\s*(.*?)\s*',line)
+                if match:
+                    value=match.group(1)
+                    if len(value)>=2 and value[0]==value[-1] and value[0] in "\"'": value=value[1:-1]
+                    if value not in {'true','false'}: raise SystemExit('Invalid public audit flag')
+                    matches.append(value)
+            if len(matches)>1: raise SystemExit('Duplicate public audit flag')
+            print('CREDX_PUBLIC_AUDIT_FLAG='+ (matches[0] if matches else 'false'))
+            PY
+
+      - name: Set artifact public audit build variable
+        env:
+          AUDIT_PUBLIC_FLAG: ${{ steps.audit-public-flag.outputs.stdout }}
+        run: |
+          set -euo pipefail
+          flag=$(printf '%s\n' "$AUDIT_PUBLIC_FLAG" | node scripts/read-audit-public-flag.mjs)
+          case "$flag" in true|false) ;; *) echo 'Invalid public audit build flag' >&2; exit 1 ;; esac
+          echo "NEXT_PUBLIC_RECOMMENDATION_AUDIT_ENABLED=$flag" >>"${GITHUB_ENV}"
 
       - name: Start dependency restore timer
         run: echo "DEPENDENCIES_STARTED_AT=$(date +%s)" >>"${GITHUB_ENV}"
@@ -317,7 +339,7 @@ jobs:
     if: >-
       !cancelled() &&
       needs.detect-changes.result == 'success' &&
-      needs.detect-changes.outputs.scope != 'none' &&
+      contains(fromJSON('["frontend-only","backend-only","full-stack"]'), needs.detect-changes.outputs.scope) &&
       (
         needs.detect-changes.outputs.scope == 'backend-only' ||
         needs.build-frontend.result == 'success'
@@ -326,6 +348,10 @@ jobs:
     timeout-minutes: 60
 
     steps:
+      - *record-runner-address
+      - *publish-runner-address
+      - *wait-for-ssh
+
       - name: Start artifact download timer
         if: needs.detect-changes.outputs.scope != 'backend-only'
         run: echo "DOWNLOAD_STARTED_AT=$(date +%s)" >>"${GITHUB_ENV}"
@@ -375,6 +401,7 @@ jobs:
         env:
           DEPLOY_COMMIT_SHA: ${{ github.sha }}
           DEPLOY_SCOPE: ${{ needs.detect-changes.outputs.scope }}
+          FRONTEND_BASE_SHA: ${{ needs.detect-changes.outputs.frontend_base_sha }}
           REMOTE_ARTIFACT_DIR: /tmp/investor-deploy-${{ github.run_id }}-${{ github.run_attempt }}
           REMOTE_ARTIFACT_FILE: ${{ env.FRONTEND_ARTIFACT_FILE }}
         with:
@@ -382,7 +409,7 @@ jobs:
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           fingerprint: ${{ secrets.EC2_SSH_FINGERPRINT }}
-          envs: DEPLOY_COMMIT_SHA,DEPLOY_SCOPE,REMOTE_ARTIFACT_DIR,REMOTE_ARTIFACT_FILE
+          envs: DEPLOY_COMMIT_SHA,DEPLOY_SCOPE,FRONTEND_BASE_SHA,REMOTE_ARTIFACT_DIR,REMOTE_ARTIFACT_FILE
           timeout: 3600s
           command_timeout: 3600s
           capture_stdout: true
@@ -397,13 +424,33 @@ jobs:
             FRONTEND_ENV_FILE="/etc/investor/frontend.env"
             DEPLOY_LOCK_FILE="/run/investor-production-deploy.lock"
             remote_artifact=""
+            contained_driver=""
+            rollback_armed=false
+            export CREDX_RECOVERY_ROLLBACK_OWNER=workflow
 
             cleanup_remote_artifact() {
               if [[ -n "${REMOTE_ARTIFACT_DIR:-}" && "$REMOTE_ARTIFACT_DIR" == /tmp/investor-deploy-* ]]; then
                 rm -rf -- "$REMOTE_ARTIFACT_DIR"
               fi
             }
-            trap cleanup_remote_artifact EXIT
+            finish_deployment() {
+              status=$?
+              rollback_failed=false
+              trap - EXIT
+              if [[ "$rollback_armed" == true ]]; then
+                echo 'Contained promotion failed; restoring the complete previous backend artifact.' >&2
+                APP_ROOT="$APP_ROOT" APP_USER="$APP_USER" BACKEND_ENV_FILE="$BACKEND_ENV_FILE" \
+                  bash "$contained_driver/deploy-recovery.sh" --restore || { status=1; rollback_failed=true; }
+              fi
+              cleanup_remote_artifact
+              if [[ "$rollback_failed" == true ]]; then
+                echo "ROLLBACK_BLOCKED: stable recovery driver retained at $contained_driver" >&2
+              elif [[ -n "$contained_driver" && "$contained_driver" == /tmp/investor-contained-driver.* ]]; then
+                rm -rf -- "$contained_driver"
+              fi
+              exit "$status"
+            }
+            trap finish_deployment EXIT
 
             command -v flock >/dev/null
             sudo touch "$DEPLOY_LOCK_FILE"
@@ -455,9 +502,34 @@ jobs:
             fi
 
             source_sync_started_at="$(date +%s)"
-            sudo -u "$APP_USER" -H rm -f "$APP_ROOT/.git/index.lock"
+            sudo -u "$APP_USER" -H git -C "$APP_ROOT" diff --quiet
+            sudo -u "$APP_USER" -H git -C "$APP_ROOT" diff --cached --quiet
             sudo -u "$APP_USER" -H git -C "$APP_ROOT" fetch origin main
             sudo -u "$APP_USER" -H git -C "$APP_ROOT" cat-file -e "${DEPLOY_COMMIT_SHA}^{commit}"
+            if [[ "$DEPLOY_SCOPE" == frontend-only ]]; then
+              # Proof is bound to the runner's exact immutable diff. Reject host
+              # source drift before checkout; no backend driver runs on this path.
+              [[ "$FRONTEND_BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+              current_sha="$(sudo -u "$APP_USER" -H git -C "$APP_ROOT" rev-parse HEAD)"
+              [[ "$current_sha" == "$FRONTEND_BASE_SHA" || "$current_sha" == "$DEPLOY_COMMIT_SHA" ]]
+            else
+              # Driver and rollback handler survive checkout and source restoration.
+              contained_driver=$(mktemp -d /tmp/investor-contained-driver.XXXXXX)
+              chmod 0755 "$contained_driver"
+              for driver_file in deploy-recovery.sh backend-recovery-artifact.py; do
+                sudo -u "$APP_USER" git -C "$APP_ROOT" show "$DEPLOY_COMMIT_SHA:deploy/no-docker/$driver_file" > "$contained_driver/$driver_file"
+                chmod 0644 "$contained_driver/$driver_file"
+              done
+              sudo -u "$APP_USER" git -C "$APP_ROOT" show "$DEPLOY_COMMIT_SHA:backend/app/core/jwt_configuration.py" > "$contained_driver/jwt_configuration.py"
+              chmod 0644 "$contained_driver/jwt_configuration.py"
+              APP_ROOT="$APP_ROOT" APP_USER="$APP_USER" BACKEND_ENV_FILE="$BACKEND_ENV_FILE" \
+                bash "$contained_driver/deploy-recovery.sh" --preflight
+              export CREDX_RECOVERY_ROLLBACK_DIR="$APP_ROOT/.recovery-release-${DEPLOY_COMMIT_SHA:0:12}-$(date +%s)-$$"
+              APP_ROOT="$APP_ROOT" APP_USER="$APP_USER" BACKEND_ENV_FILE="$BACKEND_ENV_FILE" \
+                bash "$contained_driver/deploy-recovery.sh" --prepare
+              rollback_armed=true
+              sudo systemctl stop investor-backend investor-recovery-analysis
+            fi
             sudo -u "$APP_USER" -H git -C "$APP_ROOT" reset --hard "$DEPLOY_COMMIT_SHA"
             actual_sha="$(sudo -u "$APP_USER" -H git -C "$APP_ROOT" rev-parse HEAD)"
             if [[ "$actual_sha" != "$DEPLOY_COMMIT_SHA" ]]; then
@@ -474,33 +546,28 @@ jobs:
               chmod 0644 "$remote_artifact" "$remote_artifact.sha256"
             fi
 
-            if [[ "$DEPLOY_SCOPE" != "frontend-only" ]]; then
-              bash "$APP_ROOT/deploy/no-docker/scripts/configure-postgres-recovery.sh" --restart-backend
+            RECOVERY_DEPLOY=true
+            if [[ "$DEPLOY_SCOPE" != frontend-only ]]; then
+              APP_ROOT="$APP_ROOT" APP_USER="$APP_USER" BACKEND_ENV_FILE="$BACKEND_ENV_FILE" \
+                bash "$contained_driver/deploy-recovery.sh"
             fi
-            if [[ "$DEPLOY_SCOPE" != "frontend-only" ]] && command -v pg_isready >/dev/null 2>&1 && ! pg_isready -h 127.0.0.1 -p 5432 >/dev/null 2>&1; then
-              echo "==> PostgreSQL is not ready; restarting it after disk recovery"
-              sudo systemctl restart postgresql
-              for attempt in $(seq 1 30); do
-                pg_isready -h 127.0.0.1 -p 5432 >/dev/null 2>&1 && break
-                sleep 1
-              done
-              pg_isready -h 127.0.0.1 -p 5432 >/dev/null 2>&1
-            fi
-
+            if [[ "$DEPLOY_SCOPE" == full-stack ]]; then DEPLOY_SCOPE=frontend-only; fi
+            if [[ "$DEPLOY_SCOPE" == frontend-only ]]; then
             SKIP_GIT_SYNC=true \
             APP_ROOT="$APP_ROOT" \
             APP_USER="$APP_USER" \
+            BACKEND_ENV_FILE="$BACKEND_ENV_FILE" \
+            CREDX_CONTAINED_RELEASE_DRIVER="${contained_driver:+$contained_driver/deploy-recovery.sh}" \
             FRONTEND_ARTIFACT="$remote_artifact" \
             EXPECTED_FRONTEND_SHA="$DEPLOY_COMMIT_SHA" \
               bash "$APP_ROOT/deploy/no-docker/redeploy.sh" "$DEPLOY_SCOPE"
-
-            if [[ "$DEPLOY_SCOPE" == "full-stack" ]]; then
-              echo "==> Install/update passive Bullpen runtime health timer"
-              APP_ROOT="$APP_ROOT" \
-                APP_USER="$APP_USER" \
-                BACKEND_ENV_FILE="$BACKEND_ENV_FILE" \
-                bash "$APP_ROOT/deploy/no-docker/install-bullpen-healthcheck.sh"
             fi
+
+            if [[ "$DEPLOY_SCOPE" == backend-only ]]; then
+              APP_ROOT="$APP_ROOT" APP_USER="$APP_USER" BACKEND_ENV_FILE="$BACKEND_ENV_FILE" \
+                bash "$contained_driver/deploy-recovery.sh" --post-frontend-check
+            fi
+            rollback_armed=false
 
             echo "==> EC2 deployment total: $(( $(date +%s) - deploy_started_at ))s"
 

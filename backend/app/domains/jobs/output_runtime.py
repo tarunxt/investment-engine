@@ -81,7 +81,9 @@ def holdings_from_prompt(prompt: str) -> tuple[Mapping[str, Any], ...] | None:
         return None
     exchange_name = 'exchange' if 'exchange' in headers else 'exchange symbol'
     if exchange_name not in headers:
-        return None
+        if 'market' not in headers or any(row[headers.index('market')].strip().upper() != 'US' for row in block.rows):
+            return None
+        exchange_name = 'market'
     indices = {key: headers.index(header) for key, header in {
         'exchange_symbol': exchange_name, 'stock_symbol': 'stock symbol', 'current_units': 'current units',
     }.items()}
@@ -118,12 +120,32 @@ def configure_output_context(job: Any, dimensions: Mapping[str, str | None]) -> 
     expected = next(iter(counts)) if len(counts) == 1 else None
     sources = frozen_sources_from_context(getattr(job, 'request_context_json', None),
                                           market=analysis_run_identity(job).market)
+    if kind == "rebalance" and "[REBALANCE_UNIVERSE_V1]" in _instruction_prefix(prompt) and sources is None:
+        raise OutputPreflightError("Complete Swing coverage requires frozen selected source references; refresh inputs before starting.")
     return _context.set(OutputContext(kind, metadata, holdings, expected, sources))
 
 
 def reset_output_context(token: Token | None) -> None:
     if token is not None:
         _context.reset(token)
+
+
+def rebalance_serialization_instructions() -> str:
+    """Strengthen declared rebalance generation without changing saved inputs."""
+    context = current_output_context()
+    if context is None or context.kind != 'rebalance':
+        return ''
+    return (
+        '\n\n[REBALANCE_TABLE_SERIALIZATION]\n'
+        f'Return exactly {len(REBALANCE_COLUMNS)} cells per header, separator, and data row, '
+        'in the declared column order. Do not append source-table columns or metadata columns.\n'
+        'Use pipes only as column delimiters. Encode every literal pipe inside a cell as &#124; '
+        '(including rationale text, source names, and technical setup). '
+        'Backticks and quotes do not escape a Markdown pipe. Keep each row on one line.\n'
+        'If a value is unavailable, write - in that cell; never omit the cell or shift later values.\n'
+        'Before returning, verify every row has exactly the declared cell count; '
+        'keep all rationale text inside its corresponding cell.\n'
+    )
 
 
 def active_contract_hash() -> str | None:
@@ -137,8 +159,16 @@ def normalize_runtime_output(content: str, *, kind: str | None = None, fragment:
         return None
     result = normalize_output(content, context.kind, metadata=context.metadata,
                               holdings=context.holdings, derive_arithmetic=True,
-                              minimum_rows=1 if fragment or context.kind == 'rebalance' else context.expected_rows or 5)
+                              minimum_rows=1 if fragment or context.kind == 'rebalance' else context.expected_rows or 5,
+                              non_buy_candidates=frozenset(key for source in context.swing_sources or () for key in source.identities))
     findings = list(result.findings)
+    if context.kind == 'rebalance' and not fragment and context.swing_sources is not None:
+        required = {key for source in context.swing_sources for key in source.identities}
+        present = {identity(row.values) for row in result.rows if row.valid}
+        for exchange, symbol in sorted(required - present):
+            findings.append(Finding('missing_swing_candidate', f'Missing selected Swing candidate {exchange}:{symbol}; analysis must not be invented.'))
+        if any(not source.complete for source in context.swing_sources):
+            findings.append(Finding('incomplete_swing_source', 'Selected Swing source coverage is incomplete; full candidate coverage cannot be certified.'))
     if not fragment and context.expected_rows is not None and result.coverage.canonical_rows != context.expected_rows:
         findings.append(Finding('requested_row_count', f'Requested exactly {context.expected_rows} stock rows; received {result.coverage.canonical_rows}. All source rows were retained.'))
     if context.kind == 'swing':
@@ -176,12 +206,23 @@ def output_validation_metadata(content: str | None) -> dict[str, Any] | None:
     result = normalize_runtime_output(content)
     if result is None:
         return None
+    row_identity = {row.source: row.values for row in result.rows}
+    exclusions = []
+    for finding in result.findings:
+        if finding.code not in {'missing_field_excluded', 'unaligned_rationale'}:
+            continue
+        values = row_identity.get(finding.source, {})
+        exclusions.append({'symbol': values.get('stock_symbol'), 'exchange': values.get('exchange_symbol'),
+                           'row': finding.source.row if finding.source else None, 'field': finding.field,
+                           'reason': finding.message})
     return {
+        'exclusions': exclusions[:500], 'exclusion_count': len(exclusions),
         'version': CONTRACT_VERSION,
         'schema_hash': active_contract_hash(),
         'response_hash': source_hash(content),
         'status': result.status,
         'safe_to_render': result.safe_to_replace,
+        'usage_status': 'partial' if result.safe_to_replace and any(f.code in {'missing_field_excluded', 'unaligned_rationale'} for f in result.findings) else result.status,
         'coverage': asdict(result.coverage),
         'finding_counts': dict(Counter(f.code for f in result.findings)),
         'semantic_research_quality': 'not_evaluated',

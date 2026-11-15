@@ -29,6 +29,7 @@ from app.domains.indmoney_us.threats_schemas import (
     IndMoneyUsThreatHistoryResponse,
     IndMoneyUsThreatLatestResponse,
     IndMoneyUsThreatRunResponse,
+    IndMoneyUsThreatRunRequest,
 )
 from app.domains.jobs.models import Job
 from app.domains.jobs.repository import PostgresJobRepository
@@ -113,7 +114,7 @@ async def get_threat_analysis(
 
 @router.post("/run", response_model=IndMoneyUsThreatRunResponse)
 async def run_threat_analysis(
-    body: PortfolioEventRunRequest | None = None,
+    body: IndMoneyUsThreatRunRequest | None = None,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -125,6 +126,12 @@ async def run_threat_analysis(
         raise HTTPException(
             400,
             detail="No INDmoney US portfolio snapshot found. Paste a snapshot first.",
+        )
+
+    if body and body.expected_snapshot_id is not None and body.expected_snapshot_id != latest_snapshot.id:
+        raise HTTPException(
+            409,
+            detail="The latest saved snapshot changed. Reopen the snapshot choice and review the new source before continuing.",
         )
 
     validate_holdings_snapshot({
@@ -155,7 +162,7 @@ async def run_threat_analysis(
     finally:
         await redis.aclose()
 
-    job = await PostgresJobRepository(db).get(result.job_id)
+    job = await PostgresJobRepository(db).get_for_user(result.job_id, UserId(current_user.id))
     if not job:
         raise HTTPException(500, detail="Threat analysis job could not be loaded after creation")
 

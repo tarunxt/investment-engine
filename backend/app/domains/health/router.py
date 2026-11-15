@@ -2,11 +2,12 @@ import asyncio
 import json
 from typing import Any
 
-from fastapi import APIRouter, Request, Response, status
+from fastapi import APIRouter, Depends, Request, Response, status
 from sqlalchemy import func, select, text
 
 from app.core.config import settings
 from app.core.logging import get_logger
+from app.domains.auth.dependencies import get_current_user
 from app.domains.polymarket_auto_live.models import PolymarketAutoLiveOrderIntentRecord
 from app.domains.polymarket_auto_live.order_intent_service import celery_ai_queue_consumer_diagnostics
 from app.domains.polymarket_auto_live.order_intents import (
@@ -88,6 +89,31 @@ def _health_ready_response(
 async def health_live():
     """Liveness: process is running."""
     return {"status": "ok"}
+
+
+@router.get("/execution")
+async def health_execution():
+    """Advisory execution health, separate from process and store readiness."""
+    from app.core.recovery import recovery_mode
+    from app.domains.health.execution import execution_diagnostics
+
+    return await execution_diagnostics(recovery=recovery_mode())
+
+
+@router.get("/execution/progress")
+async def health_execution_progress(current_user=Depends(get_current_user)):
+    """Actor-scoped passive receipts; never publishes diagnostic work."""
+    from datetime import datetime, timezone
+    from app.core.recovery import recovery_mode
+    from app.domains.health.progress_reader import read_progress
+    from app.domains.jobs.models import Job
+    from app.infrastructure.database.outbox.models import OutboxMessage
+
+    return await read_progress(
+        AsyncSessionLocal, Job.__table__, OutboxMessage.__table__,
+        actor_id=current_user.id, recovery=recovery_mode(),
+        now=datetime.now(timezone.utc).timestamp(),
+    )
 
 
 @router.get("/ready")

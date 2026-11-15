@@ -48,7 +48,7 @@ export function ZerodhaConnectionGuide({
           </div>
         </div>
 
-        <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1.2fr_0.8fr]">
           <div className="border border-gray-200 bg-white px-5 py-5 shadow-sm">
             <div className="flex items-center gap-2">
               <ShieldCheck className="size-4 text-gray-600" />
@@ -107,6 +107,9 @@ export function ZerodhaConnectionGuide({
         <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
           <div>
             <h2 className="text-base font-semibold text-gray-950">Connect Zerodha</h2>
+            <p className="mt-1 text-sm text-gray-600">
+              Kite Connect integration — save daywise portfolio history and manage orders
+            </p>
             <p className="mt-1 text-sm leading-6 text-gray-600">
               Sign in with Kite, let the app exchange the request token, and we&apos;ll start syncing your latest
               holdings snapshot automatically.
@@ -119,7 +122,7 @@ export function ZerodhaConnectionGuide({
         </div>
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <div className="border border-emerald-200 bg-emerald-50 px-5 py-5 shadow-sm">
           <div className="flex items-center gap-2">
             <ShieldCheck className="size-4 text-emerald-700" />

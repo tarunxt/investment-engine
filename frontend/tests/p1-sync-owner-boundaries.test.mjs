@@ -1,0 +1,32 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import {readFileSync} from 'node:fs';
+import ts from 'typescript';
+const read=path=>readFileSync(new URL(path,import.meta.url),'utf8');
+const compile=source=>ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+function load(source,bindings={},require=()=>{throw Error('Unexpected import')}){const exports={};new Function('exports','require',...Object.keys(bindings),compile(source))(exports,require,...Object.values(bindings));return exports;}
+const source=read('../app/console/dashboard/_components/RebalanceWorkflowSections.tsx');const ast=ts.createSourceFile('workflow.tsx',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
+const names=['isZerodhaAuthPropagationError','confirmZerodhaConnectionReady','queueZerodhaPortfolioSyncWithAuthRetry','waitForZerodhaPortfolioSync','isTransientWorkflowReadError','retryWorkflowRead'];
+const helpers=ast.statements.filter(node=>names.includes(node.name?.text)).map(node=>'export '+node.getText(ast)).join('\n');
+const deferred=()=>{let resolve,reject;const promise=new Promise((a,b)=>{resolve=a;reject=b});return{promise,resolve,reject}};
+const tick=()=>new Promise(resolve=>setImmediate(resolve));
+class APIError extends Error{constructor(status){super('Zerodha token propagation');this.status=status}}
+function fixture(api,sleep=async()=>{}){const owner=load(read('../lib/workflowOwnerLifetime.ts'));owner.setWorkflowOwner(42);const {workflowOwnedApi}=load(read('../lib/workflowOwnedApi.ts'),{},()=>owner);return{owner,token:owner.captureWorkflowOwner(),...load(helpers,{...owner,workflowOwnedApi,apiService:api,sleep,APIError,NetworkError:class extends Error{},normalizeError:error=>error?.message??String(error),ZERODHA_AUTH_CLOSE_GRACE_MS:10000,ZERODHA_AUTH_STATUS_POLL_MS:1,ZERODHA_SYNC_AUTH_RETRY_DELAY_MS:1,POLL_INTERVAL_MS:1,MAX_ZERODHA_SYNC_POLLS:2})};}
+
+test('sync retry rejects owner change during connection confirmation before another sync',async()=>{let syncs=0,statusReads=0;const status=deferred();const h=fixture({zerodhaSyncPortfolio:async()=>{syncs++;throw new APIError(401)},zerodhaStatus:async()=>{statusReads++;return status.promise}});const pending=h.queueZerodhaPortfolioSyncWithAuthRetry(h.token);await tick();h.owner.setWorkflowOwner(43);status.resolve({connected:true});await assert.rejects(pending,/owner changed/);assert.equal(syncs,1);assert.equal(statusReads,1);});
+
+test('sync retry rejects owner change during retry sleep',async()=>{let syncs=0;const pause=deferred();const h=fixture({zerodhaSyncPortfolio:async()=>{syncs++;if(syncs===1)throw new APIError(401);return{status:'queued'}},zerodhaStatus:async()=>({connected:true})},()=>pause.promise);const pending=h.queueZerodhaPortfolioSyncWithAuthRetry(h.token);await tick();h.owner.setWorkflowOwner(43);pause.resolve();await assert.rejects(pending,/owner changed/);assert.equal(syncs,1);});
+
+for(const response of ['success','failure'])test('first sync '+response+' from an old owner cannot continue',async()=>{let calls=0;const operation=deferred();const h=fixture({zerodhaSyncPortfolio:async()=>{calls++;return operation.promise},zerodhaStatus:async()=>{throw Error('Unexpected confirmation')}});const pending=h.queueZerodhaPortfolioSyncWithAuthRetry(h.token);h.owner.setWorkflowOwner(43);if(response==='success')operation.resolve({status:'queued'});else operation.reject(new APIError(401));await assert.rejects(pending,/owner changed/);assert.equal(calls,1);});
+
+test('second sync response is rejected after owner teardown',async()=>{let syncs=0;const retry=deferred();const h=fixture({zerodhaSyncPortfolio:async()=>{syncs++;if(syncs===1)throw new APIError(401);return retry.promise},zerodhaStatus:async()=>({connected:true})});const pending=h.queueZerodhaPortfolioSyncWithAuthRetry(h.token);await tick();assert.equal(syncs,2);h.owner.setWorkflowOwner(null);retry.resolve({status:'queued'});await assert.rejects(pending,/owner changed/);});
+
+test('connection confirmation stops after an owner changes during its poll sleep',async()=>{let reads=0;const pause=deferred();const h=fixture({zerodhaStatus:async()=>{reads++;return{connected:false}}},()=>pause.promise);const pending=h.confirmZerodhaConnectionReady(10000,h.token);await tick();h.owner.setWorkflowOwner(43);pause.resolve();await assert.rejects(pending,/owner changed/);assert.equal(reads,1);});
+
+for(const boundary of ['read','sleep'])test('portfolio polling rejects owner change during '+boundary,async()=>{let reads=0;const pause=deferred();const h=fixture({zerodhaPortfolioOverview:async()=>{reads++;return boundary==='read'?pause.promise:{latest:{captured_at:'previous'}}}},()=>pause.promise);const pending=h.waitForZerodhaPortfolioSync('previous',undefined,h.token);await tick();h.owner.setWorkflowOwner(43);pause.resolve({latest:{captured_at:'new-private-value'}});await assert.rejects(pending,/owner changed|cancelled/);assert.equal(reads,1);});
+
+test('both UI sync paths pass their captured owner and cancellation to module helpers',()=>{assert.equal((source.match(/queueZerodhaPortfolioSyncWithAuthRetry\(runtimeOwner\)/g)||[]).length,2);const start=source.indexOf('const syncPortfolioNow = useCallback');const sync=source.slice(start,source.indexOf('const handleIndMoneyContinue',start));assert.match(sync,/waitForZerodhaPortfolioSync\([\s\S]*?isCurrentWorkflowOwner\(runtimeOwner\)[\s\S]*?runtimeOwner/);});
+
+test('all workflow and basket polling call sites carry captured owner as their third argument',()=>{const calls=[];function visit(node){if(ts.isCallExpression(node)&&node.expression.getText(ast)==='waitForZerodhaPortfolioSync')calls.push(node);ts.forEachChild(node,visit)}visit(ast);assert.equal(calls.length,3);for(const call of calls){assert.equal(call.arguments.length,3);assert.equal(call.arguments[2].getText(ast),'runtimeOwner');}});
+
+for(const name of ['runWorkflow','syncPortfolioNow'])test(name+' rejects a stale invocation before popup or reservation',async()=>{let callback;function visit(node){if(ts.isVariableDeclaration(node)&&node.name.getText(ast)===name)callback=node.initializer.arguments[0].getText(ast);ts.forEachChild(node,visit)}visit(ast);const owner=load(read('../lib/workflowOwnerLifetime.ts'));owner.setWorkflowOwner(42);const runtimeOwner=owner.captureWorkflowOwner();owner.setWorkflowOwner(43);const run=load('export const callback='+callback,{...owner,runtimeOwner,window:{open:()=>{throw Error('Unexpected popup')}}}).callback;await run('zerodha');});

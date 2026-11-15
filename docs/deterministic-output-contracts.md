@@ -191,3 +191,28 @@ fragment/row/holding coverage, and finding counts. Research quality is explicitl
 metering records the same schema hash separately from billed costs. Context is
 reset on success, cancellation, and failure. Generic/custom historical contracts
 retain their existing path. No production savings have been measured.
+
+### Rebalance row widths and named supersets (2026-10-28)
+
+Rebalance fields are mapped by unique header aliases, not by taking the first 29
+cells. A table with all 29 required headers plus extra uniquely named columns is
+supported, including reordered headers. Extra columns and their values remain in
+the canonical document/export. `named_superset_mapping` records that mapping; it
+is informational and does not override row-width, duplicate-header, type, snapshot,
+action, arithmetic, or serialization validation. A malformed required value still
+blocks acceptance. This mapping behavior predates this change.
+
+A 29-cell header with 33/35-cell rows is a different case: the extra cells have no
+unambiguous header mapping. Neither quote marks nor code backticks escape Markdown
+pipes. Literal cell pipes must use `\|` or `&#124;`; commas remain ordinary cell
+content. The worker now appends explicit 29-cell and pipe-encoding guidance to
+initial generation and the existing bounded rebalance format-repair prompt for
+jobs declaring this contract. Saved job prompts and historical jobs are unchanged.
+No extra repair attempt is introduced.
+
+Incident evidence available for Run 441 / job 2221 is the reported `row_width`
+errors (29 expected, 33/35 received), not the raw response or frozen prompt.
+The screenshot proves a header/row width mismatch, but cannot identify which
+cells were extra, missing, duplicated, or contained unescaped delimiters. Tests
+reproducing these widths are synthetic, not reconstructed production evidence.
+No historical response was modified and no production analysis was rerun.
