@@ -14,6 +14,6 @@ test('usage failures override cached empty responses and label retained populate
 });
 
 test('usage failure explicitly disclaims zero usage and exposes recovery', () => {
-  assert.match(page, /role="alert"[^>]*>\{error\} Usage for the selected period is unverified; this is not a zero-usage result\. Use Refresh to retry\./);
-  assert.match(page, /API usage is unavailable\. Use Refresh to retry\./);
+  assert.match(page, /role="alert"[^>]*>\{error\} Usage for the selected period is unverified; this is not a zero-usage result\. Use Refresh usage summary and cost trend to retry\./);
+  assert.match(page, /API usage is unavailable\. Use Refresh usage summary and cost trend to retry\./);
 });

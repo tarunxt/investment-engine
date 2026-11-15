@@ -48,7 +48,7 @@ export function PortfolioWorkflowHistoryCard({ group, runs, onOpen, runLinksAvai
     const stage = group.stages.find(item => item.stage === key);
     const source = children.find(run => run.id === stage?.run_id);
     const path = stage?.run_id ? getRunDetailPathFromPrompt(stage.run_id, source?.prompt_preview) : detailPath;
-    return <HistoricalStageLedgerRow key={key} stage={key} info={historicalStageInfo(stage)} now={Date.parse(group.updated_at)} additional={additional}
+    return <HistoricalStageLedgerRow key={key} stage={key} info={historicalStageInfo(stage)} now={Date.parse(group.updated_at)} additional={additional} stageRunAvailable={Boolean(stage?.run_id)}
       onClick={stage ? () => onOpen(path) : undefined} onOutputClick={stage ? () => onOpen(path) : undefined} onPromptClick={stage?.run_id ? () => onOpen(path) : undefined} />;
   };
   return (

@@ -17,7 +17,7 @@ export function collectRouteJavaScript(report, failures = []) {
   if (!Array.isArray(report?.profiles) || !report.profiles.length) {
     failures.push("Not measured: candidate profiles missing");
   }
-  for (const profile of report?.profiles ?? []) {
+  for (const profile of Array.isArray(report?.profiles) ? report.profiles : []) {
     if (!Array.isArray(profile?.samples)) {
       failures.push("Not measured: profile samples missing");
       continue;
@@ -26,7 +26,7 @@ export function collectRouteJavaScript(report, failures = []) {
       if (!ROUTES.includes(sample?.target)) continue;
       const values = grouped.get(sample.target) ?? { transferred: [], decoded: [] };
       for (const [dimension, metric] of Object.entries(DIMENSIONS)) {
-        const value = sample.metrics?.[metric];
+        const value = sample?.metrics?.[metric];
         if (!validBytes(value)) {
           failures.push(`${sample.target} ${dimension}: required finite non-negative number missing or invalid`);
           values.invalid = true;
@@ -60,7 +60,11 @@ export function checkJavaScriptBudgets(baseline, candidate, expected = {}) {
   const start = Date.parse(evidence?.windowStart);
   const end = Date.parse(evidence?.windowEnd);
   if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) failures.push("Not measured: invalid sample window");
-  if (expected.notBefore && start < Date.parse(expected.notBefore)) failures.push("Not measured: sample window predates candidate build");
+  if (expected.notBefore !== undefined) {
+    const notBefore = Date.parse(expected.notBefore);
+    if (!Number.isFinite(notBefore)) failures.push("Not measured: invalid expected build time");
+    else if (start < notBefore) failures.push("Not measured: sample window predates candidate build");
+  }
   const growthFactor = 1 + baseline?.maximumUnexplainedGrowthPercent / 100;
   for (const route of ROUTES) {
     const candidateBytes = candidateRoutes[route];

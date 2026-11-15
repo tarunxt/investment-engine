@@ -154,7 +154,7 @@ def test_cost_dashboard_defaults_to_live_empty_when_mock_mode_unset(monkeypatch)
     monkeypatch.setattr(service, "claim_refresh_cooldown", lambda *args, **kwargs: None)
     monkeypatch.setattr(service, "_live_dashboard", lambda month=None: service._empty_live_dashboard(month))
 
-    data = service.get_dashboard(force_refresh=True)
+    data = service.get_dashboard()
 
     assert data["debug"]["mockMode"] is False
     assert data["traffic"] == []

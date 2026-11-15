@@ -442,6 +442,19 @@ try {
           if (view !== "Refresh behaviour") {
             const table = page.getByRole("region", {name:view === "Overview" ? "Portfolio overview table" : "Sources and freshness table", exact:true});
             assert.equal(await table.getByRole("row").count(),4);
+            // VISUAL-DASH-RECOVERY-SCAN: exactly one primary source state/history per row.
+            if (view === "Sources and freshness") {
+              for (const row of await table.locator("tbody > tr").all()) {
+                assert.equal(await row.getByRole("status").count(),1);
+                const history = await row.locator('a[href*="saved-portfolio"]').count();
+                assert.ok(history <= 1, "history destination must not repeat in the valuation cell");
+                assert.equal(await row.getByRole("button",{name:/^Refresh /}).count(),1);
+                const valuation = row.locator("td").last();
+                assert.equal(await valuation.getByRole("status").count(),0);
+                assert.match(await valuation.innerText(), /Available|Incomplete|Unavailable|unverified|Missing|available/);
+              }
+            }
+
             if (width === 390) {
               await table.focus();
               await page.keyboard.press("ArrowRight");

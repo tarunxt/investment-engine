@@ -34,6 +34,7 @@ const imported = {
   ...load('../lib/actionableQuantityDisplay.ts'),
   ...load('../components/AllocationScoreContext.tsx', load('../lib/basketDisplayCalculations.ts')),
   ...load('../lib/summarySourceRows.ts'),
+  ...load('../lib/usSecurityIdentity.ts'),
 };
 const ui = Object.fromEntries([
   'Link', 'AlertTriangle', 'ArrowDown', 'ArrowLeft', 'ArrowUp', 'ChevronDown', 'ChevronRight', 'ChevronUp',
@@ -44,7 +45,7 @@ function helpers(overrides = {}, transform) {
   const calls = [];
   const technicalCalls = { count: 0 };
   const exports = load(sourcePath, {
-    ...imported, ...ui, cn: (...values) => values.filter(Boolean).join(' '),
+    ...imported, ...ui, ...load('../hooks/useReviewDialog.ts', { ...React, ...overrides }), cn: (...values) => values.filter(Boolean).join(' '),
     useUsdInrRate: () => null,
     URLs: { routes: { console: { runDetail: (id) => `/console/runs/${id}`, technicalSetups: () => '/technical-setups' } } },
     parseInvestmentRecommendationContent: (...args) => {
@@ -313,7 +314,7 @@ test('actual run loader ignores stale success, stale errors and completion after
   const state = { runs: [], loading: false, error: null, cache: [] };
   const requests = { current: 0 };
   const loader = load(sourcePath, {
-    withFinalActionablesReadDeadline,
+    withFinalActionablesReadDeadline, setHistoryNotice: () => {},
     useCallback: (fn) => fn, runsRequestRef: requests, market: 'india', runCacheKey: 'india',
     setLoading: (value) => { state.loading = value; }, setError: (value) => { state.error = value; },
     setRuns: (value) => { state.runs = value; },

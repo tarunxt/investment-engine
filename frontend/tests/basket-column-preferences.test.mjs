@@ -3,7 +3,7 @@ import test from 'node:test';
 import {readFileSync} from 'node:fs';
 import ts from 'typescript';
 const source=readFileSync(new URL('../lib/basketColumnPreferences.ts',import.meta.url),'utf8');
-function preferences(storage){const exports={};new Function('exports','window',ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(exports,{sessionStorage:storage});return exports;}
+function preferences(storage, localStorage){const exports={};new Function('exports','window',ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(exports,{sessionStorage:storage,localStorage});return exports;}
 
 test('tab-session preferences survive a fresh reader and are isolated by owner, broker and market',()=>{
  const saved=new Map(),storage={getItem:key=>saved.get(key)??null,setItem:(key,value)=>saved.set(key,value)};
@@ -25,4 +25,20 @@ test('layout v2 migrates hidden IDs and persists stable order/names without cros
  assert.deepEqual(preferences(storage).readBasketColumnLayout('71:Zerodha:india'),layout);assert.deepEqual(p.readBasketColumnLayout('72:Zerodha:india'),p.emptyBasketColumnLayout());
  assert.deepEqual(p.orderedBasketColumns(['Stock','Units','Status'],['Units','missing','Units']),['Units','Stock','Status']);assert.deepEqual(p.moveBasketColumn(['Stock','Units','Status'],'Status',0),['Status','Stock','Units']);assert.deepEqual(p.moveBasketColumn(['Stock','Units'],'Stock',-1),['Stock','Units']);
  assert.deepEqual(p.normalizeBasketColumnLayout({hidden:['Status'],order:['Units'],names:{Units:' ',Stock:'x'.repeat(65)}}).names,{});
+});
+
+test('a fresh tab restores migrated choices and an explicit show-all choice', () => {
+  function storage() {
+    const entries = new Map();
+    return { getItem: key => entries.get(key) ?? null, setItem: (key, value) => entries.set(key, value) };
+  }
+  const local = storage(), oldTab = storage(), owner = '71:Zerodha:india';
+  const layout = { hidden: ['Status'], order: ['Units'], names: { Units: 'Quantity' } };
+  oldTab.setItem('credx:basket-layout:v2:' + owner, JSON.stringify(layout));
+  assert.deepEqual(preferences(oldTab, local).readBasketColumnLayout(owner), layout);
+  const fresh = preferences(storage(), local);
+  assert.deepEqual(fresh.readBasketColumnLayout(owner), layout);
+  assert.deepEqual(fresh.readBasketColumnLayout('72:Zerodha:india'), fresh.emptyBasketColumnLayout());
+  fresh.writeBasketColumnLayout(owner, { ...layout, hidden: [] });
+  assert.deepEqual(preferences(oldTab, local).readBasketColumnLayout(owner), { ...layout, hidden: [] });
 });

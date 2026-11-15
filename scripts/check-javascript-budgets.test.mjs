@@ -138,3 +138,17 @@ test("invalid and stale sample windows fail", () => {
   assert.match(checkJavaScriptBudgets(baseline, candidate).failures.join("\n"), /sample window/);
   assert.match(checkJavaScriptBudgets(baseline, report(routes), {notBefore: "2026-11-02T00:00:00Z"}).failures.join("\n"), /predates/);
 });
+
+
+test("malformed profile containers fail without accepting a measurement", () => {
+  for (const profiles of [null, {}, "invalid", 12, [null], [{samples: {}}]]) {
+    const candidate = report(routes); candidate.profiles = profiles;
+    const result = checkJavaScriptBudgets(baseline, candidate);
+    assert.ok(result.failures.length > 0);
+    assert.deepEqual(result.candidateRoutes, {});
+  }
+});
+test("invalid expected build time cannot disable freshness validation", () => {
+  const result = checkJavaScriptBudgets(baseline, report(routes), {notBefore: "invalid"});
+  assert.match(result.failures.join("\n"), /invalid expected build time/);
+});
