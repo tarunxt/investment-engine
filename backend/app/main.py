@@ -1,4 +1,10 @@
+
+from app.core.recovery import RecoveryMiddleware
+from app.domains.jobs.resource_body import ResourceBodyMiddleware
+
+from app.core.recovery import recovery_mode
 import json
+import re
 import time
 from contextlib import asynccontextmanager
 from os import getenv
@@ -21,7 +27,9 @@ from app.core.seed import seed_system_prompts
 from app.domains.ai_providers.router import router as providers_router
 from app.domains.api_usage.router import router as api_usage_router
 from app.domains.auth.router import router as auth_router
+from app.domains.sports_rankings.router import router as sports_rankings_router
 from app.domains.bullpen_run_audit.router import router as bullpen_run_audit_router
+from app.domains.bullpen008.router import router as bullpen008_router
 from app.domains.bullpen_trade_analysis.router import (
     router as bullpen_trade_analysis_router,
 )
@@ -33,6 +41,7 @@ from app.domains.indmoney_us.router import router as indmoney_us_router
 from app.domains.indmoney_us.threats_router import router as indmoney_us_threats_router
 from app.domains.health.router import router as health_router
 from app.domains.jobs.router import router as jobs_router
+from app.domains.mails.router import router as mails_router
 from app.domains.jobs.ws_router import router as jobs_ws_router
 from app.domains.polymarket.router import router as polymarket_router
 from app.domains.polymarket.runtime_broker import (
@@ -55,6 +64,7 @@ from app.domains.zerodha.router import router as zerodha_router
 from app.domains.zerodha.events_router import router as zerodha_events_router
 from app.domains.zerodha.threats_router import router as zerodha_threats_router
 from app.infrastructure.database.session import AsyncSessionLocal, async_engine
+from app.infrastructure.database.errors import database_is_unavailable
 from app.shared.exceptions import AppException
 
 # Ensure all ORM models are registered with the shared metadata.
@@ -111,9 +121,13 @@ cors_allowed_origins = _build_cors_allowed_origins()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    recovery_mode()  # Refuse malformed recovery configuration before startup work.
+    from app.domains.auth.session_startup import require_session_schema
+    async with AsyncSessionLocal() as session_schema_db:
+        await require_session_schema(session_schema_db)
     logger.info("Starting AI Investment Platform Backend")
-    logger.info("Database: %s", settings.database_url.split("@")[-1])
-    logger.info("Redis: %s", settings.redis_url)
+    logger.info("Database configured: %s", bool(settings.database_url))
+    logger.info("Redis configured: %s", bool(settings.redis_url))
     logger.info("CORS allowed origins: %s", cors_allowed_origins)
     get_bullpen_runtime_broker().validate_startup()
     # Do not terminalize persisted Auto-Live runs during FastAPI startup.
@@ -168,20 +182,21 @@ async def app_exception_handler(request: Request, exc: AppException):
 
 @app.exception_handler(Exception)
 async def general_exception_handler(request: Request, exc: Exception):
-    correlation_id = getattr(request.state, "correlation_id", None) or request.headers.get(
-        "X-Correlation-ID"
-    )
-    if not correlation_id:
-        correlation_id = str(uuid4())
+    if database_is_unavailable(exc):
+        logger.error("Database unavailable", exc_info=exc)
+        return JSONResponse(
+            status_code=503,
+            headers={"Retry-After": "3", "Cache-Control": "no-store"},
+            content={"error": "DATABASE_UNAVAILABLE", "message": "The service is temporarily unavailable. Please retry shortly."},
+        )
+    correlation_id = getattr(request.state, "correlation_id", None) or str(uuid4())
     logger.error(
-        "Unhandled exception method=%s path=%s correlation_id=%s",
-        request.method,
-        request.url.path,
-        correlation_id,
-        exc_info=exc,
+        "Unhandled exception method=%s route=%s correlation_id=%s",
+        request.method, getattr(request.scope.get("route"), "path", "unmatched"), correlation_id, exc_info=exc,
     )
     return JSONResponse(
         status_code=500,
+        headers={"X-Correlation-ID": correlation_id},
         content={
             "error": "INTERNAL_SERVER_ERROR",
             "message": "An unexpected error occurred",
@@ -226,7 +241,8 @@ async def security_headers_middleware(request: Request, call_next):
 
 @app.middleware("http")
 async def correlation_id_middleware(request: Request, call_next):
-    corr_id = request.headers.get("X-Correlation-ID", str(uuid4()))
+    supplied_id = request.headers.get("X-Correlation-ID", "")
+    corr_id = supplied_id if re.fullmatch(r"[A-Za-z0-9._-]{1,128}", supplied_id) else str(uuid4())
     request.state.correlation_id = corr_id
     start = time.monotonic()
     timing_token = begin_request_timing()
@@ -278,6 +294,9 @@ async def correlation_id_middleware(request: Request, call_next):
         end_request_timing(timing_token)
 
 
+app.add_middleware(RecoveryMiddleware)
+app.add_middleware(ResourceBodyMiddleware)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_allowed_origins,
@@ -292,7 +311,9 @@ app.add_middleware(
 
 app.include_router(health_router)
 app.include_router(auth_router)
+app.include_router(sports_rankings_router)
 app.include_router(bullpen_run_audit_router)
+app.include_router(bullpen008_router)
 app.include_router(bullpen_trade_analysis_router)
 app.include_router(cost_drivers_router)
 app.include_router(dashboard_router)
@@ -302,12 +323,15 @@ app.include_router(indmoney_us_router)
 app.include_router(indmoney_us_threats_router)
 app.include_router(jobs_router)
 app.include_router(jobs_ws_router)
+app.include_router(mails_router)
 app.include_router(polymarket_router)
 app.include_router(polymarket_auto_live_router)
 app.include_router(polymarket_direct_router)
 app.include_router(prompts_router)
 app.include_router(providers_router)
 app.include_router(api_usage_router)
+from app.domains.recommendation_audit.router import router as recommendation_audit_router
+app.include_router(recommendation_audit_router)
 app.include_router(runs_router)
 app.include_router(runs_ws_router)
 app.include_router(trading_bots_router)

@@ -165,3 +165,35 @@ def test_parse_snapshot_does_not_treat_company_name_as_footer():
     assert [holding["symbol"] for holding in parsed["holdings"]] == ["GM", "MSFT"]
     assert parsed["parse_status"] == "partial"
     assert any("does not fully reconcile" in warning for warning in parsed["parse_warnings"])
+
+
+def test_loss_percentage_follows_signed_pnl_when_pasted_arrow_is_missing():
+    service = IndMoneyUsPortfolioService()
+    raw = COMPANY_NAME_SNAPSHOT.replace("+$4.77", "-$4.77").replace("▲8.10%", "8.10%")
+    parsed = service.parse_snapshot(raw)
+    holding = next(row for row in parsed["holdings"] if row["symbol"] == "MSFT")
+    assert holding["total_pnl"] == -4.77
+    assert holding["total_pnl_percent"] == -8.10
+
+
+def test_stored_loss_percentage_is_normalized_without_mutating_snapshot():
+    service = IndMoneyUsPortfolioService()
+    original = [{"symbol": "LOSS", "current_value": 90, "invested_value": 100,
+                 "total_pnl": -10, "total_pnl_percent": 10}]
+    enriched = service._enrich_holdings(original, 90)
+    assert enriched[0]["total_pnl_percent"] == -10
+    assert original[0]["total_pnl_percent"] == 10
+    assert service._build_derived(enriched, {})["top_laggards"][0]["total_pnl_percent"] == -10
+
+
+def test_icon_wallet_in_new_and_previously_saved_snapshots():
+    from types import SimpleNamespace
+    service = IndMoneyUsPortfolioService()
+    for text, expected in [("$1,234.56", 1234.56), ("$0.00", 0.0), ("Buying power $75", None)]:
+        raw = f"My Portfolio\n\n{text}\nAdd money\nCurrent Value\n$99.00"
+        parsed = service.parse_snapshot(raw)
+        assert parsed["wallet_balance"] == expected
+        snapshot = SimpleNamespace(**dict(parsed, id=1, wallet_balance=None))
+        assert service.serialize_detail(snapshot)["wallet_balance"] == expected
+        snapshot.wallet_balance = 0.0
+        assert service.serialize_summary(snapshot)["wallet_balance"] == 0.0

@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import {
+  AlertTriangle,
   Copy,
   Download,
   Loader2,
@@ -17,7 +18,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { URLs } from "@/lib/urls";
-import { apiService } from "@/services/api";
+import { formatApiErrorSummary } from "@/lib/apiErrors";
+import { APIError, apiService } from "@/services/api";
 import type {
   BullpenRunAuditDetailResponse,
   BullpenRunAuditFeedbackDetail,
@@ -51,6 +53,20 @@ type ManualEditMap = Record<
   }
 >;
 
+type RunAuditLoadError = {
+  summary: string;
+  httpStatus: number | null;
+  code: string | null;
+  runId: string;
+  diagnosticId: string | null;
+  failedPhase: string | null;
+  causeType: string | null;
+  technicalDetail: string | null;
+  likelyCause: string | null;
+  requiredMigration: string | null;
+  fixSteps: string[];
+};
+
 const severityOrder = ["critical", "high", "medium", "low", "info"] as const;
 const auditScopeOptions = [
   "run",
@@ -81,6 +97,45 @@ function stringValue(value: unknown, fallback = "—") {
 
 function numberValue(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function parseRunAuditLoadError(error: unknown, runId: string): RunAuditLoadError {
+  const fallback = "Failed to load Bullpen run audit detail.";
+  if (!(error instanceof APIError)) {
+    return {
+      summary: error instanceof Error ? error.message : fallback,
+      httpStatus: null,
+      code: null,
+      runId,
+      diagnosticId: null,
+      failedPhase: null,
+      causeType: null,
+      technicalDetail: null,
+      likelyCause: null,
+      requiredMigration: null,
+      fixSteps: ["Retry the request.", "If it fails again, check the backend service logs for this run ID."],
+    };
+  }
+
+  const envelope = asRecord(error.details);
+  const detail = asRecord(envelope?.detail) ?? envelope;
+  const steps = asArray(detail?.fix_steps).filter(
+    (step): step is string => typeof step === "string" && Boolean(step.trim()),
+  );
+  return {
+    summary: formatApiErrorSummary(error),
+    httpStatus: error.status,
+    code: typeof detail?.error === "string" ? detail.error : null,
+    runId: typeof detail?.run_id === "string" ? detail.run_id : runId,
+    diagnosticId: typeof detail?.diagnostic_id === "string" ? detail.diagnostic_id : null,
+    failedPhase: typeof detail?.failed_phase === "string" ? detail.failed_phase : null,
+    causeType: typeof detail?.cause_type === "string" ? detail.cause_type : null,
+    technicalDetail: typeof detail?.technical_detail === "string" ? detail.technical_detail : null,
+    likelyCause: typeof detail?.likely_cause === "string" ? detail.likely_cause : null,
+    requiredMigration:
+      typeof detail?.required_migration === "string" ? detail.required_migration : null,
+    fixSteps: steps.length > 0 ? steps : ["Retry the request and inspect backend logs using this run ID."],
+  };
 }
 
 function jsonDownload(filename: string, value: unknown) {
@@ -606,6 +661,14 @@ function renderSectionData(section: string, data: unknown) {
                     : "—",
               },
               { label: "Scan Source", value: stringValue(scanContext?.scan_source_label) },
+              { label: "Scan Scope", value: stringValue(scanContext?.scan_scope) },
+              { label: "Scan Completeness", value: stringValue(scanContext?.scan_completeness) },
+              { label: "Bullpen Trending Rows", value: String(scanContext?.bullpen_trending_rows ?? "—") },
+              { label: "Complete Catalogue Markets", value: String(scanContext?.complete_catalogue_markets ?? "—") },
+              { label: "Active Wallet Positions", value: String(scanContext?.active_wallet_positions ?? "—") },
+              { label: "Filter-Eligible Markets", value: String(scanContext?.filter_eligible_markets ?? "—") },
+              { label: "Wallet Markets Added to Union", value: String(scanContext?.active_wallet_markets_added_to_union ?? "—") },
+              { label: "Missing Wallet Markets", value: String(scanContext?.missing_active_market_count ?? "—") },
               { label: "Scanned Candidates", value: String(scanContext?.scanned_candidates ?? "—") },
               { label: "Rows Before LLM", value: String(scanContext?.candidate_rows_before_llm ?? "—") },
               { label: "Manual Rows Reused", value: String(scanContext?.used_manual_console_rows ?? "—") },
@@ -898,7 +961,7 @@ export function RunAuditDetailClient() {
 
   const [detail, setDetail] = useState<BullpenRunAuditDetailResponse | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<RunAuditLoadError | null>(null);
   const [activeSection, setActiveSection] = useState("overview");
   const [sections, setSections] = useState<SectionMap>({});
   const [sectionLoading, setSectionLoading] = useState<string | null>(null);
@@ -929,7 +992,7 @@ export function RunAuditDetailClient() {
 
     async function loadDetail() {
       setLoading(true);
-      setError(null);
+      setLoadError(null);
       try {
         const nextDetail = await apiService.getBullpenRunAuditDetail(runId);
         if (!cancelled) {
@@ -938,11 +1001,7 @@ export function RunAuditDetailClient() {
         }
       } catch (nextError) {
         if (!cancelled) {
-          setError(
-            nextError instanceof Error
-              ? nextError.message
-              : "Failed to load Bullpen run audit detail.",
-          );
+          setLoadError(parseRunAuditLoadError(nextError, runId));
         }
       } finally {
         if (!cancelled) {
@@ -1152,17 +1211,88 @@ export function RunAuditDetailClient() {
     );
   }
 
-  if (error || !detail) {
+  if (loadError || !detail) {
+    const displayedError = loadError ?? parseRunAuditLoadError(null, runId || "unknown");
     return (
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-6">
         <Card className="rounded-none border-rose-200 bg-rose-50 shadow-none">
-          <CardContent className="flex flex-wrap items-center justify-between gap-4 py-6">
-            <p className="text-sm text-rose-700">{error || "Run audit not found."}</p>
-            <Button asChild variant="outline">
-              <Link href={URLs.routes.console.bullpenAiAnalyseRuns()}>
-                Back to Runs Audit
-              </Link>
-            </Button>
+          <CardHeader className="border-b border-rose-200">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-rose-700" />
+              <div>
+                <CardTitle className="text-lg text-rose-950">Run audit could not be opened</CardTitle>
+                <p className="mt-2 text-sm leading-6 text-rose-800">{displayedError.summary}</p>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-5 py-6">
+            <DetailGrid
+              items={[
+                { label: "HTTP Status", value: displayedError.httpStatus ? String(displayedError.httpStatus) : "Unavailable" },
+                { label: "Error Code", value: displayedError.code || "Unavailable" },
+                { label: "Failed Phase", value: humanizeToken(displayedError.failedPhase || "unknown") },
+                { label: "Cause Type", value: displayedError.causeType || "Unavailable" },
+                { label: "Run ID", value: displayedError.runId },
+                { label: "Diagnostic ID", value: displayedError.diagnosticId || "Unavailable" },
+              ]}
+            />
+            {displayedError.technicalDetail ? (
+              <div className="border border-rose-200 bg-white p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-rose-700">Technical detail</p>
+                <code className="mt-2 block whitespace-pre-wrap break-words text-sm leading-6 text-slate-800">
+                  {displayedError.technicalDetail}
+                </code>
+              </div>
+            ) : null}
+            <div className="grid gap-4 lg:grid-cols-2">
+              <div className="border border-amber-200 bg-amber-50 p-4">
+                <p className="text-sm font-semibold text-amber-950">Likely cause</p>
+                <p className="mt-2 text-sm leading-6 text-amber-900">
+                  {displayedError.likelyCause || "The backend could not provide additional cause information."}
+                </p>
+                {displayedError.requiredMigration ? (
+                  <p className="mt-2 text-sm text-amber-900">
+                    Required migration: <code>{displayedError.requiredMigration}</code>
+                  </p>
+                ) : null}
+              </div>
+              <div className="border border-slate-200 bg-white p-4">
+                <p className="text-sm font-semibold text-slate-950">Steps to fix</p>
+                <ol className="mt-2 list-decimal space-y-2 pl-5 text-sm leading-6 text-slate-700">
+                  {displayedError.fixSteps.map((step) => <li key={step}>{step}</li>)}
+                </ol>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" onClick={() => window.location.reload()}>
+                <RefreshCw className="mr-2 h-4 w-4" /> Retry
+              </Button>
+              <Button
+                variant="outline"
+                disabled={materializing || !runId}
+                onClick={async () => {
+                  if (!runId) return;
+                  setMaterializing(true);
+                  try {
+                    await apiService.materializeBullpenRunAudit(runId);
+                    const refreshed = await apiService.getBullpenRunAuditDetail(runId);
+                    setDetail(refreshed);
+                    setSections({});
+                    setLoadError(null);
+                  } catch (nextError) {
+                    setLoadError(parseRunAuditLoadError(nextError, runId));
+                  } finally {
+                    setMaterializing(false);
+                  }
+                }}
+              >
+                {materializing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+                Rematerialize
+              </Button>
+              <Button asChild variant="outline">
+                <Link href={URLs.routes.console.bullpenAiAnalyseRuns()}>Back to Runs Audit</Link>
+              </Button>
+            </div>
           </CardContent>
         </Card>
       </div>

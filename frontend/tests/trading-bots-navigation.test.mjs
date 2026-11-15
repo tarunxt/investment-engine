@@ -23,40 +23,41 @@ test("Sidebar navigation config defines the redesigned sections, labels, and rou
   ).groups.body;
 
   for (const label of [
-    "Overview",
+    "Dashboard",
     "Portfolios",
     "India Portfolio",
     "US Portfolio",
     "Trading Bots",
     "Bot Overview",
-    "Bullpen AI Review",
-    "Bullpen AI Live",
-    "Bullpen Copy Trader",
+    "Bullpen Review",
+    "Bullpen Live",
+    "Copy Trader",
     "Polymarket Direct",
     "Market Scanner",
     "AI Studio",
     "Run History",
+    "Alerts & Emails",
     "Prompt Library",
     "AI Models",
     "Integrations",
     "API Connections",
-    "Google Sheets",
     "Usage & Costs",
   ]) {
     assert.match(configSource, new RegExp(`name: '${label}'`));
   }
 
   for (const sectionLabel of [
-    "label: 'Overview'",
+    "label: 'Home'",
     "label: 'Investing'",
-    "label: 'AI Workspace'",
-    "label: 'Platform'",
+    "label: 'AI & Automation'",
+    "label: 'Monitoring'",
+    "label: 'Data & Integrations'",
   ]) {
     assert.match(configSource, new RegExp(sectionLabel));
   }
 
   for (const legacyLabel of [
-    "name: 'Dashboard'",
+    "name: 'Overview'",
     "name: 'Portfolio'",
     "name: 'Zerodha'",
     "name: 'IndMoney US'",
@@ -69,6 +70,9 @@ test("Sidebar navigation config defines the redesigned sections, labels, and rou
     "name: 'Settings'",
     "name: 'Bullpen x AI'",
     "name: 'Bullpen AI Auto-Live'",
+    "name: 'Bullpen AI Review'",
+    "name: 'Bullpen AI Live'",
+    "name: 'Bullpen Copy Trader'",
     "name: 'Bullpen x Polymarket'",
   ]) {
     assert.doesNotMatch(sidebarSectionsSource, new RegExp(legacyLabel));
@@ -88,7 +92,6 @@ test("Sidebar navigation config defines the redesigned sections, labels, and rou
     "URLs.routes.console.prompts()",
     "URLs.routes.console.llms()",
     "URLs.routes.console.apis()",
-    "URLs.routes.console.googleSheets()",
     "URLs.routes.profile.costDrivers()",
   ]) {
     assert.match(
@@ -153,6 +156,12 @@ test("Trading Bots is a sibling group with explicit Bot Overview and badges, whi
   assert.doesNotMatch(sidebarSectionsSource, /name: 'Profile'|name: 'Preferences'/);
   assert.match(accountNavigationSource, /name: 'Profile'/);
   assert.match(accountNavigationSource, /name: 'Preferences'/);
+  assert.match(accountNavigationSource, /name: 'Usage & Costs'/);
+  assert.doesNotMatch(sidebarSectionsSource, /name: 'Usage & Costs'/);
+  assert.match(
+    sidebarSectionsSource,
+    /id: 'monitoring'[\s\S]*?id: 'run-history'[\s\S]*?id: 'mails'[\s\S]*?name: 'Alerts & Emails'/,
+  );
 });
 
 test("Sidebar component keeps the accessibility, footer, and reorder hooks required by the redesign", () => {
@@ -160,15 +169,26 @@ test("Sidebar component keeps the accessibility, footer, and reorder hooks requi
   const utilsSource = readSource(
     "../app/console/_components/sidebarNavigationUtils.ts",
   );
+  const preferencesSource = readSource(
+    "../app/console/_components/sidebarNavigationPreferences.ts",
+  );
 
   assert.match(sidebarSource, /aria-label="Console navigation"/);
   assert.match(sidebarSource, /aria-current=\{active \? 'page' : undefined\}/);
   assert.match(sidebarSource, /aria-expanded=\{expanded\}/);
-  assert.match(sidebarSource, /Drag the handle to reorder items within each section\./);
+  assert.match(sidebarSource, /Drag folders or items within their current section\./);
+  assert.match(sidebarSource, /Nested items can be reordered inside their folder\./);
+  assert.match(sidebarSource, /Restore default name/);
+  assert.match(sidebarSource, /onContextMenu/);
+  assert.match(sidebarSource, /aria-labelledby="sidebar-rename-title"/);
+  assert.match(sidebarSource, /Save name/);
+  assert.doesNotMatch(sidebarSource, /window\.prompt/);
   assert.match(sidebarSource, /SidebarThemeToggle/);
   assert.match(sidebarSource, /ACCOUNT_ACTIONS\.logout\.label/);
   assert.match(sidebarSource, /buildSidebarOrderStorageKey\(userId\)/);
   assert.match(utilsSource, /console-sidebar-order:user:\$\{userId \?\? 'guest'\}:v2/);
+  assert.match(preferencesSource, /console-sidebar-names:user:\$\{userId \?\? 'guest'\}:v1/);
+  assert.match(preferencesSource, /console-sidebar-child-order:user:\$\{userId \?\? 'guest'\}:v1/);
   assert.doesNotMatch(sidebarSource, /isPortfolioActive|isTradingBotsActive|onTogglePortfolio|onToggleTradingBots/);
 });
 
@@ -193,4 +213,14 @@ test("Legacy Bullpen AI Auto-Live route redirects to the Trading Bots parent rou
     legacyPageSource,
     /redirect\(URLs\.routes\.console\.bullpenAiAutoLive\(\)\);/,
   );
+});
+
+ test("Retired Google Sheets screen is absent from navigation and old bookmarks redirect safely", () => {
+  const navigation = readSource("../app/console/_components/sidebarNavigationConfig.ts");
+  assert.doesNotMatch(navigation, /google-sheets|Google Sheets|googleSheets/);
+  const page = readSource("../app/console/google-sheets/page.tsx");
+  assert.match(page, /redirect\(URLs\.routes\.console\.dashboard\(\)\)/);
+  assert.doesNotMatch(page, /GoogleSheetsPanel|use client/);
+  const field = readSource("../app/console/dashboard/_components/GoogleSheetsField.tsx");
+  assert.doesNotMatch(field, /\/console\/google-sheets/);
 });

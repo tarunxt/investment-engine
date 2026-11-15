@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from app.domains.auth.dependencies import get_current_user
 from app.domains.auth.models import User, UserRole
 from .schemas import CostDriversDashboard
-from .cache import RefreshCooldownError
+from .cache import RefreshCooldownError, CollectionUnavailableError
 from .service import get_dashboard
 import re
 
@@ -29,26 +29,31 @@ def _month_param(month: str | None) -> str | None:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="month must use YYYY-MM format")
     return month
 
+# These handlers use the synchronous Redis, SQLAlchemy and boto3 clients.
+# FastAPI dispatches regular def handlers to its worker pool, keeping slow
+# cache reads or AWS refreshes off the API event loop.
 @router.get("/summary", response_model=CostDriversDashboard)
-async def summary(month: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}$"), _: User = Depends(_allowed_admin)):
+def summary(month: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}$"), _: User = Depends(_allowed_admin)):
     return get_dashboard(month=_month_param(month))
 
 @router.get("/aws")
-async def aws(_: User = Depends(_allowed_admin)):
+def aws(_: User = Depends(_allowed_admin)):
     d = get_dashboard(); return {k: d[k] for k in ("topServices", "topUsageTypes", "inventory", "debug")}
 
 @router.get("/traffic")
-async def traffic(_: User = Depends(_allowed_admin)):
+def traffic(_: User = Depends(_allowed_admin)):
     return {"traffic": get_dashboard()["traffic"]}
 
 @router.get("/recommendations")
-async def recommendations(_: User = Depends(_allowed_admin)):
+def recommendations(_: User = Depends(_allowed_admin)):
     return {"recommendations": get_dashboard()["recommendations"]}
 
 @router.post("/refresh", response_model=CostDriversDashboard)
-async def refresh(month: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}$"), _: User = Depends(_allowed_admin)):
+def refresh(month: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}$"), _: User = Depends(_allowed_admin)):
     try:
         return get_dashboard(force_refresh=True, month=_month_param(month))
+    except CollectionUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except RefreshCooldownError as exc:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,

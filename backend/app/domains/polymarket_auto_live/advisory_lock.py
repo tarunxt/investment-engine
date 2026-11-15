@@ -33,7 +33,7 @@ from app.infrastructure.database.sync_session import sync_engine
 
 logger = logging.getLogger(__name__)
 
-AutoLiveAdvisoryLockScope = Literal["run", "order_intent"]
+AutoLiveAdvisoryLockScope = Literal["run", "order_intent", "account"]
 
 _LOCK_NAMESPACE = "bullpen:auto-live:advisory-lock:v1"
 _FALLBACK_GUARD = Lock()
@@ -297,6 +297,21 @@ def acquire_order_intent_operation_advisory_lock_sync(
     return acquire_auto_live_advisory_lock_sync(
         scope="order_intent",
         resource_id=intent_id,
+    )
+
+
+def acquire_bullpen_account_execution_advisory_lock_sync(
+    account_identity: str,
+) -> AutoLiveAdvisoryLock | None:
+    """Serialize 008 remote writes with one account-wide PostgreSQL fence.
+
+    Existing 007 run and order-intent scopes remain byte-for-byte unchanged;
+    this additive scope is used only by Bullpen 008 Stage 6.
+    """
+
+    return acquire_auto_live_advisory_lock_sync(
+        scope="account",
+        resource_id=account_identity,
     )
 
 

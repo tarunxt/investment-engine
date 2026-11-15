@@ -71,4 +71,28 @@ test("deriveApiErrorMessage handles nested and string payloads", async () => {
       details: "Code: INTERNAL_SERVER_ERROR",
     },
   );
+  assert.equal(
+    formatApiErrorSummary({
+      status: 503,
+      message: "The run audit database is unavailable or its schema migration is incomplete.",
+      details: {
+        detail: {
+          error: "RUN_AUDIT_DATABASE_UNAVAILABLE",
+          message: "The run audit database is unavailable or its schema migration is incomplete.",
+          run_id: "run-123",
+          required_migration: "u7v8w9x0y1z2_add_bullpen_run_audit_tables",
+        },
+      },
+    }),
+    "HTTP 503: The run audit database is unavailable or its schema migration is incomplete. Details: Code: RUN_AUDIT_DATABASE_UNAVAILABLE • Required migration: u7v8w9x0y1z2_add_bullpen_run_audit_tables • Run ID: run-123",
+  );
+});
+
+
+test("missing error details never render a literal null or undefined", async () => {
+  const { formatUnknownError } = await loadApiErrorsModule();
+  for (const value of [null, undefined]) {
+    assert.match(formatUnknownError(value), /without returning error details/);
+    assert.doesNotMatch(formatUnknownError(value), /null|undefined/);
+  }
 });

@@ -13,6 +13,8 @@ export interface UserProfileResponse {
   timezone: string;
   notification_preferences: string;
   theme_preference: string;
+  zerodha_buy_threshold: number;
+  indmoney_buy_threshold: number;
   created_at: string;
   updated_at: string;
 }
@@ -76,6 +78,10 @@ export interface UpdatePasswordRequest {
   confirm_password: string;
 }
 
+export interface ProfilePreferencesResponse extends UpdateProfileRequest {
+  preferences_writable?: boolean;
+}
+
 export interface UpdateProfileRequest {
   full_name?: string | null;
   avatar_url?: string | null;
@@ -83,6 +89,8 @@ export interface UpdateProfileRequest {
   timezone?: string | null;
   notification_preferences?: string | null;
   theme_preference?: string | null;
+  zerodha_buy_threshold?: number | null;
+  indmoney_buy_threshold?: number | null;
 }
 
 // ==================== Prompt Types ====================
@@ -615,6 +623,7 @@ export interface ApiUsageItem {
   gemini_key_in_use?: boolean;
   gemini_key_consumed?: boolean;
   gemini_key_hidden_default?: boolean;
+  usage_measurement?: 'actual' | 'estimated';
 }
 
 
@@ -639,6 +648,7 @@ export interface LlmCostHistoryRun {
 }
 
 export interface LlmCostHistoryResponse {
+  coverage_note?: string;
   provider: string;
   name: string;
   timezone: string;
@@ -781,7 +791,13 @@ export interface RunModelTarget {
 
 export type AutoRebalancePortfolioKey = 'india' | 'indmoney_us';
 
+export interface RunSideEffectPolicy {
+  version: 1;
+  mode: "existing_preferences" | "analysis_only";
+}
+
 export interface AutoRebalanceRunReservationResponse {
+  side_effect_policy?: RunSideEffectPolicy | null;
   portfolio: AutoRebalancePortfolioKey;
   sequence: number;
   label: string;
@@ -843,6 +859,7 @@ export interface AutoRebalanceStageResponse {
   completed_at?: string | null;
   provider_count: number;
   completed_provider_count: number;
+  partial_provider_count?: number;
   failed_provider_count: number;
   estimated_cost: number;
 }
@@ -862,6 +879,12 @@ export interface AutoRebalanceJobDetailResponse {
   web_search_queries?: string[] | null;
   web_sources?: string[] | null;
   runtime_metadata_json?: Record<string, unknown> | null;
+  output_provenance?: {
+    source: "api_usage_attempt_events";
+    identities: { provider: string; model: string | null }[];
+    observed_from: string | null;
+    observed_to: string | null;
+  } | null;
   created_at: string;
   updated_at: string;
 }
@@ -876,6 +899,7 @@ export interface AutoRebalanceRunDetailResponse {
 }
 
 export interface AutoRebalanceHistoryItemResponse {
+  side_effect_policy?: RunSideEffectPolicy | null;
   portfolio: AutoRebalancePortfolioKey;
   sequence: number;
   label: string;
@@ -900,10 +924,18 @@ export interface AutoRebalanceHistoryDetailResponse
   standalone_jobs: AutoRebalanceJobDetailResponse[];
 }
 
+export interface OutputSourceJobReference {
+  run_id: number;
+  job_id: number;
+  response_sha256: string;
+}
+
 export interface RunCreate {
+  recommendation_audit?: import("./recommendationAudit").AuditRunContext;
   prompt: string;
   targets: RunModelTarget[];
   polymarket_event_context?: PolymarketEventRunContext | null;
+  output_source_jobs?: OutputSourceJobReference[];
   prompt_id?: number | null;
   scheduled_at?: string | null;
   auto_export_enabled?: boolean;
@@ -1019,11 +1051,13 @@ export interface ZerodhaLoginUrlResponse {
   login_url: string;
   configured: boolean;
   direct_market_orders_enabled?: boolean;
+  order_submission_blocked_reason?: string | null;
 }
 
 export interface ZerodhaStatusResponse {
   connected: boolean;
   direct_market_orders_enabled?: boolean;
+  order_submission_blocked_reason?: string | null;
   login_time: string | null;
   expires_at: string | null;
   last_portfolio_sync_at?: string | null;
@@ -1031,63 +1065,65 @@ export interface ZerodhaStatusResponse {
 }
 
 export interface ZerodhaPortfolioHolding {
+  numeric_input_status?: Record<string, string>;
   tradingsymbol: string;
   exchange: string;
   instrument_token: number | null;
   isin: string | null;
   product: string | null;
-  quantity: number;
-  used_quantity: number;
-  t1_quantity: number;
-  realised_quantity: number;
-  authorised_quantity: number;
+  quantity: number | null;
+  used_quantity: number | null;
+  t1_quantity: number | null;
+  realised_quantity: number | null;
+  authorised_quantity: number | null;
   authorised_date: string | null;
-  opening_quantity: number;
-  short_quantity: number;
-  collateral_quantity: number;
+  opening_quantity: number | null;
+  short_quantity: number | null;
+  collateral_quantity: number | null;
   collateral_type: string | null;
   discrepancy: boolean;
-  average_price: number;
-  last_price: number;
-  close_price: number;
-  pnl: number;
-  day_change: number;
-  day_change_percentage: number;
-  market_value: number;
-  invested_value: number;
-  day_change_value: number;
+  average_price: number | null;
+  last_price: number | null;
+  close_price: number | null;
+  pnl: number | null;
+  day_change: number | null;
+  day_change_percentage: number | null;
+  market_value: number | null;
+  invested_value: number | null;
+  day_change_value: number | null;
 }
 
 export interface ZerodhaPortfolioPosition {
+  numeric_input_status?: Record<string, string>;
   tradingsymbol: string;
   exchange: string;
   instrument_token: number | null;
   product: string | null;
-  quantity: number;
-  overnight_quantity: number;
-  multiplier: number;
-  average_price: number;
-  close_price: number;
-  last_price: number;
-  value: number;
-  pnl: number;
-  m2m: number;
-  unrealised: number;
-  realised: number;
-  buy_quantity: number;
-  buy_price: number;
-  buy_value: number;
-  buy_m2m: number;
-  sell_quantity: number;
-  sell_price: number;
-  sell_value: number;
-  sell_m2m: number;
-  day_buy_quantity: number;
-  day_buy_price: number;
-  day_buy_value: number;
-  day_sell_quantity: number;
-  day_sell_price: number;
-  day_sell_value: number;
+  quantity: number | null;
+  overnight_quantity: number | null;
+  multiplier: number | null;
+  average_price: number | null;
+  close_price: number | null;
+  last_price: number | null;
+  value: number | null;
+  pnl: number | null;
+  m2m: number | null;
+  unrealised: number | null;
+  realised: number | null;
+  buy_quantity: number | null;
+  buy_price: number | null;
+  buy_value: number | null;
+  buy_m2m: number | null;
+  sell_quantity: number | null;
+  sell_price: number | null;
+  sell_value: number | null;
+  sell_m2m: number | null;
+  day_buy_quantity: number | null;
+  day_buy_price: number | null;
+  day_buy_value: number | null;
+  day_sell_quantity: number | null;
+  day_sell_price: number | null;
+  day_sell_value: number | null;
 }
 
 export interface ZerodhaPortfolioSnapshotSummary {
@@ -1101,7 +1137,7 @@ export interface ZerodhaPortfolioSnapshotSummary {
   holdings_invested_value?: number | null;
   holdings_pnl: number;
   holdings_day_change_value: number;
-  available_margin: number;
+  available_margin: number | null;
   positions_pnl: number;
   positions_m2m: number;
 }
@@ -1292,6 +1328,12 @@ export interface DashboardSummaryResponse {
     fetched_at: string | null;
     source: 'redis-cache';
   } | null;
+  portfolio_history: {
+    india: DashboardHistoryPoint[];
+    indmoney: DashboardHistoryPoint[];
+    bullpen: DashboardHistoryPoint[];
+    combined: DashboardHistoryPoint[];
+  };
   sections: Record<string, DashboardSectionMeta>;
 }
 
@@ -1437,6 +1479,7 @@ export interface IndMoneyUsThreatAnalysis {
   tokens_out?: number | null;
   estimated_cost?: number | null;
   error_message?: string | null;
+  runtime_metadata_json?: Record<string, unknown> | null;
   report?: IndMoneyUsThreatReport | null;
 }
 
@@ -1633,6 +1676,7 @@ export interface ZerodhaThreatAnalysis {
   tokens_out?: number | null;
   estimated_cost?: number | null;
   error_message?: string | null;
+  runtime_metadata_json?: Record<string, unknown> | null;
   report?: ZerodhaThreatReport | null;
 }
 
@@ -2075,6 +2119,8 @@ export interface PolymarketPaperTrade {
 }
 
 export interface PolymarketBotState {
+  read_source?: 'runtime' | 'persisted' | 'unavailable';
+  read_message?: string | null;
   running: boolean;
   paused: boolean;
   mode: 'mock' | 'live-read' | 'live-trading';
@@ -2314,6 +2360,7 @@ export type BullpenAutoLiveExecutorErrorCode =
 export type BullpenAutoLiveTriggeredBy =
   | "manual"
   | "scheduler"
+  | "universal_scan"
   | "start"
   | "resume";
 export type BullpenAutoLiveStrategyProfile =
@@ -2332,6 +2379,26 @@ export interface BullpenAutoLiveSettings {
   min_order_usd: number;
   max_order_usd: number;
   console_order_usd: number;
+  console_min_market_odds: number;
+  console_min_highest_market_odds: number;
+  console_apply_yes_no_odds_thresholds: boolean;
+  console_max_closing_days: number;
+  console_min_volume_usd: number;
+  console_min_liquidity_usd: number;
+  console_min_volume_24hr_usd: number;
+  console_max_spread_cents: number;
+  console_rejected_theme_pattern: string;
+  console_exclude_sports: boolean;
+  console_sports_moneyline_only: boolean;
+  console_exclude_weather: boolean;
+  console_exclude_market_predictions: boolean;
+  console_exclude_tweet_count_questions: boolean;
+  console_exclude_released_by_events: boolean;
+  console_only_binary_yes_no: boolean;
+  console_exclude_custom_phrases: boolean;
+  console_custom_exclude_phrases: string[];
+  returns_per_day_formula: string;
+  event_trends_scan_count: number;
   min_liquidity_usd: number;
   min_independent_active_markets: number;
   target_active_markets: number;
@@ -2382,6 +2449,7 @@ export interface BullpenAutoLiveSettings {
   llm_execution_mode: BullpenLlmExecutionMode;
   llm_events_per_prompt: number;
   console_llm_prompt_template?: string | null;
+  console_scan_scope: "trending" | "full_universe";
   console_auto_start_at?: string | null;
   console_auto_refresh_minutes?: number | null;
   auto_live_enabled: boolean;
@@ -2408,11 +2476,18 @@ export interface BullpenAutoLiveLlmOutput {
   status?: string | null;
   llm_yes_odds?: number | null;
   llm_no_odds?: number | null;
+  direction?: string | null;
+  rationale_odds_mismatch?: boolean;
+  rationale_odds_mismatch_reason?: string | null;
+  effective_weight?: number | null;
   confidence?: BullpenAutoLiveConfidence | string | null;
   evidence_status?: BullpenAutoLiveEvidenceStatus | string | null;
   event_state?: string | null;
   key_evidence: string[];
   red_flags: string[];
+  preflight_commentary?: string | null;
+  internet_search_commentary?: string | null;
+  final_conclusion?: string | null;
   rationale?: string | null;
   error?: string | null;
   invalid_reason?: string | null;
@@ -2455,9 +2530,12 @@ export interface BullpenAutoLiveConsoleCandidateInput {
 }
 
 export interface BullpenAutoLiveConsoleRunContext {
+  workspace_profile?: "bullpen007" | "bullpen-sports";
   source_label?: string | null;
   source_url?: string | null;
   scanned_at?: string | null;
+  source_scan_completed_at?: string | null;
+  filters_completed_at?: string | null;
   snapshot_id?: string | null;
   mode?: string | null;
   total_candidates: number;
@@ -2471,6 +2549,21 @@ export interface BullpenAutoLiveConsoleRunContext {
 export interface BullpenAutoLiveRunOnceRequest {
   console_profile?: BullpenAutoLiveConsoleRunContext | null;
   client_run_id?: string | null;
+}
+
+export interface BullpenWorkflowRunNowRequest {
+  workspace_profile: "bullpen007" | "bullpen-sports";
+  client_request_id?: string;
+}
+
+export interface BullpenWorkflowRunNowResponse {
+  status: "started" | "queued";
+  run_id: string;
+  workspace_profile: "bullpen007" | "bullpen-sports";
+  universal_export_id: string;
+  universal_scan_started_at?: string | null;
+  universal_scan_completed_at?: string | null;
+  queued_at: string;
 }
 
 export interface BullpenAutoLiveOrderFunnel {
@@ -2774,6 +2867,7 @@ export interface BullpenAutoLiveRun {
   orders_planned: number;
   orders_submitted: number;
   error_message?: string | null;
+  workspace_profile?: "bullpen007" | "bullpen-sports" | null;
   execution_version?: string | null;
   order_funnel?: BullpenAutoLiveOrderFunnel | null;
   action_funnels?: Record<string, BullpenAutoLiveOrderFunnel> | null;
@@ -2789,6 +2883,7 @@ export interface BullpenAutoLiveRun {
   guardrail_checks: BullpenAutoLiveGuardrailCheck[];
   decision_ids: string[];
   order_intent_ids?: string[];
+  stage2_llm_targets_snapshot?: ProviderModelTarget[] | null;
   request_context?: BullpenAutoLiveRunOnceRequest | null;
   audit_metadata?: Record<string, unknown>;
   task_lifecycle?: BullpenAutoLiveTaskLifecycle | null;
@@ -2864,6 +2959,9 @@ export interface BullpenAutoLiveState {
   last_scan_at?: string | null;
   last_llm_run_at?: string | null;
   last_rebalance_at?: string | null;
+  latest_hourly_rebalance_status?: "completed" | "failed" | null;
+  latest_hourly_rebalance_at?: string | null;
+  latest_hourly_rebalance_detail?: string | null;
   next_scan_at?: string | null;
   next_llm_run_at?: string | null;
   next_rebalance_at?: string | null;
@@ -2999,6 +3097,8 @@ export interface BullpenAutoLiveHistoryPage {
 
 export interface BullpenAutoLiveEventTrend {
   market_id: string;
+  condition_id?: string | null;
+  slug?: string | null;
   market_title: string;
   market_url?: string | null;
   close_time?: string | null;
@@ -3009,17 +3109,271 @@ export interface BullpenAutoLiveEventTrend {
   scan_llm_outputs?: BullpenAutoLiveLlmOutput[][];
   current_yes_odds?: number | null;
   current_no_odds?: number | null;
+  current_yes_bid_cents?: number | null;
+  current_yes_ask_cents?: number | null;
+  current_yes_spread_cents?: number | null;
+  current_no_bid_cents?: number | null;
+  current_no_ask_cents?: number | null;
+  current_no_spread_cents?: number | null;
+  position_average_price_cents?: number | null;
   llm_yes_odds?: number | null;
   llm_no_odds?: number | null;
   returns_per_day?: number | null;
   is_active_position?: boolean;
+  is_claimable_position?: boolean;
   active_position_side?: BullpenAutoLiveOutcomeSide | null;
+  sports_event_slug?: string | null;
+  sports_event_title?: string | null;
+  sports_ranking?: BullpenSportsRankingComparison | null;
+}
+
+export interface BullpenSportsMetricComparison {
+  team_a: number | null;
+  team_b: number | null;
+  delta: number | null;
+}
+
+export interface BullpenSportsRankingComparison {
+  resolution_version?: string;
+  generated_at?: string;
+  view?: string;
+  status_code?: string;
+  explanation?: string;
+  comparable?: boolean;
+  team_details?: Record<string, {
+    raw_name: string; status_code: string; remedy: string;
+    selected: { name: string; canonical_id: string; source_id: string; competition: string;
+      group?: string; season?: string; source_url?: string; successful_at?: string;
+      source_as_of?: string; snapshot_hash?: string; source_status: string; ranking_kind: string } | null;
+    candidates: Array<{ name: string; source_id: string; group?: string; season?: string }>;
+  }>;
+  source_diagnostics?: Array<{ source_id: string; status: string; error?: string; published_rows: number; last_success?: string }>;
+  market_id: string;
+  code: string | null;
+  tags: string[];
+  team_a: string | null;
+  team_b: string | null;
+  match_status: "matched" | "ambiguous" | "unmatched";
+  ranking: BullpenSportsMetricComparison | null;
+  rating: BullpenSportsMetricComparison | null;
+  points: BullpenSportsMetricComparison | null;
+  competition_id: string | null;
+  competition: string | null;
+  source_as_of: string | null;
 }
 
 export interface BullpenAutoLiveEventTrendsResponse {
   events: BullpenAutoLiveEventTrend[];
   scan_count: number;
   generated_at: string;
+  current_odds_fetched_at?: string | null;
+}
+
+export type Bullpen008StageStatus =
+  | "pending"
+  | "running"
+  | "finished"
+  | "failed"
+  | "blocked"
+  | "partial"
+  | "cancelled"
+  | "disabled";
+
+export interface Bullpen008LlmTarget {
+  provider: string;
+  model: string;
+}
+
+export interface Bullpen008Settings {
+  workflow_profile: "bullpen008";
+  shadow_mode: boolean;
+  execution_enabled: boolean;
+  execution_mode: "shadow" | "confirmation_required" | "live";
+  live_control_armed: boolean;
+  emergency_stop: boolean;
+  bankroll_usd: number;
+  max_contract_exposure_usd: number;
+  max_strict_cluster_exposure_usd: number;
+  max_common_catalyst_exposure_usd: number;
+  allocation_increment_usd: number;
+  binary_side_odds_floor_pct: number;
+  entry_side_odds_floor_pct: number;
+  min_llm_probability_pct: number;
+  preferred_min_edge_pp: number;
+  minimum_edge_pp: number;
+  hard_reject_single_day_geopolitical: boolean;
+  geopolitical_min_entry_hours: number;
+  single_day_high_shock_cap_usd: number;
+  high_shock_cluster_cap_usd: number;
+  standard_cluster_cap_usd: number;
+  conservative_edge_min_pp: number;
+  high_shock_conservative_edge_min_pp: number;
+  entry_price_high_zone_pct: number;
+  entry_price_hard_ceiling_pct: number;
+  high_zone_max_allocation_usd: number;
+  min_reward_to_loss_ratio: number;
+  high_shock_evidence_max_age_minutes: number;
+  high_shock_min_source_count: number;
+  single_day_time_exit_hours: number;
+  high_shock_time_exit_hours: number;
+  take_profit_odds_floor_pct: number;
+  contingent_exit_odds_floor_pct: number;
+  odds_drop_15m_pp: number;
+  odds_drop_24h_pp: number;
+  catastrophic_drop_15m_pp: number;
+  quote_confirmation_count: number;
+  soft_drawdown_pct: number;
+  hard_drawdown_pct: number;
+  post_shock_cooldown_hours: number;
+  risk_reject_threshold: number;
+  risk_hard_reject_threshold: number;
+  risk_half_size_min: number;
+  risk_half_size_max: number;
+  probability_tolerance_pp: number;
+  stale_quote_seconds: number;
+  wallet_freshness_seconds: number;
+  plan_max_age_seconds: number;
+  exit_edge_threshold_pp: number;
+  max_slippage_cents: number;
+  max_spread_cents: number;
+  dust_threshold_usd: number;
+  exposure_rounding_tolerance_usd: number;
+  closing_window_days: number;
+  custom_exclude_phrases: string[];
+  returns_per_day_formula: string;
+  llm_targets: Bullpen008LlmTarget[];
+  auto_start_at: string | null;
+  auto_refresh_minutes: number;
+}
+
+export type Bullpen008SettingsUpdate = Partial<
+  Omit<
+    Bullpen008Settings,
+    "workflow_profile" | "shadow_mode" | "execution_enabled" | "execution_mode" | "live_control_armed" | "emergency_stop"
+  >
+>;
+
+export interface Bullpen008State {
+  workflow_profile: "bullpen008";
+  shadow_mode: boolean;
+  execution_enabled: boolean;
+  execution_mode: "shadow" | "confirmation_required" | "live";
+  emergency_stop: boolean;
+  running: boolean;
+  paused: boolean;
+  status: string;
+  next_run_at: string | null;
+  last_run_at: string | null;
+  last_run_id: string | null;
+  redis_namespace: "bullpen008";
+  celery_task_name: string;
+  celery_queue: string;
+}
+
+export interface Bullpen008StageOutput {
+  stage_number: number;
+  stage_name: string;
+  stage_version: string;
+  status: Bullpen008StageStatus;
+  pass_condition: string;
+  block_reason: string | null;
+  previous_stage_output_hash: string | null;
+  output_hash: string;
+  settings_snapshot_hash: string;
+  wallet_snapshot_hash: string;
+  inputs: Record<string, unknown>;
+  calculations: Record<string, unknown>;
+  outputs: Record<string, unknown>;
+  rejections: unknown[];
+  warnings: unknown[];
+  provenance: Record<string, unknown>;
+  prompt_version: string | null;
+  parser_version: string | null;
+  started_at: string;
+  completed_at: string;
+  duration_seconds: number;
+}
+
+export interface Bullpen008Run {
+  id: string;
+  workflow_profile: "bullpen008";
+  status: string;
+  triggered_by: string;
+  shadow_mode: boolean;
+  execution_enabled: boolean;
+  started_at: string;
+  completed_at: string | null;
+  summary: string;
+  error_message: string | null;
+  code_build_version: string | null;
+  settings_snapshot: Record<string, unknown>;
+  wallet_snapshot: Record<string, unknown>;
+  task_metadata: Record<string, unknown>;
+  run_metadata: Record<string, unknown>;
+  stages: Bullpen008StageOutput[];
+  portfolio_certificate: Record<string, unknown> | null;
+  action_plan: Record<string, unknown> | null;
+  execution_intents: Record<string, unknown>[];
+}
+
+export interface Bullpen008InheritedRun {
+  id: string;
+  label: "Inherited from Bullpen 007";
+  status: string;
+  started_at: string;
+  completed_at: string | null;
+  summary: string;
+  read_only: true;
+  source_route: "/console/bullpen-ai";
+}
+
+export interface Bullpen008Bootstrap {
+  workflow_profile: "bullpen008";
+  page_identity: "Bullpen 008";
+  shadow_mode: boolean;
+  execution_enabled: boolean;
+  settings: Bullpen008Settings;
+  state: Bullpen008State;
+  latest_run: Bullpen008Run | null;
+  inherited_runs: Bullpen008InheritedRun[];
+  alerts: Bullpen008Alert[];
+  risk_state: Record<string, unknown>;
+  pending_phase2_stages: number[];
+}
+
+export interface Bullpen008Alert {
+  id: number;
+  market_id: string;
+  side: string;
+  source: string;
+  breach_type: string;
+  llm_odds: number | null;
+  actual_odds: number | null;
+  created_at: string;
+  recovered_at: string | null;
+  payload: Record<string, unknown>;
+}
+
+export interface Bullpen008HistoryPage {
+  rows: Bullpen008Run[];
+  inherited_rows: Bullpen008InheritedRun[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export type Bullpen008EventTrend = BullpenAutoLiveEventTrend;
+
+export interface Bullpen008EventTrendsResponse {
+  events: Bullpen008EventTrend[];
+  scan_count: number;
+  generated_at: string;
+}
+
+export interface Bullpen008KillResponse {
+  state: Bullpen008State;
+  killed_run: Bullpen008Run | null;
+  message: string;
 }
 
 export type TradingBotStatus =
@@ -3027,9 +3381,11 @@ export type TradingBotStatus =
   | "paused"
   | "stopped"
   | "error"
-  | "not-configured";
+  | "not-configured"
+  | "unavailable";
 
 export type TradingBotMode =
+  | "unknown"
   | "paper"
   | "live-read"
   | "live-trading"
@@ -3155,11 +3511,22 @@ export interface BullpenTradeAnalysisSummaryStats {
   total_executed_trades: number;
   open_positions: number;
   closed_positions: number;
-  total_net_pnl: number;
-  win_rate: number;
+  total_net_pnl: number | null;
+  win_rate: number | null;
   average_pnl_percent?: number | null;
   average_holding_period_seconds?: number | null;
-  total_fees: number;
+  total_fees: number | null;
+  known_outcomes?: number;
+  unknown_outcomes?: number;
+  win_rate_denominator?: number;
+  known_fee_records?: number;
+  unknown_fee_records?: number;
+  fee_coverage?: string;
+  net_pnl_coverage?: string;
+  measured_fee_components_total?: number | null;
+  known_fee_components?: number;
+  unknown_fee_components?: number;
+
 }
 
 export interface BullpenTradeAnalysisListItem {
@@ -3278,7 +3645,9 @@ export interface BullpenTradeAnalysisActionableLearning {
   exit_timing: string;
   entry_too_expensive: boolean;
   liquidity_or_spread_issue: boolean;
-  llm_confidence_aligned: boolean;
+  llm_confidence_aligned: boolean | null;
+  algorithm_version?: string | null;
+  evidence_status?: string;
   suggested_platform_rule_changes: string[];
   suggested_prompt_changes: string[];
   suggested_risk_management_changes: string[];
@@ -3625,3 +3994,35 @@ export type FinalActionableHistoryBackfillResponse = {
   status: "queued" | "already_queued";
   task_id: string | null;
 };
+
+
+export type HistoricalScoreObservation = { id: string; runId: number; jobId: number; label: string; score: number | null; rationale: string; rawScore?: unknown; rawRationale?: unknown; sourceHash?: string | null; representation?: string };
+export type HistoricalScoreEvidenceResponse = {
+  scope: { run_id: number; market: string; symbol: string; exchange: string; covered_at: string; history_id: number | null };
+  status: "available" | "partial" | "missing" | "ambiguous";
+  matrix: Record<string, unknown> | null;
+  parameters: Record<string, HistoricalScoreObservation[]>;
+  parameter_labels?: Record<string, string>;
+  notes: string[];
+  coverage: Record<string, number>;
+  candidates: Array<{ id: string; captured_at: string; provenance: string }>;
+  source?: string;
+  capture_id?: string;
+  history_context?: { formula_version: string; score: number | null; action: string | null };
+};
+
+export type StockSourceObservation = { id: string; run_id: number; job_id: number; stage: string; run_status: string; job_status: string; provider: string | null; model: string | null; created_at: string | null; source: string; cells: Record<string, unknown> };
+export type StockSourceObservationPage = { market: "india" | "us"; symbol: string; items: StockSourceObservation[]; next_cursor: string | null; has_more: boolean; examined_sources: number; coverage_note: string };
+
+export type ZerodhaDisplayQuoteResponse = { quotes: { instrument: string; price: number; as_of: string; source: string }[]; missing: string[]; upstox_quotes?: { instrument: string; price: number; as_of: string; source: string }[] };
+
+export interface UsVendorDisplayQuote {
+  instrument: string; security_id: string; symbol: string; listing_mic: string; share_class: string;
+  vendor_symbol: string; currency: 'USD'; provider: 'Alpaca'; feed: 'iex'; coverage: string;
+  price: number; as_of: string; received_at: string; session: string; stale: boolean;
+  delay_reason: string | null; eligible_for_readiness: boolean; source: string;
+}
+export interface UsVendorDisplayQuotes {
+  quotes: UsVendorDisplayQuote[]; missing: { instrument: string; reason: string }[];
+  provider: 'Alpaca'; feed: 'iex';
+}

@@ -423,12 +423,14 @@ export function calculateBullpenPositionReturnsPerDay({
   if (isClaimable || currentPrice === null) return null;
 
   const daysUntilClose = getBullpenPositionDaysUntilClose(closeTime, nowMs);
-  if (daysUntilClose === null || daysUntilClose <= 0) return null;
+  if (daysUntilClose === null) return null;
 
   const normalizedPrice =
     currentPrice > 1 && currentPrice <= 100 ? currentPrice / 100 : currentPrice;
+  const formulaDaysUntilClose =
+    daysUntilClose < 0 ? round(daysUntilClose - 1, 1) : daysUntilClose;
 
-  return round(((100 - normalizedPrice * 100) / daysUntilClose), 2);
+  return round(((100 - normalizedPrice * 100) / (formulaDaysUntilClose + 4)), 2);
 }
 
 function toBullpenPositionCurrentPrice({

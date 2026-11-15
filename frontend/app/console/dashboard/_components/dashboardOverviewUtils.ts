@@ -137,15 +137,27 @@ function extractStructuredErrorMessage(message: string) {
   }
 }
 
-function truncateErrorMessage(message: string) {
-  return message.length > 220
-    ? `${message.slice(0, 217).trimEnd()}...`
+function limitErrorMessage(message: string) {
+  return message.length > 10_000
+    ? `${message.slice(0, 9_997).trimEnd()}...`
     : message;
 }
 
 export function normalizeError(error: unknown) {
-  const rawMessage = error instanceof Error ? error.message : String(error);
+  if (error === null || error === undefined) {
+    return "The request failed without an error message. Check the server logs for the request correlation ID.";
+  }
+  const errorObject = readErrorObject(error);
+  const rawMessage =
+    (error instanceof Error ? readErrorText(error.message) : null) ||
+    readErrorText(errorObject?.detail) ||
+    readErrorText(errorObject?.error) ||
+    readErrorText(errorObject?.message) ||
+    String(error);
   const message = extractStructuredErrorMessage(rawMessage) || rawMessage;
+  if (/^(?:null|undefined|\[object Object\])$/i.test(message.trim())) {
+    return "The request failed without a usable error message. Check the server logs for the request correlation ID.";
+  }
   if (/<(?:!doctype\s+html|html|head|body)[\s>]/i.test(message)) {
     const titleMatch = message.match(/<title[^>]*>([^<]+)<\/title>/i);
     const headingMatch = message.match(/<h1[^>]*>([^<]+)<\/h1>/i);
@@ -156,7 +168,10 @@ export function normalizeError(error: unknown) {
     );
   }
   if (message.trim()) {
-    return truncateErrorMessage(message);
+    // Tile renderers already create a short preview. Keep the complete
+    // diagnostic here so the detailed failure dialog does not discard the
+    // provider response, request ID, retry history, or parsing context.
+    return limitErrorMessage(message);
   }
   return "Something went wrong";
 }

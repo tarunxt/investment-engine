@@ -528,11 +528,13 @@ def test_redelivery_executes_stages_once_and_same_id_duplicate_exits_while_owned
         7,
         "run-duplicate",
     )
-    tasks_module.execute_polymarket_auto_live_run.run.__func__(  # type: ignore[attr-defined]
-        _FakeTask(),
-        7,
-        "run-duplicate",
-    )
+    with pytest.raises(tasks_module.Ignore):
+        tasks_module.execute_polymarket_auto_live_run.run.__func__(  # type: ignore[attr-defined]
+            _FakeTask(),
+            7,
+            "run-duplicate",
+        )
+
 
     assert len(execution_calls) == 1
     assert execution_calls[0][1:3] == (7, "run-duplicate")
@@ -1156,7 +1158,12 @@ async def test_state_and_summary_polls_do_not_terminalize_healthy_active_run(
             assert user_id == 7
             assert next_state.last_error is None
 
-        async def list_runs(self, user_id: int, *, limit: int | None = None):
+        async def list_projected_runs(
+            self,
+            user_id: int,
+            *,
+            limit: int | None = None,
+        ):
             assert user_id == 7
             assert limit == 10
             return [run]

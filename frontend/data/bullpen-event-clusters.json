@@ -1,0 +1,410 @@
+[
+  {
+    "claim_date": "2026-09-19T04:00:00Z",
+    "cluster_id": "C01",
+    "event_name": "Will the Bank of Japan announce a 50+ bps decrease at the September 2026 meeting?",
+    "market_id": "2589853"
+  },
+  {
+    "claim_date": "2026-09-19T04:00:00Z",
+    "cluster_id": "C01",
+    "event_name": "Will the Bank of Japan announce a 25 bps decrease at the September 2026 meeting?",
+    "market_id": "2589854"
+  },
+  {
+    "claim_date": "2026-09-19T04:00:00Z",
+    "cluster_id": "C01",
+    "event_name": "Will the Bank of Japan announce no change at the September 2026 meeting?",
+    "market_id": "2589855"
+  },
+  {
+    "claim_date": "2026-09-19T04:00:00Z",
+    "cluster_id": "C01",
+    "event_name": "Will the Bank of Japan announce a 25 bps increase at the September 2026 meeting?",
+    "market_id": "2589856"
+  },
+  {
+    "claim_date": "2026-09-19T04:00:00Z",
+    "cluster_id": "C01",
+    "event_name": "Will the Bank of Japan announce a 50+ bps increase at the September 2026 meeting?",
+    "market_id": "2589857"
+  },
+  {
+    "claim_date": "2026-09-18T04:00:00Z",
+    "cluster_id": "C02",
+    "event_name": "No change in Bank of England’s interest rates after September 2026 meeting?",
+    "market_id": "2661519"
+  },
+  {
+    "claim_date": "2026-09-18T04:00:00Z",
+    "cluster_id": "C02",
+    "event_name": "Bank of England increases interest rates by 25 bps after September 2026 meeting?",
+    "market_id": "2661520"
+  },
+  {
+    "claim_date": "2026-09-16T12:00:00Z",
+    "cluster_id": "C03",
+    "event_name": "Trump declassifies new UFO files by September 15?",
+    "market_id": "3502075"
+  },
+  {
+    "claim_date": "2026-09-16T12:00:00Z",
+    "cluster_id": "C04",
+    "event_name": "US-Iran Hormuz Agreement by September 15?",
+    "market_id": "3701629"
+  },
+  {
+    "claim_date": "2026-09-16T08:00:00Z",
+    "cluster_id": "C05",
+    "event_name": "Will Iran target Saudi Arabia by September 15, 2026?",
+    "market_id": "3710795"
+  },
+  {
+    "claim_date": "2026-09-16T08:00:00Z",
+    "cluster_id": "C06",
+    "event_name": "Will Iran target Egypt by September 15, 2026?",
+    "market_id": "3710804"
+  },
+  {
+    "claim_date": "2026-09-16T08:00:00Z",
+    "cluster_id": "C07",
+    "event_name": "Will Iran target Syria by September 15, 2026?",
+    "market_id": "3710810"
+  },
+  {
+    "claim_date": "2026-09-16T08:00:00Z",
+    "cluster_id": "C08",
+    "event_name": "Will Iran target Oman by September 15, 2026?",
+    "market_id": "3711103"
+  },
+  {
+    "claim_date": "2026-09-16T12:00:00Z",
+    "cluster_id": "C09",
+    "event_name": "Will Russia and Ukraine hold any diplomatic meeting by September 15, 2026?",
+    "market_id": "3741669"
+  },
+  {
+    "claim_date": "2026-09-16T12:00:00Z",
+    "cluster_id": "C10",
+    "event_name": "Will Xi Jinping visit US by September 15?",
+    "market_id": "3758826"
+  },
+  {
+    "claim_date": "2026-09-16T12:00:00Z",
+    "cluster_id": "C11",
+    "event_name": "Israel x Lebanon diplomatic meeting by September 15, 2026?",
+    "market_id": "3840177"
+  },
+  {
+    "claim_date": "2026-09-16T08:00:00Z",
+    "cluster_id": "C12",
+    "event_name": "Israel military action against Syria by September 15, 2026?",
+    "market_id": "3861936"
+  },
+  {
+    "claim_date": "2026-09-16T12:00:00Z",
+    "cluster_id": "C13",
+    "event_name": "Moscow air traffic suspended by September 15?",
+    "market_id": "3861943"
+  },
+  {
+    "claim_date": "2026-09-16T12:00:00Z",
+    "cluster_id": "C14",
+    "event_name": "Will Apple release a foldable iPhone by September 15?",
+    "market_id": "4117966"
+  },
+  {
+    "claim_date": "2026-09-16T08:00:00Z",
+    "cluster_id": "C15",
+    "event_name": "Israel military action against Lebanon on September 15?",
+    "market_id": "4178257"
+  },
+  {
+    "claim_date": "2026-09-17T08:00:00Z",
+    "cluster_id": "C16",
+    "event_name": "Israel military action against Lebanon on September 16?",
+    "market_id": "4178258"
+  },
+  {
+    "claim_date": "2026-09-18T08:00:00Z",
+    "cluster_id": "C17",
+    "event_name": "Israel military action against Lebanon on September 17?",
+    "market_id": "4178259"
+  },
+  {
+    "claim_date": "2026-09-16T08:00:00Z",
+    "cluster_id": "C18",
+    "event_name": "Will Iran target the United Arab Emirates by September 15, 2026?",
+    "market_id": "4376146"
+  },
+  {
+    "claim_date": "2026-09-16T08:00:00Z",
+    "cluster_id": "C19",
+    "event_name": "Will Iran target Iraq by September 15, 2026?",
+    "market_id": "4376690"
+  },
+  {
+    "claim_date": "2026-09-16T08:00:00Z",
+    "cluster_id": "C20",
+    "event_name": "Will Ukraine target Moscow by September 15, 2026?",
+    "market_id": "4377387"
+  },
+  {
+    "claim_date": "2026-09-16T04:00:00Z",
+    "cluster_id": "C21",
+    "event_name": "Will \"Why Did I Get Married Again?\" be the top global Netflix movie this week?",
+    "market_id": "4426567"
+  },
+  {
+    "claim_date": "2026-09-16T04:00:00Z",
+    "cluster_id": "C21",
+    "event_name": "Will \"The Whisper Man\" be the top global Netflix movie this week?",
+    "market_id": "4426568"
+  },
+  {
+    "claim_date": "2026-09-16T04:00:00Z",
+    "cluster_id": "C21",
+    "event_name": "Will \"Turning Point: Generation 9/11\" be the top global Netflix movie this week?",
+    "market_id": "4426569"
+  },
+  {
+    "claim_date": "2026-09-16T04:00:00Z",
+    "cluster_id": "C21",
+    "event_name": "Will \"Those Who Wish Me Dead\" be the top global Netflix movie this week?",
+    "market_id": "4426570"
+  },
+  {
+    "claim_date": "2026-09-16T04:00:00Z",
+    "cluster_id": "C21",
+    "event_name": "Will \"Why Did I Get Married Again?\" be the #2 global Netflix movie this week?",
+    "market_id": "4426577"
+  },
+  {
+    "claim_date": "2026-09-16T04:00:00Z",
+    "cluster_id": "C21",
+    "event_name": "Will \"The Whisper Man\" be the #2 global Netflix movie this week?",
+    "market_id": "4426578"
+  },
+  {
+    "claim_date": "2026-09-16T04:00:00Z",
+    "cluster_id": "C21",
+    "event_name": "Will \"Turning Point: Generation 9/11\" be the #2 global Netflix movie this week?",
+    "market_id": "4426579"
+  },
+  {
+    "claim_date": "2026-09-16T04:00:00Z",
+    "cluster_id": "C21",
+    "event_name": "Will \"Puss in Boots: The Last Wish\" be the #2 global Netflix movie this week?",
+    "market_id": "4426581"
+  },
+  {
+    "claim_date": "2026-09-16T04:00:00Z",
+    "cluster_id": "C22",
+    "event_name": "Will \"Why Did I Get Married Again?\" be the top US Netflix movie this week?",
+    "market_id": "4426589"
+  },
+  {
+    "claim_date": "2026-09-16T04:00:00Z",
+    "cluster_id": "C22",
+    "event_name": "Will \"The Whisper Man\" be the top US Netflix movie this week?",
+    "market_id": "4426590"
+  },
+  {
+    "claim_date": "2026-09-16T04:00:00Z",
+    "cluster_id": "C22",
+    "event_name": "Will \"Turning Point: Generation 9/11\" be the top US Netflix movie this week?",
+    "market_id": "4426591"
+  },
+  {
+    "claim_date": "2026-09-16T04:00:00Z",
+    "cluster_id": "C22",
+    "event_name": "Will \"Those Who Wish Me Dead\" be the top US Netflix movie this week?",
+    "market_id": "4426592"
+  },
+  {
+    "claim_date": "2026-09-16T04:00:00Z",
+    "cluster_id": "C22",
+    "event_name": "Will \"Puss in Boots: The Last Wish\" be the top US Netflix movie this week?",
+    "market_id": "4426593"
+  },
+  {
+    "claim_date": "2026-09-16T04:00:00Z",
+    "cluster_id": "C22",
+    "event_name": "Will \"Why Did I Get Married Again?\" be the #2 US Netflix movie this week?",
+    "market_id": "4426871"
+  },
+  {
+    "claim_date": "2026-09-16T04:00:00Z",
+    "cluster_id": "C22",
+    "event_name": "Will \"The Whisper Man\" be the #2 US Netflix movie this week?",
+    "market_id": "4426872"
+  },
+  {
+    "claim_date": "2026-09-16T04:00:00Z",
+    "cluster_id": "C22",
+    "event_name": "Will \"Turning Point: Generation 9/11\" be the #2 US Netflix movie this week?",
+    "market_id": "4426873"
+  },
+  {
+    "claim_date": "2026-09-16T04:00:00Z",
+    "cluster_id": "C22",
+    "event_name": "Will \"Those Who Wish Me Dead\" be the #2 US Netflix movie this week?",
+    "market_id": "4426874"
+  },
+  {
+    "claim_date": "2026-09-16T04:00:00Z",
+    "cluster_id": "C22",
+    "event_name": "Will \"Puss in Boots: The Last Wish\" be the #2 US Netflix movie this week?",
+    "market_id": "4426875"
+  },
+  {
+    "claim_date": "2026-09-16T04:00:00Z",
+    "cluster_id": "C23",
+    "event_name": "Will \"The Gentlemen: Season 2\" be the top global Netflix show this week?",
+    "market_id": "4426958"
+  },
+  {
+    "claim_date": "2026-09-16T04:00:00Z",
+    "cluster_id": "C23",
+    "event_name": "Will \"Beauty in Black: Season 3\" be the top global Netflix show this week?",
+    "market_id": "4426963"
+  },
+  {
+    "claim_date": "2026-09-16T04:00:00Z",
+    "cluster_id": "C23",
+    "event_name": "Will \"Death of the Pastor's Wife: Season 1\" be the #2 global Netflix show this week?",
+    "market_id": "4426977"
+  },
+  {
+    "claim_date": "2026-09-16T04:00:00Z",
+    "cluster_id": "C23",
+    "event_name": "Will \"Crew Girl: Season 1\" be the #2 global Netflix show this week?",
+    "market_id": "4426978"
+  },
+  {
+    "claim_date": "2026-09-16T04:00:00Z",
+    "cluster_id": "C24",
+    "event_name": "Will \"The Gentlemen: Season 2\" be the top US Netflix show this week?",
+    "market_id": "4426990"
+  },
+  {
+    "claim_date": "2026-09-16T04:00:00Z",
+    "cluster_id": "C24",
+    "event_name": "Will \"Death of the Pastor's Wife: Season 1\" be the top US Netflix show this week?",
+    "market_id": "4426991"
+  },
+  {
+    "claim_date": "2026-09-16T04:00:00Z",
+    "cluster_id": "C24",
+    "event_name": "Will \"Crew Girl: Season 1\" be the top US Netflix show this week?",
+    "market_id": "4426992"
+  },
+  {
+    "claim_date": "2026-09-16T04:00:00Z",
+    "cluster_id": "C24",
+    "event_name": "Will \"Beauty in Black: Season 3\" be the top US Netflix show this week?",
+    "market_id": "4426993"
+  },
+  {
+    "claim_date": "2026-09-16T04:00:00Z",
+    "cluster_id": "C24",
+    "event_name": "Will \"Instadocs: The Decoy Plane\" be the top US Netflix show this week?",
+    "market_id": "4426994"
+  },
+  {
+    "claim_date": "2026-09-16T04:00:00Z",
+    "cluster_id": "C24",
+    "event_name": "Will \"The Gentlemen: Season 2\" be the #2 US Netflix show this week?",
+    "market_id": "4427004"
+  },
+  {
+    "claim_date": "2026-09-16T04:00:00Z",
+    "cluster_id": "C24",
+    "event_name": "Will \"Death of the Pastor's Wife: Season 1\" be the #2 US Netflix show this week?",
+    "market_id": "4427005"
+  },
+  {
+    "claim_date": "2026-09-16T04:00:00Z",
+    "cluster_id": "C24",
+    "event_name": "Will \"Crew Girl: Season 1\" be the #2 US Netflix show this week?",
+    "market_id": "4427006"
+  },
+  {
+    "claim_date": "2026-09-16T04:00:00Z",
+    "cluster_id": "C24",
+    "event_name": "Will \"Instadocs: The Decoy Plane\" be the #2 US Netflix show this week?",
+    "market_id": "4427009"
+  },
+  {
+    "claim_date": "2026-09-16T04:00:00Z",
+    "cluster_id": "C21",
+    "event_name": "Will the #1 global Netflix movie have at least 18 million views this week?",
+    "market_id": "4427020"
+  },
+  {
+    "claim_date": "2026-09-16T04:00:00Z",
+    "cluster_id": "C21",
+    "event_name": "Will the #1 global Netflix movie have at least 21 million views this week?",
+    "market_id": "4427021"
+  },
+  {
+    "claim_date": "2026-09-16T04:00:00Z",
+    "cluster_id": "C23",
+    "event_name": "Will the #1 global Netflix show have at least 8 million views this week?",
+    "market_id": "4427027"
+  },
+  {
+    "claim_date": "2026-09-16T04:00:00Z",
+    "cluster_id": "C23",
+    "event_name": "Will the #1 global Netflix show have at least 12 million views this week?",
+    "market_id": "4427029"
+  },
+  {
+    "claim_date": "2026-09-16T08:00:00Z",
+    "cluster_id": "C25",
+    "event_name": "Will Iran target an Arab country by September 15, 2026?",
+    "market_id": "4442766"
+  },
+  {
+    "claim_date": "2026-09-18T12:00:00Z",
+    "cluster_id": "C26",
+    "event_name": "Israel x Lebanon diplomatic meeting by September 17, 2026?",
+    "market_id": "4503081"
+  },
+  {
+    "claim_date": "2026-09-17T08:00:00Z",
+    "cluster_id": "C27",
+    "event_name": "Will MrBeast Gaming's next video get less than 31 million views on day 3?",
+    "market_id": "4569814"
+  },
+  {
+    "claim_date": "2026-09-17T08:00:00Z",
+    "cluster_id": "C27",
+    "event_name": "Will MrBeast Gaming's next video get between 31 and 32 million views on day 3?",
+    "market_id": "4569815"
+  },
+  {
+    "claim_date": "2026-09-17T08:00:00Z",
+    "cluster_id": "C27",
+    "event_name": "Will MrBeast Gaming's next video get between 32 and 33 million views on day 3?",
+    "market_id": "4569816"
+  },
+  {
+    "claim_date": "2026-09-17T08:00:00Z",
+    "cluster_id": "C27",
+    "event_name": "Will MrBeast Gaming's next video get between 34 and 35 million views on day 3?",
+    "market_id": "4569818"
+  },
+  {
+    "claim_date": "2026-09-17T08:00:00Z",
+    "cluster_id": "C27",
+    "event_name": "Will MrBeast Gaming's next video get between 35 and 36 million views on day 3?",
+    "market_id": "4569819"
+  },
+  {
+    "claim_date": "2026-09-17T08:00:00Z",
+    "cluster_id": "C27",
+    "event_name": "Will MrBeast Gaming's next video get 36 million or more views on day 3?",
+    "market_id": "4569820"
+  }
+]

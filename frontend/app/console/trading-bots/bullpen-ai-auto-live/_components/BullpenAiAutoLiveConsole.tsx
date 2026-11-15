@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   AlertTriangle,
   Loader2,
@@ -303,80 +303,54 @@ function GuardrailPill({ check }: { check: BullpenAutoLiveGuardrailCheck }) {
   );
 }
 
-async function requestDashboard(): Promise<DashboardRequestResult> {
+const DASHBOARD_READ_TIMEOUT_MS = 20_000;
+
+async function requestDashboard(signal: AbortSignal): Promise<DashboardRequestResult> {
+  signal.throwIfAborted();
   const issues: string[] = [];
-  const [summaryResult, runsResult, decisionsResult] = await Promise.allSettled([
-    apiService.getBullpenAutoLiveSummary(),
-    apiService.getBullpenAutoLiveRuns(),
-    apiService.getBullpenAutoLiveDecisions(),
-  ]);
-  let summary =
-    summaryResult.status === "fulfilled" ? summaryResult.value : null;
-  let hasSettings = summaryResult.status === "fulfilled";
-
-  if (summaryResult.status === "rejected") {
-    issues.push(formatDashboardIssue("Summary", summaryResult.reason));
-  }
-  if (runsResult.status === "rejected") {
-    issues.push(formatDashboardIssue("Runs", runsResult.reason));
-  }
-  if (decisionsResult.status === "rejected") {
-    issues.push(formatDashboardIssue("Decisions", decisionsResult.reason));
-  }
-
-  if (!summary) {
-    const [stateResult, settingsResult] = await Promise.allSettled([
-      apiService.getBullpenAutoLiveState(),
-      apiService.getBullpenAutoLiveSettings(),
+  try {
+    // This projection is a passive persisted read. The operational summary and
+    // global decisions endpoints can perform recovery/reconciliation writes.
+    const summary = await apiService.getBullpenAutoLiveDashboardSummary({
+      timeoutMs: DASHBOARD_READ_TIMEOUT_MS,
+      signal,
+    });
+    signal.throwIfAborted();
+    const degradedSections = new Set([
+      ...(summary.degraded_sections ?? []),
+      ...Object.entries(summary.sections ?? {})
+        .filter(([, section]) => ["stale", "degraded", "unavailable"].includes(section.status))
+        .map(([name]) => name),
     ]);
-    const state = stateResult.status === "fulfilled" ? stateResult.value : null;
-    const settings =
-      settingsResult.status === "fulfilled" ? settingsResult.value : null;
-
-    if (stateResult.status === "rejected") {
-      issues.push(formatDashboardIssue("State", stateResult.reason));
+    for (const name of degradedSections) {
+      const section = summary.sections?.[name];
+      issues.push(`${labelize(name)}: ${section?.detail || "Persisted detail is temporarily unavailable. Open run history for complete evidence."}`);
     }
-    if (settingsResult.status === "rejected") {
-      issues.push(formatDashboardIssue("Settings", settingsResult.reason));
-    }
-
-    hasSettings = settings != null;
-
-    if (state || settings) {
-      summary = buildPartialSummary(state, settings);
-    }
-  }
-
-  if (!summary) {
     return {
-      summary: null,
+      summary,
       issues,
-      hasSettings,
+      hasSettings: !degradedSections.has("settings"),
     };
+  } catch (error) {
+    signal.throwIfAborted();
+    issues.push(formatDashboardIssue("Summary", error));
   }
 
-  const recentRuns =
-    runsResult.status === "fulfilled" ? runsResult.value : summary.recent_runs;
-  const recentDecisions =
-    decisionsResult.status === "fulfilled"
-      ? decisionsResult.value
-      : summary.recent_decisions;
-  const latestGuardrails =
-    summary.latest_guardrail_checks.length > 0
-      ? summary.latest_guardrail_checks
-      : summary.state.latest_guardrail_checks;
-
-  return {
-    summary: {
-      ...summary,
-      latest_run: summary.latest_run ?? recentRuns[0] ?? null,
-      recent_runs: recentRuns,
-      recent_decisions: recentDecisions,
-      latest_guardrail_checks: latestGuardrails,
-    },
-    issues,
-    hasSettings,
-  };
+  // The existing state route is also passive. Do not fall back to /settings:
+  // that legacy reader synchronizes/saves state. Keep the editor unavailable
+  // until its complete editable projection has been loaded successfully.
+  try {
+    const state = await apiService.get<BullpenAutoLiveState>(URLs.bullpenAutoLive.state(), {
+      timeoutMs: DASHBOARD_READ_TIMEOUT_MS,
+      signal,
+    });
+    signal.throwIfAborted();
+    return { summary: buildPartialSummary(state), issues, hasSettings: false };
+  } catch (error) {
+    signal.throwIfAborted();
+    issues.push(formatDashboardIssue("State", error));
+    return { summary: null, issues, hasSettings: false };
+  }
 }
 
 export function BullpenAiAutoLiveConsole() {
@@ -388,11 +362,16 @@ export function BullpenAiAutoLiveConsole() {
   const [actionBusy, setActionBusy] = useState<ActionKey | null>(null);
   const [emergencyBusy, setEmergencyBusy] = useState<EmergencyActionKey | null>(null);
   const [guardrailsDrawerOpen, setGuardrailsDrawerOpen] = useState(false);
+  const dashboardRequestRef = useRef<AbortController | null>(null);
 
   async function reloadDashboard() {
+    dashboardRequestRef.current?.abort();
+    const controller = new AbortController();
+    dashboardRequestRef.current = controller;
     setRefreshing(true);
     try {
-      const result = await requestDashboard();
+      const result = await requestDashboard(controller.signal);
+      if (controller.signal.aborted || dashboardRequestRef.current !== controller) return null;
       if (result.summary) {
         setSummary(result.summary);
       }
@@ -406,21 +385,27 @@ export function BullpenAiAutoLiveConsole() {
       );
       return result.summary;
     } catch (nextError) {
-      setError(normalizeError(nextError));
+      if (!controller.signal.aborted && dashboardRequestRef.current === controller) {
+        setError(normalizeError(nextError));
+      }
       return null;
     } finally {
-      setRefreshing(false);
+      if (!controller.signal.aborted && dashboardRequestRef.current === controller) {
+        setRefreshing(false);
+        setLoading(false);
+      }
     }
   }
 
   useEffect(() => {
-    let cancelled = false;
+    const controller = new AbortController();
+    dashboardRequestRef.current = controller;
 
     async function loadInitialDashboard() {
       setLoading(true);
       try {
-        const result = await requestDashboard();
-        if (cancelled) return;
+        const result = await requestDashboard(controller.signal);
+        if (controller.signal.aborted || dashboardRequestRef.current !== controller) return;
         setSummary(result.summary);
         setSettingsAvailable(result.hasSettings);
         setError(
@@ -431,10 +416,10 @@ export function BullpenAiAutoLiveConsole() {
               : "No Bullpen AI Auto-Live data is available yet.",
         );
       } catch (nextError) {
-        if (cancelled) return;
+        if (controller.signal.aborted || dashboardRequestRef.current !== controller) return;
         setError(normalizeError(nextError));
       } finally {
-        if (!cancelled) {
+        if (!controller.signal.aborted && dashboardRequestRef.current === controller) {
           setLoading(false);
         }
       }
@@ -443,7 +428,8 @@ export function BullpenAiAutoLiveConsole() {
     void loadInitialDashboard();
 
     return () => {
-      cancelled = true;
+      dashboardRequestRef.current?.abort();
+      dashboardRequestRef.current = null;
     };
   }, []);
 
@@ -799,6 +785,12 @@ export function BullpenAiAutoLiveConsole() {
                       href={URLs.routes.console.bullpenAi()}
                     >
                       Open Bullpen x AI
+                    </Link>
+                  </span>
+                  <span>
+                    Run history:{" "}
+                    <Link className="font-medium text-slate-900 underline decoration-amber-300 underline-offset-4" href={URLs.routes.console.runs()}>
+                      Open saved runs
                     </Link>
                   </span>
                 </div>

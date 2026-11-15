@@ -169,6 +169,7 @@ class AutoRebalanceWorkflow(Base, TimestampMixin):
     portfolio: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     sequence: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     label: Mapped[str] = mapped_column(String(128), nullable=False)
+    side_effect_policy_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="queued", index=True)
     current_stage: Mapped[str] = mapped_column(String(32), nullable=False, default="sync")
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)

@@ -4,6 +4,7 @@ export type BullpenScanFilterDetailId =
   | "excludeMarketPredictions"
   | "excludeTweetCountQuestions"
   | "excludeReleasedByEvents"
+  | "excludeOthers"
   | "onlyBinaryYesNo";
 
 export type BullpenScanFilterDetail = {
@@ -403,6 +404,23 @@ export const BULLPEN_SCAN_FILTER_DETAILS: Record<
       "Ranges such as 0-10 / 11-20 / 21+ are excluded.",
       "Markets with more than two outcomes are excluded.",
       "Markets without a clear Yes and No structure are excluded.",
+    ],
+  },
+  excludeOthers: {
+    id: "excludeOthers",
+    label: "Others",
+    description: "Add any word or phrase that should exclude matching markets from Stage 1.",
+    dialogEyebrow: "Custom exclusion",
+    title: "Other words and phrases to filter out",
+    matcherScope: "Each saved phrase is matched case-insensitively against the market question and its available market context.",
+    algorithmSteps: [
+      "Normalize each saved phrase and the market search text to lowercase.",
+      "Exclude a market when its question or available market context contains any saved phrase.",
+      "Apply the saved list to manual, scheduled, and automatic future Stage 1 scans.",
+    ],
+    excludedEventExamples: [
+      "Saving ‘praise’ excludes questions containing praise.",
+      "Saving ‘praises’ excludes questions containing praises.",
     ],
   },
 };

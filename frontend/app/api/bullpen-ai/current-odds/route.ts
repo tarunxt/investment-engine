@@ -1,13 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { shouldReplaceCategory } from "../_lib/polymarketCategory";
-import { resolvePolymarketMarketsWithQuestionFallback } from "../_lib/polymarketMarketUrls";
+import {
+  resolvePolymarketMarketsWithQuestionFallback,
+  type ResolvedPolymarketMarket,
+} from "../_lib/polymarketMarketUrls";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 type LookupQuestion = {
   id: string;
+  marketId: string | null;
+  conditionId: string | null;
   slug: string | null;
   marketUrl: string | null;
   question: string | null;
@@ -24,6 +29,18 @@ function normalizeLookupQuestion(value: unknown): LookupQuestion | null {
 
   return {
     id,
+    marketId:
+      typeof record.marketId === "string" && record.marketId.trim()
+        ? record.marketId.trim()
+        : typeof record.market_id === "string" && record.market_id.trim()
+          ? record.market_id.trim()
+          : null,
+    conditionId:
+      typeof record.conditionId === "string" && record.conditionId.trim()
+        ? record.conditionId.trim()
+        : typeof record.condition_id === "string" && record.condition_id.trim()
+          ? record.condition_id.trim()
+          : null,
     slug:
       typeof record.slug === "string" && record.slug.trim()
         ? record.slug.trim()
@@ -64,6 +81,139 @@ function logResolvedCategory(
   });
 }
 
+type ClobOrderBook = {
+  asset_id?: string;
+  asks?: Array<{ price?: string | number; size?: string | number }>;
+  bids?: Array<{ price?: string | number; size?: string | number }>;
+};
+
+const MAX_CLOB_BOOKS_BATCH_SIZE = 25;
+const MAX_CONCURRENT_CLOB_BOOK_BATCHES = 4;
+
+function bestExecutableAsk(book: ClobOrderBook | undefined) {
+  const asks = (book?.asks ?? [])
+    .map((level) => Number(level.price))
+    .filter((price) => Number.isFinite(price) && price >= 0 && price <= 1);
+  if (asks.length === 0) return null;
+  return Number((Math.min(...asks) * 100).toFixed(2));
+}
+
+function bestExecutableBid(book: ClobOrderBook | undefined) {
+  const bids = (book?.bids ?? [])
+    .map((level) => Number(level.price))
+    .filter((price) => Number.isFinite(price) && price >= 0 && price <= 1);
+  if (bids.length === 0) return null;
+  return Number((Math.max(...bids) * 100).toFixed(2));
+}
+
+async function applyClobOrderBooks(
+  markets: Record<string, ResolvedPolymarketMarket>,
+) {
+  const tokenIds = Array.from(
+    new Set(
+      Object.values(markets)
+        .flatMap((market) => [market.yesTokenId, market.noTokenId])
+        .filter((tokenId): tokenId is string => Boolean(tokenId)),
+    ),
+  );
+  if (tokenIds.length === 0) return markets;
+
+  const fetchBooks = async (batch: string[]) => {
+    const response = await fetch("https://clob.polymarket.com/books", {
+      method: "POST",
+      cache: "no-store",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(batch.map((token_id) => ({ token_id }))),
+      signal: AbortSignal.timeout(8_000),
+    });
+    if (!response.ok) {
+      throw new Error(`Polymarket CLOB books returned HTTP ${response.status}`);
+    }
+    const payload = (await response.json()) as ClobOrderBook[];
+    return Array.isArray(payload) ? payload : [];
+  };
+
+  const batches: string[][] = [];
+  for (
+    let index = 0;
+    index < tokenIds.length;
+    index += MAX_CLOB_BOOKS_BATCH_SIZE
+  ) {
+    batches.push(tokenIds.slice(index, index + MAX_CLOB_BOOKS_BATCH_SIZE));
+  }
+
+  const books = new Map<string, ClobOrderBook>();
+  for (
+    let index = 0;
+    index < batches.length;
+    index += MAX_CONCURRENT_CLOB_BOOK_BATCHES
+  ) {
+    const batchGroup = batches.slice(
+      index,
+      index + MAX_CONCURRENT_CLOB_BOOK_BATCHES,
+    );
+    const results = await Promise.allSettled(
+      batchGroup.map((batch) => fetchBooks(batch)),
+    );
+    for (let batchIndex = 0; batchIndex < results.length; batchIndex += 1) {
+      const result = results[batchIndex];
+      let batchBooks: ClobOrderBook[] = [];
+      if (result.status === "fulfilled") {
+        batchBooks = result.value;
+      } else {
+        try {
+          batchBooks = await fetchBooks(batchGroup[batchIndex]);
+        } catch {
+          // Preserve Gamma odds for only the failed batch. Other contracts
+          // still receive exact executable CLOB asks.
+        }
+      }
+      for (const book of batchBooks) {
+        if (typeof book.asset_id === "string") {
+          books.set(book.asset_id, book);
+        }
+      }
+    }
+  }
+
+  return Object.fromEntries(
+    Object.entries(markets).map(([questionId, market]) => {
+      const yesAsk = market.yesTokenId
+        ? bestExecutableAsk(books.get(market.yesTokenId))
+        : null;
+      const noAsk = market.noTokenId
+        ? bestExecutableAsk(books.get(market.noTokenId))
+        : null;
+      const yesBid = market.yesTokenId
+        ? bestExecutableBid(books.get(market.yesTokenId))
+        : null;
+      const noBid = market.noTokenId
+        ? bestExecutableBid(books.get(market.noTokenId))
+        : null;
+      return [
+        questionId,
+        {
+          ...market,
+          yesOdds: yesAsk ?? market.yesOdds,
+          noOdds: noAsk ?? market.noOdds,
+          yesBestBid: yesBid,
+          yesBestAsk: yesAsk,
+          yesSpread:
+            yesBid !== null && yesAsk !== null
+              ? Number((yesAsk - yesBid).toFixed(2))
+              : null,
+          noBestBid: noBid,
+          noBestAsk: noAsk,
+          noSpread:
+            noBid !== null && noAsk !== null
+              ? Number((noAsk - noBid).toFixed(2))
+              : null,
+        },
+      ];
+    }),
+  ) as Record<string, ResolvedPolymarketMarket>;
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = (await request.json()) as {
@@ -79,11 +229,49 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({
         markets: {},
         unresolvedQuestionIds: [],
+        fetchedAt: new Date().toISOString(),
       });
     }
 
-    const resolvedByQuestionId =
-      await resolvePolymarketMarketsWithQuestionFallback(questions);
+    // `id` is the caller's response key. History deliberately uses a unique
+    // synthetic key, so resolving it directly used to discard the canonical
+    // numeric market id and fall back to the parent event slug. Multi-outcome
+    // events share that slug, which could apply a sibling contract's odds to
+    // every row. Resolve by the exact market id, then restore the response key.
+    const resolverQuestions = questions.map((question) => ({
+      ...question,
+      id: question.marketId ?? question.id,
+      // When History provides a canonical numeric market id, make it the only
+      // lookup identity. A stale condition id or shared parent-event URL/slug
+      // must not prevent the exact contract from being fetched or select a
+      // sibling outcome in a multi-outcome event.
+      conditionId: question.marketId ? null : question.conditionId,
+      slug: question.marketId ? null : question.slug,
+      marketUrl: question.marketId ? null : question.marketUrl,
+    }));
+    const gammaMarketsByLookupId =
+      await resolvePolymarketMarketsWithQuestionFallback(
+        resolverQuestions,
+      {
+        allowPartialGammaLookups: true,
+        includeEventSupplements: false,
+        allowRuntimeQuestionFallback: false,
+        exactNumericIdPaths: true,
+        preferIndicativeOutcomePrices: true,
+      },
+    );
+    const gammaMarkets = Object.fromEntries(
+      questions.flatMap((question) => {
+        const resolved =
+          gammaMarketsByLookupId[question.marketId ?? question.id];
+        return resolved ? [[question.id, resolved]] : [];
+      }),
+    ) as Record<string, ResolvedPolymarketMarket>;
+    // Return the exact contract's live CLOB quotes. The additional bid/ask
+    // fields let History show Bullpen's visible order-book spread, while the
+    // legacy yesOdds/noOdds fields remain executable buy asks for callers that
+    // have not adopted the richer quote shape yet.
+    const resolvedByQuestionId = await applyClobOrderBooks(gammaMarkets);
     questions.forEach((question) => {
       const resolved = resolvedByQuestionId[question.id];
       logResolvedCategory(question, resolved ?? null);
@@ -95,6 +283,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       markets: resolvedByQuestionId,
       unresolvedQuestionIds,
+      fetchedAt: new Date().toISOString(),
     });
   } catch (error) {
     return NextResponse.json(

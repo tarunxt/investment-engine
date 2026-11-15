@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { ExternalLink, X } from "lucide-react";
 
 import type {
@@ -172,6 +172,115 @@ export function BullpenStage2ActionablesDialog({
 }) {
   const titleId = useId();
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const [marketMetadata, setMarketMetadata] = useState<
+    Record<
+      string,
+      { title: string | null; marketUrl: string | null; slug: string | null }
+    >
+  >({});
+
+  const unresolvedMarketIds = useMemo(
+    () =>
+      actionables.eventExits
+        .filter(
+          (item) =>
+            item.marketId &&
+            item.title === item.marketId &&
+            !item.marketUrl,
+        )
+        .map((item) => item.marketId as string),
+    [actionables.eventExits],
+  );
+
+  useEffect(() => {
+    if (unresolvedMarketIds.length === 0) return;
+    const controller = new AbortController();
+
+    void (async () => {
+      try {
+        const response = await fetch("/api/bullpen-ai/market-urls", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          cache: "no-store",
+          signal: controller.signal,
+          body: JSON.stringify({
+            questions: unresolvedMarketIds.map((id) => ({
+              id,
+              slug: null,
+              marketUrl: null,
+              question: null,
+              category: null,
+            })),
+          }),
+        });
+        if (!response.ok) return;
+        const payload = (await response.json()) as {
+          marketTitles?: Record<string, string | null>;
+          marketUrls?: Record<string, string | null>;
+          marketSlugs?: Record<string, string | null>;
+        };
+        if (controller.signal.aborted) return;
+        setMarketMetadata(
+          Object.fromEntries(
+            unresolvedMarketIds.map((id) => [
+              id,
+              {
+                title: payload.marketTitles?.[id] ?? null,
+                marketUrl: payload.marketUrls?.[id] ?? null,
+                slug: payload.marketSlugs?.[id] ?? null,
+              },
+            ]),
+          ),
+        );
+      } catch (error) {
+        if (!(error instanceof DOMException && error.name === "AbortError")) {
+          console.warn("Unable to enrich persisted Stage 2 actionables", error);
+        }
+      }
+    })();
+
+    return () => controller.abort();
+  }, [unresolvedMarketIds]);
+
+  const visibleActionables = useMemo(() => {
+    const eventExits = actionables.eventExits.map((item) => {
+      if (!item.marketId) return item;
+      const metadata = marketMetadata[item.marketId];
+      if (!metadata?.title) return item;
+      return {
+        ...item,
+        title: metadata.title,
+        marketUrl: metadata.marketUrl,
+        slug: metadata.slug,
+        reason:
+          "Persisted by Stage 2 as an authoritative Event Exit actionable.",
+      };
+    });
+    // Event URLs group multiple dated markets, so URL/parent-event slug is
+    // deliberately not an exit identity. The canonical Gamma question is the
+    // exact market-level bridge available for legacy retained runs.
+    const exitTitles = new Set(
+      eventExits.map((item) => item.title.trim().toLowerCase()),
+    );
+    const matchedHold = actionables.hold.filter(
+      (item) =>
+        !exitTitles.has(item.title.trim().toLowerCase()),
+    );
+    // A legacy budget-trimmed run starts with every preserved active position
+    // in Hold because its exit rows lost metadata. The live wallet may have
+    // changed since that scan (for example, one exited market disappeared),
+    // so reconcile the row count to the frozen run aggregate instead of
+    // allowing today's portfolio to rewrite the historical result.
+    const historicalHoldCount = Math.max(
+      0,
+      actionables.hold.length - actionables.eventExits.length,
+    );
+    const hold =
+      unresolvedMarketIds.length > 0
+        ? matchedHold.slice(0, historicalHoldCount)
+        : matchedHold;
+    return { ...actionables, eventExits, hold };
+  }, [actionables, marketMetadata, unresolvedMarketIds.length]);
 
   useEffect(() => {
     closeButtonRef.current?.focus();
@@ -209,8 +318,8 @@ export function BullpenStage2ActionablesDialog({
               Actionables
             </h2>
             <p className="mt-1 text-sm text-slate-600">
-              Exit {actionables.eventExits.length} · Buy {actionables.buyNew.length} · Hold{" "}
-              {actionables.hold.length}
+              Exit {visibleActionables.eventExits.length} · Buy {visibleActionables.buyNew.length} · Hold{" "}
+              {visibleActionables.hold.length}
             </p>
           </div>
           <button
@@ -228,21 +337,21 @@ export function BullpenStage2ActionablesDialog({
           <ActionableSection
             title="Event Exits"
             description="Active Bullpen positions identified for sale or displaced from the LLM-selected portfolio."
-            items={actionables.eventExits}
+            items={visibleActionables.eventExits}
             tone="exit"
             emptyMessage="No active Bullpen position is currently identified for exit."
           />
           <ActionableSection
             title="Buy New"
             description="New events selected by the latest LLM ranking for a potential Bullpen purchase."
-            items={actionables.buyNew}
+            items={visibleActionables.buyNew}
             tone="buy"
             emptyMessage="No new Bullpen event is currently identified for purchase."
           />
           <ActionableSection
             title="Hold"
             description="Active Bullpen positions not included in Event Exits and therefore retained for now."
-            items={actionables.hold}
+            items={visibleActionables.hold}
             tone="hold"
             emptyMessage="No active Bullpen position is currently classified as Hold."
           />

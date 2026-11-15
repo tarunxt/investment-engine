@@ -11,6 +11,7 @@ import {
 const POLYMARKET_EVENT_BASE_URL = "https://polymarket.com/event";
 const POLYMARKET_GAMMA_MARKETS_URL = "https://gamma-api.polymarket.com/markets";
 const MAX_GAMMA_LOOKUP_BATCH_SIZE = 25;
+const MAX_CONCURRENT_GAMMA_LOOKUP_BATCHES = 4;
 const MAX_EVENT_DETAIL_BATCH_SIZE = 8;
 const MARKET_CONTEXT_CAPTURE_CHARS = 40_000;
 const MAX_MARKET_CONTEXT_UPDATES = 6;
@@ -28,15 +29,19 @@ type SearchableCanonicalizableQuestion = CanonicalizableQuestion & {
 
 export type ResolvedPolymarketMarket = {
   id: string;
+  title: string | null;
   conditionId: string | null;
   slug: string | null;
   marketSlug: string | null;
   eventSlug: string | null;
+  eventTitle: string | null;
   marketUrl: string | null;
   authoritativeMarketOpen: boolean | null;
   category: string | null;
   yesOdds: number | null;
   noOdds: number | null;
+  yesTokenId: string | null;
+  noTokenId: string | null;
   bestBidPrice: number | null;
   bestAskPrice: number | null;
   rules: string | null;
@@ -50,8 +55,12 @@ type PolymarketEventSupplement = {
 };
 
 type PolymarketMarketResolutionOptions = {
+  allowPartialGammaLookups?: boolean;
   backendAccessToken?: string | null;
   allowRuntimeQuestionFallback?: boolean;
+  exactNumericIdPaths?: boolean;
+  includeEventSupplements?: boolean;
+  preferIndicativeOutcomePrices?: boolean;
   maxRuntimeQuestionFallbacks?: number;
   runtimeSearch?: (
     path: string,
@@ -164,6 +173,17 @@ function getNestedEventSlug(value: unknown) {
   return readString(record, ["slug", "eventSlug", "urlSlug"]);
 }
 
+function getNestedEventTitle(value: unknown) {
+  for (const item of [...toArray(value), ...parseJsonArray(value)]) {
+    const record = toRecord(item);
+    if (!record) continue;
+    const title = readString(record, ["title", "name", "question"]);
+    if (title) return title;
+  }
+  const record = toRecord(value);
+  return record ? readString(record, ["title", "name", "question"]) : null;
+}
+
 function getNestedSeriesSlug(value: unknown) {
   for (const item of [...toArray(value), ...parseJsonArray(value)]) {
     const record = toRecord(item);
@@ -247,6 +267,30 @@ function readOutcomeOdds(record: Record<string, unknown>) {
   return {
     yesOdds,
     noOdds,
+  };
+}
+
+function readOutcomeTokenIds(record: Record<string, unknown>) {
+  const outcomes = parseJsonArray(record.outcomes)
+    .map((value) => {
+      if (typeof value === "string") return value.trim().toLowerCase();
+      if (!value || typeof value !== "object") return null;
+      return readString(value as Record<string, unknown>, [
+        "name",
+        "label",
+        "title",
+      ])?.toLowerCase() ?? null;
+    });
+  const tokenIds = parseJsonArray(
+    record.clobTokenIds ?? record.clob_token_ids,
+  ).map((value) =>
+    typeof value === "string" && value.trim() ? value.trim() : null,
+  );
+  const yesIndex = outcomes.findIndex((label) => label === "yes");
+  const noIndex = outcomes.findIndex((label) => label === "no");
+  return {
+    yesTokenId: yesIndex >= 0 ? tokenIds[yesIndex] ?? null : null,
+    noTokenId: noIndex >= 0 ? tokenIds[noIndex] ?? null : null,
   };
 }
 
@@ -537,15 +581,29 @@ async function fetchPolymarketEventSupplements(marketUrls: string[]) {
 function normalizeResolvedMarket(
   record: Record<string, unknown>,
   fallbackSlug: string | null = null,
+  preferIndicativeOutcomePrices = false,
 ): ResolvedPolymarketMarket | null {
   const id = readString(record, ["id"]);
   const conditionId = readString(record, ["conditionId", "condition_id"]);
   const slug = getCanonicalPolymarketMarketSlug(record, fallbackSlug);
   const eventSlug = getCanonicalPolymarketEventSlug(record, slug);
-  const { yesOdds, noOdds } = readOutcomeOdds(record);
+  const eventTitle = getNestedEventTitle(record.events) || getNestedEventTitle(record.event);
+  const { yesOdds: indicativeYesOdds, noOdds: indicativeNoOdds } =
+    readOutcomeOdds(record);
   const rules = extractRulesText(record);
   const bestBidPrice = normalizePrice(parseNumber(record.bestBid));
   const bestAskPrice = normalizePrice(parseNumber(record.bestAsk));
+  const executableYesOdds =
+    bestAskPrice === null ? null : normalizeOdds(bestAskPrice);
+  const executableNoOdds =
+    bestBidPrice === null ? null : normalizeOdds(1 - bestBidPrice);
+  const yesOdds = preferIndicativeOutcomePrices
+    ? indicativeYesOdds ?? executableYesOdds
+    : executableYesOdds ?? indicativeYesOdds;
+  const noOdds = preferIndicativeOutcomePrices
+    ? indicativeNoOdds ?? executableNoOdds
+    : executableNoOdds ?? indicativeNoOdds;
+  const { yesTokenId, noTokenId } = readOutcomeTokenIds(record);
   const category = formatPolymarketCategory(
     collectPolymarketCategoryLabels(record),
   );
@@ -554,15 +612,19 @@ function normalizeResolvedMarket(
 
   return {
     id,
+    title: readString(record, ["question", "title"]),
     conditionId,
     slug,
     marketSlug: slug,
     eventSlug,
+    eventTitle,
     marketUrl: buildPolymarketEventUrl(eventSlug),
     authoritativeMarketOpen: resolveAuthoritativeMarketOpenState(record),
     category,
     yesOdds,
     noOdds,
+    yesTokenId,
+    noTokenId,
     bestBidPrice,
     bestAskPrice,
     rules,
@@ -573,7 +635,55 @@ function normalizeResolvedMarket(
 
 async function fetchGammaMarketLookupBatch(
   questions: CanonicalizableQuestion[],
+  options: PolymarketMarketResolutionOptions = {},
 ) {
+  if (
+    options.exactNumericIdPaths &&
+    questions.every((question) => isNumericQuestionId(question.id))
+  ) {
+    const exactResults = await Promise.allSettled(
+      questions.map(async (question) => {
+        const id = question.id.trim();
+        const fetchExact = async () => {
+          const response = await fetch(
+            `${POLYMARKET_GAMMA_MARKETS_URL}/${encodeURIComponent(id)}`,
+            {
+              cache: "no-store",
+              headers: { accept: "application/json" },
+              signal: AbortSignal.timeout(8_000),
+            },
+          );
+          if (!response.ok) {
+            throw new Error(
+              `Polymarket Gamma market ${id} returned HTTP ${response.status}`,
+            );
+          }
+          const payload = await response.json();
+          if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+            throw new Error(`Polymarket Gamma returned no market for id ${id}`);
+          }
+          return payload as Record<string, unknown>;
+        };
+
+        try {
+          return await fetchExact();
+        } catch {
+          return fetchExact();
+        }
+      }),
+    );
+    const records = exactResults.flatMap((result) =>
+      result.status === "fulfilled" ? [result.value] : [],
+    );
+    if (records.length === 0 && !options.allowPartialGammaLookups) {
+      const failed = exactResults.find(
+        (result): result is PromiseRejectedResult => result.status === "rejected",
+      );
+      throw failed?.reason ?? new Error("Polymarket Gamma exact lookups failed");
+    }
+    return records;
+  }
+
   const params = new URLSearchParams();
   const seenIds = new Set<string>();
   const seenSlugs = new Set<string>();
@@ -628,7 +738,10 @@ async function fetchGammaMarketLookupBatch(
 
 export async function resolvePolymarketMarkets<
   T extends CanonicalizableQuestion,
->(questions: T[]) {
+>(
+  questions: T[],
+  options: PolymarketMarketResolutionOptions = {},
+) {
   const resolvedByQuestionId: Record<string, ResolvedPolymarketMarket> = {};
   if (questions.length === 0) return resolvedByQuestionId;
 
@@ -636,21 +749,65 @@ export async function resolvePolymarketMarkets<
   const recordsBySlug = new Map<string, Record<string, unknown>>();
   const recordsByConditionId = new Map<string, Record<string, unknown>>();
 
+  const lookupBatchSize = options.exactNumericIdPaths
+    ? MAX_CONCURRENT_GAMMA_LOOKUP_BATCHES
+    : MAX_GAMMA_LOOKUP_BATCH_SIZE;
+  const lookupBatches: CanonicalizableQuestion[][] = [];
   for (
     let index = 0;
     index < questions.length;
-    index += MAX_GAMMA_LOOKUP_BATCH_SIZE
+    index += lookupBatchSize
   ) {
-    const batch = questions.slice(index, index + MAX_GAMMA_LOOKUP_BATCH_SIZE);
-    const records = await fetchGammaMarketLookupBatch(batch);
+    lookupBatches.push(
+      questions.slice(index, index + lookupBatchSize),
+    );
+  }
 
-    for (const record of records) {
-      const id = readString(record, ["id"]);
-      const slug = getCanonicalPolymarketMarketSlug(record);
-      const conditionId = readString(record, ["conditionId", "condition_id"]);
-      if (id) recordsById.set(id, record);
-      if (slug) recordsBySlug.set(slug, record);
-      if (conditionId) recordsByConditionId.set(conditionId, record);
+  for (
+    let index = 0;
+    index < lookupBatches.length;
+    index += MAX_CONCURRENT_GAMMA_LOOKUP_BATCHES
+  ) {
+    const batchGroup = lookupBatches.slice(
+      index,
+      index + MAX_CONCURRENT_GAMMA_LOOKUP_BATCHES,
+    );
+    const lookupResults = await Promise.allSettled(
+      batchGroup.map((batch) => fetchGammaMarketLookupBatch(batch, options)),
+    );
+    const recordsByBatch: Record<string, unknown>[][] = [];
+
+    for (let batchIndex = 0; batchIndex < lookupResults.length; batchIndex += 1) {
+      const result = lookupResults[batchIndex];
+      if (result.status === "fulfilled") {
+        recordsByBatch.push(result.value);
+        continue;
+      }
+      if (!options.allowPartialGammaLookups) {
+        throw result.reason;
+      }
+      try {
+        recordsByBatch.push(
+          await fetchGammaMarketLookupBatch(batchGroup[batchIndex], options),
+        );
+      } catch {
+        // Keep the other exact-identity results instead of failing the entire
+        // current-odds table because one transient Gamma batch was unavailable.
+      }
+    }
+
+    for (const records of recordsByBatch) {
+      for (const record of records) {
+        const id = readString(record, ["id"]);
+        const slug = getCanonicalPolymarketMarketSlug(record);
+        const conditionId = readString(record, [
+          "conditionId",
+          "condition_id",
+        ]);
+        if (id) recordsById.set(id, record);
+        if (slug) recordsBySlug.set(slug, record);
+        if (conditionId) recordsByConditionId.set(conditionId, record);
+      }
     }
   }
 
@@ -665,13 +822,21 @@ export async function resolvePolymarketMarkets<
       (question.slug ? recordsBySlug.get(question.slug.trim()) : undefined);
     if (!record) continue;
 
-    const resolved = normalizeResolvedMarket(record, question.slug?.trim() || null);
+    const resolved = normalizeResolvedMarket(
+      record,
+      question.slug?.trim() || null,
+      options.preferIndicativeOutcomePrices === true,
+    );
     if (resolved) {
       resolvedByQuestionId[question.id] = resolved;
       if (resolved.marketUrl) {
         uniqueMarketUrls.add(resolved.marketUrl);
       }
     }
+  }
+
+  if (options.includeEventSupplements === false) {
+    return resolvedByQuestionId;
   }
 
   const supplementsByMarketUrl = await fetchPolymarketEventSupplements(
@@ -718,6 +883,7 @@ async function searchBullpenMarketByQuestion(
     })) as {
       events?: Array<{
         slug?: string | null;
+        title?: string | null;
         markets?: Array<{
           conditionId?: string | null;
           question?: string | null;
@@ -736,6 +902,7 @@ async function searchBullpenMarketByQuestion(
       (event.markets || []).map((market) => ({
         ...market,
         eventSlug: event.slug || null,
+        eventTitle: event.title || null,
       })),
     );
     const matchedMarket = markets?.find(
@@ -763,7 +930,7 @@ async function searchBullpenMarketByQuestion(
     } satisfies CanonicalizableQuestion;
 
     try {
-      const resolved = await resolvePolymarketMarkets([fallbackMarket]);
+      const resolved = await resolvePolymarketMarkets([fallbackMarket], options);
       const refreshed = resolved[fallbackMarket.id];
       if (refreshed) {
         return refreshed;
@@ -774,10 +941,12 @@ async function searchBullpenMarketByQuestion(
 
     return {
       id: fallbackMarket.id,
+      title: matchedMarket.question || null,
       conditionId: matchedMarket.conditionId || null,
       slug: fallbackMarket.slug,
       marketSlug: fallbackMarket.slug,
       eventSlug: matchedMarket.eventSlug || null,
+      eventTitle: matchedMarket.eventTitle || null,
       marketUrl: fallbackMarket.marketUrl,
       // A normalized question-text match is useful for display enrichment,
       // but it is not exact condition/slug identity. Never let it reclassify
@@ -787,6 +956,8 @@ async function searchBullpenMarketByQuestion(
       category: null,
       yesOdds: toPercent(yesOutcome?.price ?? yesOutcome?.probability),
       noOdds: toPercent(noOutcome?.price ?? noOutcome?.probability),
+      yesTokenId: null,
+      noTokenId: null,
       bestBidPrice: null,
       bestAskPrice: null,
       rules: null,
@@ -804,7 +975,7 @@ export async function resolvePolymarketMarketsWithQuestionFallback<
   questions: T[],
   options: PolymarketMarketResolutionOptions = {},
 ) {
-  const resolvedByQuestionId = await resolvePolymarketMarkets(questions);
+  const resolvedByQuestionId = await resolvePolymarketMarkets(questions, options);
   if (options.allowRuntimeQuestionFallback === false) {
     return resolvedByQuestionId;
   }

@@ -89,6 +89,12 @@ export async function POST(request: NextRequest) {
     });
 
     return NextResponse.json({
+      marketTitles: Object.fromEntries(
+        questions.map((question) => [
+          question.id,
+          resolvedByQuestionId[question.id]?.title ?? question.question,
+        ]),
+      ),
       marketUrls: Object.fromEntries(
         questions.map((question) => [
           question.id,

@@ -28,18 +28,24 @@ _PASSIVE_UI_POSITION_REFRESH_CALLERS = frozenset(
         "ui-passive-refresh",
     }
 )
-# Stage 1 needs the current economic portfolio for analysis even when the
-# service-account execution snapshot is temporarily empty while the operator/
-# public wallet still has live holdings. These callers may use same-wallet
-# public evidence for Stage 1/2 analysis only. The returned snapshot remains
-# display-only (no auth lineage and never promoted to the execution cache), so
-# Stage 3 still fails closed until the authenticated runtime agrees.
-_STAGE1_ANALYSIS_POSITION_REFRESH_CALLERS = frozenset(
+# Analysis, immutable planning and shadow-only pre-submit validation need the
+# current economic portfolio even when
+# the service-account execution snapshot is temporarily empty while the
+# operator/public wallet still has live holdings. These callers may use the
+# status-resolved public wallet as evidence for analysis or planning only. The
+# returned snapshot remains display-only (no auth lineage and never promoted to
+# the execution cache). Live Stage 6 deliberately uses a different caller and
+# still fails closed until the authenticated runtime agrees.
+_BULLPEN008_NON_EXECUTION_IDENTITY_CALLERS = frozenset(
     {
-        "auto-live-stage1",
-        "auto-live-stage1-recovery",
+        "bullpen008-stage1-shadow",
+        "bullpen008-stage5-plan",
+        "bullpen008-stage6-shadow-pre-submit",
     }
 )
+_STAGE1_ANALYSIS_POSITION_REFRESH_CALLERS = frozenset(
+    {"auto-live-stage1", "auto-live-stage1-recovery"}
+) | _BULLPEN008_NON_EXECUTION_IDENTITY_CALLERS
 
 _ORIGINAL_GET_POSITIONS_SNAPSHOT = (
     runtime_broker_module.BullpenRuntimeBroker.get_positions_snapshot
@@ -483,15 +489,25 @@ async def _refresh_public_wallet_snapshot(
     broker: runtime_broker_module.BullpenRuntimeBroker,
     *,
     caller_source: str,
+    wallet_override: str | None = None,
+    persist: bool = True,
 ) -> runtime_broker_module.BullpenPositionsSnapshot:
-    wallet = await _status_wallet_address(broker)
+    wallet = _normalize_wallet_address(wallet_override)
+    if wallet_override is not None and wallet is None:
+        raise runtime_broker_module.BullpenRuntimeCommandError(
+            "The requested Bullpen display wallet address is invalid.",
+            classification="public_wallet_identity_invalid",
+        )
+    if wallet is None:
+        wallet = await _status_wallet_address(broker)
     if wallet is None:
         raise runtime_broker_module.BullpenRuntimeCommandError(
             "Unable to resolve the Bullpen Polymarket wallet address for the display refresh.",
             classification="public_wallet_identity_missing",
         )
 
-    await _persist_display_wallet_identity(broker, wallet)
+    if persist:
+        await _persist_display_wallet_identity(broker, wallet)
     payload = await _read_public_positions_payload(wallet)
     config = runtime_broker_module._runtime_config()
     diagnostics = runtime_broker_module.BullpenCommandDiagnostics(
@@ -524,8 +540,30 @@ async def _refresh_public_wallet_snapshot(
         freshness_state="cached",
         diagnostics=diagnostics,
     )
-    await _write_display_snapshot(broker, snapshot)
+    if persist:
+        await _write_display_snapshot(broker, snapshot)
     return snapshot
+
+
+async def read_public_display_wallet_snapshot(
+    broker: runtime_broker_module.BullpenRuntimeBroker,
+    *,
+    wallet: str,
+    caller_source: str,
+) -> runtime_broker_module.BullpenPositionsSnapshot:
+    """Read one explicit public wallet without mutating the runtime account LKG.
+
+    This is the account-isolated UI path. It lets a page render its configured
+    wallet even when the singleton execution CLI is currently authenticated as
+    a different Bullpen account.
+    """
+
+    return await _refresh_public_wallet_snapshot(
+        broker,
+        caller_source=caller_source,
+        wallet_override=wallet,
+        persist=False,
+    )
 
 
 async def _refresh_ui_positions_snapshot(
@@ -656,15 +694,26 @@ async def _get_stage1_analysis_positions_snapshot(
     except Exception as exc:
         canonical_error = exc
 
+    normalized_caller_source = runtime_broker_module._normalize_caller_source(
+        caller_source
+    )
     if canonical_snapshot is not None and _snapshot_has_positive_wallet_rows(
         canonical_snapshot
     ):
-        return canonical_snapshot
+        canonical_identity = _normalize_wallet_address(
+            canonical_snapshot.account_identity
+        )
+        if (
+            canonical_identity is not None
+            or normalized_caller_source
+            not in _BULLPEN008_NON_EXECUTION_IDENTITY_CALLERS
+        ):
+            return canonical_snapshot
 
     try:
         public_snapshot = await _refresh_public_wallet_snapshot(
             broker,
-            caller_source=runtime_broker_module._normalize_caller_source(caller_source),
+            caller_source=normalized_caller_source,
         )
     except Exception:
         if canonical_snapshot is not None:

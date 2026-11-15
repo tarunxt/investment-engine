@@ -28,6 +28,13 @@ class DashboardHistoryPoint(BaseModel):
     value: float
 
 
+class DashboardPortfolioHistory(BaseModel):
+    india: list[DashboardHistoryPoint] = Field(default_factory=list, max_length=400)
+    indmoney: list[DashboardHistoryPoint] = Field(default_factory=list, max_length=400)
+    bullpen: list[DashboardHistoryPoint] = Field(default_factory=list, max_length=400)
+    combined: list[DashboardHistoryPoint] = Field(default_factory=list, max_length=400)
+
+
 class DashboardHolding(BaseModel):
     symbol: str
     company_name: str | None = None
@@ -104,4 +111,7 @@ class DashboardSummaryResponse(BaseModel):
     zerodha: DashboardZerodhaSection | None = None
     indmoney_us: DashboardIndMoneySection | None = None
     bullpen: DashboardBullpenSection | None = None
+    portfolio_history: DashboardPortfolioHistory = Field(
+        default_factory=DashboardPortfolioHistory
+    )
     sections: dict[str, DashboardSectionMeta]

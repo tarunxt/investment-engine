@@ -69,7 +69,13 @@ AutoLiveSubmissionEvidenceKind = Literal[
     "submitted_at",
     "uncertain_write_boundary",
 ]
-AutoLiveTriggeredBy = Literal["manual", "scheduler", "start", "resume"]
+AutoLiveTriggeredBy = Literal[
+    "manual",
+    "scheduler",
+    "universal_scan",
+    "start",
+    "resume",
+]
 AutoLiveStrategyProfile = Literal["guardrail_kelly", "bullpen_console_top10"]
 AutoLiveExitStrategy = Literal[
     "OUTSIDE_TOP_10_RETURNS_DAY",
@@ -114,6 +120,7 @@ TradingBotStatus = Literal["running", "paused", "stopped", "error", "not-configu
 TradingBotMode = Literal["paper", "live-read", "live-trading", "dry-run", "analysis-only"]
 TradingBotGuardrailTone = Literal["neutral", "positive", "warning", "critical"]
 BullpenLlmExecutionMode = Literal["chunked_parallel", "single_combined"]
+BullpenConsoleScanScope = Literal["trending", "full_universe"]
 AutoLiveOrderIntentStatus = Literal[
     "PLANNED",
     "READY",
@@ -219,6 +226,36 @@ class BullpenAutoLiveSettingsBase(BaseModel):
     min_order_usd: float = Field(default=1, gt=0)
     max_order_usd: float = Field(default=25, gt=0)
     console_order_usd: float = Field(default=5, gt=0)
+    # Stage 1 requires both the lower and higher side of a binary odds pair
+    # to clear their independently editable strict thresholds.
+    console_min_market_odds: float = Field(default=1, ge=0, lt=50)
+    console_min_highest_market_odds: float = Field(default=90, ge=50, lt=100)
+    console_apply_yes_no_odds_thresholds: bool = True
+    console_max_closing_days: int = Field(default=30, ge=1)
+    console_min_volume_usd: float = Field(default=100, ge=0)
+    console_min_liquidity_usd: float = Field(default=100, ge=0)
+    console_min_volume_24hr_usd: float = Field(default=100, ge=0)
+    console_max_spread_cents: float = Field(default=10, ge=0)
+    console_rejected_theme_pattern: str = "crypto prices|twitter|Mentions"
+    console_exclude_sports: bool = True
+    console_sports_moneyline_only: bool = False
+    console_exclude_weather: bool = True
+    console_exclude_market_predictions: bool = True
+    console_exclude_tweet_count_questions: bool = True
+    console_exclude_released_by_events: bool = True
+    console_only_binary_yes_no: bool = True
+    console_exclude_custom_phrases: bool = True
+    console_custom_exclude_phrases: list[str] = Field(default_factory=list)
+    # Named Bullpen workspaces share the canonical execution engine while
+    # retaining independent Stage 1 filter values. Keeping these overlays in
+    # the existing JSON settings record is additive and migration-free.
+    console_filter_profiles: dict[str, dict[str, object]] = Field(
+        default_factory=dict
+    )
+    returns_per_day_formula: str = (
+        "=(100-CURRENT_CHOSEN_SIDE_BULLPEN_ODDS)/(DAYS_UNTIL_CLOSE+4)"
+    )
+    event_trends_scan_count: int = Field(default=20, ge=1, le=20)
     min_liquidity_usd: float = Field(default=1_000, ge=0)
 
     min_independent_active_markets: int = Field(default=10, ge=1)
@@ -281,6 +318,7 @@ class BullpenAutoLiveSettingsBase(BaseModel):
     llm_execution_mode: BullpenLlmExecutionMode = "chunked_parallel"
     llm_events_per_prompt: int = Field(default=20, ge=1, le=100)
     console_llm_prompt_template: str | None = None
+    console_scan_scope: BullpenConsoleScanScope = "trending"
     console_auto_start_at: str | None = None
     console_auto_refresh_minutes: int | None = Field(default=None, ge=1)
 
@@ -321,6 +359,47 @@ class BullpenAutoLiveSettingsBase(BaseModel):
         value: list[BullpenAutoLiveLlmTarget],
     ) -> list[BullpenAutoLiveLlmTarget]:
         return _normalize_console_llm_targets(value)
+
+    @field_validator("console_custom_exclude_phrases")
+    @classmethod
+    def normalize_console_custom_exclude_phrases(cls, value: list[str]) -> list[str]:
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for phrase in value:
+            candidate = phrase.strip().lower()
+            if not candidate or candidate in seen:
+                continue
+            if len(candidate) > 120:
+                raise ValueError("custom exclusion phrases must be at most 120 characters")
+            seen.add(candidate)
+            normalized.append(candidate)
+        if len(normalized) > 100:
+            raise ValueError("no more than 100 custom exclusion phrases are allowed")
+        return normalized
+
+    @field_validator("console_rejected_theme_pattern")
+    @classmethod
+    def validate_console_rejected_theme_pattern(cls, value: str) -> str:
+        import re
+
+        candidate = value.strip()
+        if len(candidate) > 500:
+            raise ValueError("theme rejection pattern must be at most 500 characters")
+        if candidate:
+            try:
+                re.compile(candidate, re.IGNORECASE)
+            except re.error as exc:
+                raise ValueError(f"invalid theme rejection pattern: {exc}") from exc
+        return candidate
+
+    @field_validator("returns_per_day_formula")
+    @classmethod
+    def validate_returns_per_day_formula_field(cls, value: str) -> str:
+        from app.domains.polymarket_auto_live.returns_formula import (
+            validate_returns_per_day_formula,
+        )
+
+        return validate_returns_per_day_formula(value)
 
     @model_validator(mode="after")
     def validate_cross_field_rules(self) -> "BullpenAutoLiveSettingsBase":
@@ -379,6 +458,26 @@ class BullpenAutoLiveSettingsUpdate(BaseModel):
     min_order_usd: float | None = Field(default=None, gt=0)
     max_order_usd: float | None = Field(default=None, gt=0)
     console_order_usd: float | None = Field(default=None, gt=0)
+    console_min_market_odds: float | None = Field(default=None, ge=0, lt=50)
+    console_min_highest_market_odds: float | None = Field(default=None, ge=50, lt=100)
+    console_apply_yes_no_odds_thresholds: bool | None = None
+    console_max_closing_days: int | None = Field(default=None, ge=1)
+    console_min_volume_usd: float | None = Field(default=None, ge=0)
+    console_min_liquidity_usd: float | None = Field(default=None, ge=0)
+    console_min_volume_24hr_usd: float | None = Field(default=None, ge=0)
+    console_max_spread_cents: float | None = Field(default=None, ge=0)
+    console_rejected_theme_pattern: str | None = None
+    console_exclude_sports: bool | None = None
+    console_sports_moneyline_only: bool | None = None
+    console_exclude_weather: bool | None = None
+    console_exclude_market_predictions: bool | None = None
+    console_exclude_tweet_count_questions: bool | None = None
+    console_exclude_released_by_events: bool | None = None
+    console_only_binary_yes_no: bool | None = None
+    console_exclude_custom_phrases: bool | None = None
+    console_custom_exclude_phrases: list[str] | None = None
+    returns_per_day_formula: str | None = None
+    event_trends_scan_count: int | None = Field(default=None, ge=1, le=20)
     min_liquidity_usd: float | None = Field(default=None, ge=0)
 
     min_independent_active_markets: int | None = Field(default=None, ge=1)
@@ -436,6 +535,7 @@ class BullpenAutoLiveSettingsUpdate(BaseModel):
     llm_execution_mode: BullpenLlmExecutionMode | None = None
     llm_events_per_prompt: int | None = Field(default=None, ge=1, le=100)
     console_llm_prompt_template: str | None = None
+    console_scan_scope: BullpenConsoleScanScope | None = None
     console_auto_start_at: str | None = None
     console_auto_refresh_minutes: int | None = Field(default=None, ge=1)
 
@@ -532,9 +632,12 @@ class BullpenAutoLiveConsoleCandidateInput(BaseModel):
 
 
 class BullpenAutoLiveConsoleRunContext(BaseModel):
+    workspace_profile: Literal["bullpen007", "bullpen-sports"] = "bullpen007"
     source_label: str | None = None
     source_url: str | None = None
     scanned_at: str | None = None
+    source_scan_completed_at: str | None = None
+    filters_completed_at: str | None = None
     snapshot_id: str | None = None
     mode: str | None = None
     total_candidates: int = Field(default=0, ge=0)
@@ -568,6 +671,9 @@ class BullpenAutoLiveConsoleRunContext(BaseModel):
 
 class BullpenAutoLiveRunOnceRequest(BaseModel):
     console_profile: BullpenAutoLiveConsoleRunContext | None = None
+    # Background workflow-trigger batches wait for the single guarded planner
+    # lane instead of superseding or recording a false skipped run.
+    wait_for_execution_lane: bool = False
     # Optional client-generated durable identity for ambiguity-safe starts.
     # Existing clients may omit it. When present, the API returns the already
     # persisted run for the same authenticated user instead of creating or
@@ -578,6 +684,25 @@ class BullpenAutoLiveRunOnceRequest(BaseModel):
         max_length=64,
         pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{7,63}$",
     )
+
+
+class BullpenWorkflowRunNowRequest(BaseModel):
+    workspace_profile: Literal["bullpen007", "bullpen-sports"]
+    client_request_id: str = Field(
+        min_length=8,
+        max_length=64,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{7,63}$",
+    )
+
+
+class BullpenWorkflowRunNowResponse(BaseModel):
+    status: Literal["started", "queued"]
+    run_id: str
+    workspace_profile: Literal["bullpen007", "bullpen-sports"]
+    universal_export_id: str
+    universal_scan_started_at: str | None = None
+    universal_scan_completed_at: str | None = None
+    queued_at: str
 
 
 class BullpenAutoLiveRejectedCandidateDiagnostic(BaseModel):
@@ -601,6 +726,11 @@ class BullpenAutoLiveRunDiagnostics(BaseModel):
     )
     scan_source_label: str | None = None
     scan_source_url: str | None = None
+    scan_scope: BullpenConsoleScanScope = "trending"
+    scan_completeness: Literal["trending", "complete", "incomplete"] = "trending"
+    bullpen_trending_rows: int | None = Field(default=None, ge=0)
+    complete_catalogue_markets: int | None = Field(default=None, ge=0)
+    missing_active_market_count: int = Field(default=0, ge=0)
     used_manual_console_rows: bool = False
     selected_manual_candidate_ids: list[str] = Field(default_factory=list)
     stage2_has_usable_reviews: bool = True
@@ -956,6 +1086,7 @@ class BullpenAutoLiveRun(BaseModel):
     orders_planned: int = 0
     orders_submitted: int = 0
     error_message: str | None = None
+    workspace_profile: Literal["bullpen007", "bullpen-sports"] | None = None
     execution_version: str | None = None
     order_funnel: BullpenAutoLiveOrderFunnel = Field(default_factory=BullpenAutoLiveOrderFunnel)
     action_funnels: dict[str, BullpenAutoLiveOrderFunnel] = Field(default_factory=dict)
@@ -1069,6 +1200,9 @@ class BullpenAutoLiveState(BaseModel):
     last_scan_at: str | None = None
     last_llm_run_at: str | None = None
     last_rebalance_at: str | None = None
+    latest_hourly_rebalance_status: Literal["completed", "failed"] | None = None
+    latest_hourly_rebalance_at: str | None = None
+    latest_hourly_rebalance_detail: str | None = Field(default=None, max_length=600)
     next_scan_at: str | None = None
     next_llm_run_at: str | None = None
     next_rebalance_at: str | None = None
@@ -1096,6 +1230,11 @@ class BullpenAutoLiveState(BaseModel):
     balance_status: AutoLiveGuardrailStatus = "watch"
 
 
+class BullpenHourlyRebalanceResultRequest(BaseModel):
+    status: Literal["completed", "failed"]
+    detail: str | None = Field(default=None, max_length=600)
+
+
 class BullpenAutoLiveStatusConfiguration(BaseModel):
     """Small persisted configuration payload used for the console's first paint.
 
@@ -1113,6 +1252,7 @@ class BullpenAutoLiveStatusConfiguration(BaseModel):
     emergency_stop: bool
     limit_orders_only: bool
     console_order_usd: float
+    console_scan_scope: BullpenConsoleScanScope = "trending"
     console_auto_start_at: str | None = None
     console_auto_refresh_minutes: int | None = None
     console_llm_target_count: int = Field(default=0, ge=0)
@@ -1223,6 +1363,8 @@ class BullpenAutoLiveHistoryPage(BaseModel):
 
 class BullpenAutoLiveEventTrend(BaseModel):
     market_id: str
+    condition_id: str | None = None
+    slug: str | None = None
     market_title: str
     market_url: str | None = None
     close_time: str | None = None
@@ -1237,6 +1379,7 @@ class BullpenAutoLiveEventTrend(BaseModel):
     llm_no_odds: float | None = Field(default=None, ge=0, le=100)
     returns_per_day: float | None = None
     is_active_position: bool = False
+    is_claimable_position: bool = False
     active_position_side: AutoLiveOutcomeSide | None = None
 
 

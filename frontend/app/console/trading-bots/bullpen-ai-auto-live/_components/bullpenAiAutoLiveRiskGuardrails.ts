@@ -1,6 +1,6 @@
 "use client";
 
-import type { BullpenAutoLiveSettings } from "@/types/api";
+import type { BullpenAutoLiveSettings, BullpenAutoLiveSettingsUpdate } from "@/types/api";
 
 export type BullpenAiAutoLiveGuardrailTag =
   | "HARD BLOCK"
@@ -72,6 +72,27 @@ export const BULLPEN_AI_AUTO_LIVE_SAFE_DEFAULTS: BullpenAutoLiveSettings = {
   min_order_usd: 1,
   max_order_usd: 25,
   console_order_usd: 5,
+  console_min_market_odds: 1,
+  console_min_highest_market_odds: 90,
+  console_apply_yes_no_odds_thresholds: true,
+  console_max_closing_days: 30,
+  console_min_volume_usd: 100,
+  console_min_liquidity_usd: 100,
+  console_min_volume_24hr_usd: 100,
+  console_max_spread_cents: 10,
+  console_rejected_theme_pattern: "crypto prices|twitter|Mentions",
+  console_exclude_sports: true,
+  console_sports_moneyline_only: false,
+  console_exclude_weather: true,
+  console_exclude_market_predictions: true,
+  console_exclude_tweet_count_questions: true,
+  console_exclude_released_by_events: true,
+  console_only_binary_yes_no: true,
+  console_exclude_custom_phrases: true,
+  console_custom_exclude_phrases: [],
+  returns_per_day_formula:
+    "=(100-CURRENT_CHOSEN_SIDE_BULLPEN_ODDS)/(DAYS_UNTIL_CLOSE+4)",
+  event_trends_scan_count: 20,
   min_liquidity_usd: 1000,
   min_independent_active_markets: 10,
   target_active_markets: 15,
@@ -122,6 +143,7 @@ export const BULLPEN_AI_AUTO_LIVE_SAFE_DEFAULTS: BullpenAutoLiveSettings = {
   llm_execution_mode: "chunked_parallel",
   llm_events_per_prompt: 20,
   console_llm_prompt_template: null,
+  console_scan_scope: "trending",
   auto_live_enabled: false,
   dry_run: true,
   require_manual_confirmation: true,
@@ -935,10 +957,21 @@ export function buildBullpenAiAutoLiveSafeDefaultDraft() {
   return bullpenAiAutoLiveSettingsToDraft(BULLPEN_AI_AUTO_LIVE_SAFE_DEFAULTS);
 }
 
+/** Only editor-owned fields may be sent from a bounded settings projection. */
+export function buildBullpenAiAutoLiveGuardrailUpdate(
+  settings: BullpenAutoLiveSettings,
+): BullpenAutoLiveSettingsUpdate {
+  const update: BullpenAutoLiveSettingsUpdate = {};
+  for (const field of BULLPEN_AI_AUTO_LIVE_GUARDRAIL_FIELDS) {
+    update[field.key] = settings[field.key] as never;
+  }
+  return update;
+}
+
 export function serializeBullpenAiAutoLiveGuardrails(
   settings: BullpenAutoLiveSettings,
 ) {
-  return JSON.stringify(settings, null, 2);
+  return JSON.stringify(buildBullpenAiAutoLiveGuardrailUpdate(settings), null, 2);
 }
 
 function addFieldError(

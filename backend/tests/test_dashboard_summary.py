@@ -10,18 +10,41 @@ from fastapi import Response
 
 from app.domains.dashboard import service
 from app.domains.dashboard import router as dashboard_router
+from app.domains.dashboard.models import DashboardPortfolioDailySnapshot
 from app.domains.dashboard.schemas import (
     DashboardBullpenSection,
     DashboardFxRate,
     DashboardHistoryPoint,
     DashboardHolding,
     DashboardIndMoneySection,
+    DashboardIndMoneySnapshot,
+    DashboardPortfolioHistory,
     DashboardSectionMeta,
     DashboardSummaryResponse,
     DashboardZerodhaSection,
     DashboardZerodhaSnapshot,
 )
+from app.domains.dashboard.tasks import _is_carried_forward, _portfolio_values
 from app.domains.auth.models import UserRole
+from app.domains.zerodha.tasks import is_weekend_snapshot_date
+from app.shared.portfolio_summary import signed_holding_return_percent
+
+
+@pytest.mark.parametrize(
+    "percent,pnl,invested,expected",
+    [(10, -10, 100, -10), (-10, 10, 100, 10), (-10, -10, 100, -10),
+     (None, -10, 100, None), (10, None, 100, 10), (10, -10, 0, 10),
+     (10, -10, -100, 10), (10, 0, 100, 10)],
+)
+def test_pasted_holding_percentage_has_same_sign_as_long_position_pnl(percent, pnl, invested, expected):
+    assert signed_holding_return_percent(percent, pnl=pnl, invested_value=invested) == expected
+
+
+def test_dashboard_normalizes_legacy_pasted_loss_percentage_without_writing_snapshot():
+    rows = [{"symbol": "LOSS", "current_value": 90, "invested_value": 100,
+             "pnl": -10, "pnl_percent": 10}]
+    assert service._top_holdings(rows, total_value=90)[0].pnl_percent == -10
+    assert rows[0]["pnl_percent"] == 10
 
 
 def _summary_fixture() -> DashboardSummaryResponse:
@@ -119,6 +142,10 @@ async def test_dashboard_summary_loads_sections_concurrently_and_degrades_one(
         await asyncio.sleep(0.05)
         return DashboardBullpenSection()
 
+    async def load_portfolio_history(_user_id: int):
+        await asyncio.sleep(0.05)
+        return DashboardPortfolioHistory()
+
     async def load_fx(_user_id: int):
         await asyncio.sleep(0.05)
         return DashboardFxRate(
@@ -133,6 +160,11 @@ async def test_dashboard_summary_loads_sections_concurrently_and_degrades_one(
     monkeypatch.setattr(service, "_load_zerodha", load_zerodha)
     monkeypatch.setattr(service, "_load_indmoney", load_indmoney)
     monkeypatch.setattr(service, "_load_bullpen", load_bullpen)
+    monkeypatch.setattr(
+        service,
+        "_load_portfolio_history",
+        load_portfolio_history,
+    )
     monkeypatch.setattr(service, "_load_fx", load_fx)
 
     started = monotonic()
@@ -149,6 +181,134 @@ async def test_dashboard_summary_loads_sections_concurrently_and_degrades_one(
     )
 
 
+@pytest.mark.anyio
+async def test_load_bullpen_prefers_display_snapshot_without_mutating_cache(
+    monkeypatch,
+):
+    fetched_at = datetime.now(UTC)
+    display_snapshot = SimpleNamespace(
+        payload={
+            "summary": {
+                "active_count": 13,
+                "claimable_count": 0,
+                "claimable_value": 0,
+                "cash_balance": 4.44,
+                "total_value": 68.64,
+                "unrealized_pnl": -0.81,
+                "wallet_value": 68.64,
+            },
+            "positions": [{"id": index} for index in range(13)],
+        },
+        fetched_at=fetched_at.isoformat(),
+    )
+
+    class Broker:
+        async def read_display_positions_snapshot(self, *, delete_invalid: bool):
+            assert delete_invalid is False
+            return display_snapshot
+
+        async def read_cached_positions_snapshot(self, *, delete_invalid: bool):
+            raise AssertionError("display snapshot should be preferred")
+
+    monkeypatch.setattr(service, "get_bullpen_runtime_broker", lambda: Broker())
+
+    result = await service._load_bullpen(17)
+
+    assert result.active_count == 13
+    assert result.claimable_count == 0
+    assert result.cash_balance == 4.44
+    assert result.total_value == 68.64
+    assert result.fetched_at == fetched_at
+
+
+@pytest.mark.anyio
+async def test_load_bullpen_falls_back_when_display_snapshot_read_fails(
+    monkeypatch,
+):
+    fetched_at = datetime.now(UTC)
+    execution_snapshot = SimpleNamespace(
+        payload={
+            "summary": {
+                "active_count": 13,
+                "claimable_count": 0,
+            },
+            "positions": [{"id": index} for index in range(13)],
+        },
+        fetched_at=fetched_at.isoformat(),
+    )
+
+    class Broker:
+        async def read_display_positions_snapshot(self, *, delete_invalid: bool):
+            assert delete_invalid is False
+            raise RuntimeError("display cache validation failed")
+
+        async def read_cached_positions_snapshot(self, *, delete_invalid: bool):
+            assert delete_invalid is False
+            return execution_snapshot
+
+    monkeypatch.setattr(service, "get_bullpen_runtime_broker", lambda: Broker())
+
+    result = await service._load_bullpen(17)
+
+    assert result.active_count == 13
+    assert result.claimable_count == 0
+    assert result.fetched_at == fetched_at
+
+
+@pytest.mark.anyio
+async def test_load_bullpen_refreshes_presentation_data_when_caches_are_empty(
+    monkeypatch,
+):
+    fetched_at = datetime.now(UTC)
+    refreshed_snapshot = SimpleNamespace(
+        payload={
+            "summary": {
+                "active_count": 13,
+                "claimable_count": 0,
+                "cash_balance": 4.44,
+                "total_value": 68.74,
+            },
+            "positions": [{"id": index} for index in range(13)],
+        },
+        fetched_at=fetched_at.isoformat(),
+    )
+
+    class Broker:
+        async def read_display_positions_snapshot(self, *, delete_invalid: bool):
+            assert delete_invalid is False
+            return None
+
+        async def read_cached_positions_snapshot(self, *, delete_invalid: bool):
+            assert delete_invalid is False
+            return None
+
+        async def get_positions_snapshot(
+            self,
+            *,
+            force_fresh: bool,
+            allow_refresh: bool,
+            caller_source: str,
+            max_age_seconds: int,
+            timeout_seconds: int,
+        ):
+            assert force_fresh is False
+            assert allow_refresh is False
+            assert caller_source == "ui-passive-refresh"
+            assert max_age_seconds == 20
+            assert timeout_seconds == 10
+            return refreshed_snapshot
+
+    monkeypatch.setattr(service, "get_bullpen_runtime_broker", lambda: Broker())
+
+    result = await service._load_bullpen(17)
+
+    assert result.active_count == 13
+    assert result.claimable_count == 0
+    assert result.cash_balance == 4.44
+    assert result.total_value == 68.74
+    assert result.fetched_at == fetched_at
+
+
 def test_dashboard_summary_response_stays_below_150kb_and_excludes_raw_data():
     payload = _summary_fixture().model_dump_json().encode()
 
@@ -158,6 +318,25 @@ def test_dashboard_summary_response_stays_below_150kb_and_excludes_raw_data():
     assert b"audit" not in payload
     assert b"prompt" not in payload
     assert b"order_history" not in payload
+
+
+def test_full_daily_portfolio_history_stays_below_150kb():
+    summary = _summary_fixture()
+    history = [
+        DashboardHistoryPoint(
+            captured_at=summary.generated_at,
+            value=100_000 + index,
+        )
+        for index in range(400)
+    ]
+    summary.portfolio_history = DashboardPortfolioHistory(
+        india=history,
+        indmoney=history,
+        bullpen=history,
+        combined=history,
+    )
+
+    assert len(summary.model_dump_json().encode()) < 150_000
 
 
 def test_top_holdings_and_history_have_hard_schema_budgets():
@@ -206,3 +385,62 @@ async def test_dashboard_summary_etag_is_private_and_revalidates(monkeypatch):
     )
     assert not_modified.status_code == 304
     assert not_modified.headers["etag"] == etag
+
+
+def test_daily_portfolio_values_include_cash_once_and_convert_to_inr():
+    summary = _summary_fixture()
+    now = summary.generated_at
+    summary.usd_inr_rate = 100
+    summary.fx.value = 100
+    summary.zerodha.snapshot.holdings_market_value = 100
+    summary.zerodha.snapshot.available_margin = 20
+    summary.indmoney_us = DashboardIndMoneySection(
+        snapshot=DashboardIndMoneySnapshot(
+            snapshot_date=date(2026, 8, 21),
+            captured_at=now,
+            source="manual",
+            parse_status="parsed",
+            holdings_count=1,
+            wallet_balance=2,
+            current_value=10,
+            top_holdings=[],
+            history=[],
+        )
+    )
+    summary.bullpen = DashboardBullpenSection(
+        cash_balance=5,
+        total_value=49,
+        wallet_value=50,
+        fetched_at=now,
+    )
+
+    values = _portfolio_values(summary)
+
+    assert values["zerodha_total_inr"] == 120
+    assert values["indmoney_total_usd"] == 12
+    assert values["indmoney_total_inr"] == 1200
+    assert values["bullpen_total_usd"] == 50
+    assert values["bullpen_total_inr"] == 5000
+    assert values["combined_total_inr"] == 6320
+
+
+def test_weekend_market_values_are_carried_forward_and_sync_is_skipped():
+    friday = date(2026, 8, 21)
+    saturday = date(2026, 8, 22)
+    sunday = date(2026, 8, 23)
+
+    assert _is_carried_forward(friday, saturday) is True
+    assert _is_carried_forward(friday, sunday) is True
+    assert _is_carried_forward(friday, friday) is False
+    assert is_weekend_snapshot_date(friday) is False
+    assert is_weekend_snapshot_date(saturday) is True
+    assert is_weekend_snapshot_date(sunday) is True
+
+
+def test_daily_portfolio_snapshot_is_idempotent_per_user_and_date():
+    constraint_names = {
+        constraint.name
+        for constraint in DashboardPortfolioDailySnapshot.__table__.constraints
+    }
+
+    assert "uq_dashboard_portfolio_daily_snapshots_user_date" in constraint_names

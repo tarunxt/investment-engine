@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+from contextlib import contextmanager
 import json
 import time
 from dataclasses import dataclass
@@ -8,6 +9,8 @@ from datetime import datetime, timezone
 from typing import Any
 
 import redis as sync_redis
+from redis.backoff import NoBackoff
+from redis.retry import Retry
 
 from app.core.config import settings
 from app.core.logging import get_logger
@@ -18,6 +21,8 @@ CURRENT_MONTH_CACHE_TTL_SECONDS = 6 * 60 * 60
 HISTORICAL_MONTH_CACHE_TTL_SECONDS = 24 * 60 * 60
 MANUAL_REFRESH_COOLDOWN_SECONDS = 15 * 60
 STALE_GOOD_TTL_SECONDS = 7 * 24 * 60 * 60
+REDIS_CONNECT_TIMEOUT_SECONDS = 0.5
+REDIS_READ_TIMEOUT_SECONDS = 0.5
 
 _CACHE_NAMESPACE = "cost-drivers:v2"
 _LOCAL_CACHE: dict[str, dict[str, Any]] = {}
@@ -57,7 +62,16 @@ def _cache_key(kind: str, cache_key: str) -> str:
 
 def _redis_client() -> sync_redis.Redis | None:
     try:
-        return sync_redis.from_url(settings.redis_url, decode_responses=True)
+        return sync_redis.from_url(
+            settings.redis_url,
+            decode_responses=True,
+            socket_connect_timeout=REDIS_CONNECT_TIMEOUT_SECONDS,
+            socket_timeout=REDIS_READ_TIMEOUT_SECONDS,
+            # The cache already has a local fallback. Redis retries would
+            # multiply the wait on every cache/cooldown operation during outages.
+            retry=Retry(NoBackoff(), 0),
+            retry_on_timeout=False,
+        )
     except Exception:
         logger.exception("Unable to create Redis client for cost dashboard cache")
         return None
@@ -135,15 +149,18 @@ def load_stale_good_dashboard(cache_key: str) -> CacheRecord | None:
 def store_dashboard(cache_key: str, data: dict[str, Any], ttl_seconds: int) -> str:
     cached_at = datetime.now(timezone.utc).isoformat()
     payload = _encode_record(copy.deepcopy(data), cached_at)
+    provenance = (data.get("debug") or {}).get("billingProvenance")
+    good = provenance is None or provenance.get("complete") is True
     redis_client = _redis_client()
     if redis_client is not None:
         try:
             redis_client.set(_cache_key("dashboard", cache_key), payload, ex=ttl_seconds)
-            redis_client.set(
-                _cache_key("stale-good", cache_key),
-                payload,
-                ex=STALE_GOOD_TTL_SECONDS,
-            )
+            if good:
+                redis_client.set(
+                    _cache_key("stale-good", cache_key),
+                    payload,
+                    ex=STALE_GOOD_TTL_SECONDS,
+                )
             return cached_at
         except Exception:
             logger.exception("Unable to write cost dashboard cache to Redis")
@@ -157,11 +174,12 @@ def store_dashboard(cache_key: str, data: dict[str, Any], ttl_seconds: int) -> s
         "expiresAt": expires_at,
         "cachedAt": cached_at,
     }
-    _LOCAL_STALE[cache_key] = {
-        "data": copy.deepcopy(data),
-        "expiresAt": stale_expires_at,
-        "cachedAt": cached_at,
-    }
+    if good:
+        _LOCAL_STALE[cache_key] = {
+            "data": copy.deepcopy(data),
+            "expiresAt": stale_expires_at,
+            "cachedAt": cached_at,
+        }
     return cached_at
 
 
@@ -184,15 +202,63 @@ def claim_refresh_cooldown(cache_key: str) -> None:
         finally:
             redis_client.close()
 
-    now = time.time()
-    expires_at = _LOCAL_COOLDOWNS.get(cache_key)
-    if expires_at and now < expires_at:
-        raise RefreshCooldownError(int(expires_at - now))
+    raise CollectionUnavailableError("Shared refresh cooldown unavailable; no collection started")
 
-    _LOCAL_COOLDOWNS[cache_key] = now + ttl_seconds
 
 
 def reset_local_cost_dashboard_cache_state() -> None:
     _LOCAL_CACHE.clear()
     _LOCAL_STALE.clear()
     _LOCAL_COOLDOWNS.clear()
+
+
+class CollectionUnavailableError(RuntimeError):
+    pass
+
+
+@contextmanager
+def collection_lease(cache_key: str):
+    """Fail closed across processes. A crashed owner requires operator recovery.
+
+    No lease expiry: an expired lease could admit a duplicate while an old owner
+    is still running. Normal completion, failure and cancellation release it.
+    Redis state loss can still admit a new owner during an old in-flight provider
+    request. Ownership checks stop detectable subsequent work; they cannot fence
+    a remote provider request. Strict failover exclusion remains an acceptance gap.
+    """
+    client = _redis_client()
+    if client is None:
+        raise CollectionUnavailableError("Shared collection coordination unavailable; no collection started")
+    lock = client.lock(_cache_key("collector", cache_key), timeout=None, blocking=False)
+    acquired = False
+
+    def require_ownership():
+        try:
+            owned = lock.owned()
+        except Exception as exc:
+            raise CollectionUnavailableError(
+                "Collection ownership cannot be verified; further requests stopped. In-flight outcome unknown."
+            ) from exc
+        if not owned:
+            raise CollectionUnavailableError(
+                "Collection ownership lost; further requests stopped. In-flight outcome unknown."
+            )
+
+    try:
+        try:
+            acquired = lock.acquire(blocking=False)
+        except Exception as exc:
+            raise CollectionUnavailableError("Shared collection coordination unavailable; no collection started") from exc
+        if not acquired:
+            raise CollectionUnavailableError("Collection already in progress; no duplicate collection started")
+        yield require_ownership
+    finally:
+        try:
+            if acquired and lock.owned():
+                # Real Redis release also compares the token atomically.
+                lock.release()
+        except Exception:
+            # Do not mask cancellation/failure or assume ownership was released.
+            logger.exception("Unable to confirm/release cost collector ownership; operator recovery may be required")
+        finally:
+            client.close()

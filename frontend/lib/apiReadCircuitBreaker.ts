@@ -33,6 +33,9 @@ export class ApiReadCircuitBreaker {
     const fallbacks = candidates.filter(
       (candidate) => candidate.stage !== "primary",
     );
+    // Same-origin deployments can have only one transport. Keep that bounded
+    // attempt available instead of turning subsequent reads into empty loops.
+    if (fallbacks.length === 0) return candidates;
     if (state.phase === "half-open") return fallbacks;
     if (
       state.openedAt !== null &&

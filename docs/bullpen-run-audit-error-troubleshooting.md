@@ -24,7 +24,7 @@ The detail read may materialize/reconstruct the audit snapshot before returning 
 
 `An unexpected error occurred` is the production-safe message returned by the global FastAPI exception handler for an **unhandled backend exception (HTTP 500)**. It is not the root-cause exception itself. The real exception and stack trace remain in backend logs.
 
-After the diagnostics hardening change, the response also carries a safe **Reference ID / correlation ID**, and the backend exception log records the request method, path, and the same ID. This lets an operator find the exact stack trace without exposing it in the browser.
+After the diagnostics hardening change, the response also carries a safe **Reference ID / correlation ID**, and the backend exception log records the request method, route template, and the same ID. This lets an operator find the exact stack trace without exposing it in the browser.
 
 ## Triage procedure
 
@@ -41,7 +41,7 @@ After the diagnostics hardening change, the response also carries a safe **Refer
    - `429`: throttled; retry after the service recovers.
    - `5xx`: backend failure; continue with the Reference ID and logs.
    - network/timeout/invalid JSON: inspect proxy/backend health before changing run data.
-4. Search backend logs for the **correlation ID** first. If necessary, also search the request path containing the run ID. The unhandled-exception log should include the full stack trace.
+4. Search backend logs for the **correlation ID** first. The unhandled-exception log should include the full stack trace.
 5. Classify the failing layer from the first application frame in the traceback. For run-detail 500s, inspect in this order:
    - `bullpen_run_audit.service.materialize_run_audit_snapshot_sync`
    - persisted run record conversion (`record_to_run`)
@@ -64,7 +64,7 @@ After the diagnostics hardening change, the response also carries a safe **Refer
 
 - Never replace a server exception with only a generic UI string; always preserve a safe error code and correlation/reference ID.
 - Never expose stack traces, secrets, tokens, raw provider payloads, or database credentials in the browser response.
-- Log unhandled exceptions with `method`, `path`, and `correlation_id`, plus `exc_info`/stack trace server-side.
+- Log unhandled exceptions with `method`, route template, and `correlation_id`, plus `exc_info`/stack trace server-side.
 - Keep the same correlation ID from browser → API → response → logs.
 - For a run-specific failure, include the run ID in the URL/path or structured server log context.
 - Treat historical/frozen audit snapshots as evidence. Fix parsing/reconstruction logic rather than destructively editing source records.

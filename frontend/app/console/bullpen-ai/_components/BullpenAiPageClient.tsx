@@ -25,6 +25,7 @@ import {
   Plus,
   RefreshCw,
   Trash2,
+  UserRound,
   X,
 } from "lucide-react";
 
@@ -70,6 +71,12 @@ import {
   type BullpenScanFilterDetailId,
 } from "@/lib/bullpenScanExclusions";
 import {
+  applyBullpenStageOneSettings,
+  getBullpenStageOneEventNames,
+  scopeBullpenWorkspaceStorageKey,
+  type BullpenWorkspaceProfile,
+} from "@/lib/bullpenStageOneSettings";
+import {
   buildBullpenLlmRunTargetSet,
   buildBullpenQuestionRowFromActivePosition,
   extractBullpenActivePositionLlmAnalysis,
@@ -94,6 +101,7 @@ import type {
   BullpenAutoLiveDecision,
   BullpenAutoLiveRun,
   BullpenAutoLiveRunOnceRequest,
+  BullpenAutoLiveSettings,
   BullpenLlmExecutionMode,
   PolymarketEventRunContext,
   PolymarketManualInvestOrderRequest,
@@ -108,6 +116,7 @@ import type {
   BullpenTableSortKey,
   BullpenTableSortState,
 } from "./BullpenQuestionsTable";
+import type { BullpenIndependentStageOneProgress } from "./BullpenAutoRunScheduleCard";
 import {
   syncBullpenAutoRunActivePositionAnalyses,
   syncBullpenAutoRunSummarySnapshots,
@@ -131,6 +140,7 @@ import {
   isActiveBullpenPosition,
   shouldPreserveBullpenPositionsOnRefresh,
 } from "@/lib/bullpenPositions";
+import { SportsBreakupSection } from "./SportsBreakupSection";
 
 const BullpenQuestionsTable = dynamic(
   () =>
@@ -175,7 +185,7 @@ const BullpenAutoRunScheduleCard = dynamic(
   },
 );
 
-const TABS: {
+const BULLPEN_007_TABS: {
   mode: ScanMode;
   label: string;
   href: string;
@@ -191,6 +201,24 @@ const TABS: {
     href: URLs.routes.console.bullpenAiEndOfMonth(),
   },
 ];
+
+function getWorkspaceTabs(profile: BullpenWorkspaceProfile) {
+  if (profile === "bullpen-sports") {
+    return [
+      {
+        mode: "30-days" as const,
+        label: "30 days",
+        href: URLs.routes.console.bullpenSports30Days(),
+      },
+      {
+        mode: "end-of-month" as const,
+        label: "End of Month",
+        href: URLs.routes.console.bullpenSportsEndOfMonth(),
+      },
+    ];
+  }
+  return BULLPEN_007_TABS;
+}
 const RENDER_LEGACY_SCAN_CONTROLS =
   process.env.NEXT_PUBLIC_RENDER_LEGACY_BULLPEN_SCAN === "true";
 
@@ -216,6 +244,9 @@ const SNAPSHOT_SOURCE_TABS: {
 const BULLPEN_SNAPSHOT_STORAGE_LEGACY_KEY =
   "investment-engine:bullpen-ai:snapshots:v1";
 const BULLPEN_SNAPSHOT_STORAGE_KEY = "investment-engine:bullpen-ai:snapshots:v2";
+const BULLPEN_SNAPSHOT_DATABASE_NAME = "investment-engine-bullpen-ai";
+const BULLPEN_SNAPSHOT_DATABASE_VERSION = 1;
+const BULLPEN_SNAPSHOT_OBJECT_STORE = "snapshot-cache";
 const BULLPEN_LAST_LLM_TARGET_STORAGE_KEY =
   "investment-engine:bullpen-ai:last-llm-target:v1";
 const BULLPEN_ACTIVE_POSITION_LLM_STORAGE_KEY =
@@ -243,6 +274,13 @@ const DEFAULT_SORT_STATE: BullpenTableSortState = {
 const INVESTMENT_PROGRESS_POLL_MS = 1_500;
 const EMPTY_SELECTED_IDS = new Set<string>();
 const BULLPEN_UI_REQUEST_TIMEOUT_MS = 8_000;
+const BULLPEN_SCAN_REQUEST_TIMEOUT_MS = 3_600_000;
+const BULLPEN_SNAPSHOT_SYNC_REQUEST_TIMEOUT_MS = 60_000;
+const BULLPEN_SNAPSHOT_SYNC_INTERVAL_MS = 30_000;
+const SCAN_SNAPSHOT_MAX_ACCEPTED_ROWS = 500;
+const SCAN_SNAPSHOT_MAX_REJECTED_ROWS = 500;
+const BULLPEN_SCAN_POLL_MS = 250;
+const BULLPEN_SCAN_TRANSIENT_RETRY_MS = 1_000;
 
 const AWS_EC2_TERMINAL_URL =
   "https://ap-south-1.console.aws.amazon.com/ec2-instance-connect/ssh/home?addressFamily=ipv4&connType=standard&instanceId=i-0b8ad0aebce8510cb&osUser=ubuntu&region=ap-south-1&sshPort=22";
@@ -256,6 +294,15 @@ const DEFAULT_EC2_COMMANDS = [
   "sudo systemctl status investor-celery-worker --no-pager",
 ];
 const EC2_COMMANDS_STORAGE_KEY = "bullpenAi.ec2Commands";
+const BULLPEN_ACCOUNT_USERNAME = "intrepid_crane_3";
+const BULLPEN_ACCOUNT_WALLET_FALLBACK =
+  "0xa70b18abdebf0704b41901c33e8477ea1085afdf";
+const CHANGE_BULLPEN_ACCOUNT_COMMANDS = [
+  "sudo -u investor -H bullpen logout",
+  "sudo -u investor -H bullpen login",
+  "sudo -u investor -H bullpen polymarket positions --output json",
+  "sudo systemctl restart investor-backend investor-celery-worker investor-celery-beat investor-frontend",
+];
 
 async function fetchBullpenUiJson<T>(
   input: string,
@@ -638,6 +685,7 @@ function getFilterCustomKeywordKey(detailId: BullpenScanFilterDetailId) {
   if (detailId === "excludeTweetCountQuestions") {
     return "customExcludeTweetCountQuestionsKeywords";
   }
+  if (detailId === "excludeOthers") return "customExcludeOtherPhrases";
   return null;
 }
 
@@ -653,11 +701,14 @@ function normalizeCustomExclusionKeywords(keywords: unknown) {
     });
 }
 
-function readStoredCustomExclusionKeywords() {
+function readStoredCustomExclusionKeywords(profile: BullpenWorkspaceProfile) {
   if (typeof window === "undefined") return {};
   try {
     const raw = window.localStorage.getItem(
-      BULLPEN_CUSTOM_EXCLUSION_KEYWORDS_STORAGE_KEY,
+      scopeBullpenWorkspaceStorageKey(
+        BULLPEN_CUSTOM_EXCLUSION_KEYWORDS_STORAGE_KEY,
+        profile,
+      ),
     );
     if (!raw) return {};
     const parsed = JSON.parse(raw) as Record<string, unknown>;
@@ -674,6 +725,9 @@ function readStoredCustomExclusionKeywords() {
       customExcludeTweetCountQuestionsKeywords: normalizeCustomExclusionKeywords(
         parsed.customExcludeTweetCountQuestionsKeywords,
       ),
+      customExcludeOtherPhrases: normalizeCustomExclusionKeywords(
+        parsed.customExcludeOtherPhrases,
+      ),
     };
   } catch {
     return {};
@@ -688,9 +742,15 @@ function getCustomExclusionKeywordsForDetail(
   return filterKey ? filters[filterKey] : [];
 }
 
-function writeStoredCustomExclusionKeywords(filters: BullpenScanFilters) {
+function writeStoredCustomExclusionKeywords(
+  filters: BullpenScanFilters,
+  profile: BullpenWorkspaceProfile,
+) {
   window.localStorage.setItem(
-    BULLPEN_CUSTOM_EXCLUSION_KEYWORDS_STORAGE_KEY,
+    scopeBullpenWorkspaceStorageKey(
+      BULLPEN_CUSTOM_EXCLUSION_KEYWORDS_STORAGE_KEY,
+      profile,
+    ),
     JSON.stringify({
       customExcludeSportsKeywords: filters.customExcludeSportsKeywords,
       customExcludeWeatherKeywords: filters.customExcludeWeatherKeywords,
@@ -698,6 +758,7 @@ function writeStoredCustomExclusionKeywords(filters: BullpenScanFilters) {
         filters.customExcludeMarketPredictionsKeywords,
       customExcludeTweetCountQuestionsKeywords:
         filters.customExcludeTweetCountQuestionsKeywords,
+      customExcludeOtherPhrases: filters.customExcludeOtherPhrases,
     }),
   );
 }
@@ -705,6 +766,11 @@ function writeStoredCustomExclusionKeywords(filters: BullpenScanFilters) {
 function filtersEqual(left: BullpenScanFilters, right: BullpenScanFilters) {
   return (
     left.maxClosingDays === right.maxClosingDays &&
+    left.minVolumeUsd === right.minVolumeUsd &&
+    left.minLiquidityUsd === right.minLiquidityUsd &&
+    left.minVolume24hrUsd === right.minVolume24hrUsd &&
+    left.maxSpreadCents === right.maxSpreadCents &&
+    left.rejectedThemePattern === right.rejectedThemePattern &&
     left.targetDate === right.targetDate &&
     left.excludeSports === right.excludeSports &&
     left.excludeWeather === right.excludeWeather &&
@@ -721,9 +787,13 @@ function filtersEqual(left: BullpenScanFilters, right: BullpenScanFilters) {
       right.customExcludeMarketPredictionsKeywords.join(",") &&
     left.customExcludeTweetCountQuestionsKeywords.join(",") ===
       right.customExcludeTweetCountQuestionsKeywords.join(",") &&
+    left.customExcludeOtherPhrases.join(",") ===
+      right.customExcludeOtherPhrases.join(",") &&
     left.onlyBinaryYesNo === right.onlyBinaryYesNo &&
     left.minYesOdds === right.minYesOdds &&
-    left.minNoOdds === right.minNoOdds
+    left.minNoOdds === right.minNoOdds &&
+    left.minLowerOutcomeOdds === right.minLowerOutcomeOdds &&
+    left.minHigherOutcomeOdds === right.minHigherOutcomeOdds
   );
 }
 
@@ -946,10 +1016,12 @@ function buildBullpenAutoRunRequest({
   mode,
   snapshot,
   selectedQuestionIds,
+  workspaceProfile,
 }: {
   mode: ScanMode;
   snapshot: BullpenScanSnapshot | null;
   selectedQuestionIds: Set<string>;
+  workspaceProfile: BullpenWorkspaceProfile;
 }): BullpenAutoLiveRunOnceRequest | null {
   if (!snapshot) {
     return null;
@@ -957,9 +1029,12 @@ function buildBullpenAutoRunRequest({
 
   return {
     console_profile: {
+      workspace_profile: workspaceProfile,
       source_label: snapshot.sourceLabel,
       source_url: snapshot.sourceUrl,
       scanned_at: snapshot.scannedAt,
+      source_scan_completed_at: snapshot.sourceScanCompletedAt ?? null,
+      filters_completed_at: snapshot.filtersCompletedAt ?? snapshot.scannedAt,
       snapshot_id: snapshot.snapshotId,
       mode,
       total_candidates: snapshot.totalCandidates,
@@ -1157,64 +1232,227 @@ function readSnapshotHistoryByModeFromStorageValue(value: unknown) {
   return next;
 }
 
-function readBullpenSnapshotsFromStorage() {
-  if (typeof window === "undefined") {
+type StoredBullpenSnapshots = {
+  manual: Record<ScanMode, BullpenSnapshotHistory>;
+  auto: Record<ScanMode, BullpenSnapshotHistory>;
+};
+
+function parseStoredBullpenSnapshots(value: unknown): StoredBullpenSnapshots | null {
+  if (!value || typeof value !== "object") return null;
+
+  const record = value as Record<string, unknown>;
+  if (!record.manual && !record.auto) return null;
+
+  return {
+    manual: readSnapshotHistoryByModeFromStorageValue(record.manual),
+    auto: readSnapshotHistoryByModeFromStorageValue(record.auto),
+  };
+}
+
+function createEmptyStoredBullpenSnapshots(): StoredBullpenSnapshots {
+  return {
+    manual: createEmptySnapshotHistory(),
+    auto: createEmptySnapshotHistory(),
+  };
+}
+
+function mergeLatestServerManualSnapshot(
+  stored: Record<ScanMode, BullpenSnapshotHistory>,
+  serverSnapshot: BullpenScanSnapshot | null,
+) {
+  if (!serverSnapshot) return stored;
+  const mode = serverSnapshot.mode;
+  const previous = stored[mode].current;
+  if (
+    previous &&
+    Date.parse(previous.scannedAt) >= Date.parse(serverSnapshot.scannedAt)
+  ) {
+    if (
+      previous.sourceScanCompletedAt ||
+      !serverSnapshot.sourceScanCompletedAt
+    ) {
+      return stored;
+    }
     return {
-      manual: createEmptySnapshotHistory(),
-      auto: createEmptySnapshotHistory(),
+      ...stored,
+      [mode]: {
+        ...stored[mode],
+        current: {
+          ...previous,
+          sourceScanCompletedAt: serverSnapshot.sourceScanCompletedAt,
+        },
+      },
     };
+  }
+  return {
+    ...stored,
+    [mode]: {
+      current: serverSnapshot,
+      history: previous
+        ? [archiveBullpenScanSnapshot(previous), ...stored[mode].history]
+            .filter(
+              (snapshot, index, snapshots) =>
+                snapshots.findIndex(
+                  (candidate) => candidate.snapshotId === snapshot.snapshotId,
+                ) === index,
+            )
+            .slice(0, MAX_BULLPEN_SNAPSHOT_HISTORY)
+        : stored[mode].history,
+    },
+  };
+}
+
+function readBullpenSnapshotsFromStorage(
+  profile: BullpenWorkspaceProfile = "bullpen007",
+): StoredBullpenSnapshots {
+  if (typeof window === "undefined") {
+    return createEmptyStoredBullpenSnapshots();
   }
 
   try {
-    const raw = window.localStorage.getItem(BULLPEN_SNAPSHOT_STORAGE_KEY);
+    const raw = window.localStorage.getItem(
+      scopeBullpenWorkspaceStorageKey(BULLPEN_SNAPSHOT_STORAGE_KEY, profile),
+    );
     const parsed = raw ? JSON.parse(raw) : null;
-    if (parsed && typeof parsed === "object") {
-      const record = parsed as Record<string, unknown>;
-      if (record.manual || record.auto) {
-        return {
-          manual: readSnapshotHistoryByModeFromStorageValue(record.manual),
-          auto: readSnapshotHistoryByModeFromStorageValue(record.auto),
-        };
-      }
-    }
+    const storedSnapshots = parseStoredBullpenSnapshots(parsed);
+    if (storedSnapshots) return storedSnapshots;
   } catch {
     // Fall back to the legacy manual-only snapshot cache.
   }
 
   try {
-    const raw = window.localStorage.getItem(BULLPEN_SNAPSHOT_STORAGE_LEGACY_KEY);
+    const raw = window.localStorage.getItem(
+      scopeBullpenWorkspaceStorageKey(
+        BULLPEN_SNAPSHOT_STORAGE_LEGACY_KEY,
+        profile,
+      ),
+    );
     const parsed = raw ? JSON.parse(raw) : null;
     return {
       manual: readSnapshotHistoryByModeFromStorageValue(parsed),
       auto: createEmptySnapshotHistory(),
     };
   } catch {
-    return {
-      manual: createEmptySnapshotHistory(),
-      auto: createEmptySnapshotHistory(),
-    };
+    return createEmptyStoredBullpenSnapshots();
   }
 }
 
-function writeBullpenSnapshotsToStorage({
+function openBullpenSnapshotDatabase(
+  profile: BullpenWorkspaceProfile = "bullpen007",
+): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const request = window.indexedDB.open(
+      scopeBullpenWorkspaceStorageKey(BULLPEN_SNAPSHOT_DATABASE_NAME, profile),
+      BULLPEN_SNAPSHOT_DATABASE_VERSION,
+    );
+    request.onupgradeneeded = () => {
+      const database = request.result;
+      if (!database.objectStoreNames.contains(BULLPEN_SNAPSHOT_OBJECT_STORE)) {
+        database.createObjectStore(BULLPEN_SNAPSHOT_OBJECT_STORE);
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function readBullpenSnapshotsFromIndexedDb(
+  profile: BullpenWorkspaceProfile = "bullpen007",
+): Promise<StoredBullpenSnapshots | null> {
+  if (typeof window === "undefined" || !window.indexedDB) return null;
+
+  let database: IDBDatabase | null = null;
+  try {
+    database = await openBullpenSnapshotDatabase(profile);
+    const serialized = await new Promise<unknown>((resolve, reject) => {
+      const transaction = database!.transaction(
+        BULLPEN_SNAPSHOT_OBJECT_STORE,
+        "readonly",
+      );
+      const request = transaction
+        .objectStore(BULLPEN_SNAPSHOT_OBJECT_STORE)
+        .get(scopeBullpenWorkspaceStorageKey(BULLPEN_SNAPSHOT_STORAGE_KEY, profile));
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const parsed =
+      typeof serialized === "string" ? JSON.parse(serialized) : serialized;
+    return parseStoredBullpenSnapshots(parsed);
+  } catch {
+    return null;
+  } finally {
+    database?.close();
+  }
+}
+
+async function writeBullpenSnapshotsToIndexedDb({
   manualSnapshotsByMode,
   autoSnapshotsByMode,
+  profile,
 }: {
   manualSnapshotsByMode: Record<ScanMode, BullpenSnapshotHistory>;
   autoSnapshotsByMode: Record<ScanMode, BullpenSnapshotHistory>;
+  profile?: BullpenWorkspaceProfile;
+}) {
+  if (typeof window === "undefined" || !window.indexedDB) return;
+
+  let database: IDBDatabase | null = null;
+  try {
+    const serialized = JSON.stringify({
+      manual: manualSnapshotsByMode,
+      auto: autoSnapshotsByMode,
+    });
+    database = await openBullpenSnapshotDatabase(profile ?? "bullpen007");
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database!.transaction(
+        BULLPEN_SNAPSHOT_OBJECT_STORE,
+        "readwrite",
+      );
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+      transaction
+        .objectStore(BULLPEN_SNAPSHOT_OBJECT_STORE)
+        .put(
+          serialized,
+          scopeBullpenWorkspaceStorageKey(
+            BULLPEN_SNAPSHOT_STORAGE_KEY,
+            profile ?? "bullpen007",
+          ),
+        );
+    });
+  } catch {
+    // Keep the current in-memory snapshot usable when durable storage fails.
+  } finally {
+    database?.close();
+  }
+}
+
+function writeBullpenSnapshotsToLocalStorage({
+  manualSnapshotsByMode,
+  autoSnapshotsByMode,
+  profile,
+}: {
+  manualSnapshotsByMode: Record<ScanMode, BullpenSnapshotHistory>;
+  autoSnapshotsByMode: Record<ScanMode, BullpenSnapshotHistory>;
+  profile?: BullpenWorkspaceProfile;
 }) {
   if (typeof window === "undefined") return;
 
   try {
     window.localStorage.setItem(
-      BULLPEN_SNAPSHOT_STORAGE_KEY,
+      scopeBullpenWorkspaceStorageKey(
+        BULLPEN_SNAPSHOT_STORAGE_KEY,
+        profile ?? "bullpen007",
+      ),
       JSON.stringify({
         manual: manualSnapshotsByMode,
         auto: autoSnapshotsByMode,
       }),
     );
   } catch {
-    // Keep the screen usable even when localStorage is unavailable.
+    // Large Full Universe snapshots exceed localStorage in some browsers.
+    // IndexedDB remains the authoritative durable cache in that case.
   }
 }
 
@@ -1574,24 +1812,39 @@ function BullpenAiPageFallback() {
   );
 }
 
-export default function BullpenAiPage() {
+export default function BullpenAiPage({
+  workspaceProfile = "bullpen007",
+}: {
+  workspaceProfile?: BullpenWorkspaceProfile;
+}) {
   return (
     <Suspense fallback={<BullpenAiPageFallback />}>
-      <BullpenAiPageContent />
+      <BullpenAiPageContent workspaceProfile={workspaceProfile} />
     </Suspense>
   );
 }
 
-function BullpenAiPageContent() {
+function BullpenAiPageContent({
+  workspaceProfile,
+}: {
+  workspaceProfile: BullpenWorkspaceProfile;
+}) {
   const searchParams = useSearchParams();
   const usdInrRate = useUsdInrRate();
+  const eventNames = getBullpenStageOneEventNames(workspaceProfile);
+  const settingsProfile =
+    workspaceProfile === "bullpen007" ? undefined : workspaceProfile;
+  const workspaceTabs = getWorkspaceTabs(workspaceProfile);
+  const workspaceTitle =
+    workspaceProfile === "bullpen-sports" ? "Bullpen Sports" : "Bullpen x AI";
   const activeMode: ScanMode =
     searchParams.get("tab") === "end-of-month" ? "end-of-month" : "30-days";
-  const activeTab = TABS.find((tab) => tab.mode === activeMode) || TABS[0];
+  const activeTab =
+    workspaceTabs.find((tab) => tab.mode === activeMode) || workspaceTabs[0];
   const [filtersByMode, setFiltersByMode] = useState<
     Record<ScanMode, BullpenScanFilters>
   >(() => {
-    const storedCustomKeywords = readStoredCustomExclusionKeywords();
+    const storedCustomKeywords = readStoredCustomExclusionKeywords(workspaceProfile);
     return {
       "30-days": {
         ...normalizeBullpenScanFilters("30-days", searchParams),
@@ -1603,6 +1856,43 @@ function BullpenAiPageContent() {
       },
     };
   });
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const applySettings = (settings: BullpenAutoLiveSettings) => {
+      if (cancelled) return;
+      setFiltersByMode((current) => ({
+        "30-days": applyBullpenStageOneSettings(current["30-days"], settings),
+        "end-of-month": applyBullpenStageOneSettings(
+          current["end-of-month"],
+          settings,
+        ),
+      }));
+    };
+
+    const handleSettingsUpdated = (event: Event) => {
+      applySettings(
+        (event as CustomEvent<BullpenAutoLiveSettings>).detail,
+      );
+    };
+
+    window.addEventListener(
+      eventNames.settingsUpdated,
+      handleSettingsUpdated,
+    );
+    void apiService.getBullpenAutoLiveSettings(undefined, settingsProfile).then(applySettings).catch(() => {
+      // Each scan retries this settings read before building its request.
+    });
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener(
+        eventNames.settingsUpdated,
+        handleSettingsUpdated,
+      );
+    };
+  }, []);
   const [snapshotsByMode, setSnapshotsByMode] = useState<
     Record<ScanMode, BullpenSnapshotHistory>
   >(createEmptySnapshotHistory);
@@ -1769,28 +2059,116 @@ function BullpenAiPageContent() {
   }, []);
 
   useEffect(() => {
-    const storedSnapshots = readBullpenSnapshotsFromStorage();
-    setSnapshotsByMode(storedSnapshots.manual);
-    setAutoSnapshotsByMode(storedSnapshots.auto);
-    setLastLlmTargets(readLastLlmTargetsFromStorage());
-    setBullpenLlmPromptTemplate(readBullpenLlmPromptFromStorage());
-    setActivePositionAnalysesByKey(readActivePositionAnalysesFromStorage());
-    setRequireFreshInternetEvidence(
-      readStoredBoolean(BULLPEN_REQUIRE_FRESH_EVIDENCE_STORAGE_KEY, true),
-    );
-    setAllowEvidenceGroundedNonWebModels(
-      readStoredBoolean(BULLPEN_ALLOW_NON_WEB_EVIDENCE_STORAGE_KEY, false),
-    );
-    setHasLoadedStorage(true);
+    let cancelled = false;
+    const syncController = new AbortController();
+
+    void (async () => {
+      const indexedDbSnapshots = workspaceProfile === "bullpen007"
+        ? await readBullpenSnapshotsFromIndexedDb()
+        : await readBullpenSnapshotsFromIndexedDb(workspaceProfile);
+      if (cancelled) return;
+
+      const storedSnapshots = workspaceProfile === "bullpen007"
+        ? indexedDbSnapshots ?? readBullpenSnapshotsFromStorage()
+        : indexedDbSnapshots ?? readBullpenSnapshotsFromStorage(workspaceProfile);
+      let manualSnapshots = storedSnapshots.manual;
+      try {
+        const latestServerSnapshot = await fetchBullpenUiJson<{
+          snapshot?: BullpenScanSnapshot | null;
+        }>(
+          `/api/bullpen-ai/stage-one-snapshot?workspaceProfile=${encodeURIComponent(workspaceProfile)}`,
+          { cache: "no-store", signal: syncController.signal },
+          BULLPEN_SNAPSHOT_SYNC_REQUEST_TIMEOUT_MS,
+        );
+        if (!cancelled && latestServerSnapshot.response.ok) {
+          manualSnapshots = mergeLatestServerManualSnapshot(
+            manualSnapshots,
+            normalizeSnapshot(latestServerSnapshot.payload.snapshot),
+          );
+        }
+      } catch {
+        // Keep the device-local snapshot available if server synchronization fails.
+      }
+      if (cancelled) return;
+      setSnapshotsByMode(manualSnapshots);
+      setAutoSnapshotsByMode(storedSnapshots.auto);
+      setLastLlmTargets(readLastLlmTargetsFromStorage());
+      setBullpenLlmPromptTemplate(readBullpenLlmPromptFromStorage());
+      setActivePositionAnalysesByKey(readActivePositionAnalysesFromStorage());
+      setRequireFreshInternetEvidence(
+        readStoredBoolean(BULLPEN_REQUIRE_FRESH_EVIDENCE_STORAGE_KEY, true),
+      );
+      setAllowEvidenceGroundedNonWebModels(
+        readStoredBoolean(BULLPEN_ALLOW_NON_WEB_EVIDENCE_STORAGE_KEY, false),
+      );
+      setHasLoadedStorage(true);
+    })();
+
+    return () => {
+      cancelled = true;
+      syncController.abort();
+    };
   }, []);
 
   useEffect(() => {
     if (!hasLoadedStorage) return;
-    writeBullpenSnapshotsToStorage({
+    const snapshots = {
       manualSnapshotsByMode: snapshotsByMode,
       autoSnapshotsByMode,
-    });
+    };
+    if (workspaceProfile === "bullpen007") {
+      void writeBullpenSnapshotsToIndexedDb(snapshots);
+      writeBullpenSnapshotsToLocalStorage(snapshots);
+    } else {
+      void writeBullpenSnapshotsToIndexedDb({
+        ...snapshots,
+        profile: workspaceProfile,
+      });
+      writeBullpenSnapshotsToLocalStorage({
+        ...snapshots,
+        profile: workspaceProfile,
+      });
+    }
   }, [autoSnapshotsByMode, hasLoadedStorage, snapshotsByMode]);
+
+  useEffect(() => {
+    if (!hasLoadedStorage) return;
+    const controller = new AbortController();
+    const syncLatestSnapshot = async () => {
+      try {
+        const result = await fetchBullpenUiJson<{
+          snapshot?: BullpenScanSnapshot | null;
+        }>(
+          `/api/bullpen-ai/stage-one-snapshot?workspaceProfile=${encodeURIComponent(workspaceProfile)}`,
+          { cache: "no-store", signal: controller.signal },
+          BULLPEN_SNAPSHOT_SYNC_REQUEST_TIMEOUT_MS,
+        );
+        if (!result.response.ok || controller.signal.aborted) return;
+        const snapshot = normalizeSnapshot(result.payload.snapshot);
+        if (!snapshot) return;
+        setSnapshotsByMode((current) =>
+          mergeLatestServerManualSnapshot(current, snapshot),
+        );
+      } catch {
+        // The current device-local snapshot remains usable while offline.
+      }
+    };
+    const interval = window.setInterval(
+      () => void syncLatestSnapshot(),
+      BULLPEN_SNAPSHOT_SYNC_INTERVAL_MS,
+    );
+    const syncWhenVisible = () => {
+      if (document.visibilityState === "visible") void syncLatestSnapshot();
+    };
+    window.addEventListener("focus", syncWhenVisible);
+    document.addEventListener("visibilitychange", syncWhenVisible);
+    return () => {
+      controller.abort();
+      window.clearInterval(interval);
+      window.removeEventListener("focus", syncWhenVisible);
+      document.removeEventListener("visibilitychange", syncWhenVisible);
+    };
+  }, [hasLoadedStorage]);
 
   useEffect(() => {
     if (!hasLoadedStorage) return;
@@ -2217,6 +2595,7 @@ function BullpenAiPageContent() {
       mode: activeMode,
       snapshot,
       selectedQuestionIds: new Set<string>(),
+      workspaceProfile,
     });
   };
 
@@ -2423,7 +2802,7 @@ function BullpenAiPageContent() {
         [activeMode]: nextActiveFilters,
       };
       try {
-        writeStoredCustomExclusionKeywords(nextActiveFilters);
+        writeStoredCustomExclusionKeywords(nextActiveFilters, workspaceProfile);
       } catch {
         // Keep the in-memory edits usable when localStorage is unavailable.
       }
@@ -2436,7 +2815,7 @@ function BullpenAiPageContent() {
       ...current,
       [activeMode]: {
         ...createBullpenScanFilters(activeMode),
-        ...readStoredCustomExclusionKeywords(),
+        ...readStoredCustomExclusionKeywords(workspaceProfile),
       },
     }));
   }
@@ -2953,16 +3332,17 @@ function BullpenAiPageContent() {
 
   function syncBullpenScanSnapshot(
     snapshot: BullpenScanSnapshot,
-    options?: { resetSelections?: boolean },
+    options?: { resetSelections?: boolean; archivePrevious?: boolean },
   ) {
     const resetSelections = options?.resetSelections ?? true;
+    const archivePrevious = options?.archivePrevious ?? true;
     setSnapshotsByMode((current) => {
       const previousCurrent = current[activeMode].current;
       return {
         ...current,
         [activeMode]: {
           current: snapshot,
-          history: previousCurrent
+          history: previousCurrent && archivePrevious
             ? [
                 archiveBullpenScanSnapshot(previousCurrent),
                 ...current[activeMode].history,
@@ -2984,79 +3364,73 @@ function BullpenAiPageContent() {
     }));
   }
 
-  async function executeBullpenScan(options?: { resetSelections?: boolean }) {
-    const params = buildBullpenScanQueryParams(activeMode, activeFilters);
+  async function executeBullpenScan(options?: {
+    resetSelections?: boolean;
+    archivePrevious?: boolean;
+    filtersOverride?: BullpenScanFilters;
+    signal?: AbortSignal;
+    onProgress?: (progress: BullpenIndependentStageOneProgress) => void;
+  }) {
+    const signal = options?.signal ?? pageRequestAbortControllerRef.current?.signal;
     setScanningMode(activeMode);
-    setMessagesByMode((current) => ({ ...current, [activeMode]: null }));
-    setInvestmentMessagesByMode((current) => ({ ...current, [activeMode]: null }));
-    const positionsRefreshTask = refreshBullpenPositions({
-      suppressAutoClaim: true,
-      refreshMode: "passive",
-      callerSource: "ui-scan-preflight",
-    }).catch((error) => ({
-      positions: activePositions,
-      error: `Failed to refresh Bullpen wallet positions during scan: ${normalizeError(error)}.`,
-    }));
-
     try {
-      const { response, payload } = await fetchBullpenUiJson<ScanResult>(`/api/bullpen-ai?${params.toString()}`, {
-        cache: "no-store",
-        signal: pageRequestAbortControllerRef.current?.signal,
-      });
-      const isSuccessfulScan = response.ok && !payload.error;
-
-      void positionsRefreshTask;
-
-      const nextSnapshot = isSuccessfulScan
-        ? createBullpenScanSnapshot(payload)
-        : null;
-      if (nextSnapshot) {
-        syncBullpenScanSnapshot(nextSnapshot, {
-          resetSelections: options?.resetSelections,
-        });
+      let filters = options?.filtersOverride ?? activeFilters;
+      if (!options?.filtersOverride) {
+        const settings = await apiService.getBullpenAutoLiveSettings(
+          { signal },
+          settingsProfile,
+        );
+        filters = applyBullpenStageOneSettings(filters, settings);
       }
-
-      const message =
-        !response.ok || payload.error
-          ? payload.error || "Bullpen scan failed."
-          : payload.warning
-            ? payload.warning
-            : payload.questions.length === 0
-              ? "No Bullpen questions matched the current scan filters. Adjust the filters or rerun later."
-              : null;
-      setMessagesByMode((current) => ({
-        ...current,
-        [activeMode]: message,
-      }));
-
-      return {
-        snapshot: nextSnapshot,
-        error: !isSuccessfulScan
-          ? payload.error || "Bullpen scan failed."
-          : null,
-      };
-    } catch (scanError) {
-      void positionsRefreshTask;
-      const message =
-        scanError instanceof Error
-          ? scanError.message
-          : "Bullpen scan failed.";
-      setMessagesByMode((current) => ({
-        ...current,
-        [activeMode]: message,
-      }));
-      return {
-        snapshot: null,
-        error: message,
-      };
-    } finally {
-      setScanningMode(null);
-    }
+      const positions = await refreshBullpenPositions({ suppressAutoClaim: true, refreshMode: "passive", callerSource: "ui-filter-preflight" });
+      const params = buildBullpenScanQueryParams(activeMode, filters);
+      params.set("useUniversal", "true");
+      params.set("workspaceProfile", workspaceProfile);
+      const started = Date.now();
+      while (true) {
+        if (Date.now() - started >= BULLPEN_SCAN_REQUEST_TIMEOUT_MS) throw new Error("Filtering the shared scan timed out.");
+        const result = await fetchBullpenUiJson<ScanResult & { status?: string; reapplyCursor?: number; processedCandidates?: number }>(
+          `/api/bullpen-ai?${params.toString()}`,
+          { cache: "no-store", signal, method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ activePositions: positions.positions.filter(isActiveBullpenPosition) }) },
+          BULLPEN_SCAN_REQUEST_TIMEOUT_MS,
+        );
+        if (!result.response.ok || result.payload.error) throw new Error(result.payload.error || "Could not filter the shared scan.");
+        if (result.response.status !== 202) {
+          const snapshot = createBullpenScanSnapshot(result.payload);
+          syncBullpenScanSnapshot(snapshot, options);
+          setMessagesByMode(current => ({ ...current, [activeMode]: null }));
+          return { snapshot, error: null };
+        }
+        if (result.payload.reapplyCursor == null || !result.payload.scanExportId) throw new Error("The filter operation did not return a continuation cursor.");
+        params.set("reapplyCursor", String(result.payload.reapplyCursor));
+        params.set("reapplyExportId", result.payload.scanExportId);
+        options?.onProgress?.({ scannedMarkets: result.payload.processedCandidates ?? 0,
+          completedPages: 0, currentPage: 0, retryCount: 0, status: "scanning",
+          lastUpdatedAt: new Date().toISOString(), message: `Filtering ${result.payload.processedCandidates}/${result.payload.totalCandidates} captured events` });
+      }
+    } catch (error) {
+      const message = signal?.aborted ? "Filtering stopped." : formatUnknownError(error);
+      setMessagesByMode(current => ({ ...current, [activeMode]: message }));
+      return { snapshot: null, error: message };
+    } finally { setScanningMode(null); }
   }
 
   async function runScan() {
     await executeBullpenScan({ resetSelections: true });
   }
+
+  const reapplyExistingStageOneFilters = useEffectEvent(async (settings: BullpenAutoLiveSettings) => {
+    const result = await executeBullpenScan({ filtersOverride: applyBullpenStageOneSettings(activeFilters, settings), resetSelections: true, archivePrevious: false });
+    window.dispatchEvent(new CustomEvent(eventNames.reapplyFinished, {
+      detail: { success: !result.error, message: result.error ?? `Applied filters to ${result.snapshot?.totalCandidates.toLocaleString("en-IN")} shared events. Events passing filters: ${result.snapshot?.totalAcceptedQuestions ?? result.snapshot?.questions.length ?? 0}.` },
+    }));
+  });
+
+  useEffect(() => {
+    const handleReapply = (event: Event) => { void reapplyExistingStageOneFilters((event as CustomEvent<BullpenAutoLiveSettings>).detail); };
+    window.addEventListener(eventNames.reapplyFilters, handleReapply);
+    return () => window.removeEventListener(eventNames.reapplyFilters, handleReapply);
+  }, []);
 
   async function runLlm(targets: ProviderModelTarget[]) {
     if (targets.length === 0) {
@@ -3927,11 +4301,11 @@ function BullpenAiPageContent() {
     ? "Scanning Bullpen..."
     : activeVisibleSnapshot
       ? "No saved questions are available in this snapshot."
-      : isManualScanView
-        ? "No scan results yet. Click Run Bullpen Scan to load matching Bullpen questions."
-        : "No auto scan results yet. Run Scans and Invest Now above to populate this tab.";
+      : "Event results unknown. No saved source snapshot is available; current scan activity is unverified.";
   const [isBullpenIntroDialogOpen, setIsBullpenIntroDialogOpen] = useState(false);
   const [ec2CommandMenuOpen, setEc2CommandMenuOpen] = useState(false);
+  const [isBullpenAccountDialogOpen, setIsBullpenAccountDialogOpen] =
+    useState(false);
   const [ec2Commands, setEc2Commands] = useState(getInitialEc2Commands);
   const [newEc2Command, setNewEc2Command] = useState("");
   const [editingEc2CommandIndex, setEditingEc2CommandIndex] = useState<
@@ -4023,16 +4397,48 @@ function BullpenAiPageContent() {
           </p>
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <h1 className="text-3xl font-bold tracking-tight text-slate-950">
-              Bullpen x AI
+              {workspaceTitle}
             </h1>
             <button
               type="button"
               onClick={() => setIsBullpenIntroDialogOpen(true)}
               className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-purple-200 bg-white text-purple-700 shadow-sm transition hover:border-purple-300 hover:bg-purple-50 hover:text-purple-900 focus:outline-none focus:ring-2 focus:ring-purple-400 focus:ring-offset-2"
-              aria-label="Show Bullpen x AI overview"
+              aria-label={`Show ${workspaceTitle} overview`}
             >
               <Info className="h-4 w-4" />
             </button>
+          </div>
+          <div className="mt-4 flex flex-wrap items-stretch gap-3">
+            <div className="flex min-w-0 flex-wrap items-center gap-x-5 gap-y-2 rounded-2xl border border-purple-100 bg-purple-50/60 px-4 py-3 text-sm">
+              <div className="flex items-center gap-2">
+                <UserRound className="size-4 text-purple-700" aria-hidden="true" />
+                <span className="text-slate-500">Username</span>
+                <strong className="font-mono text-slate-950">
+                  {BULLPEN_ACCOUNT_USERNAME}
+                </strong>
+              </div>
+              <div className="min-w-0">
+                <span className="mr-2 text-slate-500">Wallet address</span>
+                <strong
+                  className="break-all font-mono text-xs text-slate-950"
+                  title={
+                    lastSuccessfulLiveSnapshot?.lineage?.accountIdentity ??
+                    BULLPEN_ACCOUNT_WALLET_FALLBACK
+                  }
+                >
+                  {lastSuccessfulLiveSnapshot?.lineage?.accountIdentity ??
+                    BULLPEN_ACCOUNT_WALLET_FALLBACK}
+                </strong>
+              </div>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              className="border-purple-300 bg-white text-purple-800 hover:bg-purple-50"
+              onClick={() => setIsBullpenAccountDialogOpen(true)}
+            >
+              Change Bullpen Account
+            </Button>
           </div>
         </div>
         <div className="mt-1 flex flex-wrap items-center gap-2">
@@ -4233,6 +4639,17 @@ function BullpenAiPageContent() {
       ) : null}
 
       <BullpenAutoRunScheduleCard
+        workspaceProfile={workspaceProfile}
+        independentScanSnapshot={activeCurrentSnapshot}
+        onRunIndependentStageOne={async (signal, onProgress) => {
+          const result = await executeBullpenScan({
+            resetSelections: true,
+            archivePrevious: false,
+            signal,
+            onProgress,
+          });
+          return result;
+        }}
         buildRunNowRequest={buildRunNowRequest}
         activePositions={openActivePositions}
         activePositionsSummary={activePositionsSummary}
@@ -4936,6 +5353,10 @@ function BullpenAiPageContent() {
       </Card>
       ) : null}
 
+      {workspaceProfile === "bullpen-sports" ? (
+        <SportsBreakupSection snapshot={activeVisibleSnapshot} />
+      ) : null}
+
       <BullpenQuestionsTable
             snapshot={activeVisibleSnapshot}
             rowsOverride={orderedVisibleTableRows}
@@ -4975,11 +5396,12 @@ function BullpenAiPageContent() {
                         <div className="space-y-0.5 text-xs font-medium leading-5 text-slate-600">
                           {activeSnapshotSource === tab.source ? (
                             <>
+                              <p>{tabSnapshot ? `Saved snapshot · ${formatApiTimestamp(tabSnapshot.scannedAt)} · current freshness unverified` : "Source unavailable · observation age unknown"}</p>
                               <p>
-                                Total Events Scanned: {tabSnapshot?.totalCandidates ?? 0}
+                                Total Events Scanned: {tabSnapshot?.totalCandidates ?? "—"}
                               </p>
                               <p>
-                                Events that passed Filters: {tabSnapshot?.questions.length ?? 0}
+                                Events that passed Filters: {tabSnapshot?.questions.length ?? "—"}
                               </p>
                             </>
                           ) : null}
@@ -5011,6 +5433,91 @@ function BullpenAiPageContent() {
             onToggleQuestion={toggleQuestionSelection}
             onToggleSelectAll={toggleSelectAllQuestions}
           />
+
+      {isBullpenAccountDialogOpen ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              setIsBullpenAccountDialogOpen(false);
+            }
+          }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="change-bullpen-account-title"
+            className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl"
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-purple-600">
+                  Bullpen account access
+                </p>
+                <h2
+                  id="change-bullpen-account-title"
+                  className="mt-1 text-2xl font-bold text-slate-950"
+                >
+                  Change Bullpen Account
+                </h2>
+                <p className="mt-2 text-sm leading-6 text-slate-600">
+                  Open the production EC2 terminal, then run these commands in
+                  order. Bullpen will print a new one-time device URL and code;
+                  complete that sign-in before running the verification command.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsBullpenAccountDialogOpen(false)}
+                className="rounded-full p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-950"
+                aria-label="Close Change Bullpen Account dialog"
+              >
+                <X className="size-5" aria-hidden="true" />
+              </button>
+            </div>
+            <a
+              href={AWS_EC2_TERMINAL_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="mt-5 flex items-center justify-between gap-3 rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-950 hover:bg-amber-100"
+            >
+              <span className="min-w-0 break-all">{AWS_EC2_TERMINAL_URL}</span>
+              <ExternalLink className="size-4 shrink-0" aria-hidden="true" />
+            </a>
+            <ol className="mt-5 space-y-3">
+              {CHANGE_BULLPEN_ACCOUNT_COMMANDS.map((command, index) => (
+                <li
+                  key={command}
+                  className="rounded-2xl border border-slate-200 bg-slate-950 p-4 text-white"
+                >
+                  <div className="mb-2 flex items-center justify-between gap-3">
+                    <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+                      Step {index + 1}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => void navigator.clipboard.writeText(command)}
+                      className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold text-slate-300 hover:bg-white/10 hover:text-white"
+                    >
+                      <Copy className="size-3.5" aria-hidden="true" />
+                      Copy
+                    </button>
+                  </div>
+                  <code className="block break-all text-xs leading-5 text-emerald-300">
+                    {command}
+                  </code>
+                </li>
+              ))}
+            </ol>
+            <div className="mt-5 rounded-2xl border border-sky-200 bg-sky-50 p-4 text-sm leading-6 text-sky-950">
+              Do not reuse the login code shown in an old screenshot. Every
+              login creates a fresh one-time code. This server uses systemd, so
+              use the listed investor services instead of PM2.
+            </div>
+          </section>
+        </div>
+      ) : null}
 
       {isPromptEditorOpen ? (
         <BullpenPromptEditorDialog

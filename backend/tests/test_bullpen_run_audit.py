@@ -1,10 +1,12 @@
 import json
+from datetime import UTC, datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import httpx
 import pytest
 from fastapi import FastAPI
 from sqlalchemy.dialects import postgresql
+from sqlalchemy.exc import SQLAlchemyError
 
 import app.infrastructure.database.all_models  # noqa: F401
 from app.domains.auth.dependencies import get_current_user
@@ -26,6 +28,7 @@ from app.domains.bullpen_run_audit.repository import (
 )
 from app.domains.bullpen_run_audit.router import router as run_audit_router
 from app.domains.bullpen_run_audit.service import (
+    _as_utc,
     _build_bundle,
     _build_formula_records,
     _serialize_stage_records,
@@ -58,6 +61,19 @@ def _build_test_app() -> FastAPI:
     return app
 
 
+class _DummySession:
+    def commit(self) -> None:
+        return None
+
+
+class _DummySessionContext:
+    def __enter__(self):
+        return _DummySession()
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+
 def _feedback_report_payload() -> dict[str, object]:
     return {
         "report_version": "1",
@@ -84,6 +100,30 @@ def _feedback_report_payload() -> dict[str, object]:
         "priority_plan": [],
         "codex_prompt": "Fix the pipeline",
     }
+
+
+def test_audit_timestamp_normalization_compares_legacy_naive_and_aware_values():
+    legacy_naive_utc = datetime(2026, 8, 21, 9, 30, 0)
+    aware_utc = datetime(2026, 8, 21, 9, 30, 0, tzinfo=UTC)
+    aware_india = datetime(
+        2026,
+        8,
+        21,
+        15,
+        0,
+        0,
+        tzinfo=timezone(timedelta(hours=5, minutes=30)),
+    )
+
+    normalized_naive = _as_utc(legacy_naive_utc)
+    normalized_aware = _as_utc(aware_utc)
+
+    assert normalized_naive == aware_utc
+    assert normalized_aware == aware_utc
+    assert _as_utc(None) is None
+    assert normalized_naive is not None and normalized_aware is not None
+    assert normalized_naive >= normalized_aware
+    assert _as_utc(aware_india) == aware_utc
 
 
 def test_audit_decision_capture_filters_superseded_reconciliation_rows():
@@ -2687,13 +2727,14 @@ def test_algorithm_registry_contains_required_audit_keys():
     assert BULLPEN_RUN_AUDIT_SCHEMA_VERSION == 2
     assert (
         BULLPEN_RUN_AUDIT_ALGORITHM_REGISTRY_VERSION
-        == "2026-07-27-stage3-submission-evidence-v29"
+        == "2026-09-20-ups-filter-integrity-v32"
     )
     assert (
         BULLPEN_RUN_AUDIT_RULE_VERSION
-        == "2026-07-27-stage3-submission-evidence-v29"
+        == "2026-09-20-ups-filter-integrity-v32"
     )
     keys = {entry["algorithm_key"] for entry in AUDITED_ALGORITHM_REGISTRY}
+    assert "stage1_common_scan_filters_and_wallet_union" in keys
     assert keys >= {
         "run_execution_handoff_fallback",
         "stage2_consensus_statistics",
@@ -3414,6 +3455,97 @@ def test_stage1_degraded_portfolio_skips_verified_formula_findings():
     assert "STAGE1_VERIFIED_POSITION_COUNT_MISMATCH" not in codes
     assert "STAGE1_VERIFIED_AVAILABLE_SLOTS_MISMATCH" not in codes
     assert "STAGE1_VERIFIED_TRADE_AMOUNT_MISMATCH" not in codes
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("failure", "expected_status", "expected_code"),
+    [
+        (
+            SQLAlchemyError("relation bullpen_run_audit_snapshots does not exist"),
+            503,
+            "RUN_AUDIT_DATABASE_UNAVAILABLE",
+        ),
+        (RuntimeError("legacy audit payload failed"), 500, "RUN_AUDIT_MATERIALIZATION_FAILED"),
+    ],
+)
+async def test_run_audit_detail_returns_actionable_sanitized_failures(
+    monkeypatch,
+    failure,
+    expected_status,
+    expected_code,
+):
+    app = _build_test_app()
+
+    async def fake_to_thread(func):
+        return func()
+
+    def fail_detail(*_args, **_kwargs):
+        raise failure
+
+    monkeypatch.setattr(
+        "app.domains.bullpen_run_audit.router.SyncSessionLocal",
+        _DummySessionContext,
+    )
+    monkeypatch.setattr(
+        "app.domains.bullpen_run_audit.router.asyncio.to_thread",
+        fake_to_thread,
+    )
+    monkeypatch.setattr(
+        "app.domains.bullpen_run_audit.router.get_run_audit_detail_sync",
+        fail_detail,
+    )
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.get("/bullpen-ai/run-audits/run-123")
+
+    assert response.status_code == expected_status
+    detail = response.json()["detail"]
+    assert detail["error"] == expected_code
+    assert detail["run_id"] == "run-123"
+    assert detail["diagnostic_id"]
+    assert detail["failed_phase"]
+    assert detail["cause_type"] == type(failure).__name__
+    assert detail["technical_detail"].startswith(type(failure).__name__)
+    assert detail["likely_cause"]
+    assert len(detail["fix_steps"]) >= 4
+    if expected_status == 503:
+        assert detail["required_migration"].startswith("u7v8w9x0y1z2")
+
+
+@pytest.mark.anyio
+async def test_forced_materialization_returns_same_actionable_failure_contract(monkeypatch):
+    app = _build_test_app()
+
+    async def fake_to_thread(func):
+        return func()
+
+    def fail_materialization(*_args, **_kwargs):
+        raise TypeError("legacy stage payload is not a mapping")
+
+    monkeypatch.setattr(
+        "app.domains.bullpen_run_audit.router.SyncSessionLocal",
+        _DummySessionContext,
+    )
+    monkeypatch.setattr(
+        "app.domains.bullpen_run_audit.router.asyncio.to_thread",
+        fake_to_thread,
+    )
+    monkeypatch.setattr(
+        "app.domains.bullpen_run_audit.router.materialize_run_audit_snapshot_sync",
+        fail_materialization,
+    )
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.post("/bullpen-ai/run-audits/run-123/materialize")
+
+    assert response.status_code == 500
+    detail = response.json()["detail"]
+    assert detail["error"] == "RUN_AUDIT_MATERIALIZATION_FAILED"
+    assert detail["cause_type"] == "TypeError"
+    assert "legacy stage payload is not a mapping" in detail["technical_detail"]
 
 
 @pytest.mark.anyio

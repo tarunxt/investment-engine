@@ -13,15 +13,19 @@ import {
   writeTradeAnalysisCache,
 } from "@/lib/bullpenTradeAnalysisFallback";
 import { URLs } from "@/lib/urls";
+import {
+  tradeExecutionFill,
+  tradeOutcomeLabel,
+} from "@/lib/tradeAnalysisExecution";
 import { apiService } from "@/services/api";
 import { useAuth } from "@/hooks/useAuth";
 import type {
-  BullpenTradeAnalysisLearningInsights,
   BullpenTradeAnalysisListItem,
   BullpenTradeAnalysisListResponse,
 } from "@/types/api";
 
 import {
+  formatConfidence,
   formatCurrency,
   formatDateTime,
   formatDuration,
@@ -57,7 +61,8 @@ const defaultFilters: AnalysisFilters = {
 function cardToneClassName(item: BullpenTradeAnalysisListItem) {
   if (item.status === "FAILED") return "border-amber-200 bg-amber-50/40";
   if (item.final_tag === "OPEN") return "border-sky-200 bg-sky-50/40";
-  if (item.pnl_outcome_tag === "PROFIT") return "border-emerald-200 bg-emerald-50/40";
+  if (item.pnl_outcome_tag === "PROFIT")
+    return "border-emerald-200 bg-emerald-50/40";
   if (item.pnl_outcome_tag === "LOSS") return "border-rose-200 bg-rose-50/40";
   return "border-slate-200 bg-white";
 }
@@ -109,33 +114,26 @@ function exitTimestamp(item: BullpenTradeAnalysisListItem) {
 }
 
 function pnlOutcomeLabel(item: BullpenTradeAnalysisListItem) {
-  if (item.pnl_outcome_tag && item.pnl_outcome_tag !== "OPEN") {
-    return humanizeTag(item.pnl_outcome_tag);
-  }
-  return item.is_squared_off ? "REALIZED" : "OPEN";
+  return humanizeTag(tradeOutcomeLabel(item));
 }
 
-function LearningCard({
-  title,
-  items,
-}: {
-  title: string;
-  items: string[];
-}) {
+function LearningCard({ title, items }: { title: string; items?: string[] }) {
   return (
     <Card className="rounded-none border-slate-200 shadow-none">
       <CardHeader>
         <CardTitle className="text-base text-slate-950">{title}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-3 text-sm text-slate-700">
-        {items.length > 0 ? (
+        {items === undefined ? (
+          <p className="text-slate-500">Learning insights unavailable.</p>
+        ) : items.length > 0 ? (
           items.map((item) => (
             <p key={item} className="leading-6">
               {item}
             </p>
           ))
         ) : (
-          <p className="text-slate-500">No signals yet.</p>
+          <p className="text-slate-500">No observations in this category.</p>
         )}
       </CardContent>
     </Card>
@@ -145,8 +143,11 @@ function LearningCard({
 export function TradeAnalysisListClient() {
   const { user } = useAuth();
   const [filters, setFilters] = useState<AnalysisFilters>(defaultFilters);
-  const [draftFilters, setDraftFilters] = useState<AnalysisFilters>(defaultFilters);
-  const [data, setData] = useState<BullpenTradeAnalysisListResponse | null>(null);
+  const [draftFilters, setDraftFilters] =
+    useState<AnalysisFilters>(defaultFilters);
+  const [data, setData] = useState<BullpenTradeAnalysisListResponse | null>(
+    null,
+  );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [fallbackNotice, setFallbackNotice] = useState<string | null>(null);
@@ -156,6 +157,8 @@ export function TradeAnalysisListClient() {
 
     async function load() {
       setLoading(true);
+      // A previous request may belong to another filter set or user.
+      setData(null);
       setError(null);
       setFallbackNotice(null);
       const filtersKey = buildTradeAnalysisFiltersKey(filters);
@@ -228,6 +231,8 @@ export function TradeAnalysisListClient() {
 
   const summary = data?.summary;
   const learning = data?.learning_insights;
+  const hasUnknownPnl = data?.items.some((item) => !Number.isFinite(item.net_pnl));
+  const hasUnknownFees = data?.items.some((item) => !Number.isFinite(item.fees_total));
 
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-6">
@@ -387,37 +392,73 @@ export function TradeAnalysisListClient() {
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
           label="Executed Trades"
-          value={loading ? "…" : String(summary?.total_executed_trades ?? 0)}
+          value={
+            loading
+              ? "…"
+              : summary
+                ? String(summary.total_executed_trades)
+                : "Unavailable"
+          }
         />
         <StatCard
-          label="Open Positions"
-          value={loading ? "…" : String(summary?.open_positions ?? 0)}
+          label="Confirmed Open Positions"
+          value={
+            loading
+              ? "…"
+              : summary
+                ? String(summary.open_positions)
+                : "Unavailable"
+          }
         />
         <StatCard
           label="Closed Positions"
-          value={loading ? "…" : String(summary?.closed_positions ?? 0)}
+          value={
+            loading
+              ? "…"
+              : summary
+                ? String(summary.closed_positions)
+                : "Unavailable"
+          }
         />
         <StatCard
-          label="Total Net P&L"
-          value={loading ? "…" : formatCurrency(summary?.total_net_pnl)}
+          label={summary?.net_pnl_coverage ? `Recorded Net P&L Subtotal (${summary?.net_pnl_coverage ?? "unknown"} coverage)` : "Total Net P&L"}
+          value={loading ? "…" : (summary?.net_pnl_coverage === "unknown" || (!summary?.net_pnl_coverage && hasUnknownPnl)) ? "Not evaluated" : formatCurrency(summary?.total_net_pnl)}
         />
         <StatCard
-          label="Win Rate"
-          value={loading ? "…" : formatPercent((summary?.win_rate ?? 0) * 100)}
+          label={`Known-outcome Win Rate (n=${summary?.win_rate_denominator ?? summary?.closed_positions ?? 0})`}
+          value={
+            loading
+              ? "…"
+              : summary && summary.win_rate != null && (summary.win_rate_denominator ?? (hasUnknownPnl ? 0 : summary.closed_positions)) > 0
+                ? formatPercent(summary.win_rate * 100)
+                : "Unavailable"
+          }
         />
         <StatCard
           label="Average P&L %"
-          value={loading ? "…" : formatPercent(summary?.average_pnl_percent)}
+          value={loading ? "…" : hasUnknownPnl ? "Not evaluated" : formatPercent(summary?.average_pnl_percent)}
         />
         <StatCard
           label="Average Holding"
-          value={loading ? "…" : formatDuration(summary?.average_holding_period_seconds)}
+          value={
+            loading
+              ? "…"
+              : formatDuration(summary?.average_holding_period_seconds)
+          }
         />
         <StatCard
-          label="Total Fees"
-          value={loading ? "…" : formatCurrency(summary?.total_fees)}
+          label={summary?.fee_coverage ? `Recorded Fees Subtotal (${summary?.fee_coverage ?? "unknown"} coverage)` : "Total Fees"}
+          value={loading ? "…" : (summary?.fee_coverage === "unknown" || (!summary?.fee_coverage && hasUnknownFees)) ? "Not evaluated" : formatCurrency(summary?.total_fees)}
         />
       </div>
+
+      {summary?.known_outcomes != null && summary?.unknown_outcomes != null ? (<p className="text-sm text-slate-600">
+        Selected cohort: {summary?.closed_positions ?? 0} closed, {summary?.known_outcomes ?? 0} known outcomes,
+        {" "}{summary?.unknown_outcomes ?? 0} unknown. Known zero is a non-win; win requires net P&amp;L &gt; 0.
+        Recorded execution fees only; tax, spread and FX are not verified.
+        Measured fee components: {formatCurrency(summary?.measured_fee_components_total)}
+        {" "}({summary?.known_fee_components ?? 0} known, {summary?.unknown_fee_components ?? 0} missing).
+      </p>) : null}
 
       {error ? (
         <Card className="rounded-none border-rose-200 bg-rose-50 shadow-none">
@@ -441,6 +482,14 @@ export function TradeAnalysisListClient() {
           </CardContent>
         </Card>
       ) : null}
+
+      <section aria-label="Analysis scope and coverage" className="space-y-2 text-sm text-slate-700">
+        <p>Applied filters: {Object.entries(filters).map(([key, value]) => `${key}: ${value || "All"}`).join(" · ")}</p>
+        <p>Displayed records: {data ? data.items.length : "Unavailable"}. {summary?.win_rate_denominator == null ? "Outcome-label and fee coverage denominators: unavailable in this response." : "See the selected-cohort counts above."} Aggregate totals do not establish complete coverage.</p>
+        {data ? <p>Displayed-record coverage only: known net P&amp;L {data.items.filter((item) => Number.isFinite(item.net_pnl)).length}/{data.items.length}; known fees {data.items.filter((item) => Number.isFinite(item.fees_total)).length}/{data.items.length}. These counts do not establish full-cohort coverage.</p> : null}
+        {data ? <JsonPanel title="Reported Summary Raw Evidence" value={summary} /> : null}
+        <p>Source and analysis versions: unavailable unless supplied in the raw evidence. Exit observations do not establish post-exit performance.</p>
+      </section>
 
       <Tabs defaultValue="trades" className="gap-6">
         <TabsList variant="line">
@@ -475,10 +524,10 @@ export function TradeAnalysisListClient() {
                     <div className="space-y-2">
                       <CardTitle className="text-lg text-slate-950">{item.title}</CardTitle>
                       <div className="flex flex-wrap gap-2">
-                        <TradeAnalysisBadge value={item.final_tag} />
+                        <TradeAnalysisBadge value={item.final_tag === "OPEN" ? tradeOutcomeLabel(item) : item.final_tag} />
                         <TradeAnalysisBadge value={item.status} />
                         {item.pnl_outcome_tag !== item.final_tag ? (
-                          <TradeAnalysisBadge value={item.pnl_outcome_tag} />
+                          <TradeAnalysisBadge value={tradeOutcomeLabel(item)} />
                         ) : null}
                         {item.is_squared_off ? (
                           <TradeAnalysisBadge value="SQUARED_OFF" className="border-slate-200 bg-white text-slate-700" />
@@ -505,12 +554,7 @@ export function TradeAnalysisListClient() {
                         price: item.buy_requested_price ?? item.buy_price,
                         odds: item.buy_requested_odds ?? item.buy_odds,
                       })}</p>
-                      <p>Filled: {formatExecutionSummary({
-                        amount: item.buy_filled_amount ?? item.buy_amount,
-                        shares: item.buy_filled_shares ?? item.buy_shares,
-                        price: item.buy_average_fill_price ?? item.buy_price,
-                        odds: item.buy_average_fill_odds ?? item.buy_odds,
-                      })}</p>
+                      <p>Filled: {formatExecutionSummary(tradeExecutionFill(item, "buy"))}</p>
                       <p>Status: {item.buy_status || "—"}</p>
                     </div>
                     <div className="space-y-1 text-sm text-slate-700">
@@ -524,12 +568,7 @@ export function TradeAnalysisListClient() {
                         price: item.sell_requested_price ?? item.exit_price,
                         odds: item.sell_requested_odds ?? item.exit_odds,
                       })}</p>
-                      <p>Filled: {formatExecutionSummary({
-                        amount: item.sell_filled_amount ?? item.exit_amount,
-                        shares: item.sell_filled_shares ?? item.exit_shares,
-                        price: item.sell_average_fill_price ?? item.exit_price,
-                        odds: item.sell_average_fill_odds ?? item.exit_odds,
-                      })}</p>
+                      <p>Filled: {formatExecutionSummary(tradeExecutionFill(item, "sell"))}</p>
                       <p>Status: {item.sell_status || (item.is_squared_off ? "completed" : "—")}</p>
                     </div>
                     <div className="space-y-1 text-sm text-slate-700">
@@ -549,7 +588,7 @@ export function TradeAnalysisListClient() {
                     </div>
                     <div className="space-y-1 text-sm text-slate-700">
                       <p className="font-semibold text-slate-950">Reasoning</p>
-                      <p>Confidence: {formatPercent((item.confidence ?? 0) * 100)}</p>
+                      <p>Confidence: {formatConfidence(item.confidence)}</p>
                       <p>Risk score: {formatNumber(item.risk_score, 2)}</p>
                       <p>{item.short_reason || "No buy summary stored."}</p>
                       <p>{item.exit_reason ? `Exit reason: ${item.exit_reason}` : "Position still open or exit reason unavailable."}</p>
@@ -563,47 +602,100 @@ export function TradeAnalysisListClient() {
         </TabsContent>
 
         <TabsContent value="learning" className="space-y-4">
-          <div className="grid gap-4 lg:grid-cols-2">
-            <LearningCard
-              title="Recommendations"
-              items={learning?.recommendations ?? []}
-            />
-            <LearningCard
-              title="Profitable Tags"
-              items={listEntries(learning?.profitable_tags ?? [], "tag")}
-            />
-            <LearningCard
-              title="Unprofitable Tags"
-              items={listEntries(learning?.unprofitable_tags ?? [], "tag")}
-            />
-            <LearningCard
-              title="Exit Reasons Ranked By P&L"
-              items={listEntries(learning?.exit_reasons_ranked_by_pnl ?? [], "reason")}
-            />
-            <LearningCard
-              title="Buy Reasons Ranked By P&L"
-              items={listEntries(learning?.buy_reasons_ranked_by_pnl ?? [], "reason")}
-            />
-            <LearningCard
-              title="Confidence And Liquidity Buckets"
-              items={[
-                ...listEntries(learning?.average_pnl_by_confidence_bucket ?? [], "bucket"),
-                ...listEntries(learning?.average_pnl_by_liquidity_bucket ?? [], "bucket"),
-              ]}
-            />
-          </div>
+          {loading ? (
+            <p role="status" className="text-sm text-slate-500">
+              Loading learning insights…
+            </p>
+          ) : (
+            <>
+              <p className="text-sm leading-6 text-slate-700">
+                Descriptive observations only. Calibration, causal attribution and weight
+                changes are not evaluated. Stored recommendations are unvalidated hypotheses.
+              </p>
+              <div className="grid gap-4 lg:grid-cols-2">
+                <LearningCard
+                  title="Recommendations"
+                  items={learning?.recommendations}
+                />
+                <LearningCard
+                  title="Profitable Tags"
+                  items={
+                    learning?.profitable_tags
+                      ? listEntries(learning.profitable_tags, "tag")
+                      : undefined
+                  }
+                />
+                <LearningCard
+                  title="Unprofitable Tags"
+                  items={
+                    learning?.unprofitable_tags
+                      ? listEntries(learning.unprofitable_tags, "tag")
+                      : undefined
+                  }
+                />
+                <LearningCard
+                  title="Exit Reasons Ranked By P&L"
+                  items={
+                    learning?.exit_reasons_ranked_by_pnl
+                      ? listEntries(
+                          learning.exit_reasons_ranked_by_pnl,
+                          "reason",
+                        )
+                      : undefined
+                  }
+                />
+                <LearningCard
+                  title="Buy Reasons Ranked By P&L"
+                  items={
+                    learning?.buy_reasons_ranked_by_pnl
+                      ? listEntries(
+                          learning.buy_reasons_ranked_by_pnl,
+                          "reason",
+                        )
+                      : undefined
+                  }
+                />
+                <LearningCard
+                  title="Confidence And Liquidity Buckets"
+                  items={
+                    learning?.average_pnl_by_confidence_bucket &&
+                    learning?.average_pnl_by_liquidity_bucket
+                      ? [
+                          ...listEntries(
+                            learning?.average_pnl_by_confidence_bucket ?? [],
+                            "bucket",
+                          ),
+                          ...listEntries(
+                            learning?.average_pnl_by_liquidity_bucket ?? [],
+                            "bucket",
+                          ),
+                        ]
+                      : undefined
+                  }
+                />
+              </div>
 
-          <Card className="rounded-none border-slate-200 shadow-none">
-            <CardHeader>
-              <CardTitle className="text-base text-slate-950">Learning Raw Data</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <JsonPanel
-                title="Learning Insights JSON"
-                value={learning as BullpenTradeAnalysisLearningInsights | null}
-              />
-            </CardContent>
-          </Card>
+              <Card className="rounded-none border-slate-200 shadow-none">
+                <CardHeader>
+                  <CardTitle className="text-base text-slate-950">
+                    Learning Raw Data
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {learning && Object.keys(learning).length > 0 ? (
+                    <JsonPanel
+                      title="Learning Insights JSON"
+                      value={learning}
+                    />
+                  ) : (
+                    <p className="text-sm text-slate-500">
+                      Learning insights unavailable.
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
+            </>
+          )}
         </TabsContent>
       </Tabs>
     </div>

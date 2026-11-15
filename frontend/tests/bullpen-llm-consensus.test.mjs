@@ -240,7 +240,7 @@ test("getBullpenReturnsPerDayBreakdown uses unpriced upside for current odds mat
       daysUntilClose: 1.7,
       llmYesOdds: 12.5,
       llmNoOdds: 87.5,
-      result: 44.41,
+      result: 13.25,
     },
   );
 
@@ -258,7 +258,29 @@ test("getBullpenReturnsPerDayBreakdown uses unpriced upside for current odds mat
       daysUntilClose: 1.7,
       llmYesOdds: 60,
       llmNoOdds: 40,
-      result: 13.24,
+      result: 3.95,
+    },
+  );
+});
+
+test("getBullpenReturnsPerDayBreakdown uses the strongest current side before LLM coverage", async () => {
+  const { getBullpenReturnsPerDayBreakdown } = await loadBullpenAiModule();
+
+  assert.deepEqual(
+    getBullpenReturnsPerDayBreakdown({
+      yesOdds: 88.5,
+      noOdds: 11.5,
+      llmYesOdds: null,
+      llmNoOdds: null,
+      daysUntilClose: 2,
+    }),
+    {
+      currentOdds: 88.5,
+      currentSide: "Yes",
+      daysUntilClose: 2,
+      llmYesOdds: null,
+      llmNoOdds: null,
+      result: 1.92,
     },
   );
 });

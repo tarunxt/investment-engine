@@ -33,6 +33,7 @@ export type BullpenStage2AuthoritativeActionables = {
 
 type BuildBullpenStage2ActionablesInput = {
   activePositions: BullpenAutoRunActivePositionView[];
+  activePositionQuestions?: BullpenQuestionRow[];
   decisions: BullpenAutoLiveDecision[];
   selectedRows: BullpenQuestionRow[];
   authoritativeActionables?: BullpenStage2AuthoritativeActionables | null;
@@ -55,7 +56,9 @@ function uniqueKeys(values: Array<string | null | undefined>) {
 
 function activePositionKeys(position: BullpenAutoRunActivePositionView) {
   return uniqueKeys([
+    position.positionKey,
     position.marketId,
+    position.conditionId,
     position.slug,
     position.marketUrl,
     position.marketTitle,
@@ -72,7 +75,16 @@ function decisionKeys(decision: BullpenAutoLiveDecision) {
 }
 
 function selectedRowKeys(row: BullpenQuestionRow) {
-  return uniqueKeys([row.marketId, row.slug, row.marketUrl, row.question, row.id]);
+  return uniqueKeys([
+    row.positionKey,
+    row.marketId,
+    row.conditionId,
+    row.questionId,
+    row.slug,
+    row.marketUrl,
+    row.question,
+    row.id,
+  ]);
 }
 
 function sharesAnyKey(left: string[], right: string[]) {
@@ -248,6 +260,7 @@ function buildAuthoritativePlaceholderItem({
 
 function buildAuthoritativeActionables({
   activePositions,
+  activePositionQuestions = [],
   decisions,
   selectedRows,
   authoritativeActionables,
@@ -266,12 +279,27 @@ function buildAuthoritativeActionables({
     rank: index + 1,
     keys: selectedRowKeys(row),
   }));
+  const activeQuestionEntries = activePositionQuestions.map((row) => ({
+    row,
+    keys: selectedRowKeys(row),
+  }));
+  const findPositionForAuthoritativeKeys = (authoritativeKeys: string[]) => {
+    const directPosition = liveActivePositions.find((candidate) =>
+      sharesAnyKey(authoritativeKeys, activePositionKeys(candidate)),
+    );
+    if (directPosition) return directPosition;
+    const questionEntry = activeQuestionEntries.find((entry) =>
+      sharesAnyKey(authoritativeKeys, entry.keys),
+    );
+    if (!questionEntry) return undefined;
+    return liveActivePositions.find((candidate) =>
+      sharesAnyKey(questionEntry.keys, activePositionKeys(candidate)),
+    );
+  };
 
   const eventExits = exitMarketIds.map((marketId) => {
     const authoritativeKeys = uniqueKeys([marketId]);
-    const position = liveActivePositions.find((candidate) =>
-      sharesAnyKey(authoritativeKeys, activePositionKeys(candidate)),
-    );
+    const position = findPositionForAuthoritativeKeys(authoritativeKeys);
     const decision = decisions.find((candidate) =>
       sharesAnyKey(authoritativeKeys, decisionKeys(candidate)),
     );
@@ -322,9 +350,15 @@ function buildAuthoritativeActionables({
       .filter((key): key is string => key !== null),
   );
   const hold = liveActivePositions
-    .filter((position) =>
-      !activePositionKeys(position).some((key) => exitKeySet.has(key)),
-    )
+    .filter((position) => {
+      const positionKeys = activePositionKeys(position);
+      const questionKeys = activeQuestionEntries.find((entry) =>
+        sharesAnyKey(entry.keys, positionKeys),
+      )?.keys ?? [];
+      return ![...positionKeys, ...questionKeys].some((key) =>
+        exitKeySet.has(key),
+      );
+    })
     .map((position) => {
       const matchingDecision = findMatchingDecisions(
         activePositionKeys(position),
@@ -355,6 +389,7 @@ function buildAuthoritativeActionables({
  */
 export function buildBullpenStage2Actionables({
   activePositions,
+  activePositionQuestions = [],
   decisions,
   selectedRows,
   authoritativeActionables = null,
@@ -362,6 +397,7 @@ export function buildBullpenStage2Actionables({
   if (authoritativeActionables) {
     return buildAuthoritativeActionables({
       activePositions,
+      activePositionQuestions,
       decisions,
       selectedRows,
       authoritativeActionables,

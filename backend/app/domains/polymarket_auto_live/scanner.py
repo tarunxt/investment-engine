@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import re
-from collections.abc import AsyncIterator
+import time
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -14,9 +16,15 @@ import httpx
 from app.domains.polymarket_auto_live.category import read_polymarket_theme
 
 POLYMARKET_GAMMA_MARKETS_URL = "https://gamma-api.polymarket.com/markets"
+POLYMARKET_GAMMA_EVENTS_URL = "https://gamma-api.polymarket.com/events"
+POLYMARKET_GAMMA_EVENTS_KEYSET_URL = (
+    "https://gamma-api.polymarket.com/events/keyset"
+)
 POLYMARKET_HTTP_HEADERS = {"User-Agent": "investment-engine-bullpen-auto-live/1.0"}
-GAMMA_PAGE_SIZE = 500
-SCAN_LIMIT = 1_500
+GAMMA_EVENT_PAGE_SIZE = 100
+GAMMA_DEADLINE_CURSOR_PAGE_SIZE = 500
+GAMMA_DEADLINE_CURSOR_MAX_OFFSET = 1_900
+GAMMA_KEYSET_EVENT_PAGE_SIZE = 500
 DEFAULT_GAMMA_HTTP_TIMEOUT_SECONDS = 20.0
 
 _SHARED_GAMMA_CLIENT: ContextVar[httpx.AsyncClient | None] = ContextVar(
@@ -293,6 +301,7 @@ class ScannedMarket:
     best_bid_cents: float | None
     best_ask_cents: float | None
     spread_cents: float | None
+    volume_24hr_usd: float | None = None
     force_include: bool = False
     raw: dict[str, Any] | None = None
 
@@ -305,6 +314,8 @@ class ScanRejectedMarket:
     market_url: str | None
     reasons: list[str]
     force_included_position: bool = False
+    source_market: ScannedMarket | None = None
+    serialized_candidate: dict[str, object] | None = None
 
 
 @dataclass
@@ -314,6 +325,9 @@ class ScanResult:
     scanned_at: str
     accepted: list[ScannedMarket]
     rejected: list[ScanRejectedMarket]
+    complete_universe: bool = True
+    warning: str | None = None
+    details: str | None = None
 
 
 def _now_iso() -> str:
@@ -421,6 +435,15 @@ def _read_outcome_labels(row: dict[str, Any]) -> list[str]:
 def _read_yes_no_prices(
     outcome_labels: list[str], row: dict[str, Any]
 ) -> tuple[float | None, float | None]:
+    """Return executable buy prices for each side of a binary order book.
+
+    Gamma outcomePrices are indicative/last-traded probabilities, not
+    necessarily prices at which a new order can fill. For a binary YES token,
+    bestAsk is the executable Buy Yes price and the complement of bestBid is
+    the executable Buy No price. Keep outcome prices only as a compatibility
+    fallback when either side of the book is unavailable.
+    """
+
     normalized_labels = [_normalize_text(label) for label in outcome_labels]
     prices = [_parse_float(item) for item in _parse_json_list(row.get("outcomePrices"))]
     yes_price = None
@@ -433,8 +456,16 @@ def _read_yes_no_prices(
         no_index = normalized_labels.index("no")
         if no_index < len(prices):
             no_price = prices[no_index]
-    return _normalize_odds(yes_price), _normalize_odds(no_price)
 
+    if len(set(normalized_labels)) == 2 and set(normalized_labels) == {"yes", "no"}:
+        best_ask_cents = _normalize_odds(_parse_float(row.get("bestAsk")))
+        best_bid_cents = _normalize_odds(_parse_float(row.get("bestBid")))
+        if best_ask_cents is not None:
+            yes_price = best_ask_cents
+        if best_bid_cents is not None:
+            no_price = round(100.0 - best_bid_cents, 2)
+
+    return _normalize_odds(yes_price), _normalize_odds(no_price)
 
 def _is_binary_yes_no(
     outcome_labels: list[str], yes_odds: float | None, no_odds: float | None
@@ -601,6 +632,7 @@ def _normalize_market(
         current_yes_odds=yes_odds,
         current_no_odds=no_odds,
         volume_usd=_parse_float(row.get("volumeNum") or row.get("volume")),
+        volume_24hr_usd=_parse_float(row.get("volume24hr")),
         liquidity_usd=_parse_float(row.get("liquidityNum") or row.get("liquidity")),
         description=(
             row.get("description").strip()
@@ -622,14 +654,184 @@ async def _fetch_gamma_page(
     client: httpx.AsyncClient,
     *,
     offset: int,
-) -> list[dict[str, Any]]:
+    end_date_min: str | None,
+) -> tuple[list[dict[str, Any]], int]:
+    params = {
+        "active": "true",
+        "archived": "false",
+        "closed": "false",
+        "limit": str(GAMMA_EVENT_PAGE_SIZE),
+        "offset": str(offset),
+    }
+    if end_date_min is not None:
+        params["end_date_min"] = end_date_min
     response = await client.get(
-        POLYMARKET_GAMMA_MARKETS_URL,
+        POLYMARKET_GAMMA_EVENTS_URL,
+        params=params,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    events = payload if isinstance(payload, list) else []
+    markets: list[dict[str, Any]] = []
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        if (
+            event.get("closed") is True
+            or event.get("active") is False
+            or event.get("archived") is True
+        ):
+            continue
+        event_identity = {
+            key: event[key]
+            for key in ("id", "slug", "title")
+            if key in event
+        }
+        event_markets = event.get("markets")
+        if not isinstance(event_markets, list):
+            continue
+        for market in event_markets:
+            if not isinstance(market, dict):
+                continue
+            if (
+                market.get("closed") is True
+                or market.get("active") is False
+                or market.get("archived") is True
+            ):
+                continue
+            normalized_row = dict(market)
+            normalized_row["_export_event"] = {key: value for key, value in event.items() if key != "markets"}
+            normalized_row.setdefault("events", [event_identity])
+            markets.append(normalized_row)
+    return markets, len(events)
+
+
+async def _fetch_gamma_keyset_page(
+    client: httpx.AsyncClient,
+    *,
+    after_cursor: str | None,
+    end_date_min: str | None,
+) -> tuple[list[dict[str, Any]], str | None]:
+    """Fetch one high-throughput event-keyset page for exhaustive discovery.
+
+    Parent events carry every child market and support pages five times larger
+    than the market-keyset endpoint, reducing cursor round trips while still
+    proving the complete cursor chain.
+    """
+
+    params: dict[str, str] = {
+        "archived": "false",
+        "closed": "false",
+        "limit": str(GAMMA_KEYSET_EVENT_PAGE_SIZE),
+    }
+    if end_date_min is not None:
+        params["end_date_min"] = end_date_min
+    if after_cursor:
+        params["after_cursor"] = after_cursor
+    response = await client.get(POLYMARKET_GAMMA_EVENTS_KEYSET_URL, params=params)
+    response.raise_for_status()
+    payload = response.json()
+    if not isinstance(payload, dict):
+        raise ValueError("Gamma keyset response must be an object.")
+    events = payload.get("events")
+    if not isinstance(events, list):
+        raise ValueError("Gamma keyset response did not include an events list.")
+    markets: list[dict[str, Any]] = []
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        if (
+            event.get("closed") is True
+            or event.get("active") is False
+            or event.get("archived") is True
+        ):
+            continue
+        event_identity = {
+            key: event[key]
+            for key in ("id", "slug", "title")
+            if key in event
+        }
+        event_markets = event.get("markets")
+        if not isinstance(event_markets, list):
+            continue
+        for market in event_markets:
+            if not isinstance(market, dict):
+                continue
+            if (
+                market.get("closed") is True
+                or market.get("active") is False
+                or market.get("archived") is True
+            ):
+                continue
+            normalized_row = dict(market)
+            normalized_row["_export_event"] = {key: value for key, value in event.items() if key != "markets"}
+            normalized_row.setdefault("events", [event_identity])
+            markets.append(normalized_row)
+
+    next_cursor = payload.get("next_cursor")
+    normalized_cursor = (
+        next_cursor.strip()
+        if isinstance(next_cursor, str) and next_cursor.strip()
+        else None
+    )
+    # Gamma follows the Polymarket cursor convention where LTE= is the
+    # base64-encoded terminal sentinel (-1), not another page token.
+    if normalized_cursor in {"LTE=", "-1"}:
+        normalized_cursor = None
+    return markets, normalized_cursor
+
+
+async def _fetch_gamma_keyset_page_with_retries(
+    client: httpx.AsyncClient,
+    *,
+    after_cursor: str | None,
+    end_date_min: str | None,
+) -> tuple[list[dict[str, Any]], str | None]:
+    """Retry the same cursor only for transient read failures; never skip pages.
+
+    The caller's total page budget also bounds retries and backoff. Cancellation,
+    invalid payloads, and permanent HTTP errors propagate immediately.
+    """
+    for attempt in range(3):
+        try:
+            return await _fetch_gamma_keyset_page(
+                client, after_cursor=after_cursor, end_date_min=end_date_min,
+            )
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code != 429 and exc.response.status_code < 500:
+                raise
+            if attempt == 2:
+                raise
+        except httpx.TransportError:
+            if attempt == 2:
+                raise
+        await asyncio.sleep(attempt + 1)
+    raise RuntimeError("Gamma page retries exhausted")
+
+
+async def _fetch_gamma_deadline_cursor_page(
+    client: httpx.AsyncClient,
+    *,
+    offset: int,
+    end_date_min: str,
+) -> tuple[list[dict[str, Any]], int, str | None, int]:
+    """Fetch one ordered event page and expose a safe rolling deadline cursor.
+
+    Gamma rejects large offsets even though the active universe is larger than
+    that limit.  Ordering by deadline lets the 008 scanner advance the lower
+    bound after every page while retaining an offset only for events that share
+    the boundary deadline.  The caller verifies that every full page advances
+    either the deadline or that boundary offset before accepting completeness.
+    """
+
+    response = await client.get(
+        POLYMARKET_GAMMA_EVENTS_URL,
         params={
             "active": "true",
             "archived": "false",
             "closed": "false",
-            "limit": str(GAMMA_PAGE_SIZE),
+            "end_date_min": end_date_min,
+            "limit": str(GAMMA_DEADLINE_CURSOR_PAGE_SIZE),
             "offset": str(offset),
             "order": "endDate",
             "ascending": "true",
@@ -637,7 +839,50 @@ async def _fetch_gamma_page(
     )
     response.raise_for_status()
     payload = response.json()
-    return payload if isinstance(payload, list) else []
+    events = payload if isinstance(payload, list) else []
+    markets: list[dict[str, Any]] = []
+    deadlines: list[str] = []
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        deadline = _normalize_close_time(event.get("endDate"))
+        if deadline is not None:
+            deadlines.append(deadline)
+        if (
+            event.get("closed") is True
+            or event.get("active") is False
+            or event.get("archived") is True
+        ):
+            continue
+        event_identity = {
+            key: event[key]
+            for key in ("id", "slug", "title")
+            if key in event
+        }
+        event_markets = event.get("markets")
+        if not isinstance(event_markets, list):
+            continue
+        for market in event_markets:
+            if not isinstance(market, dict):
+                continue
+            if (
+                market.get("closed") is True
+                or market.get("active") is False
+                or market.get("archived") is True
+            ):
+                continue
+            normalized_row = dict(market)
+            normalized_row["_export_event"] = {key: value for key, value in event.items() if key != "markets"}
+            normalized_row.setdefault("events", [event_identity])
+            markets.append(normalized_row)
+
+    last_deadline = max(deadlines) if deadlines else None
+    boundary_count = (
+        sum(1 for deadline in deadlines if deadline == last_deadline)
+        if last_deadline is not None
+        else 0
+    )
+    return markets, len(events), last_deadline, boundary_count
 
 
 @asynccontextmanager
@@ -876,21 +1121,98 @@ async def scan_candidate_markets(
     *,
     min_liquidity_usd: float,
     existing_position_slugs: set[str] | None = None,
+    apply_base_filters: bool = True,
+    use_keyset_pagination: bool = False,
+    use_deadline_cursor_pagination: bool = False,
+    preserve_partial_on_error: bool = False,
+    pagination_deadline_seconds: float | None = None,
+    filter_parent_deadlines: bool = True,
+    progress_callback: Callable[[int, int], None] | None = None,
+    market_filter: Callable[[ScannedMarket], list[str]] | None = None,
+    rejected_callback: Callable[[ScanRejectedMarket], None] | None = None,
+    accepted_callback: Callable[[ScannedMarket], None] | None = None,
+    page_cache_key: str | None = None,
+    retain_candidates: bool = True,
 ) -> ScanResult:
     existing_position_slugs = existing_position_slugs or set()
     accepted: list[ScannedMarket] = []
     rejected: list[ScanRejectedMarket] = []
     seen_market_ids: set[str] = set()
+    current_universe_start = _now_iso() if filter_parent_deadlines else None
+    pagination_error: Exception | None = None
+    pagination_started_at = time.monotonic()
+    completed_pages = 0
+    from app.domains.polymarket_auto_live.scan_page_cache import ScanPageCache
+    page_cache = ScanPageCache(page_cache_key) if page_cache_key else None
 
     async with httpx.AsyncClient(
         timeout=20,
         headers=POLYMARKET_HTTP_HEADERS,
     ) as client:
         offset = 0
-        while offset < SCAN_LIMIT:
-            rows = await _fetch_gamma_page(client, offset=offset)
+        after_cursor: str | None = None
+        seen_cursors: set[str] = set()
+        deadline_boundary: str | None = None
+        deadline_boundary_seen = 0
+        while True:
+            try:
+                if (
+                    pagination_deadline_seconds is not None
+                    and time.monotonic() - pagination_started_at
+                    >= pagination_deadline_seconds
+                ):
+                    raise TimeoutError(
+                        "Gamma pagination exceeded its full-universe deadline."
+                    )
+                # HTTPX read timeouts reset on every received chunk. Bound the
+                # entire page request too, including a slow trickling response.
+                page_budget = 60.0
+                if pagination_deadline_seconds is not None:
+                    page_budget = min(page_budget, max(0.001,
+                        pagination_deadline_seconds - (time.monotonic() - pagination_started_at)))
+                async with asyncio.timeout(page_budget):
+                    if use_deadline_cursor_pagination:
+                        rows, event_count, last_deadline, boundary_count = (
+                            await _fetch_gamma_deadline_cursor_page(
+                                client,
+                                offset=offset,
+                                end_date_min=current_universe_start or _now_iso(),
+                            )
+                        )
+                        next_cursor = None
+                    elif use_keyset_pagination:
+                        cached = page_cache.read(after_cursor, current_universe_start) if page_cache else None
+                        if cached is not None:
+                            rows, next_cursor = cached
+                        else:
+                            rows, next_cursor = await _fetch_gamma_keyset_page_with_retries(
+                                client,
+                                after_cursor=after_cursor,
+                                end_date_min=current_universe_start,
+                            )
+                            if page_cache is not None:
+                                page_cache.write(after_cursor, current_universe_start, rows, next_cursor)
+                        event_count = 0
+                    else:
+                        rows, event_count = await _fetch_gamma_page(
+                            client,
+                            offset=offset,
+                            end_date_min=current_universe_start,
+                        )
+                        next_cursor = None
+            except Exception as exc:
+                if not preserve_partial_on_error or not seen_market_ids:
+                    raise
+                pagination_error = exc
+                break
             for row in rows:
                 if not isinstance(row, dict):
+                    continue
+                if (
+                    row.get("closed") is True
+                    or row.get("active") is False
+                    or row.get("archived") is True
+                ):
                     continue
                 normalized = _normalize_market(
                     row,
@@ -902,25 +1224,76 @@ async def scan_candidate_markets(
                 if normalized is None or normalized.market_id in seen_market_ids:
                     continue
                 seen_market_ids.add(normalized.market_id)
-                reasons = _evaluate_filter_reasons(
-                    normalized,
-                    min_liquidity_usd=min_liquidity_usd,
+                reasons = market_filter(normalized) if market_filter is not None else (
+                    _evaluate_filter_reasons(
+                        normalized,
+                        min_liquidity_usd=min_liquidity_usd,
+                    )
+                    if apply_base_filters
+                    else []
                 )
                 if reasons and not normalized.force_include:
-                    rejected.append(
-                        ScanRejectedMarket(
+                    rejected_market = ScanRejectedMarket(
                             market_id=normalized.market_id,
                             question=normalized.question,
                             slug=normalized.slug,
                             market_url=normalized.market_url,
                             reasons=reasons,
+                            source_market=normalized,
                         )
-                    )
+                    if rejected_callback is not None:
+                        rejected_callback(rejected_market)
+                    rejected.append(rejected_market)
                     continue
-                accepted.append(normalized)
-            if len(rows) < GAMMA_PAGE_SIZE:
-                break
-            offset += GAMMA_PAGE_SIZE
+                if accepted_callback is not None:
+                    accepted_callback(normalized)
+                if retain_candidates:
+                    accepted.append(normalized)
+            completed_pages += 1
+            if progress_callback is not None:
+                progress_callback(len(seen_market_ids), completed_pages)
+            if use_deadline_cursor_pagination:
+                if event_count < GAMMA_DEADLINE_CURSOR_PAGE_SIZE:
+                    break
+                if last_deadline is None or boundary_count <= 0:
+                    raise ValueError(
+                        "Gamma deadline cursor page did not expose a deadline boundary."
+                    )
+                if last_deadline == deadline_boundary:
+                    deadline_boundary_seen += boundary_count
+                else:
+                    deadline_boundary = last_deadline
+                    deadline_boundary_seen = boundary_count
+                previous_state = (current_universe_start, offset)
+                next_offset = offset + event_count
+                if next_offset <= GAMMA_DEADLINE_CURSOR_MAX_OFFSET:
+                    offset = next_offset
+                elif last_deadline > current_universe_start:
+                    current_universe_start = last_deadline
+                    offset = deadline_boundary_seen
+                elif deadline_boundary_seen <= GAMMA_DEADLINE_CURSOR_MAX_OFFSET:
+                    offset = deadline_boundary_seen
+                else:
+                    raise ValueError(
+                        "Gamma deadline boundary exceeds the safe offset window."
+                    )
+                if (current_universe_start, offset) == previous_state:
+                    raise ValueError(
+                        "Gamma deadline cursor did not advance before completion."
+                    )
+            elif use_keyset_pagination:
+                if next_cursor is None:
+                    break
+                if next_cursor in seen_cursors:
+                    raise ValueError(
+                        "Gamma keyset pagination repeated a cursor before completion."
+                    )
+                seen_cursors.add(next_cursor)
+                after_cursor = next_cursor
+            else:
+                if event_count == 0:
+                    break
+                offset += event_count
 
     for slug in sorted(existing_position_slugs):
         if slug in {market.slug for market in accepted if market.slug}:
@@ -933,8 +1306,23 @@ async def scan_candidate_markets(
 
     return ScanResult(
         source_label="Polymarket Gamma API",
-        source_url=POLYMARKET_GAMMA_MARKETS_URL,
+        source_url=(
+            POLYMARKET_GAMMA_EVENTS_KEYSET_URL
+            if use_keyset_pagination
+            else POLYMARKET_GAMMA_EVENTS_URL
+        ),
         scanned_at=_now_iso(),
         accepted=accepted,
         rejected=rejected,
+        complete_universe=pagination_error is None,
+        warning=(
+            "Gamma pagination stopped after preserving the successfully fetched pages."
+            if pagination_error is not None
+            else None
+        ),
+        details=(
+            str(pagination_error) or type(pagination_error).__name__
+            if pagination_error is not None
+            else None
+        ),
     )

@@ -28,19 +28,43 @@ const FORWARDED_HEADER_BLOCKLIST = new Set([
   "x-forwarded-proto",
 ]);
 const RESPONSE_HEADER_BLOCKLIST = new Set(["content-encoding", "content-length"]);
+// Broker connection/snapshot reads may wait behind a database transaction.
+const ZERODHA_SYNC_PROXY_ATTEMPT_TIMEOUT_MS = 16_000;
+const ZERODHA_SYNC_PROXY_TOTAL_TIMEOUT_MS = 18_000;
 const DEFAULT_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS = 1_200;
 const DEFAULT_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 4_000;
-// Auto-Live dashboard, history, and exact-run reads intentionally have backend
-// deadlines of up to four seconds. Give those routes enough time to return
-// their own compact 503/degraded response while keeping the BFF below the
-// console's five-second poll deadline.
+// Captured portfolio reports can wait for a DB connection and parse stored
+// model output. Keep these read-only routes inside the browser's 20s budget.
+const CAPTURED_ANALYSIS_PROXY_ATTEMPT_TIMEOUT_MS = 16_000;
+const CAPTURED_ANALYSIS_PROXY_TOTAL_TIMEOUT_MS = 18_000;
 const DEFAULT_BULLPEN_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS = 4_200;
 const DEFAULT_BULLPEN_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 4_750;
 const MAX_BULLPEN_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS = 4_500;
 const MAX_BULLPEN_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 4_900;
+// History reads have a twelve-second backend deadline because the bounded
+// twenty-scan projection can briefly wait behind a persistence transaction.
+// Keep only these two BFF routes outside that deadline; fast dashboard polling
+// retains its existing strict budget.
+const BULLPEN_HISTORY_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS = 12_500;
+const BULLPEN_HISTORY_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 14_000;
+const BULLPEN_DASHBOARD_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS = 12_500;
+const BULLPEN_DASHBOARD_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 14_000;
+const DEFAULT_EVENT_TRENDS_PROXY_TIMEOUT_MS = 30_000;
+const MIN_EVENT_TRENDS_PROXY_TIMEOUT_MS = 5_000;
+const MAX_EVENT_TRENDS_PROXY_TIMEOUT_MS = 120_000;
+const EVENT_TRENDS_PROXY_TRANSPORT_GRACE_MS = 2_000;
+const BULLPEN_STAGE_ONE_EXCEL_TIMEOUT_MS = 600_000;
+const BULLPEN008_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS = 10_000;
+const BULLPEN008_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 12_000;
+const SPORTS_EVENT_COMPARISONS_PROXY_TIMEOUT_MS = 18_000;
+const SPORTS_RANKINGS_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS = 12_500;
+const SPORTS_RANKINGS_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 14_000;
+const ZERODHA_PROTECTED_ORDER_TIMEOUT_MS = 180_000;
 const DEFAULT_BACKEND_PROXY_MUTATION_TIMEOUT_MS = 8_000;
+const EVENT_TRENDS_SCAN_COUNT_MUTATION_TIMEOUT_MS = 20_000;
 const SAFE_FALLBACK_METHODS = new Set(["GET", "HEAD"]);
 const PUBLIC_BACKEND_PATHS = new Set([
+  "auth/google/config",
   "auth/register",
   "auth/forgot-password",
   "auth/reset-password",
@@ -49,6 +73,15 @@ const PUBLIC_BACKEND_PATHS = new Set([
   "health/ready",
 ]);
 const originCircuit = new ApiOriginCircuitBreaker(2, 30_000);
+// Read fallbacks share a circuit so a dead primary does not consume every
+// dashboard poll budget. Mutations are single-target and carry server-side
+// idempotency keys; they must still reach that target when a prior read opened
+// its circuit. A practically non-opening circuit retains the transport's
+// accounting contract without suppressing an explicitly requested mutation.
+const mutationOriginCircuit = new ApiOriginCircuitBreaker(
+  Number.MAX_SAFE_INTEGER,
+  0,
+);
 
 type BackendApiCandidate = {
   baseUrl: string;
@@ -201,6 +234,14 @@ function readBoundedTimeout(
   return Math.min(Math.max(configured, 1_000), maximumMs);
 }
 
+function formatTimeoutBudget(timeoutMs: number) {
+  const seconds = timeoutMs / 1_000;
+  const value = Number.isInteger(seconds)
+    ? String(seconds)
+    : String(Number(seconds.toFixed(3)));
+  return `${value} ${seconds === 1 ? "second" : "seconds"}`;
+}
+
 function isBullpenAutoLiveRead(method: string, path: string) {
   return (
     SAFE_FALLBACK_METHODS.has(method) &&
@@ -209,13 +250,129 @@ function isBullpenAutoLiveRead(method: string, path: string) {
   );
 }
 
+function getCapturedPortfolioAnalysisReadScope(method: string, path: string) {
+  if (!SAFE_FALLBACK_METHODS.has(method)) return undefined;
+  const match = /^(zerodha|indmoney-us)\/(events|threats)\/(?:latest|history|[0-9]+)$/.exec(path);
+  // Four fixed scopes isolate DB-only reads from wallet/broker failures;
+  // never key circuit state by a user or captured job ID.
+  return match ? `${match[1]}/${match[2]}` : undefined;
+}
+
+function getResearchHistoryReadScope(method: string, path: string) {
+  if (!SAFE_FALLBACK_METHODS.has(method)) return undefined;
+  // Full stored run details and model cost estimates read historical model
+  // output. Keep their deadline and circuit separate from wallet/broker reads.
+  if (path === "runs" || path === "runs/auto-rebalance-history") return "runs/history";
+  if (/^runs\/[0-9]+$/.test(path)) return "runs/detail";
+  if (path === "providers") return "providers";
+  return undefined;
+}
+
+function isBullpen008Read(method: string, path: string) {
+  return (
+    SAFE_FALLBACK_METHODS.has(method) &&
+    (path === "polymarket/bullpen008" ||
+      path.startsWith("polymarket/bullpen008/"))
+  );
+}
+
+function isBullpenHistoryRead(method: string, path: string) {
+  return (
+    SAFE_FALLBACK_METHODS.has(method) &&
+    (path === "polymarket/auto-live/history" ||
+      path === "polymarket/auto-live/history/event-trends")
+  );
+}
+
+function isBullpenEventTrendsRead(method: string, path: string) {
+  return (
+    SAFE_FALLBACK_METHODS.has(method) &&
+    path === "polymarket/auto-live/history/event-trends"
+  );
+}
+
+function isBullpenDashboardRead(method: string, path: string) {
+  return (
+    SAFE_FALLBACK_METHODS.has(method) &&
+    (path === "polymarket/auto-live/status" ||
+      path === "polymarket/auto-live/summary/dashboard" ||
+      path === "polymarket/state")
+  );
+}
+
+function getEventTrendsProxyTimeoutMs(request: NextRequest, path: string) {
+  if (!isBullpenEventTrendsRead(request.method, path)) return null;
+  const requestedSeconds = Number.parseInt(
+    request.nextUrl.searchParams.get("proxy_timeout_seconds") || "",
+    10,
+  );
+  if (!Number.isFinite(requestedSeconds)) {
+    return DEFAULT_EVENT_TRENDS_PROXY_TIMEOUT_MS;
+  }
+  return Math.min(
+    MAX_EVENT_TRENDS_PROXY_TIMEOUT_MS,
+    Math.max(MIN_EVENT_TRENDS_PROXY_TIMEOUT_MS, requestedSeconds * 1_000),
+  );
+}
+
+function isClusteringProgressRead(method: string, path: string) {
+  return SAFE_FALLBACK_METHODS.has(method) &&
+    /^polymarket\/auto-live\/clustering\/[^/]+\/progress$/.test(path);
+}
+
+function isBullpenStageOneExcelDownload(method: string, path: string) {
+  return (
+    method === "GET" &&
+    /^polymarket\/auto-live\/runs\/[^/]+\/stage-one\.xlsx$/.test(path)
+  );
+}
+
+function isSportsEventComparisonsRead(method: string, path: string) {
+  return method === "POST" && path === "api/sports-rankings/event-comparisons";
+}
+
+function isZerodhaSyncRequest(method: string, path: string) {
+  return (
+    (SAFE_FALLBACK_METHODS.has(method) &&
+      ["zerodha/status", "zerodha/login-url", "zerodha/portfolio"].includes(path)) ||
+    (method === "POST" &&
+      ["zerodha/callback", "zerodha/portfolio/sync"].includes(path))
+  );
+}
+
 function getProxyAttemptTimeoutMs(method: string, path: string) {
+  if (method === "POST" && ["zerodha/orders/place-protected-market", "zerodha/orders/place-protected-market-sequenced"].includes(path)) return ZERODHA_PROTECTED_ORDER_TIMEOUT_MS;
+  if (isZerodhaSyncRequest(method, path)) return ZERODHA_SYNC_PROXY_ATTEMPT_TIMEOUT_MS;
+  if (getCapturedPortfolioAnalysisReadScope(method, path) || getResearchHistoryReadScope(method, path)) {
+    return CAPTURED_ANALYSIS_PROXY_ATTEMPT_TIMEOUT_MS;
+  }
+  if (isSportsEventComparisonsRead(method, path)) return SPORTS_EVENT_COMPARISONS_PROXY_TIMEOUT_MS;
+  if (SAFE_FALLBACK_METHODS.has(method) && (path === "api/sports-rankings" || path.startsWith("api/sports-rankings/"))) return SPORTS_RANKINGS_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS;
+  if (/^polymarket\/auto-live\/runs\/[^/]+\/stage-one-export$/.test(path)) return 30_000;
+  if (isBullpenStageOneExcelDownload(method, path)) {
+    return BULLPEN_STAGE_ONE_EXCEL_TIMEOUT_MS;
+  }
+  if (
+    method === "PUT" &&
+    path === "polymarket/auto-live/history/event-trends/scan-count"
+  ) {
+    return EVENT_TRENDS_SCAN_COUNT_MUTATION_TIMEOUT_MS;
+  }
   if (!SAFE_FALLBACK_METHODS.has(method)) {
     return readBoundedTimeout(
       process.env.BACKEND_PROXY_TIMEOUT_MS,
       DEFAULT_BACKEND_PROXY_MUTATION_TIMEOUT_MS,
       30_000,
     );
+  }
+
+
+  if (isBullpenHistoryRead(method, path)) {
+    return BULLPEN_HISTORY_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS;
+  }
+
+  if (isBullpenDashboardRead(method, path)) {
+    return BULLPEN_DASHBOARD_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS;
   }
 
   if (isBullpenAutoLiveRead(method, path)) {
@@ -226,6 +383,10 @@ function getProxyAttemptTimeoutMs(method: string, path: string) {
     );
   }
 
+  if (isBullpen008Read(method, path)) {
+    return BULLPEN008_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS;
+  }
+
   return readBoundedTimeout(
     process.env.BACKEND_PROXY_TIMEOUT_MS,
     DEFAULT_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS,
@@ -234,8 +395,27 @@ function getProxyAttemptTimeoutMs(method: string, path: string) {
 }
 
 function getProxyTotalTimeoutMs(method: string, path: string) {
+  if (method === "POST" && ["zerodha/orders/place-protected-market", "zerodha/orders/place-protected-market-sequenced"].includes(path)) return ZERODHA_PROTECTED_ORDER_TIMEOUT_MS;
+  if (isZerodhaSyncRequest(method, path)) return ZERODHA_SYNC_PROXY_TOTAL_TIMEOUT_MS;
+  if (getCapturedPortfolioAnalysisReadScope(method, path) || getResearchHistoryReadScope(method, path)) {
+    return CAPTURED_ANALYSIS_PROXY_TOTAL_TIMEOUT_MS;
+  }
+  if (isSportsEventComparisonsRead(method, path)) return SPORTS_EVENT_COMPARISONS_PROXY_TIMEOUT_MS;
+  if (SAFE_FALLBACK_METHODS.has(method) && (path === "api/sports-rankings" || path.startsWith("api/sports-rankings/"))) return SPORTS_RANKINGS_BACKEND_PROXY_TOTAL_TIMEOUT_MS;
+  if (/^polymarket\/auto-live\/runs\/[^/]+\/stage-one-export$/.test(path)) return 30_000;
+  if (isBullpenStageOneExcelDownload(method, path)) {
+    return BULLPEN_STAGE_ONE_EXCEL_TIMEOUT_MS;
+  }
   if (!SAFE_FALLBACK_METHODS.has(method)) {
     return getProxyAttemptTimeoutMs(method, path);
+  }
+
+  if (isBullpenHistoryRead(method, path)) {
+    return BULLPEN_HISTORY_BACKEND_PROXY_TOTAL_TIMEOUT_MS;
+  }
+
+  if (isBullpenDashboardRead(method, path)) {
+    return BULLPEN_DASHBOARD_BACKEND_PROXY_TOTAL_TIMEOUT_MS;
   }
 
   if (isBullpenAutoLiveRead(method, path)) {
@@ -244,6 +424,10 @@ function getProxyTotalTimeoutMs(method: string, path: string) {
       DEFAULT_BULLPEN_BACKEND_PROXY_TOTAL_TIMEOUT_MS,
       MAX_BULLPEN_BACKEND_PROXY_TOTAL_TIMEOUT_MS,
     );
+  }
+
+  if (isBullpen008Read(method, path)) {
+    return BULLPEN008_BACKEND_PROXY_TOTAL_TIMEOUT_MS;
   }
 
   // Keep the same-origin BFF attempt chain inside one bounded deadline.
@@ -306,7 +490,27 @@ async function proxyBackendRequest(request: NextRequest, context: RouteContext) 
   const correlationId = createProxyCorrelationId(request);
   let outcome = "unreachable";
   let responseStatus: number | undefined;
-  const resolvedCandidates = resolveBackendApiCandidates(request);
+  // Slow wallet/CLI reads must not open the circuit for healthy database-only
+  // history reads on the same backend origin. Use fixed scopes so this
+  // registry remains bounded; never key circuit state by user or run ID.
+  const readCircuitScope =
+    SAFE_FALLBACK_METHODS.has(request.method) && PUBLIC_BACKEND_PATHS.has(path)
+      ? path
+      : SAFE_FALLBACK_METHODS.has(request.method) && (path === "api/sports-rankings" || path.startsWith("api/sports-rankings/"))
+      ? "api/sports-rankings"
+      : isClusteringProgressRead(request.method, path)
+      ? "polymarket/auto-live/clustering/progress"
+      : SAFE_FALLBACK_METHODS.has(request.method) &&
+    (path === "polymarket/auto-live/history" ||
+      path === "polymarket/auto-live/history/event-trends")
+      ? path
+      : SAFE_FALLBACK_METHODS.has(request.method) && isZerodhaSyncRequest(request.method, path)
+      ? "zerodha/sync"
+      : getCapturedPortfolioAnalysisReadScope(request.method, path)
+        ?? getResearchHistoryReadScope(request.method, path);
+  const resolvedCandidates = resolveBackendApiCandidates(request).map(
+    (candidate) => ({ ...candidate, circuitScope: readCircuitScope }),
+  );
   const isPublicRequest = PUBLIC_BACKEND_PATHS.has(path);
   const backendSession = isPublicRequest
     ? null
@@ -326,32 +530,57 @@ async function proxyBackendRequest(request: NextRequest, context: RouteContext) 
     );
   }
 
-  const totalTimeoutMs = getProxyTotalTimeoutMs(request.method, path);
+  // Logout needs revocation only, even when access is expired or refresh has
+  // already been reserved. Never rotate simply to authenticate this action.
+  const revokeWithRefresh = request.method === "POST" && path === "auth/logout" &&
+    Boolean(backendSession?.refreshToken);
+  const upstreamPath = revokeWithRefresh ? "auth/logout-refresh" : path;
+  const upstreamBody = revokeWithRefresh
+    ? JSON.stringify({ refresh_token: backendSession!.refreshToken })
+    : body;
+
+  const eventTrendsTimeoutMs = getEventTrendsProxyTimeoutMs(request, path);
+  const totalTimeoutMs =
+    eventTrendsTimeoutMs === null
+      ? getProxyTotalTimeoutMs(request.method, path)
+      : eventTrendsTimeoutMs + EVENT_TRENDS_PROXY_TRANSPORT_GRACE_MS;
+  const primaryAttemptTimeoutMs = eventTrendsTimeoutMs
+    ? eventTrendsTimeoutMs + 1_000
+    : getProxyAttemptTimeoutMs(request.method, path);
 
   try {
     const result = await executeBoundedApiRequest({
       method: request.method,
       candidates: resolvedCandidates,
-      circuit: originCircuit,
+      circuit: SAFE_FALLBACK_METHODS.has(request.method)
+        ? originCircuit
+        : mutationOriginCircuit,
       callerSignal: request.signal,
       totalBudgetMs: totalTimeoutMs,
-      primaryAttemptBudgetMs: getProxyAttemptTimeoutMs(request.method, path),
-      refreshAuthentication: backendSession
+      primaryAttemptBudgetMs: primaryAttemptTimeoutMs,
+      refreshAuthentication: backendSession && !revokeWithRefresh
         ? (signal) => rotateBackendTokens(backendSession, signal)
         : undefined,
       fetchCandidate: async (candidate, signal) => {
-        const targetUrl = buildTargetUrl(candidate.baseUrl, path, request);
+        const targetUrl = buildTargetUrl(candidate.baseUrl, upstreamPath, request);
+        const headers = buildForwardHeaders(request, correlationId,
+          revokeWithRefresh ? null : backendSession?.accessToken ?? null);
+        if (revokeWithRefresh) headers.set("Content-Type", "application/json");
         const response = await fetch(targetUrl, {
           method: request.method,
-          headers: buildForwardHeaders(
-            request,
-            correlationId,
-            backendSession?.accessToken ?? null,
-          ),
-          body,
+          headers,
+          body: upstreamBody,
           cache: "no-store",
           signal,
         });
+        if (isBullpenStageOneExcelDownload(request.method, path) && response.ok) {
+          return {
+            body: response.body,
+            status: response.status,
+            statusText: response.statusText,
+            headers: buildResponseHeaders(response),
+          };
+        }
         return bufferBackendResponse(
           response,
           request.method,
@@ -375,7 +604,7 @@ async function proxyBackendRequest(request: NextRequest, context: RouteContext) 
       outcome = "timeout";
       return NextResponse.json(
         {
-          message: "The backend did not respond in time. Please retry.",
+          message: `The backend did not respond in time (${formatTimeoutBudget(eventTrendsTimeoutMs ?? totalTimeoutMs)}). Please retry.`,
         },
         {
           status: 504,
@@ -388,6 +617,13 @@ async function proxyBackendRequest(request: NextRequest, context: RouteContext) 
       );
     }
 
+    if (error instanceof BackendRuntimeHttpError && error.status === 409) {
+      outcome = "refresh_coordination_required";
+      return NextResponse.json(
+        { message: "Your session update is in progress or could not be confirmed. Reload this page, or sign in again." },
+        { status: 409, headers: { "X-Correlation-ID": correlationId } },
+      );
+    }
     if (error instanceof BackendRuntimeHttpError && error.status === 401) {
       outcome = "authentication_failed";
       return NextResponse.json(

@@ -10,8 +10,9 @@ TradingBotSummaryId = Literal[
     "bullpen-x-ai",
     "bullpen-ai-auto-live",
 ]
-TradingBotStatus = Literal["running", "paused", "stopped", "error", "not-configured"]
+TradingBotStatus = Literal["running", "paused", "stopped", "error", "not-configured", "unavailable"]
 TradingBotMode = Literal[
+    "unknown",
     "paper",
     "live-read",
     "live-trading",
@@ -80,3 +81,42 @@ class TradingBotOverviewCard(BaseModel):
 class TradingBotsOverviewResponse(BaseModel):
     generated_at: str
     bots: list[TradingBotOverviewCard] = Field(default_factory=list)
+
+
+class UniversalScanHistoryItem(BaseModel):
+    id: str
+    status: Literal["queued", "running", "completed", "failed", "cancelled"]
+    triggered_by: Literal["manual", "scheduler"]
+    started_at: str | None = None
+    completed_at: str | None = None
+    total_events: int | None = None
+    error: str | None = None
+    export_id: str | None = None
+    rows_sha256: str | None = None
+
+
+class UniversalScanAutoRunStatus(BaseModel):
+    enabled: bool
+    running: bool
+    paused: bool = False
+    kill_requested: bool = False
+    run_id: str | None = None
+    start_at: str
+    refresh_minutes: int
+    next_run_at: str | None = None
+    last_run_at: str | None = None
+    last_completed_at: str | None = None
+    last_completed_run_started_at: str | None = None
+    last_total_events: int | None = None
+    last_failed_at: str | None = None
+    last_error: str | None = None
+    progress_events: int = 0
+    progress_pages: int = 0
+    estimated_total_events: int | None = None
+    progress_message: str | None = None
+    history: list[UniversalScanHistoryItem] = Field(default_factory=list)
+
+
+class UniversalScanScheduleUpdate(BaseModel):
+    start_at: str | None = None
+    refresh_minutes: int | None = Field(default=None, ge=1, le=10_080)

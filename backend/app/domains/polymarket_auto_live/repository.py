@@ -1,14 +1,16 @@
 from __future__ import annotations
 
+from app.domains.polymarket_auto_live.history_projection import history_console_projection
+
 from datetime import UTC, datetime
 from math import ceil
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Iterable, Mapping, Sequence
+from typing import TYPE_CHECKING, Iterable, Literal, Mapping, Sequence
 
 from pydantic import ValidationError
-from sqlalchemy import Select, and_, desc, exists, func, or_, select
+from sqlalchemy import Select, and_, desc, exists, func, inspect, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, object_session
 
 from app.core.logging import get_logger
 from app.domains.polymarket_auto_live.console_projection import (
@@ -44,6 +46,10 @@ from app.domains.polymarket_auto_live.schemas import (
     BullpenAutoLiveVerifiedPortfolioSnapshot,
 )
 
+from app.domains.polymarket_auto_live.trend_snapshot import (
+    frozen_trend_stages, needs_frozen_trend_overlay,
+)
+
 logger = get_logger("app.domains.polymarket_auto_live.repository")
 
 
@@ -61,6 +67,16 @@ def _event_trend_llm_outputs(value: object) -> list[BullpenAutoLiveLlmOutput]:
     return outputs
 
 
+def _event_trend_has_valid_llm_output(
+    outputs: Sequence[BullpenAutoLiveLlmOutput],
+) -> bool:
+    """Return whether at least one model supplied a usable probability pair."""
+    return any(
+        output.llm_yes_odds is not None and output.llm_no_odds is not None
+        for output in outputs
+    )
+
+
 if TYPE_CHECKING:
     from app.domains.polymarket_auto_live.engine import PositionSnapshot
 
@@ -72,6 +88,23 @@ VALID_AUTO_LIVE_STATUSES = {
     "not-configured",
 }
 ACTIVE_AUTO_LIVE_RUN_STATUSES = ("running", "confirming")
+BullpenHistoryWorkspaceProfile = Literal["bullpen007", "bullpen-sports"]
+
+
+def _history_workspace_filter(
+    record: type[PolymarketAutoLiveRunRecord],
+    workspace_profile: BullpenHistoryWorkspaceProfile,
+) -> object:
+    """Assign durable runs to one console workflow, including legacy 007 rows."""
+
+    if workspace_profile == "bullpen-sports":
+        return record.workspace_profile == "bullpen-sports"
+    return or_(
+        record.workspace_profile == "bullpen007",
+        record.workspace_profile.is_(None),
+    )
+
+
 TERMINAL_AUTO_LIVE_INTENT_STATUSES = frozenset(
     {
         "CONFIRMED",
@@ -221,6 +254,16 @@ def record_to_state(record: PolymarketAutoLiveStateRecord | None) -> BullpenAuto
             "next_run_at": _isoformat(record.next_run_at),
         }
     )
+    if record.latest_hourly_rebalance_at is not None:
+        payload.update(
+            {
+                "latest_hourly_rebalance_status": record.latest_hourly_rebalance_status,
+                "latest_hourly_rebalance_at": _isoformat(
+                    record.latest_hourly_rebalance_at
+                ),
+                "latest_hourly_rebalance_detail": record.latest_hourly_rebalance_detail,
+            }
+        )
     payload["status"] = normalize_auto_live_status(payload.get("status"))
     return BullpenAutoLiveState.model_validate(payload)
 
@@ -242,6 +285,7 @@ def record_to_run(record: PolymarketAutoLiveRunRecord) -> BullpenAutoLiveRun:
             "orders_submitted": record.orders_submitted,
             "summary": record.summary,
             "error_message": record.error_message,
+            "workspace_profile": record.workspace_profile or "bullpen007",
         }
     )
     return BullpenAutoLiveRun.model_validate(payload)
@@ -267,6 +311,7 @@ def projected_row_to_run(row: object) -> tuple[BullpenAutoLiveRun, bool]:
         orders_planned=int(getattr(row, "orders_planned", 0) or 0),
         orders_submitted=int(getattr(row, "orders_submitted", 0) or 0),
         error_message=getattr(row, "error_message", None),
+        workspace_profile=getattr(row, "workspace_profile", None),
     )
     return BullpenAutoLiveRun.model_validate(payload), projection_available
 
@@ -400,7 +445,44 @@ def apply_state_to_record(
     record.last_run_at = _parse_datetime(state.last_run_at)
     record.next_run_at = _parse_datetime(state.next_run_at)
     payload = state_to_record_payload(state)
+    existing_payload = record.payload if isinstance(record.payload, dict) else {}
+    durable_rebalance_at = record.latest_hourly_rebalance_at
+    existing_rebalance_at = _parse_datetime(
+        existing_payload.get("latest_hourly_rebalance_at")
+    )
+    incoming_rebalance_at = _parse_datetime(
+        payload.get("latest_hourly_rebalance_at")
+    )
+    if existing_rebalance_at is not None and (
+        incoming_rebalance_at is None
+        or existing_rebalance_at > incoming_rebalance_at
+    ):
+        # A Bullpen worker may save scheduler state that it hydrated before an
+        # external hourly workflow reported its result.  Never let that stale
+        # full-payload write erase or rewind the newer terminal marker.
+        for key in (
+            "latest_hourly_rebalance_status",
+            "latest_hourly_rebalance_at",
+            "latest_hourly_rebalance_detail",
+        ):
+            payload[key] = existing_payload.get(key)
     payload["status"] = normalized_status
+    effective_rebalance_at = _parse_datetime(
+        payload.get("latest_hourly_rebalance_at")
+    )
+    if effective_rebalance_at is not None and (
+        durable_rebalance_at is None
+        or effective_rebalance_at >= durable_rebalance_at
+    ):
+        durable_status = payload.get("latest_hourly_rebalance_status")
+        durable_detail = payload.get("latest_hourly_rebalance_detail")
+        record.latest_hourly_rebalance_status = (
+            str(durable_status) if durable_status is not None else None
+        )
+        record.latest_hourly_rebalance_at = effective_rebalance_at
+        record.latest_hourly_rebalance_detail = (
+            str(durable_detail) if durable_detail is not None else None
+        )
     record.payload = payload
 
 
@@ -412,10 +494,38 @@ def apply_run_to_record(
 ) -> None:
     if record.id != run.id or record.user_id != user_id:
         raise ValueError("Auto-Live run ownership mismatch.")
+    # All persistence paths (including deferred Stage 3 reconciliation) use this
+    # adapter. Record the completion in the same transaction before replacing
+    # the previous payload, so mail cannot observe uncommitted output.
+    attached_session = object_session(record) if inspect(record, raiseerr=False) is not None else None
+    if attached_session is not None:
+        from app.domains.mails.completion_events import record_bullpen_completions
+        record_bullpen_completions(
+            attached_session, user_id=user_id, previous=record.payload,
+            current=run.model_dump(mode="json"),
+        )
     record.id = run.id
     record.user_id = user_id
     record.status = run.status
     record.triggered_by = run.triggered_by
+    requested_workspace_profile = run.workspace_profile
+    if (
+        requested_workspace_profile is None
+        and run.request_context is not None
+        and run.request_context.console_profile is not None
+    ):
+        requested_workspace_profile = (
+            run.request_context.console_profile.workspace_profile
+        )
+    # The engine deliberately removes the potentially large request context
+    # before its terminal save.  Keep the workspace captured by the initial
+    # queued/running save instead of silently moving every completed run back
+    # to the legacy Bullpen 007 default.
+    record.workspace_profile = (
+        requested_workspace_profile
+        or record.workspace_profile
+        or "bullpen007"
+    )
     record.dry_run = run.dry_run
     record.started_at = _parse_datetime(run.started_at) or utc_now()
     record.completed_at = _parse_datetime(run.completed_at)
@@ -576,7 +686,18 @@ class AsyncPolymarketAutoLiveRepository:
         await self.session.flush()
 
     async def save_state(self, user_id: int, state: BullpenAutoLiveState) -> None:
-        record = await self.get_state_record(user_id)
+        # API-owned scheduler paths can also retain an older identity-map copy
+        # while the external hourly workflow commits a newer terminal marker.
+        # Refresh under the same row lock used by synchronous workers before
+        # applying the full state payload.
+        record = (
+            await self.session.execute(
+                select(PolymarketAutoLiveStateRecord)
+                .where(PolymarketAutoLiveStateRecord.user_id == user_id)
+                .with_for_update()
+                .execution_options(populate_existing=True, autoflush=False)
+            )
+        ).scalar_one_or_none()
         if record is None:
             record = PolymarketAutoLiveStateRecord(
                 user_id=user_id,
@@ -830,13 +951,64 @@ class AsyncPolymarketAutoLiveRepository:
         rows = (await self.session.execute(query)).scalars().all()
         return [record_to_run(row) for row in rows]
 
+    async def list_projected_runs(
+        self,
+        user_id: int,
+        *,
+        limit: int | None = None,
+    ) -> list[BullpenAutoLiveRun]:
+        """Return bounded run projections without reading the full JSON payload.
+
+        A completed run payload can be hundreds of megabytes. Selecting ORM
+        entities for the default ``/runs`` response made PostgreSQL stream those
+        payloads even though the API immediately removed all detailed fields.
+        Keep full payload reads available through ``list_runs`` for explicit
+        detail requests while making the normal list path control-plane safe.
+        """
+
+        record = PolymarketAutoLiveRunRecord
+        query = (
+            select(
+                record.id,
+                record.status,
+                record.triggered_by,
+                record.dry_run,
+                record.started_at,
+                record.completed_at,
+                record.live_execution_requested,
+                record.live_execution_attempted,
+                record.decisions_count,
+                record.orders_planned,
+                record.orders_submitted,
+                record.summary,
+                record.error_message,
+                record.workspace_profile,
+                record.console_projection,
+                record.updated_at,
+            )
+            .where(record.user_id == user_id)
+            .order_by(desc(record.started_at), desc(record.created_at))
+        )
+        if limit is not None:
+            query = query.limit(limit)
+        rows = (await self.session.execute(query)).all()
+        return [projected_row_to_run(row)[0] for row in rows]
+
     async def get_latest_projected_run(
         self,
         user_id: int,
+        *,
+        workspace_profile: BullpenHistoryWorkspaceProfile | None = None,
     ) -> tuple[BullpenAutoLiveRun, bool, str] | None:
         """Read the newest console projection without selecting the TOAST payload."""
 
         record = PolymarketAutoLiveRunRecord
+        filters = [
+            record.user_id == user_id,
+            _dashboard_relevant_run_filter(user_id=user_id),
+        ]
+        if workspace_profile is not None:
+            filters.append(_history_workspace_filter(record, workspace_profile))
         row = (
             await self.session.execute(
                 select(
@@ -853,11 +1025,11 @@ class AsyncPolymarketAutoLiveRepository:
                     record.orders_submitted,
                     record.summary,
                     record.error_message,
+                    record.workspace_profile,
                     record.console_projection,
                     record.updated_at,
                 )
-                .where(record.user_id == user_id)
-                .where(_dashboard_relevant_run_filter(user_id=user_id))
+                .where(*filters)
                 .order_by(desc(record.started_at), desc(record.created_at))
                 .limit(1)
             )
@@ -895,6 +1067,7 @@ class AsyncPolymarketAutoLiveRepository:
                     record.orders_submitted,
                     record.summary,
                     record.error_message,
+                    record.workspace_profile,
                     record.console_projection,
                     record.updated_at,
                 )
@@ -1177,19 +1350,36 @@ class AsyncPolymarketAutoLiveRepository:
         *,
         page: int,
         size: int,
+        workspace_profile: BullpenHistoryWorkspaceProfile | None = None,
     ) -> BullpenAutoLiveHistoryPage:
         """Return bounded history rows without loading ``run.payload``."""
 
         normalized_page = max(1, page)
         normalized_size = max(1, min(size, CONSOLE_HISTORY_MAX_SIZE))
         record = PolymarketAutoLiveRunRecord
+        filters = [record.user_id == user_id]
+        if workspace_profile is not None:
+            filters.append(_history_workspace_filter(record, workspace_profile))
         total = int(
             await self.session.scalar(
                 select(func.count())
                 .select_from(record)
-                .where(record.user_id == user_id)
+                .where(*filters)
             )
             or 0
+        )
+        # PostgreSQL can evaluate SELECT projections before discarding OFFSET
+        # rows. Paginate narrow IDs first so page N does not parse all of the
+        # previous pages' large console JSON again. Materialization keeps this
+        # boundary explicit instead of relying on the planner to defer it.
+        history_page = (
+            select(record.id)
+            .where(*filters)
+            .order_by(desc(record.started_at), desc(record.created_at))
+            .offset((normalized_page - 1) * normalized_size)
+            .limit(normalized_size)
+            .cte("history_page")
+            .prefix_with("MATERIALIZED", dialect="postgresql")
         )
         rows = (
             await self.session.execute(
@@ -1207,13 +1397,12 @@ class AsyncPolymarketAutoLiveRepository:
                     record.orders_submitted,
                     record.summary,
                     record.error_message,
-                    record.console_projection,
+                    history_console_projection(record).label("console_projection"),
                     record.updated_at,
                 )
-                .where(record.user_id == user_id)
+                .select_from(record)
+                .join(history_page, record.id == history_page.c.id)
                 .order_by(desc(record.started_at), desc(record.created_at))
-                .offset((normalized_page - 1) * normalized_size)
-                .limit(normalized_size)
             )
         ).all()
         items = []
@@ -1237,7 +1426,13 @@ class AsyncPolymarketAutoLiveRepository:
             generated_at=utc_now().isoformat(),
         )
 
-    async def list_recent_event_trends(self, user_id: int, *, scan_count: int = 20) -> BullpenAutoLiveEventTrendsResponse:
+    async def list_recent_event_trends(
+        self,
+        user_id: int,
+        *,
+        scan_count: int | None = None,
+        workspace_profile: BullpenHistoryWorkspaceProfile | None = None,
+    ) -> BullpenAutoLiveEventTrendsResponse:
         """Aggregate the latest Stage 2 LLM scans, with decision rows as fallback.
 
         The heatmap represents LLM scans, not only Stage 3 decisions. A run can
@@ -1250,28 +1445,136 @@ class AsyncPolymarketAutoLiveRepository:
         """
         run = PolymarketAutoLiveRunRecord
         decision = PolymarketAutoLiveDecisionRecord
-        normalized_scan_count = max(1, min(scan_count, 20))
+        settings = record_to_settings(await self.get_settings_record(user_id))
+        requested_scan_count = (
+            settings.event_trends_scan_count
+            if scan_count is None
+            else scan_count
+        )
+        normalized_scan_count = max(1, min(requested_scan_count, 20))
+        trend_generated_at = utc_now()
+        run_filters = [run.user_id == user_id]
+        if workspace_profile is not None:
+            run_filters.append(_history_workspace_filter(run, workspace_profile))
+        returns_formula = settings.returns_per_day_formula
         run_rows = (await self.session.execute(
             select(
                 run.id,
-                run.payload["stage_results"].label("trend_stage_results"),
+                run.console_projection["stage_results"].label("trend_stage_results"),
+                run.console_projection["version"].as_integer().label(
+                    "trend_projection_version"
+                ),
                 run.started_at,
                 run.completed_at,
                 run.updated_at,
             )
-            .where(run.user_id == user_id)
+            .where(*run_filters)
             .order_by(desc(run.started_at), desc(run.created_at))
             .limit(normalized_scan_count)
         )).all()
         run_ids = [str(row.id) for row in run_rows]
         if not run_ids:
             return BullpenAutoLiveEventTrendsResponse(
-                scan_count=20,
+                scan_count=normalized_scan_count,
                 generated_at=utc_now().isoformat(),
             )
 
         run_index = {run_id: index for index, run_id in enumerate(run_ids)}
         event_scores: dict[str, dict[str, object]] = {}
+
+        def retained_stage1_candidate_count(run_row: object) -> int:
+            raw_stages = getattr(run_row, "trend_stage_results", None)
+            if not isinstance(raw_stages, list):
+                return 0
+            for raw_stage in raw_stages:
+                try:
+                    stage = BullpenAutoLiveStageResult.model_validate(raw_stage)
+                except ValidationError:
+                    continue
+                if workflow_stage_key(stage) != "scan":
+                    continue
+                accepted_rows = stage.outputs.get("accepted_candidates")
+                if isinstance(accepted_rows, list) and accepted_rows:
+                    return len(accepted_rows)
+                accepted_count = stage.outputs.get("accepted_candidates_count")
+                if isinstance(accepted_count, (int, float)) and accepted_count > 0:
+                    return int(accepted_count)
+            return 0
+
+        latest_stage1_run_row = next(
+            (
+                run_row
+                for run_row in run_rows
+                if retained_stage1_candidate_count(run_row) > 0
+            ),
+            run_rows[0],
+        )
+        latest_stage1_run_id = str(latest_stage1_run_row.id)
+
+        def requires_frozen_trend_overlay(run_row: object) -> bool:
+            projection_version = getattr(
+                run_row, "trend_projection_version", None
+            )
+            if (
+                isinstance(projection_version, int)
+                and projection_version >= CONSOLE_PROJECTION_VERSION
+            ):
+                return False
+            return needs_frozen_trend_overlay(
+                getattr(run_row, "trend_stage_results", None)
+            )
+
+        # Projections created before per-model trend retention kept only the
+        # first ten Stage-2 rows and removed their llm_outputs. Read just the
+        # latest run's frozen stage slice as a compatibility overlay. This is
+        # deliberately limited to one run so the first-paint query never loads
+        # twenty complete historical payloads.
+        latest_frozen_stage_row = (await self.session.execute(
+            select(
+                frozen_trend_stages(run).label("trend_stage_results")
+            )
+            .where(run.user_id == user_id)
+            .where(run.id == run_rows[0].id)
+            .where(requires_frozen_trend_overlay(run_rows[0]))
+        )).first()
+        trend_run_rows = list(run_rows)
+        if latest_frozen_stage_row is not None and isinstance(
+            latest_frozen_stage_row.trend_stage_results, list
+        ):
+            trend_run_rows.append(SimpleNamespace(
+                id=run_rows[0].id,
+                trend_stage_results=latest_frozen_stage_row.trend_stage_results,
+                trend_projection_version=getattr(
+                    run_rows[0], "trend_projection_version", None
+                ),
+                started_at=run_rows[0].started_at,
+                completed_at=run_rows[0].completed_at,
+                updated_at=run_rows[0].updated_at,
+            ))
+        if latest_stage1_run_id != run_ids[0]:
+            latest_stage1_frozen_row = (await self.session.execute(
+                select(
+                    frozen_trend_stages(run).label("trend_stage_results")
+                )
+                .where(run.user_id == user_id)
+                .where(run.id == latest_stage1_run_row.id)
+                .where(requires_frozen_trend_overlay(latest_stage1_run_row))
+            )).first()
+            if latest_stage1_frozen_row is not None and isinstance(
+                latest_stage1_frozen_row.trend_stage_results, list
+            ):
+                trend_run_rows.append(SimpleNamespace(
+                    id=latest_stage1_run_row.id,
+                    trend_stage_results=(
+                        latest_stage1_frozen_row.trend_stage_results
+                    ),
+                    trend_projection_version=getattr(
+                        latest_stage1_run_row, "trend_projection_version", None
+                    ),
+                    started_at=latest_stage1_run_row.started_at,
+                    completed_at=latest_stage1_run_row.completed_at,
+                    updated_at=latest_stage1_run_row.updated_at,
+                ))
 
         def as_record(value: object) -> dict[str, object]:
             return value if isinstance(value, dict) else {}
@@ -1304,6 +1607,7 @@ class AsyncPolymarketAutoLiveRepository:
                     "sides": [None] * 20,
                     "timestamps": [None] * 20,
                     "llm_outputs": [[] for _ in range(20)],
+                    "latest_stage1": None,
                     "latest_stage2": None,
                     "latest_decision": None,
                 },
@@ -1312,9 +1616,97 @@ class AsyncPolymarketAutoLiveRepository:
                 entry["title"] = title
             return entry
 
-        # Stage 2 is the source of truth for the scan circles. Read only the
-        # stage_results JSON slice so History does not hydrate complete run payloads.
-        for run_row in run_rows:
+        # The latest Stage 1 accepted-candidate snapshot is the authoritative
+        # universe for the current dashboard (78 rows in the common console
+        # profile). Add every retained row before applying Stage 2 history so
+        # candidates still receive their deadline and current-market metrics
+        # when no model produced usable Yes/No odds.
+        for run_row in trend_run_rows:
+            if str(run_row.id) != latest_stage1_run_id:
+                continue
+            raw_stages = run_row.trend_stage_results
+            if not isinstance(raw_stages, list):
+                continue
+            scan_stage: BullpenAutoLiveStageResult | None = None
+            for raw_stage in raw_stages:
+                try:
+                    stage = BullpenAutoLiveStageResult.model_validate(raw_stage)
+                except ValidationError:
+                    continue
+                if workflow_stage_key(stage) == "scan":
+                    scan_stage = stage
+                    break
+            if scan_stage is None:
+                continue
+            accepted_rows = scan_stage.outputs.get("accepted_candidates")
+            if not isinstance(accepted_rows, list):
+                continue
+            stage1_timestamp = first_text(
+                scan_stage.completed_at,
+                scan_stage.started_at,
+                _isoformat(run_row.completed_at),
+                _isoformat(run_row.updated_at),
+                _isoformat(run_row.started_at),
+            )
+            for raw_candidate in accepted_rows:
+                if not isinstance(raw_candidate, dict):
+                    continue
+                market_id = first_text(
+                    raw_candidate.get("market_id"),
+                    raw_candidate.get("marketId"),
+                    raw_candidate.get("question_id"),
+                    raw_candidate.get("questionId"),
+                    raw_candidate.get("condition_id"),
+                    raw_candidate.get("slug"),
+                )
+                if market_id is None:
+                    continue
+                title = first_text(
+                    raw_candidate.get("market_title"),
+                    raw_candidate.get("question"),
+                    raw_candidate.get("title"),
+                    market_id,
+                ) or market_id
+                entry = ensure_entry(market_id, title)
+                entry["latest_stage1"] = {
+                    "condition_id": first_text(
+                        raw_candidate.get("condition_id"),
+                        raw_candidate.get("conditionId"),
+                    ),
+                    "slug": first_text(raw_candidate.get("slug")),
+                    "market_url": first_text(
+                        raw_candidate.get("market_url"),
+                        raw_candidate.get("source_url"),
+                    ),
+                    "close_time": first_text(
+                        raw_candidate.get("close_time"),
+                        raw_candidate.get("end_date"),
+                    ),
+                    "current_yes_odds": first_number(
+                        raw_candidate.get("current_yes_odds"),
+                        raw_candidate.get("current_yes_odds_pct"),
+                    ),
+                    "current_no_odds": first_number(
+                        raw_candidate.get("current_no_odds"),
+                        raw_candidate.get("current_no_odds_pct"),
+                    ),
+                    "best_bid_cents": first_number(
+                        raw_candidate.get("best_bid_cents")
+                    ),
+                    "best_ask_cents": first_number(
+                        raw_candidate.get("best_ask_cents")
+                    ),
+                    "returns_per_day": first_number(
+                        raw_candidate.get("returns_per_day")
+                    ),
+                    "scanned_at": stage1_timestamp,
+                }
+
+        # Stage 2 is the source of truth for the scan circles. Read the bounded
+        # console projection rather than the immutable full run payload: the latter
+        # can contain the complete market universe and provider evidence for every
+        # scan, which makes this first-paint query exceed its browser budget.
+        for run_row in trend_run_rows:
             index = run_index[str(run_row.id)]
             raw_stages = run_row.trend_stage_results
             if not isinstance(raw_stages, list):
@@ -1441,6 +1833,73 @@ class AsyncPolymarketAutoLiveRepository:
                 )
                 llm_outputs = _event_trend_llm_outputs(candidate.get("llm_outputs"))
                 entry = ensure_entry(market_id, title)
+                has_valid_llm_output = _event_trend_has_valid_llm_output(
+                    llm_outputs
+                )
+                if llm_outputs and not entry["llm_outputs"][index]:
+                    entry["llm_outputs"][index] = llm_outputs
+                if index == 0:
+                    exposure = first_number(
+                        candidate.get("current_exposure_usd"),
+                        candidate.get("exposure_usd"),
+                    )
+                    entry["latest_stage2"] = {
+                        "condition_id": first_text(
+                            candidate.get("condition_id"),
+                            candidate.get("conditionId"),
+                            prepared.get("condition_id"),
+                            prepared.get("conditionId"),
+                            prompt_market.get("condition_id"),
+                            prompt_market.get("conditionId"),
+                        ),
+                        "slug": first_text(
+                            candidate.get("slug"),
+                            prepared.get("slug"),
+                            prompt_market.get("slug"),
+                        ),
+                        "market_url": first_text(
+                            candidate.get("market_url"),
+                            candidate.get("source_url"),
+                            prepared.get("market_url"),
+                            prompt_market.get("market_url"),
+                        ),
+                        "close_time": first_text(
+                            candidate.get("close_time"),
+                            candidate.get("end_date"),
+                            prepared.get("close_time"),
+                            prompt_market.get("close_time"),
+                        ),
+                        "current_yes_odds": current_yes_odds,
+                        "current_no_odds": current_no_odds,
+                        "best_bid_cents": first_number(
+                            candidate.get("best_bid_cents"),
+                            prompt_market.get("best_bid_cents"),
+                            prepared.get("best_bid_cents"),
+                        ),
+                        "best_ask_cents": first_number(
+                            candidate.get("best_ask_cents"),
+                            prompt_market.get("best_ask_cents"),
+                            prepared.get("best_ask_cents"),
+                        ),
+                        # Consensus without a usable saved model output is not
+                        # coverage. Some failed runs serialize the empty
+                        # consensus default as 0/100; exposing that as a green
+                        # scan circle creates odds that no model actually gave.
+                        "llm_yes_odds": yes_score if has_valid_llm_output else None,
+                        "llm_no_odds": no_score if has_valid_llm_output else None,
+                        "returns_per_day": first_number(
+                            candidate.get("returns_per_day")
+                        ),
+                        "is_active_position": bool(
+                            exposure is not None and exposure > 0
+                        ),
+                        "active_position_side": first_text(
+                            candidate.get("position_side"),
+                            candidate.get("side"),
+                        ),
+                    }
+                if not has_valid_llm_output:
+                    continue
                 scores = entry["scores"]
                 if isinstance(scores, list) and (
                     scores[index] is None or strongest >= float(scores[index])
@@ -1449,39 +1908,6 @@ class AsyncPolymarketAutoLiveRepository:
                     entry["sides"][index] = strongest_side
                     entry["timestamps"][index] = timestamp
                     entry["llm_outputs"][index] = llm_outputs
-                    if index == 0:
-                        exposure = first_number(
-                            candidate.get("current_exposure_usd"),
-                            candidate.get("exposure_usd"),
-                        )
-                        entry["latest_stage2"] = {
-                            "market_url": first_text(
-                                candidate.get("market_url"),
-                                candidate.get("source_url"),
-                                prepared.get("market_url"),
-                                prompt_market.get("market_url"),
-                            ),
-                            "close_time": first_text(
-                                candidate.get("close_time"),
-                                candidate.get("end_date"),
-                                prepared.get("close_time"),
-                                prompt_market.get("close_time"),
-                            ),
-                            "current_yes_odds": current_yes_odds,
-                            "current_no_odds": current_no_odds,
-                            "llm_yes_odds": yes_score,
-                            "llm_no_odds": no_score,
-                            "returns_per_day": first_number(
-                                candidate.get("returns_per_day")
-                            ),
-                            "is_active_position": bool(
-                                exposure is not None and exposure > 0
-                            ),
-                            "active_position_side": first_text(
-                                candidate.get("position_side"),
-                                candidate.get("side"),
-                            ),
-                        }
 
         # Decision rows preserve legacy history and enrich the newest scan with
         # position metadata, but never overwrite a Stage 2 scan observation.
@@ -1490,10 +1916,24 @@ class AsyncPolymarketAutoLiveRepository:
             decision.market_title, decision.side, decision.decision,
             decision.risk_status, decision.edge_pp, decision.score,
             decision.console_projection,
-            decision.payload["llm_outputs"].label("trend_llm_outputs"),
             decision.created_at, decision.updated_at,
         ).where(decision.user_id == user_id).where(decision.run_id.in_(run_ids))
-          .where(decision.console_projection.is_not(None)).where(_visible_decision_filter()))).all()
+          .where(decision.console_projection.is_not(None)))).all()
+
+        # Current run projections already retain the per-model Stage-2 output
+        # used by the heatmap. Reading the immutable decision payload for every
+        # row forces PostgreSQL to de-TOAST and parse large JSON that will
+        # normally never be used. Identify genuine legacy gaps first, then
+        # fetch the frozen output slice only for that bounded subset.
+        projected_rows: list[
+            tuple[
+                object,
+                BullpenAutoLiveDecision,
+                int,
+                list[BullpenAutoLiveLlmOutput],
+            ]
+        ] = []
+        fallback_decision_ids: list[str] = []
         for row in rows:
             try:
                 projected = projected_row_to_decision(row)
@@ -1507,6 +1947,42 @@ class AsyncPolymarketAutoLiveRepository:
             index = run_index.get(str(row.run_id))
             if index is None:
                 continue
+            projected_llm_outputs = list(projected.llm_outputs)
+            projected_rows.append(
+                (row, projected, index, projected_llm_outputs)
+            )
+            existing_entry = event_scores.get(projected.market_id)
+            existing_outputs = (
+                existing_entry["llm_outputs"][index]
+                if existing_entry is not None
+                else []
+            )
+            if not existing_outputs and not projected_llm_outputs:
+                fallback_decision_ids.append(str(row.id))
+
+        frozen_outputs_by_decision_id: dict[
+            str, list[BullpenAutoLiveLlmOutput]
+        ] = {}
+        if fallback_decision_ids:
+            frozen_rows = (await self.session.execute(
+                select(
+                    decision.id,
+                    decision.payload["llm_outputs"].label(
+                        "trend_frozen_llm_outputs"
+                    ),
+                )
+                .where(decision.user_id == user_id)
+                .where(decision.id.in_(fallback_decision_ids))
+                .where(decision.console_projection.is_not(None))
+            )).all()
+            frozen_outputs_by_decision_id = {
+                str(row.id): _event_trend_llm_outputs(
+                    row.trend_frozen_llm_outputs
+                )
+                for row in frozen_rows
+            }
+
+        for row, projected, index, projected_llm_outputs in projected_rows:
             yes_score = (
                 projected.fair_yes_probability_pct
                 if projected.fair_yes_probability_pct is not None
@@ -1521,18 +1997,34 @@ class AsyncPolymarketAutoLiveRepository:
             strongest_side = "YES" if yes_score >= no_score else "NO"
             entry = ensure_entry(projected.market_id, projected.market_title)
             scores = entry["scores"]
-            if isinstance(scores, list) and scores[index] is None:
+            decision_llm_outputs = frozen_outputs_by_decision_id.get(
+                str(row.id),
+                [],
+            ) or projected_llm_outputs
+            if (
+                isinstance(scores, list)
+                and scores[index] is None
+                and _event_trend_has_valid_llm_output(decision_llm_outputs)
+            ):
                 scores[index] = round(strongest, 2)
                 entry["sides"][index] = strongest_side
                 entry["timestamps"][index] = projected.updated_at or projected.created_at
-                entry["llm_outputs"][index] = _event_trend_llm_outputs(
-                    row.trend_llm_outputs
-                )
+            # A Stage-2 projection created before per-model trend retention can
+            # already contain the score while its output array is empty. Enrich
+            # that scan from the immutable decision payload without replacing a
+            # newer authoritative Stage-2 breakdown.
+            if not entry["llm_outputs"][index] and decision_llm_outputs:
+                entry["llm_outputs"][index] = decision_llm_outputs
             if index == 0:
                 entry["latest_decision"] = projected
 
         events: list[BullpenAutoLiveEventTrend] = []
         for market_id, entry in event_scores.items():
+            latest_stage1 = (
+                entry["latest_stage1"]
+                if isinstance(entry.get("latest_stage1"), dict)
+                else {}
+            )
             latest_stage2 = (
                 entry["latest_stage2"]
                 if isinstance(entry.get("latest_stage2"), dict)
@@ -1544,29 +2036,128 @@ class AsyncPolymarketAutoLiveRepository:
 
             def stage2_or_decision(key: str, decision_value: object) -> object:
                 value = latest_stage2.get(key)
-                return decision_value if value is None else value
+                if value is not None:
+                    return value
+                stage1_value = latest_stage1.get(key)
+                return decision_value if stage1_value is None else stage1_value
 
-            decision_returns = (
-                _event_trend_returns_per_day(latest_decision)
-                if latest_decision is not None
-                else None
+            current_yes_odds = first_number(stage2_or_decision(
+                "current_yes_odds",
+                latest_decision.current_yes_odds if latest_decision else None,
+            ))
+            current_no_odds = first_number(stage2_or_decision(
+                "current_no_odds",
+                latest_decision.current_no_odds if latest_decision else None,
+            ))
+            best_bid_cents = first_number(stage2_or_decision(
+                "best_bid_cents",
+                getattr(latest_decision, "best_bid_cents", None),
+            ))
+            best_ask_cents = first_number(stage2_or_decision(
+                "best_ask_cents",
+                getattr(latest_decision, "best_ask_cents", None),
+            ))
+            if best_ask_cents is not None and 0 <= best_ask_cents <= 100:
+                current_yes_odds = best_ask_cents
+            if best_bid_cents is not None and 0 <= best_bid_cents <= 100:
+                current_no_odds = round(100.0 - best_bid_cents, 2)
+            llm_yes_odds = first_number(stage2_or_decision(
+                "llm_yes_odds",
+                latest_decision.fair_yes_probability_pct
+                if latest_decision else None,
+            ))
+            llm_no_odds = first_number(stage2_or_decision(
+                "llm_no_odds",
+                latest_decision.fair_no_probability_pct
+                if latest_decision else None,
+            ))
+            # Older compact projections retained the heatmap's strongest score
+            # and side but truncated the corresponding Stage-2 candidate row.
+            # Reconstruct the complementary consensus pair from those frozen
+            # values so latest-scan coverage and Returns/day stay truthful.
+            latest_score = first_number(entry["scores"][0])
+            latest_side = first_text(entry["sides"][0])
+            latest_outputs = entry["llm_outputs"][0]
+            latest_has_valid_output = _event_trend_has_valid_llm_output(
+                latest_outputs
+            )
+            if not latest_has_valid_output:
+                # A scan is covered only when at least one saved provider output
+                # can explain its odds. This also prevents old, detail-less
+                # projections and empty 0/100 consensus defaults from rendering
+                # as green circles with an empty hover card.
+                llm_yes_odds = None
+                llm_no_odds = None
+            elif latest_score is not None and 0 <= latest_score <= 100:
+                if llm_yes_odds is None:
+                    llm_yes_odds = (
+                        latest_score if latest_side == "YES" else 100 - latest_score
+                    )
+                if llm_no_odds is None:
+                    llm_no_odds = (
+                        latest_score if latest_side == "NO" else 100 - latest_score
+                    )
+            close_time = first_text(stage2_or_decision(
+                "close_time",
+                latest_decision.close_time if latest_decision else None,
+            ))
+            is_claimable_position = bool(
+                latest_stage2.get("is_claimable_position")
             )
             active_from_stage2 = bool(latest_stage2.get("is_active_position"))
             active_from_decision = bool(
                 latest_decision is not None
                 and latest_decision.current_exposure_usd > 0
             )
+            active_position_side = (
+                latest_stage2.get("active_position_side")
+                if active_from_stage2
+                else (
+                    latest_decision.side
+                    if active_from_decision and latest_decision is not None
+                    else None
+                )
+            )
+            returns_llm_yes_odds = llm_yes_odds
+            returns_llm_no_odds = llm_no_odds
+            if active_position_side == "YES":
+                returns_llm_yes_odds, returns_llm_no_odds = 100.0, 0.0
+            elif active_position_side == "NO":
+                returns_llm_yes_odds, returns_llm_no_odds = 0.0, 100.0
+            current_returns_per_day = (
+                None
+                if is_claimable_position
+                else llm_returns_per_day(
+                    llm_yes_odds=returns_llm_yes_odds,
+                    llm_no_odds=returns_llm_no_odds,
+                    close_time=close_time,
+                    now=trend_generated_at,
+                    current_yes_odds=current_yes_odds,
+                    current_no_odds=current_no_odds,
+                    formula=returns_formula,
+                )
+            )
+            if current_returns_per_day is None and not is_claimable_position:
+                current_returns_per_day = first_number(
+                    latest_stage2.get("returns_per_day"),
+                    latest_stage1.get("returns_per_day"),
+                )
             events.append(BullpenAutoLiveEventTrend(
                 market_id=market_id,
+                condition_id=first_text(stage2_or_decision(
+                    "condition_id",
+                    None,
+                )),
+                slug=first_text(stage2_or_decision(
+                    "slug",
+                    latest_decision.slug if latest_decision else None,
+                )),
                 market_title=str(entry["title"]),
                 market_url=stage2_or_decision(
                     "market_url",
                     latest_decision.market_url if latest_decision else None,
                 ),
-                close_time=stage2_or_decision(
-                    "close_time",
-                    latest_decision.close_time if latest_decision else None,
-                ),
+                close_time=close_time,
                 score=round(sum(
                     (entry["scores"][index] or 0) * weight
                     for index, weight in enumerate((1, 0.5, 0.25))
@@ -1575,44 +2166,21 @@ class AsyncPolymarketAutoLiveRepository:
                 scan_sides=entry["sides"],
                 scan_timestamps=entry["timestamps"],
                 scan_llm_outputs=entry["llm_outputs"],
-                current_yes_odds=stage2_or_decision(
-                    "current_yes_odds",
-                    latest_decision.current_yes_odds if latest_decision else None,
-                ),
-                current_no_odds=stage2_or_decision(
-                    "current_no_odds",
-                    latest_decision.current_no_odds if latest_decision else None,
-                ),
-                llm_yes_odds=stage2_or_decision(
-                    "llm_yes_odds",
-                    latest_decision.fair_yes_probability_pct
-                    if latest_decision else None,
-                ),
-                llm_no_odds=stage2_or_decision(
-                    "llm_no_odds",
-                    latest_decision.fair_no_probability_pct
-                    if latest_decision else None,
-                ),
-                returns_per_day=stage2_or_decision(
-                    "returns_per_day", decision_returns
-                ),
+                current_yes_odds=current_yes_odds,
+                current_no_odds=current_no_odds,
+                llm_yes_odds=llm_yes_odds,
+                llm_no_odds=llm_no_odds,
+                returns_per_day=current_returns_per_day,
                 is_active_position=active_from_stage2 or active_from_decision,
-                active_position_side=(
-                    latest_stage2.get("active_position_side")
-                    if active_from_stage2
-                    else (
-                        latest_decision.side
-                        if active_from_decision and latest_decision is not None
-                        else None
-                    )
-                ),
+                is_claimable_position=is_claimable_position,
+                active_position_side=active_position_side,
             ))
 
         events.sort(key=lambda event: (-event.score, event.market_title.casefold()))
         return BullpenAutoLiveEventTrendsResponse(
             events=events,
-            scan_count=20,
-            generated_at=utc_now().isoformat(),
+            scan_count=normalized_scan_count,
+            generated_at=trend_generated_at.isoformat(),
         )
 
     async def list_projected_decisions_for_run(
@@ -1781,7 +2349,17 @@ class SyncPolymarketAutoLiveRepository:
         apply_settings_to_record(record, settings)
 
     def save_state(self, user_id: int, state: BullpenAutoLiveState) -> None:
-        record = self.get_state_record(user_id)
+        # Workers retain a long-lived SQLAlchemy session. Refresh under a row
+        # lock so a stale identity-map copy cannot overwrite a newer external
+        # hourly-rebalance result committed by the API.
+        record = (
+            self.session.execute(
+                select(PolymarketAutoLiveStateRecord)
+                .where(PolymarketAutoLiveStateRecord.user_id == user_id)
+                .with_for_update()
+                .execution_options(populate_existing=True, autoflush=False)
+            ).scalar_one_or_none()
+        )
         if record is None:
             record = PolymarketAutoLiveStateRecord(
                 user_id=user_id,

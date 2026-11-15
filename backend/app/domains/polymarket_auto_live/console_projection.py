@@ -24,7 +24,7 @@ _LIST_LIMITS = {
     # Candidate identity rows are required to repopulate the Auto Scan table.
     # Keep the list bounded, while allowing the normal 30-day/EOM scan universe
     # to survive the lightweight dashboard projection without an extra read.
-    "accepted_candidates": 100,
+    "accepted_candidates": 200,
     "rejected_candidates": 100,
     "active_positions_found": 10,
     "available_for_claim": 10,
@@ -34,11 +34,15 @@ _LIST_LIMITS = {
     "event_exit_rows": 10,
     "execution_steps": 10,
     "guardrails_checked": 10,
-    "llm_outputs": 0,
-    "llm_reviewed_candidates": 10,
+    # Event-trend history is rendered from this bounded projection. Preserve the
+    # complete normal Stage-2 universe and its normalized per-model results so a
+    # later Stage-3 failure cannot make completed LLM work appear uncovered.
+    "llm_outputs": 10,
+    "llm_reviewed_candidates": 100,
     "llm_target_runs": 0,
 }
 _DROPPED_KEYS = {
+    "scan_export_data",
     "raw",
     "raw_output",
     "raw_response",
@@ -66,9 +70,19 @@ _STAGE_INPUT_KEYS = {
     "source_run_id",
 }
 _STAGE_OUTPUT_KEYS = {
+    "filter_ledger",
+    "scan_scope",
+    "scan_completeness",
+    "scan_warning",
+    "scan_details",
     "workflow_stage_key",
     "phase_status",
     "progress_commentary",
+    "scan_progress",
+    "snapshot_id",
+    "scanned_at",
+    "source_scan_completed_at",
+    "filters_completed_at",
     "error_message",
     "failure_category",
     "cancellation_state",
@@ -637,8 +651,39 @@ def build_minimal_workflow_stage_results(
             stage.outputs,
             (
                 "phase_status",
+                "scan_scope",
+                "scan_completeness",
+                "scan_warning",
+                "scan_details",
+                "scanned_candidates",
                 "completed_items",
                 "total_items",
+                "failed_items",
+                "accepted_candidates_count",
+                "candidate_rows_before_llm",
+                "stage1_accepted_candidate_count",
+                "active_position_rows",
+                "active_position_rows_before_llm",
+                "active_positions_total",
+                "llm_candidate_count",
+                "llm_provider_target_count",
+                "llm_selected_target_count",
+                "llm_target_count",
+                "llm_completed_provider_target_count",
+                "llm_completed_model_count",
+                "llm_successful_provider_target_count",
+                "llm_passed_provider_target_count",
+                "llm_usable_provider_target_count",
+                "llm_failed_provider_target_count",
+                "llm_failed_model_count",
+                "llms_completed",
+                "stage2_actionable_contract_version",
+                "stage2_actionable_contract_authoritative",
+                "stage2_actionable_contract_execution_mode",
+                "stage2_actionable_exit_market_ids",
+                "stage2_actionable_buy_market_ids",
+                "stage2_actionable_exit_count",
+                "stage2_actionable_buy_count",
                 "orders_planned",
                 "orders_processed",
                 "orders_submitted",
@@ -688,6 +733,7 @@ def projected_run_payload(
     orders_planned: int,
     orders_submitted: int,
     error_message: str | None,
+    workspace_profile: str | None = None,
 ) -> tuple[dict[str, Any], bool]:
     valid_projection = (
         isinstance(projection, dict)
@@ -714,6 +760,7 @@ def projected_run_payload(
                 if error_message is not None
                 else None
             ),
+            "workspace_profile": workspace_profile or "bullpen007",
         }
     )
     return payload, valid_projection

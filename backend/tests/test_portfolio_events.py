@@ -104,6 +104,9 @@ Intro line that should be ignored.
         )
 
         prompt = build_zerodha_events_prompt(snapshot)
+        self.assertIn("Settled holdings market value excluding T1 (INR): 454,401.00", prompt)
+        self.assertIn("Settled Quantity", prompt)
+        self.assertIn("Settled Value (excludes T1)", prompt)
 
         self.assertIn("You must cover **every holding in the pasted portfolio**", prompt)
         self.assertIn("Treat 2026-05-30 as the reference 'today' date", prompt)

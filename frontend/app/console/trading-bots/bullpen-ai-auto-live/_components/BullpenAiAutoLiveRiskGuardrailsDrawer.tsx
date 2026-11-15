@@ -34,6 +34,7 @@ import {
   BULLPEN_AI_AUTO_LIVE_GUARDRAIL_SECTIONS,
   BULLPEN_AI_AUTO_LIVE_SAFE_DEFAULTS,
   buildBullpenAiAutoLiveSafeDefaultDraft,
+  buildBullpenAiAutoLiveGuardrailUpdate,
   bullpenAiAutoLiveSettingsToDraft,
   formatBullpenAiAutoLiveGuardrailValue,
   serializeBullpenAiAutoLiveGuardrails,
@@ -210,7 +211,7 @@ export function BullpenAiAutoLiveRiskGuardrailsDrawer({
 
     setSaving(true);
     try {
-      await apiService.updateBullpenAutoLiveSettings(validation.settings);
+      await apiService.updateBullpenAutoLiveSettings(buildBullpenAiAutoLiveGuardrailUpdate(validation.settings));
       const nextSummary = await onSummaryReload();
       setDraft(getInitialDraft(nextSummary?.settings ?? validation.settings));
       setEnableLiveConfirmation("");

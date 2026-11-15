@@ -94,11 +94,12 @@ test("dashboard cache is user-scoped and below-fold panels mount on visibility",
   assert.match(dashboard, /getDashboardSummary\(\)/);
   assert.doesNotMatch(dashboard, /useUsdInrRate/);
   assert.doesNotMatch(dashboard, /RebalanceWorkflowSections/);
-  assert.match(dashboard, /automatedRebalance\(\)/);
+  assert.match(dashboard, /zerodha\(\)\}#india-workflow[^>]+>\s*Review India workflow\s*<\/Link>/);
+  assert.match(dashboard, /indmoneyUs\(\)\}#us-workflow[^>]+>\s*Review US workflow\s*<\/Link>/);
   assert.match(automatedRebalance, /RebalanceWorkflowSections/);
-  assert.match(dashboard, /Its histories, editors, polling, and model/);
+  assert.match(dashboard, /Start and monitor each market’s multi-stage workflow below its portfolio page/);
   assert.doesNotMatch(dashboard, /DashboardFinalActionablesTables/);
-  assert.match(dashboard, /Full histories, model evidence, and action tables load only/);
+  assert.match(dashboard, /Open the market-specific report for full histories, model evidence, and action tables/);
   assert.match(dashboard, /onVisible=\{\(\) => \{[\s\S]*loadThreats/);
   assert.match(dashboard, /data-performance-usable=/);
   assert.match(lazyMount, /IntersectionObserver/);
@@ -131,4 +132,24 @@ test("Nginx caches only immutable assets and bypasses buffering for sockets", ()
   assert.match(nginx, /location \^~ \/backend-api\/[\s\S]*private, no-store/);
   assert.match(nginx, /location \/ws\/[\s\S]*proxy_buffering off/);
   assert.match(nginx, /upstream investor_backend[\s\S]*keepalive 32/);
+});
+
+
+test("a failed sole transport remains available during circuit cooldown", () => {
+  const { ApiReadCircuitBreaker } = loadCircuitModule();
+  const circuit = new ApiReadCircuitBreaker(1, 30_000);
+  circuit.recordFailure(direct, 100);
+  assert.deepEqual(circuit.order([direct], 101), [direct]);
+  assert.deepEqual(circuit.order([direct], 102), [direct]);
+  circuit.recordSuccess(direct);
+  assert.equal(circuit.snapshot(direct).phase, "closed");
+});
+
+test("a sole transport remains available while a multi-transport probe is pending", () => {
+  const { ApiReadCircuitBreaker } = loadCircuitModule();
+  const circuit = new ApiReadCircuitBreaker(1, 100);
+  circuit.recordFailure(direct, 0);
+  circuit.order([direct, proxy], 101);
+  assert.equal(circuit.snapshot(direct).phase, "half-open");
+  assert.deepEqual(circuit.order([direct], 102), [direct]);
 });

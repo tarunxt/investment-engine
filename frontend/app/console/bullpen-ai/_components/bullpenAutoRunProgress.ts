@@ -10,6 +10,7 @@ type WorkflowStageKey = "scan" | "llm" | "invest";
 export type BullpenAutoRunScanCandidateView = {
   questionId: string | null;
   marketId: string | null;
+  conditionId: string | null;
   question: string;
   marketUrl: string | null;
   slug: string | null;
@@ -19,7 +20,18 @@ export type BullpenAutoRunScanCandidateView = {
   currentNoOdds: number | null;
   volumeUsd: number | null;
   liquidityUsd: number | null;
+  bestBidCents: number | null;
+  bestAskCents: number | null;
+  spreadCents: number | null;
+  returnsPerDay: number | null;
   forceInclude: boolean;
+  forceIncludedPosition: boolean;
+  selected: boolean | null;
+  rules: string | null;
+  eventDescription: string | null;
+  marketContext: string | null;
+  resolutionSource: string | null;
+  preflightEvidenceBlock: string | null;
   scanStatus: "passed" | "filtered";
   filterReasons: string[];
 };
@@ -41,6 +53,7 @@ export type BullpenAutoRunActivePositionView = {
   conditionId: string | null;
   isClaimable: boolean;
   classification: string | null;
+  returnsPerDay: number | null;
 };
 
 export type BullpenAutoRunWorkflowStageView = {
@@ -621,6 +634,7 @@ function readScanCandidates(stage: BullpenAutoLiveStageResult | null) {
       return {
         questionId: readString(record.question_id),
         marketId: readString(record.market_id),
+        conditionId: readString(record.condition_id),
         question,
         marketUrl: readString(record.market_url),
         slug: readString(record.slug),
@@ -630,7 +644,19 @@ function readScanCandidates(stage: BullpenAutoLiveStageResult | null) {
         currentNoOdds: readNumber(record.current_no_odds),
         volumeUsd: readNumber(record.volume_usd),
         liquidityUsd: readNumber(record.liquidity_usd),
+        bestBidCents: readNumber(record.best_bid_cents),
+        bestAskCents: readNumber(record.best_ask_cents),
+        spreadCents: readNumber(record.spread_cents),
+        returnsPerDay: readNumber(record.returns_per_day),
         forceInclude: readBoolean(record.force_include),
+        forceIncludedPosition: readBoolean(record.force_included_position),
+        selected:
+          typeof record.selected === "boolean" ? record.selected : null,
+        rules: readString(record.rules),
+        eventDescription: readString(record.event_description),
+        marketContext: readString(record.market_context),
+        resolutionSource: readString(record.resolution_source),
+        preflightEvidenceBlock: readString(record.preflight_evidence_block),
         scanStatus,
         filterReasons: Array.isArray(record.reasons)
           ? record.reasons.filter(
@@ -692,6 +718,7 @@ function readActivePositionsFound(stage: BullpenAutoLiveStageResult | null) {
         isClaimable:
           readBoolean(record.is_claimable) || readBoolean(record.isClaimable),
         classification,
+        returnsPerDay: readNumber(record.returns_per_day),
       } satisfies BullpenAutoRunActivePositionView;
     })
     .filter((position): position is BullpenAutoRunActivePositionView =>
@@ -784,6 +811,7 @@ export function buildBullpenAutoRunWorkflowView(
     }
 
     const tone: WorkflowTone =
+      explicitPhase === "failed" ||
       explicitPhase === "aborted" ||
       explicitPhase === "blocked" ||
       (definition.key === "invest" &&
@@ -824,8 +852,10 @@ export function buildBullpenAutoRunWorkflowView(
         ? (readString(stage?.outputs?.llm_execution_mode) ??
           readString(stage?.inputs?.llm_execution_mode))
         : null;
-    const progressLabel = !shouldShowStageData
-      ? "Queued"
+    const progressLabel = !normalizedRun && !pendingRunId
+      ? "Unknown"
+      : !shouldShowStageData
+      ? runStatus === "failed" ? "Blocked by upstream failure" : "Queued"
       : explicitPhase === "cancelled"
         ? "Cancelled"
       : explicitPhase === "aborted"
@@ -883,7 +913,9 @@ export function buildBullpenAutoRunWorkflowView(
             )
           : null;
     let detail =
-      (shouldShowStageData ? stage?.reason : null) ||
+      !normalizedRun && !pendingRunId
+        ? "Workflow description only; execution status is unknown."
+        : (shouldShowStageData ? stage?.reason : null) ||
       (state === "current" && index === 0 && runStatus === "running"
         ? "Bullpen scan started. Waiting for the worker handoff to complete."
         : state === "finished"
@@ -955,7 +987,7 @@ export function buildBullpenAutoRunWorkflowView(
             ? "Last run failed"
             : runStatus === "skipped"
               ? "Last run was skipped"
-              : "Queued for the next auto-run");
+              : normalizedRun ? "Queued for the next auto-run" : "Execution status unknown");
   const statusCopy =
     taskLifecycleLabel ??
     (runStatus === "failed"
@@ -988,7 +1020,9 @@ export function buildBullpenAutoRunWorkflowView(
                 normalizedRun?.summary,
                 "The latest Bullpen Scan + LLM + Exit and Invest run was skipped.",
               )
-            : "The next Bullpen Scan + LLM + Exit and Invest run is waiting in queue.");
+            : normalizedRun
+              ? "The saved run reports waiting in queue; this does not verify current worker execution."
+              : "No saved run evidence is available. The stages describe the workflow; queue and execution status are unknown.");
 
   return {
     stages,

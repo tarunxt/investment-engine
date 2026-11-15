@@ -7,6 +7,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.recovery import manual_zerodha_order_scope
 from app.domains.auth.dependencies import get_current_user
 from app.domains.auth.models import User
 from app.domains.zerodha.audit import ZerodhaAuditRepository
@@ -243,7 +244,7 @@ def _snapshot_summary(
         holdings_invested_value=snapshot.holdings_invested_value,
         holdings_pnl=snapshot.holdings_pnl,
         holdings_day_change_value=snapshot.holdings_day_change_value,
-        available_margin=snapshot.available_margin or 0.0,
+        available_margin=snapshot.available_margin,
         positions_pnl=snapshot.positions_pnl,
         positions_m2m=snapshot.positions_m2m,
     )
@@ -268,6 +269,7 @@ async def get_login_url(current_user: User = Depends(get_current_user)):
         login_url=_svc.get_login_url() if _svc.is_configured else "",
         configured=_svc.is_configured,
         direct_market_orders_enabled=_svc.direct_market_orders_enabled,
+        order_submission_blocked_reason=_svc.order_submission_blocked_reason,
     )
 
 
@@ -331,6 +333,7 @@ async def callback(
         login_time=login_time,
         expires_at=expires_at,
         direct_market_orders_enabled=_svc.direct_market_orders_enabled,
+        order_submission_blocked_reason=_svc.order_submission_blocked_reason,
     )
 
 
@@ -355,21 +358,53 @@ async def get_status(
         return ZerodhaStatusResponse(
             connected=False,
             direct_market_orders_enabled=_svc.direct_market_orders_enabled,
+            order_submission_blocked_reason=_svc.order_submission_blocked_reason,
             **snapshot_meta,
         )
     if cred.expires_at <= datetime.now(tz=timezone.utc):
         return ZerodhaStatusResponse(
             connected=False,
             direct_market_orders_enabled=_svc.direct_market_orders_enabled,
+            order_submission_blocked_reason=_svc.order_submission_blocked_reason,
             **snapshot_meta,
         )
     return ZerodhaStatusResponse(
         connected=True,
         direct_market_orders_enabled=_svc.direct_market_orders_enabled,
+        order_submission_blocked_reason=_svc.order_submission_blocked_reason,
         login_time=cred.login_time,
         expires_at=cred.expires_at,
         **snapshot_meta,
     )
+
+
+@router.get("/portfolio/quote-capabilities")
+async def portfolio_quote_capabilities(current_user: User = Depends(get_current_user)):
+    """Owner-scoped configuration flags only; no credential or provider read."""
+    from .upstox_quotes import configured_for
+    return {"upstox_ltp_enabled": configured_for(current_user.id)}
+
+
+@router.get("/portfolio/quotes")
+async def portfolio_display_quotes(instruments: list[str] = Query(min_length=1, max_length=500), db: AsyncSession = Depends(get_async_db), current_user: User = Depends(get_current_user)):
+    """Authenticated read-only quote batch; never prepare, modify or submit orders."""
+    from .display_quotes import validate_instruments, read_display_quotes, quote_failure_detail
+    try:
+        keys = validate_instruments(instruments)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    token = await ZerodhaCredentialRepository(db).get_plaintext_token(current_user.id)
+    if not token:
+        raise HTTPException(401, "Not connected to Zerodha. Please login first.")
+    try:
+        return await read_display_quotes(_svc, token, keys, user_id=current_user.id)
+    except KiteError as exc:
+        status_code, detail = quote_failure_detail(exc)
+        logger.warning("Read-only portfolio quote rejected for user %s: %s", current_user.id, detail)
+        raise HTTPException(status_code, detail) from exc
+    except Exception as exc:
+        logger.exception("Read-only portfolio quote retrieval failed for user %s", current_user.id)
+        raise HTTPException(502, "Live broker quotes could not be retrieved") from exc
 
 
 @router.get("/portfolio", response_model=ZerodhaPortfolioOverviewResponse)
@@ -663,7 +698,8 @@ async def place_protected_market_orders(
             "market_protection": order.market_protection,
         }
         try:
-            result = await _svc.place_order(token, order_data, variety="regular")
+            with manual_zerodha_order_scope():
+                result = await _svc.place_order(token, order_data, variety="regular")
             results.append(ZerodhaProtectedMarketOrderResult(
                 tradingsymbol=order_data["tradingsymbol"],
                 exchange=order_data["exchange"],
@@ -755,7 +791,8 @@ async def place_protected_market_orders_sequenced(
 
     for order in sell_orders:
         try:
-            result = await _svc.place_order(token, _build_protected_market_order_data(order), variety="regular")
+            with manual_zerodha_order_scope():
+                result = await _svc.place_order(token, _build_protected_market_order_data(order), variety="regular")
             order_id = result.get("order_id", "")
             if order_id:
                 sell_order_ids.add(str(order_id))
@@ -832,7 +869,8 @@ async def place_protected_market_orders_sequenced(
             buy_phase_attempted = True
             buy_order = order.model_copy(update={"quantity": affordable_qty})
             try:
-                result = await _svc.place_order(token, _build_protected_market_order_data(buy_order), variety="regular")
+                with manual_zerodha_order_scope():
+                    result = await _svc.place_order(token, _build_protected_market_order_data(buy_order), variety="regular")
                 buy_results.append(_order_result_from_request(buy_order, "placed", order_id=str(result.get("order_id", ""))))
                 remaining -= affordable_qty * unit_price
                 if affordable_qty < order.quantity:

@@ -242,7 +242,7 @@ test("Bullpen positions refresh current odds and use end-of-day ET for returns/d
     assert.equal(position.closeTime, "2026-06-27T03:59:59.999Z");
     assert.equal(position.yesOdds, 86.5);
     assert.equal(position.noOdds, 13.5);
-    assert.equal(position.returnsPerDay, 17.65);
+    assert.equal(position.returnsPerDay, 9.72);
 
     const refreshed = applyBullpenPositionMarketData(position, {
       noOdds: 11.5,
@@ -260,7 +260,7 @@ test("Bullpen positions refresh current odds and use end-of-day ET for returns/d
     assert.equal(refreshed.currentPrice, 0.115);
     assert.equal(refreshed.currentValue, 1.52);
     assert.equal(refreshed.unrealizedPnl, -6.27);
-    assert.equal(refreshed.returnsPerDay, 18.06);
+    assert.equal(refreshed.returnsPerDay, 9.94);
     assert.equal(
       refreshed.marketUrl,
       "https://polymarket.com/event/starmer-out-in-2025",
@@ -1001,5 +1001,30 @@ test("same-account Redis display cache can replace stale displayed live rows wit
       incomingSource: "redis-cache",
     }),
     false,
+  );
+});
+
+
+test("expired unclaimable Bullpen positions use negative days in returns/day", async () => {
+  const { calculateBullpenPositionReturnsPerDay } =
+    await loadBullpenPositionsModule();
+  const nowMs = Date.parse("2026-08-28T12:00:00.000Z");
+
+  assert.equal(
+    calculateBullpenPositionReturnsPerDay({
+      closeTime: "2026-08-27T00:00:00.000Z",
+      currentPrice: 0.9955,
+      nowMs,
+    }),
+    0.3,
+  );
+  assert.equal(
+    calculateBullpenPositionReturnsPerDay({
+      closeTime: "2026-08-27T00:00:00.000Z",
+      currentPrice: 0.9955,
+      isClaimable: true,
+      nowMs,
+    }),
+    null,
   );
 });

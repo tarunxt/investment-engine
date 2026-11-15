@@ -16,17 +16,20 @@ from app.domains.dashboard.schemas import (
     DashboardHolding,
     DashboardIndMoneySection,
     DashboardIndMoneySnapshot,
+    DashboardPortfolioHistory,
     DashboardSectionMeta,
     DashboardSummaryResponse,
     DashboardZerodhaSection,
     DashboardZerodhaSnapshot,
 )
+from app.domains.dashboard.models import DashboardPortfolioDailySnapshot
 from app.domains.fx_rates.service import load_persisted_usd_inr_rate
 from app.domains.indmoney_us.models import IndMoneyUsPortfolioSnapshot
 from app.domains.polymarket.runtime_broker import get_bullpen_runtime_broker
 from app.domains.zerodha.models import ZerodhaCredential, ZerodhaPortfolioSnapshot
 from app.infrastructure.database.session import AsyncSessionLocal
 from app.core.request_timing import add_redis_duration
+from app.shared.portfolio_summary import signed_holding_return_percent
 
 DASHBOARD_HISTORY_LIMIT = 12
 DASHBOARD_TOP_HOLDINGS_LIMIT = 4
@@ -78,6 +81,9 @@ def _top_holdings(
         pnl_percent = _number(
             raw.get("pnl_percent", raw.get("total_pnl_percent")),
         )
+        pnl_percent = signed_holding_return_percent(
+            pnl_percent, pnl=pnl, invested_value=invested_value,
+        ) or 0
         weight = _optional_number(
             raw.get("weight_percent", raw.get("portfolio_weight_percent"))
         )
@@ -284,11 +290,41 @@ def _position_rows(payload: Any) -> list[Any]:
 
 
 async def _load_bullpen(_user_id: int) -> DashboardBullpenSection:
-    # This is a passive cache read by design. Initial page rendering must never
-    # launch the Bullpen CLI, refresh credentials, or contact Polymarket.
+    # Prefer passive caches so initial rendering stays fast. When both bounded
+    # caches are unavailable, use the same presentation-only public-wallet
+    # refresh as the interactive portfolio. This never authorizes execution.
     redis_started_at = monotonic()
     try:
-        snapshot = await get_bullpen_runtime_broker().read_cached_positions_snapshot()
+        broker = get_bullpen_runtime_broker()
+        try:
+            snapshot = await broker.read_display_positions_snapshot(
+                delete_invalid=False,
+            )
+        except Exception:
+            logger.warning(
+                "Bullpen display snapshot read failed; using execution cache fallback",
+                exc_info=True,
+            )
+            snapshot = None
+        if snapshot is None:
+            try:
+                snapshot = await broker.read_cached_positions_snapshot(
+                    delete_invalid=False,
+                )
+            except Exception:
+                logger.warning(
+                    "Bullpen execution snapshot read failed; using passive display refresh",
+                    exc_info=True,
+                )
+                snapshot = None
+        if snapshot is None:
+            snapshot = await broker.get_positions_snapshot(
+                force_fresh=False,
+                allow_refresh=False,
+                caller_source="ui-passive-refresh",
+                max_age_seconds=20,
+                timeout_seconds=10,
+            )
     finally:
         add_redis_duration((monotonic() - redis_started_at) * 1000)
     if snapshot is None:
@@ -308,6 +344,48 @@ async def _load_bullpen(_user_id: int) -> DashboardBullpenSection:
         unrealized_pnl=_optional_number(summary.get("unrealized_pnl")),
         wallet_value=_optional_number(summary.get("wallet_value")),
         fetched_at=fetched_at,
+    )
+
+
+async def _load_portfolio_history(
+    user_id: int,
+) -> DashboardPortfolioHistory:
+    async with AsyncSessionLocal() as db:
+        rows = (
+            await db.execute(
+                select(
+                    DashboardPortfolioDailySnapshot.captured_at,
+                    DashboardPortfolioDailySnapshot.zerodha_total_inr,
+                    DashboardPortfolioDailySnapshot.indmoney_total_inr,
+                    DashboardPortfolioDailySnapshot.bullpen_total_inr,
+                    DashboardPortfolioDailySnapshot.combined_total_inr,
+                )
+                .where(DashboardPortfolioDailySnapshot.user_id == user_id)
+                .order_by(
+                    desc(DashboardPortfolioDailySnapshot.snapshot_date),
+                    desc(DashboardPortfolioDailySnapshot.captured_at),
+                )
+                .limit(400)
+            )
+        ).all()
+
+    rows = list(reversed(rows))
+
+    def points(field: str) -> list[DashboardHistoryPoint]:
+        return [
+            DashboardHistoryPoint(
+                captured_at=row.captured_at,
+                value=float(value),
+            )
+            for row in rows
+            if (value := getattr(row, field)) is not None
+        ]
+
+    return DashboardPortfolioHistory(
+        india=points("zerodha_total_inr"),
+        indmoney=points("indmoney_total_inr"),
+        bullpen=points("bullpen_total_inr"),
+        combined=points("combined_total_inr"),
     )
 
 
@@ -369,6 +447,7 @@ async def build_dashboard_summary(
     loaders = [
         _timed_section("zerodha", _load_zerodha, user_id),
         _timed_section("indmoney_us", _load_indmoney, user_id),
+        _timed_section("portfolio_history", _load_portfolio_history, user_id),
         _timed_section("fx", _load_fx, user_id),
     ]
     if include_singleton_bullpen:
@@ -400,5 +479,10 @@ async def build_dashboard_summary(
         zerodha=values["zerodha"],
         indmoney_us=values["indmoney_us"],
         bullpen=values["bullpen"],
+        portfolio_history=(
+            values["portfolio_history"]
+            if isinstance(values["portfolio_history"], DashboardPortfolioHistory)
+            else DashboardPortfolioHistory()
+        ),
         sections=sections,
     )

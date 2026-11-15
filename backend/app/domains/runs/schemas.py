@@ -7,16 +7,21 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Literal
 
 from app.domains.jobs.schemas import JobResponse
+from app.domains.jobs.output_sources import MAX_OUTPUT_SOURCE_JOBS, OutputSourceJobReference
 from app.domains.polymarket.stage2_models import (
     EvidencePacketV2,
     Stage2MarketContext,
 )
 from app.shared.types import JobStatus
+from app.shared.exceptions import ValidationException
+from app.domains.jobs.resource_policy import MAX_PROMPT_CHARS, MAX_TARGETS, validate_prompt
+from app.domains.jobs.resource_validation import MODEL_IDENTIFIER_MAX_CHARS
+from app.domains.runs.side_effect_policy import RunSideEffectPolicy
 
 
 class RunModelTarget(BaseModel):
-    provider: str
-    model: str
+    provider: str = Field(max_length=MODEL_IDENTIFIER_MAX_CHARS)
+    model: str = Field(max_length=MODEL_IDENTIFIER_MAX_CHARS)
 
 
 class PolymarketEventEvidenceOptions(BaseModel):
@@ -111,6 +116,7 @@ class PreparedPolymarketEventContext(BaseModel):
 
 
 class AutoRebalanceRunReservationRequest(BaseModel):
+    side_effect_policy: RunSideEffectPolicy | None = None
     portfolio: str
 
     @field_validator("portfolio")
@@ -123,6 +129,7 @@ class AutoRebalanceRunReservationRequest(BaseModel):
 
 
 class AutoRebalanceRunReservationResponse(BaseModel):
+    side_effect_policy: RunSideEffectPolicy | None = None
     portfolio: str
     sequence: int
     label: str
@@ -197,8 +204,21 @@ class AutoRebalanceStageResponse(BaseModel):
     completed_at: datetime | None = None
     provider_count: int = 0
     completed_provider_count: int = 0
+    partial_provider_count: int = 0
     failed_provider_count: int = 0
     estimated_cost: float = 0
+
+
+class OutputProvenanceIdentity(BaseModel):
+    provider: str
+    model: str | None = None
+
+
+class OutputProvenanceResponse(BaseModel):
+    source: Literal["api_usage_attempt_events"]
+    identities: list[OutputProvenanceIdentity] = Field(default_factory=list)
+    observed_from: datetime | None = None
+    observed_to: datetime | None = None
 
 
 class AutoRebalanceJobDetailResponse(BaseModel):
@@ -216,6 +236,7 @@ class AutoRebalanceJobDetailResponse(BaseModel):
     web_search_queries: list[str] | None = None
     web_sources: list[str] | None = None
     runtime_metadata_json: dict[str, Any] | None = None
+    output_provenance: OutputProvenanceResponse | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -232,6 +253,7 @@ class AutoRebalanceRunDetailResponse(BaseModel):
 
 
 class AutoRebalanceHistoryItemResponse(BaseModel):
+    side_effect_policy: RunSideEffectPolicy | None = None
     portfolio: str
     sequence: int
     label: str
@@ -346,10 +368,15 @@ class FinalActionableHistoryBackfillResponse(BaseModel):
     task_id: str | None = None
 
 
+from app.domains.recommendation_audit.schemas import AuditRunContext
+
+
 class RunCreate(BaseModel):
-    prompt: str
-    targets: list[RunModelTarget]
+    recommendation_audit: AuditRunContext | None = None
+    prompt: str = Field(max_length=MAX_PROMPT_CHARS)
+    targets: list[RunModelTarget] = Field(min_length=1, max_length=MAX_TARGETS)
     polymarket_event_context: PolymarketEventRunContext | None = None
+    output_source_jobs: list[OutputSourceJobReference] | None = Field(default=None, max_length=MAX_OUTPUT_SOURCE_JOBS)
     prompt_id: Optional[int] = None
     scheduled_at: Optional[datetime] = None
     # Auto-export settings
@@ -362,6 +389,14 @@ class RunCreate(BaseModel):
     auto_rebalance_portfolio: Optional[str] = None
     auto_rebalance_sequence: Optional[int] = None
     auto_rebalance_label: Optional[str] = None
+
+    @field_validator("prompt")
+    @classmethod
+    def bounded_prompt(cls, value):
+        try:
+            return validate_prompt(value)
+        except ValidationException as exc:
+            raise ValueError(exc.message) from None
 
     @field_validator("targets")
     @classmethod
@@ -382,6 +417,8 @@ class RunCreate(BaseModel):
 
     @model_validator(mode="after")
     def validate_auto_rebalance_metadata(self) -> "RunCreate":
+        if self.output_source_jobs is not None and self.polymarket_event_context is not None:
+            raise ValueError("Equity output sources cannot be combined with Polymarket context")
         metadata_values = [
             self.auto_rebalance_portfolio,
             self.auto_rebalance_sequence,
@@ -427,6 +464,13 @@ class RunResponse(BaseModel):
     auto_rebalance_label: Optional[str] = None
     created_at: datetime
     updated_at: datetime
+
+    @model_validator(mode="after")
+    def reflect_partial_jobs(self):
+        statuses = {link.job.status for link in self.run_jobs}
+        if self.status in {JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.PARTIAL} and JobStatus.PARTIAL in statuses and not statuses.intersection({JobStatus.PENDING, JobStatus.PROCESSING, JobStatus.SCHEDULED}):
+            self.status = JobStatus.PARTIAL
+        return self
 
     model_config = {"from_attributes": True}
 

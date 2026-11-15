@@ -1,6 +1,9 @@
+import { readBullpenScheduleSource } from "./helpers/bullpenScheduleSource.mjs";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import vm from "node:vm";
+import ts from "typescript";
 
 const historyScreen = readFileSync(
   new URL(
@@ -9,11 +12,98 @@ const historyScreen = readFileSync(
   ),
   "utf8",
 );
+const polymarketMarketUrls = readFileSync(
+  new URL(
+    "../app/api/bullpen-ai/_lib/polymarketMarketUrls.ts",
+    import.meta.url,
+  ),
+  "utf8",
+);
+const scheduleCard = readBullpenScheduleSource();
+const dedicatedRunPage = readFileSync(
+  new URL(
+    "../app/console/bullpen-ai/runs/[runId]/RunDetailClient.tsx",
+    import.meta.url,
+  ),
+  "utf8",
+);
+
+test("History opens a dedicated run-details screen instead of a popup", () => {
+  assert.match(
+    historyScreen,
+    /bullpenWorkspaceRunPath\(workspaceProfile, run\.id\)/,
+  );
+  assert.doesNotMatch(historyScreen, /runDetails=/);
+  assert.doesNotMatch(
+    historyScreen,
+    /analyse-runs\/\$\{encodeURIComponent\(run\.id\)\}/,
+  );
+  assert.match(dedicatedRunPage, /useParams/);
+  assert.match(
+    dedicatedRunPage,
+    /<BullpenRunDetailScreen[\s\S]*?runId=\{runId \?\? ""\}[\s\S]*?workspaceProfile=\{workspaceProfile\}/,
+  );
+  assert.match(scheduleCard, /export function BullpenRunDetailScreen/);
+  assert.match(scheduleCard, /presentation="page"/);
+  assert.match(scheduleCard, /Back to run history/);
+  assert.match(scheduleCard, /isPage[\s\S]*min-h-screen bg-slate-100/);
+  assert.match(
+    scheduleCard,
+    /onOpenScanCandidateDialog=\{openScanCandidateDialog\}/,
+  );
+  assert.match(
+    scheduleCard,
+    /onOpenStageTwoLlmRunDetails=\{setStageTwoLlmRunDialog\}/,
+  );
+  assert.match(
+    scheduleCard,
+    /onOpenMetricDetails=\{openInvestMetricDialog\}/,
+  );
+  assert.match(scheduleCard, /<StageOneOutputDialog/);
+  assert.match(scheduleCard, /<StageTwoLlmRunDetailsDialog/);
+  assert.match(scheduleCard, /<InvestMetricDetailsDialog/);
+  assert.match(scheduleCard, /renderInteractiveRows/);
+});
+test("History keeps usable run or trend data when the sibling request times out", () => {
+  assert.match(historyScreen, /Promise\.allSettled/);
+  assert.match(historyScreen, /HISTORY_READ_TIMEOUT_MS = 20_000/);
+  assert.match(historyScreen, /readHistoryWithRetry/);
+  assert.match(historyScreen, /HISTORY_READ_RETRY_DELAY_MS = 750/);
+  assert.match(historyScreen, /historyAndTrendsPromise/);
+  assert.match(historyScreen, /cacheHistoryPage\(pageResult\.value, workspaceProfile\)/);
+  assert.match(historyScreen, /readCachedHistoryPage\(workspaceProfile\)/);
+  assert.match(historyScreen, /pageResult\.status === "fulfilled"/);
+  assert.match(historyScreen, /trendsResult\.status === "fulfilled"/);
+  assert.match(historyScreen, /setTrendsError/);
+});
+
+test("History uses a saved configurable refresh interval without overlapping requests", () => {
+  const historyContent = readFileSync(
+    new URL(
+      "../app/console/bullpen-ai/_components/BullpenRunHistoryContent.tsx",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.match(historyScreen, /DEFAULT_RUN_HISTORY_REFRESH_SECONDS = 300/);
+  assert.match(historyScreen, /RUN_HISTORY_REFRESH_SECONDS_STORAGE_KEY/);
+  assert.match(historyScreen, /window\.localStorage\.getItem/);
+  assert.match(historyScreen, /window\.localStorage\.setItem/);
+  assert.match(historyScreen, /const refreshInProgress = useRef\(false\)/);
+  assert.match(historyScreen, /if \(refreshInProgress\.current\) return/);
+  assert.match(historyScreen, /window\.setInterval\([\s\S]*?refreshIntervalSeconds \* 1_000/);
+  assert.match(historyScreen, /window\.clearInterval\(interval\)/);
+  assert.match(historyContent, /Set Run History refresh time/);
+  assert.match(historyContent, /Refresh every \(seconds\)/);
+  assert.match(historyContent, /Default: 300 seconds/);
+});
 
 test("History primes the shared portfolio from a forced current wallet refresh", () => {
   assert.match(historyScreen, /caller_source: "ui-history-portfolio-refresh"/);
   assert.match(historyScreen, /force_fresh: "true"/);
   assert.match(historyScreen, /max_age_seconds: "0"/);
+  assert.match(historyScreen, /signal: AbortSignal\.timeout\(10_000\)/);
   assert.match(historyScreen, /fetchCurrentBullpenPositions\(\)\.catch\(\(\) => null\)/);
   assert.match(historyScreen, /isUsableBullpenPositionsSnapshot/);
   assert.match(historyScreen, /portfolioReady \? \(/);
@@ -30,6 +120,107 @@ test("History active-event ticks are reconciled against current active positions
   assert.match(historyScreen, /hasUsableCurrentPositions && currentPositions/);
 });
 
+test("History refreshes large current-odds sets in gateway-safe batches", () => {
+  assert.match(historyScreen, /MAX_CURRENT_ODDS_LOOKUP_BATCH_SIZE = 100/);
+  assert.match(
+    historyScreen,
+    /questions\.slice\(\s*index,\s*index \+ MAX_CURRENT_ODDS_LOOKUP_BATCH_SIZE/,
+  );
+  assert.match(historyScreen, /Object\.assign\(mergedMarkets, payload\.markets/);
+  assert.match(historyScreen, /return \{ markets: mergedMarkets, fetchedAt \}/);
+  assert.match(historyScreen, /historyCurrentOddsLookupId\(event, index\)/);
+  assert.match(historyScreen, /marketId: event\.market_id/);
+  assert.match(scheduleCard, /stageOneActiveOddsLookupId\(position, index\)/);
+  assert.match(scheduleCard, /stageOneCandidateOddsLookupId\(candidate, index\)/);
+});
+
+test("History refreshes each multi-outcome contract by exact market id", () => {
+  const currentOddsRoute = readFileSync(
+    new URL("../app/api/bullpen-ai/current-odds/route.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(currentOddsRoute, /marketId: string \| null/);
+  assert.match(currentOddsRoute, /id: question\.marketId \?\? question\.id/);
+  assert.match(
+    currentOddsRoute,
+    /conditionId: question\.marketId \? null : question\.conditionId/,
+  );
+  assert.match(currentOddsRoute, /slug: question\.marketId \? null : question\.slug/);
+  assert.match(
+    currentOddsRoute,
+    /marketUrl: question\.marketId \? null : question\.marketUrl/,
+  );
+  assert.match(currentOddsRoute, /allowRuntimeQuestionFallback: false/);
+  assert.match(currentOddsRoute, /exactNumericIdPaths: true/);
+  assert.match(currentOddsRoute, /preferIndicativeOutcomePrices: true/);
+  assert.match(currentOddsRoute, /const resolvedByQuestionId = await applyClobOrderBooks\(gammaMarkets\)/);
+  assert.match(currentOddsRoute, /yesBestBid: yesBid/);
+  assert.match(currentOddsRoute, /yesBestAsk: yesAsk/);
+  assert.match(currentOddsRoute, /noBestBid: noBid/);
+  assert.match(currentOddsRoute, /noBestAsk: noAsk/);
+  assert.match(
+    polymarketMarketUrls,
+    /`\$\{POLYMARKET_GAMMA_MARKETS_URL\}\/\$\{encodeURIComponent\(id\)\}`/,
+  );
+  assert.match(
+    currentOddsRoute,
+    /gammaMarketsByLookupId\[question\.marketId \?\? question\.id\]/,
+  );
+});
+
+test("History shows bought price and exact Bullpen bid/ask spreads", () => {
+  const trendsTable = readFileSync(
+    new URL(
+      "../app/console/bullpen-ai/_components/BullpenEventTrendsTable.tsx",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.match(historyScreen, /position_average_price_cents:/);
+  assert.match(historyScreen, /currentPosition\.averagePrice \* 100/);
+  assert.match(historyScreen, /current_yes_bid_cents: market\?\.yesBestBid/);
+  assert.match(historyScreen, /current_no_ask_cents: market\?\.noBestAsk/);
+  assert.match(trendsTable, /\{ key: "bought", label: "Bought"/);
+  assert.match(trendsTable, /"score", "tags", "ranking", "rating", "points", "bought", "currentOdds"/);
+  assert.match(trendsTable, /Spread \$\{cents\(spread\)\}/);
+  assert.match(trendsTable, /heldSideCurrentOdds > HELD_SIDE_ODDS_ALERT_THRESHOLD/);
+});
+
+test("History keeps deadlines and Returns/day when the latest LLM scan is uncovered", () => {
+  assert.match(historyScreen, /conditionId: event\.condition_id \?\? null/);
+  assert.match(historyScreen, /slug: event\.slug \?\? null/);
+  assert.match(
+    historyScreen,
+    /close_time: event\.close_time \?\? currentPosition\?\.closeTime \?\? null/,
+  );
+  assert.match(
+    historyScreen,
+    /currentReturnsPerDay\([\s\S]*?reconciledEvent[\s\S]*?activePosition\?\.returnsPerDay/,
+  );
+  assert.match(
+    historyScreen,
+    /const positionTrends =[\s\S]*?applyCurrentBullpenPositionsToEventTrends/,
+  );
+  assert.match(
+    historyScreen,
+    /applyCurrentOrderBookOddsToEventTrends\(\s*rankedTrends,/,
+  );
+  assert.match(
+    historyScreen,
+    /event\.llm_yes_odds != null && event\.llm_no_odds != null/,
+  );
+  assert.match(historyScreen, /if \(chosenSide === null\)/);
+  assert.match(historyScreen, /daysUntilClose < 0/);
+  assert.match(historyScreen, /daysUntilClose - 1/);
+  assert.match(historyScreen, /formulaDaysUntilClose \+ 4/);
+  assert.match(
+    historyScreen,
+    /condition_id: event\.condition_id \?\? currentPosition\?\.conditionId \?\? null/,
+  );
+});
+
 test("History does not treat a shared parent market id as an active contract match", () => {
   assert.match(historyScreen, /function isSameBullpenContract/);
   assert.match(historyScreen, /eventMarketId === conditionId/);
@@ -44,4 +235,47 @@ test("History does not treat a shared parent market id as an active contract mat
     /const contractCandidates = activePositions\.filter\(\(position\) =>\s*isSameBullpenContract\(event, position\)/,
   );
   assert.match(historyScreen, /candidates: contractCandidates/);
+});
+
+
+function rankingEnrichment(batch, fallback) {
+  const start = historyScreen.indexOf("async function applySportsRankingsToEventTrends(");
+  const end = historyScreen.indexOf("function resolveActivePositionSide", start);
+  const code = ts.transpileModule(historyScreen.slice(start, end), {
+    compilerOptions: { target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  return vm.runInNewContext(`${code}; applySportsRankingsToEventTrends`, {
+    readSportsEventComparisons: batch,
+    readSportsEventComparisonsFromDetails: fallback,
+  });
+}
+
+test("Successful ranking batches render unmatched rows without detail fan-out", async () => {
+  const enrich = rankingEnrichment(
+    async () => ({ comparisons: { a: { match_status: "unmatched", ranking: null } } }),
+    async () => { throw new Error("Unexpected detail fan-out"); },
+  );
+  const result = await enrich({ events: [{ market_id: "a", sports_event_slug: "cup-a-b" }] });
+  assert.equal(result.events[0].sports_ranking.match_status, "unmatched");
+  assert.equal(result.events[0].sports_ranking.ranking, null);
+});
+
+test("Failed ranking batches expose a service error without a second matcher", async () => {
+  let calls = 0;
+  const enrich = rankingEnrichment(
+    async () => { throw new Error("Temporary gateway failure"); },
+    async () => { calls++; return { a: { match_status: "matched", ranking: { delta: -2 } } }; },
+  );
+  const result = await enrich({ events: [{ market_id: "a", sports_event_slug: "cup-a-b" }] });
+  assert.equal(calls, 0);
+  assert.equal(result.events[0].sports_ranking.ranking, null);
+  assert.equal(result.events[0].sports_ranking.status_code, "SERVICE_UNAVAILABLE");
+});
+
+
+test("Current unmatched results replace previously cached matches", async () => {
+  const enrich = rankingEnrichment(async () => ({ comparisons: { a: { match_status: "unmatched", status_code: "TEAM_UNMAPPED", ranking: null } } }));
+  const result = await enrich({ events: [{ market_id: "a", sports_event_slug: "uel-a-b", sports_ranking: { match_status: "matched", ranking: { team_a: 1, team_b: 2, delta: -1 } } }] });
+  assert.equal(result.events[0].sports_ranking.status_code, "TEAM_UNMAPPED");
+  assert.equal(result.events[0].sports_ranking.ranking, null);
 });

@@ -11,6 +11,14 @@ FRONTEND_ROOT="$APP_ROOT/frontend"
 
 cd "$FRONTEND_ROOT"
 
+# The Bullpen workspace can keep a large client/API module graph resident in
+# Next.js. Node's default ~2 GiB heap crashed the production frontend under
+# that load, leaving nginx with intermittent 502s. Respect an explicit runtime
+# override while giving the 8 GiB host room for the backend and workers.
+if [[ " ${NODE_OPTIONS:-} " != *" --max-old-space-size="* ]]; then
+  export NODE_OPTIONS="${NODE_OPTIONS:+$NODE_OPTIONS }--max-old-space-size=3072"
+fi
+
 LAUNCH_TARGET="$(
   node "$APP_ROOT/deploy/no-docker/frontend-artifact.mjs" \
     resolve-launch \

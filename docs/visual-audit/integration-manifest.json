@@ -1,0 +1,1002 @@
+{
+  "baseline": "1089c6f1c5dc01c6cb41be1da7b45e9e7a8b805b",
+  "gate": "No merge or deployment until coordinator supplies all 20 final heads and verified source-map/visual acceptance",
+  "source_review": "All four native review batches received; native reviewers viewed PDF pixels; integrator did not",
+  "scopes": [
+    {
+      "scope": "API-COST-PROVENANCE",
+      "branch": "visual/api-cost-provenance",
+      "pr": 1345,
+      "observed_head": "0a93a3a99cb1a40cfb235a84f58c1b01edcd21cb",
+      "final_head": "0a93a3a99cb1a40cfb235a84f58c1b01edcd21cb",
+      "source_visual_acceptance": "Native scoped source-to-implementation check passed; final integrated spot-check and production acceptance remain pending",
+      "status": "integrated; scoped native acceptance passed; final integrated release gate pending",
+      "files": [
+        "docs/visual-audit/api-cost-provenance.md",
+        "frontend/app/console/apis/CombinedLlmCostChart.tsx",
+        "frontend/app/console/apis/_components/LlmUsageBreakdown.tsx",
+        "frontend/app/console/apis/page.tsx",
+        "frontend/scripts/api-cost-provenance-playwright.mjs",
+        "frontend/tests/api-usage-failed-versus-empty.test.mjs"
+      ],
+      "coordinator_supplied_head": "0a93a3a99cb1a40cfb235a84f58c1b01edcd21cb",
+      "integrated_source_head": "0a93a3a99cb1a40cfb235a84f58c1b01edcd21cb",
+      "source_commit_is_ancestor": true,
+      "final_head_basis": "Coordinator-supplied worker result; visual release acceptance still pending"
+    },
+    {
+      "scope": "AUTO-MODELS-SELECTION",
+      "branch": "visual/auto-models-selection",
+      "pr": 1361,
+      "observed_head": "770ffee1fdd17d90e3695d6891e3bfe79e357e80",
+      "final_head": "770ffee1fdd17d90e3695d6891e3bfe79e357e80",
+      "source_visual_acceptance": "Native scoped source-to-implementation check passed; final integrated spot-check and production acceptance remain pending",
+      "status": "integrated; scoped native acceptance passed; final integrated release gate pending",
+      "coordinator_supplied_head": "770ffee1fdd17d90e3695d6891e3bfe79e357e80",
+      "files": [
+        "docs/visual/auto-models-selection/README.md",
+        "docs/visual/auto-models-selection/desktop-anthropic-end.png",
+        "docs/visual/auto-models-selection/desktop-anthropic.png",
+        "docs/visual/auto-models-selection/desktop-deepseek-end.png",
+        "docs/visual/auto-models-selection/desktop-deepseek.png",
+        "docs/visual/auto-models-selection/desktop-empty.png",
+        "docs/visual/auto-models-selection/desktop-failed.png",
+        "docs/visual/auto-models-selection/desktop-gemini-end.png",
+        "docs/visual/auto-models-selection/desktop-gemini.png",
+        "docs/visual/auto-models-selection/desktop-history-empty.png",
+        "docs/visual/auto-models-selection/desktop-loading.png",
+        "docs/visual/auto-models-selection/desktop-openai-end.png",
+        "docs/visual/auto-models-selection/desktop-openai.png",
+        "docs/visual/auto-models-selection/desktop-partial.png",
+        "docs/visual/auto-models-selection/desktop-summary.png",
+        "docs/visual/auto-models-selection/desktop-templates.png",
+        "docs/visual/auto-models-selection/narrow-320-anthropic.png",
+        "docs/visual/auto-models-selection/narrow-anthropic-end.png",
+        "docs/visual/auto-models-selection/narrow-anthropic.png",
+        "docs/visual/auto-models-selection/narrow-deepseek-end.png",
+        "docs/visual/auto-models-selection/narrow-deepseek.png",
+        "docs/visual/auto-models-selection/narrow-gemini-end.png",
+        "docs/visual/auto-models-selection/narrow-gemini.png",
+        "docs/visual/auto-models-selection/narrow-openai-end.png",
+        "docs/visual/auto-models-selection/narrow-openai.png",
+        "docs/visual/auto-models-selection/narrow-summary.png",
+        "docs/visual/auto-models-selection/narrow-templates.png",
+        "docs/visual/auto-models-selection/results.json",
+        "frontend/app/console/dashboard/_components/RebalanceWorkflowSections.tsx",
+        "frontend/components/shared/LlmModelMixControls.tsx",
+        "frontend/components/shared/LlmModelSelectionPanel.tsx",
+        "frontend/components/shared/ModelPickerDialogFrame.tsx",
+        "frontend/tests/model-picker-browser.mjs",
+        "frontend/tests/rebalance-readiness.test.mjs"
+      ],
+      "integrated_source_head": "770ffee1fdd17d90e3695d6891e3bfe79e357e80",
+      "source_commit_is_ancestor": true,
+      "final_head_basis": "Coordinator-supplied worker result; visual release acceptance still pending"
+    },
+    {
+      "scope": "AUTO-INPUTS-EVIDENCE",
+      "branch": "visual/auto-inputs-evidence",
+      "pr": 1347,
+      "observed_head": "21922d3ece37152a5e3e3b93f1d7fd5afd4f7e2f",
+      "final_head": "21922d3ece37152a5e3e3b93f1d7fd5afd4f7e2f",
+      "source_visual_acceptance": "Native scoped source-to-implementation check passed; final integrated spot-check and production acceptance remain pending",
+      "status": "integrated; scoped native acceptance passed; final integrated release gate pending",
+      "files": [
+        "docs/visual-auto-inputs-evidence.md",
+        "frontend/app/console/dashboard/_components/InputEvidenceRows.tsx",
+        "frontend/app/console/dashboard/_components/RebalanceWorkflowSections.tsx",
+        "frontend/tests/input-evidence-offline.mjs",
+        "frontend/tests/rebalance-stage-inputs.test.mjs"
+      ],
+      "coordinator_supplied_head": "21922d3ece37152a5e3e3b93f1d7fd5afd4f7e2f",
+      "integrated_source_head": "21922d3ece37152a5e3e3b93f1d7fd5afd4f7e2f",
+      "source_commit_is_ancestor": true,
+      "final_head_basis": "Coordinator-supplied worker result; visual release acceptance still pending"
+    },
+    {
+      "scope": "AUTO-STAGES-HIERARCHY",
+      "branch": "codex/auto-stages-hierarchy",
+      "pr": 1363,
+      "observed_head": "3cd6339c768a1f4c55b8faec70f2b8b5c4ca8a6c",
+      "final_head": "3cd6339c768a1f4c55b8faec70f2b8b5c4ca8a6c",
+      "source_visual_acceptance": "Native scoped source-to-implementation check passed; final integrated spot-check and production acceptance remain pending",
+      "status": "integrated; scoped native acceptance passed; final integrated release gate pending",
+      "coordinator_supplied_head": "3cd6339c768a1f4c55b8faec70f2b8b5c4ca8a6c",
+      "files": [
+        "docs/visual-audit/auto-stages-hierarchy/README.md",
+        "docs/visual-audit/auto-stages-hierarchy/evidence-desktop.png",
+        "docs/visual-audit/auto-stages-hierarchy/execution-desktop.png",
+        "docs/visual-audit/auto-stages-hierarchy/india-desktop.png",
+        "docs/visual-audit/auto-stages-hierarchy/us-partial-desktop.png",
+        "docs/visual-audit/auto-stages-hierarchy/us-partial-narrow-left.png",
+        "docs/visual-audit/auto-stages-hierarchy/us-partial-narrow.png",
+        "frontend/app/console/automated-rebalance/_components/AutomatedRebalanceClient.tsx",
+        "frontend/app/console/dashboard/_components/RebalanceWorkflowSections.tsx",
+        "frontend/components/shared/WorkflowStageLedger.tsx",
+        "frontend/scripts/auto-stages-ledger-offline-playwright.mjs"
+      ],
+      "integrated_source_head": "3cd6339c768a1f4c55b8faec70f2b8b5c4ca8a6c",
+      "source_commit_is_ancestor": true,
+      "final_head_basis": "Coordinator-supplied worker result; visual release acceptance still pending"
+    },
+    {
+      "scope": "AUTO-DURATION-EXPLANATION",
+      "branch": "fix/auto-duration-explanation",
+      "pr": 1356,
+      "observed_head": "50f8ab80588e31732097c54583a7d97b849ab042",
+      "final_head": "50f8ab80588e31732097c54583a7d97b849ab042",
+      "source_visual_acceptance": "Native scoped source-to-implementation check passed; final integrated spot-check and production acceptance remain pending",
+      "status": "integrated; scoped native acceptance passed; final integrated release gate pending",
+      "files": [
+        "frontend/app/console/dashboard/_components/StageDurationBreakdownDialog.tsx",
+        "frontend/scripts/duration-explanation-playwright.mjs"
+      ],
+      "coordinator_supplied_head": "50f8ab80588e31732097c54583a7d97b849ab042",
+      "integrated_source_head": "50f8ab80588e31732097c54583a7d97b849ab042",
+      "source_commit_is_ancestor": true,
+      "final_head_basis": "Coordinator-supplied worker result; visual release acceptance still pending"
+    },
+    {
+      "scope": "AUTO-PROMPT-PREVIEW",
+      "branch": "visual/auto-prompt-preview",
+      "pr": 1350,
+      "observed_head": "79f33b2fde2135297ead7a99ce042087377ef063",
+      "final_head": "79f33b2fde2135297ead7a99ce042087377ef063",
+      "source_visual_acceptance": "Native scoped source-to-implementation check passed; final integrated spot-check and production acceptance remain pending",
+      "status": "integrated; scoped native acceptance passed; final integrated release gate pending",
+      "files": [
+        "frontend/app/console/automated-rebalance/_components/PromptTemplateDialog.tsx",
+        "frontend/app/console/dashboard/_components/RebalanceWorkflowSections.tsx"
+      ],
+      "coordinator_supplied_head": "79f33b2fde2135297ead7a99ce042087377ef063",
+      "integrated_source_head": "79f33b2fde2135297ead7a99ce042087377ef063",
+      "source_commit_is_ancestor": true,
+      "final_head_basis": "Coordinator-supplied worker result; visual release acceptance still pending"
+    },
+    {
+      "scope": "DASH-LAYOUT-SUMMARY",
+      "branch": "visual/dash-layout-summary",
+      "pr": 1357,
+      "observed_head": "a92263ded624704c30e03e9475acbe178cb2e01a",
+      "final_head": "a92263ded624704c30e03e9475acbe178cb2e01a",
+      "source_visual_acceptance": "Native scoped source-to-implementation check passed; final integrated spot-check and production acceptance remain pending",
+      "status": "integrated; scoped native acceptance passed; final integrated release gate pending",
+      "files": [
+        "docs/visual-audit/DASH-LAYOUT-SUMMARY.md",
+        "docs/visual-audit/evidence/dash-layout-summary/overview-1180.png",
+        "docs/visual-audit/evidence/dash-layout-summary/overview-390.png",
+        "docs/visual-audit/evidence/dash-layout-summary/refresh-1180.png",
+        "docs/visual-audit/evidence/dash-layout-summary/refresh-390.png",
+        "docs/visual-audit/evidence/dash-layout-summary/results.json",
+        "docs/visual-audit/evidence/dash-layout-summary/sources-1180.png",
+        "docs/visual-audit/evidence/dash-layout-summary/sources-390.png",
+        "frontend/app/console/dashboard/DashboardPageClient.tsx",
+        "frontend/app/console/dashboard/_components/DashboardSkeletons.tsx",
+        "frontend/scripts/dashboard-freshness-playwright.mjs",
+        "frontend/tests/dashboard-portfolio-totals.test.mjs"
+      ],
+      "coordinator_supplied_head": "a92263ded624704c30e03e9475acbe178cb2e01a",
+      "integrated_source_head": "a92263ded624704c30e03e9475acbe178cb2e01a",
+      "source_commit_is_ancestor": true,
+      "final_head_basis": "Coordinator-supplied worker result; visual release acceptance still pending"
+    },
+    {
+      "scope": "NAV-SIDEBAR-HIERARCHY",
+      "branch": "fix/nav-sidebar-hierarchy",
+      "pr": 1346,
+      "observed_head": "c0ea16b61dc8da9289d6285025da9e61c03c6c1e",
+      "final_head": "c0ea16b61dc8da9289d6285025da9e61c03c6c1e",
+      "source_visual_acceptance": "Native scoped source-to-implementation check passed; final integrated spot-check and production acceptance remain pending",
+      "status": "integrated; scoped native acceptance passed; final integrated release gate pending",
+      "files": [
+        "artifacts/nav-sidebar-hierarchy/README.md",
+        "artifacts/nav-sidebar-hierarchy/browser-results.json",
+        "artifacts/nav-sidebar-hierarchy/sidebar-account-1180-100.png",
+        "artifacts/nav-sidebar-hierarchy/sidebar-active-1180-100.png",
+        "artifacts/nav-sidebar-hierarchy/sidebar-directory-1180-100.png",
+        "artifacts/nav-sidebar-hierarchy/sidebar-directory-390-100.png",
+        "artifacts/nav-sidebar-hierarchy/sidebar-directory-end-1180-100.png",
+        "artifacts/nav-sidebar-hierarchy/sidebar-directory-end-390-100.png",
+        "artifacts/nav-sidebar-hierarchy/sidebar-home-390-100.png",
+        "artifacts/nav-sidebar-hierarchy/sidebar-rebalance-1180-100.png",
+        "artifacts/nav-sidebar-hierarchy/sidebar-rebalance-390-100.png",
+        "frontend/app/console/_components/NavigationDirectory.tsx",
+        "frontend/app/console/_components/SidebarNavigation.tsx",
+        "frontend/scripts/sidebar-space-playwright.mjs"
+      ],
+      "coordinator_supplied_head": "c0ea16b61dc8da9289d6285025da9e61c03c6c1e",
+      "integrated_source_head": "c0ea16b61dc8da9289d6285025da9e61c03c6c1e",
+      "source_commit_is_ancestor": true,
+      "final_head_basis": "Coordinator-supplied worker result; visual release acceptance still pending"
+    },
+    {
+      "scope": "US-SNAPSHOT-PROVENANCE",
+      "branch": "fix/us-snapshot-provenance",
+      "pr": 1352,
+      "observed_head": "d0805d52bf8869b51c94fe81c25b83850e920f3c",
+      "final_head": "d0805d52bf8869b51c94fe81c25b83850e920f3c",
+      "source_visual_acceptance": "Native scoped source-to-implementation check passed; final integrated spot-check and production acceptance remain pending",
+      "status": "integrated; scoped native acceptance passed; final integrated release gate pending",
+      "files": [
+        "docs/visual-audit/US-SNAPSHOT-PROVENANCE.md",
+        "docs/visual-audit/us-snapshot-provenance/1180-empty.json",
+        "docs/visual-audit/us-snapshot-provenance/1180-empty.png",
+        "docs/visual-audit/us-snapshot-provenance/1180-failed.json",
+        "docs/visual-audit/us-snapshot-provenance/1180-failed.png",
+        "docs/visual-audit/us-snapshot-provenance/1180-loading.json",
+        "docs/visual-audit/us-snapshot-provenance/1180-loading.png",
+        "docs/visual-audit/us-snapshot-provenance/1180-navigation-viewport.png",
+        "docs/visual-audit/us-snapshot-provenance/1180-navigation.json",
+        "docs/visual-audit/us-snapshot-provenance/1180-navigation.png",
+        "docs/visual-audit/us-snapshot-provenance/1180-paste-draft.json",
+        "docs/visual-audit/us-snapshot-provenance/1180-paste-draft.png",
+        "docs/visual-audit/us-snapshot-provenance/1180-paste-empty-viewport.png",
+        "docs/visual-audit/us-snapshot-provenance/1180-paste-empty.json",
+        "docs/visual-audit/us-snapshot-provenance/1180-paste-empty.png",
+        "docs/visual-audit/us-snapshot-provenance/1180-recovered.json",
+        "docs/visual-audit/us-snapshot-provenance/1180-recovered.png",
+        "docs/visual-audit/us-snapshot-provenance/1180-save-failure.json",
+        "docs/visual-audit/us-snapshot-provenance/1180-save-failure.png",
+        "docs/visual-audit/us-snapshot-provenance/1180-saved-after-fixture-import.json",
+        "docs/visual-audit/us-snapshot-provenance/1180-saved-after-fixture-import.png",
+        "docs/visual-audit/us-snapshot-provenance/1180-saved-partial-viewport.png",
+        "docs/visual-audit/us-snapshot-provenance/1180-saved-partial.json",
+        "docs/visual-audit/us-snapshot-provenance/1180-saved-partial.png",
+        "docs/visual-audit/us-snapshot-provenance/1180-source-details.json",
+        "docs/visual-audit/us-snapshot-provenance/1180-source-details.png",
+        "docs/visual-audit/us-snapshot-provenance/1180-stale-read-failure.json",
+        "docs/visual-audit/us-snapshot-provenance/1180-stale-read-failure.png",
+        "docs/visual-audit/us-snapshot-provenance/1180-unavailable.json",
+        "docs/visual-audit/us-snapshot-provenance/1180-unavailable.png",
+        "docs/visual-audit/us-snapshot-provenance/390-navigation-viewport.png",
+        "docs/visual-audit/us-snapshot-provenance/390-navigation.json",
+        "docs/visual-audit/us-snapshot-provenance/390-navigation.png",
+        "docs/visual-audit/us-snapshot-provenance/390-paste-draft.json",
+        "docs/visual-audit/us-snapshot-provenance/390-paste-draft.png",
+        "docs/visual-audit/us-snapshot-provenance/390-paste-empty-viewport.png",
+        "docs/visual-audit/us-snapshot-provenance/390-paste-empty.json",
+        "docs/visual-audit/us-snapshot-provenance/390-paste-empty.png",
+        "docs/visual-audit/us-snapshot-provenance/390-saved-partial-viewport.png",
+        "docs/visual-audit/us-snapshot-provenance/390-saved-partial.json",
+        "docs/visual-audit/us-snapshot-provenance/390-saved-partial.png",
+        "docs/visual-audit/us-snapshot-provenance/390-source-details.json",
+        "docs/visual-audit/us-snapshot-provenance/390-source-details.png",
+        "docs/visual-audit/us-snapshot-provenance/validation.json",
+        "frontend/app/console/indmoney-us/_components/IndMoneyUsPasteCard.tsx",
+        "frontend/app/console/indmoney-us/_components/IndMoneyUsSnapshotWorkspace.tsx",
+        "frontend/app/console/indmoney-us/_components/IndMoneyUsSnapshotsPanel.tsx",
+        "frontend/app/console/indmoney-us/page.tsx",
+        "frontend/tests/us-snapshot-provenance.test.mjs",
+        "frontend/tests/us-snapshot-rendering.test.mjs"
+      ],
+      "coordinator_supplied_head": "d0805d52bf8869b51c94fe81c25b83850e920f3c",
+      "integrated_source_head": "d0805d52bf8869b51c94fe81c25b83850e920f3c",
+      "source_commit_is_ancestor": true,
+      "final_head_basis": "Coordinator-supplied worker result; visual release acceptance still pending"
+    },
+    {
+      "scope": "LLM-REPORT-COMPARISON",
+      "branch": "visual/llm-report-comparison",
+      "pr": 1351,
+      "observed_head": "442d385f99559457dd462cd6ab6148ca976d1c88",
+      "final_head": "442d385f99559457dd462cd6ab6148ca976d1c88",
+      "source_visual_acceptance": "Native scoped source-to-implementation check passed; final integrated spot-check and production acceptance remain pending",
+      "status": "integrated; scoped native acceptance passed; final integrated release gate pending",
+      "files": [
+        "docs/visual-llm-report-comparison.md",
+        "frontend/app/console/llms/page.tsx",
+        "frontend/scripts/llm-report-offline-playwright.mjs"
+      ],
+      "coordinator_supplied_head": "442d385f99559457dd462cd6ab6148ca976d1c88",
+      "integrated_source_head": "442d385f99559457dd462cd6ab6148ca976d1c88",
+      "source_commit_is_ancestor": true,
+      "final_head_basis": "Coordinator-supplied worker result; visual release acceptance still pending"
+    },
+    {
+      "scope": "VISUAL-MAILS-HISTORY-HIERARCHY",
+      "branch": "visual/mails-history-hierarchy",
+      "pr": 1362,
+      "observed_head": "128e1b9fedb58db204a96c3b31d4e9e758f16dc8",
+      "final_head": "128e1b9fedb58db204a96c3b31d4e9e758f16dc8",
+      "source_visual_acceptance": "Native scoped source-to-implementation check passed; final integrated spot-check and production acceptance remain pending",
+      "status": "integrated; scoped native acceptance passed; final integrated release gate pending",
+      "coordinator_supplied_head": "128e1b9fedb58db204a96c3b31d4e9e758f16dc8",
+      "files": [
+        "artifacts/visual-mails-history/desktop-github.png",
+        "artifacts/visual-mails-history/desktop-loaded.png",
+        "artifacts/visual-mails-history/desktop-loading.png",
+        "artifacts/visual-mails-history/desktop-stale.png",
+        "artifacts/visual-mails-history/desktop-unavailable-partial.png",
+        "artifacts/visual-mails-history/desktop-verified-empty.png",
+        "artifacts/visual-mails-history/narrow-unavailable.png",
+        "docs/visual-mails-history-hierarchy.md",
+        "frontend/app/console/mails/page.tsx",
+        "frontend/scripts/mail-history-offline-playwright.mjs"
+      ],
+      "integrated_source_head": "128e1b9fedb58db204a96c3b31d4e9e758f16dc8",
+      "source_commit_is_ancestor": true,
+      "final_head_basis": "Coordinator-supplied worker result; visual release acceptance still pending"
+    },
+    {
+      "scope": "USAGE-ERROR-CONSOLIDATION",
+      "branch": "visual/usage-error-consolidation",
+      "pr": 1353,
+      "observed_head": "d94812fda45446bcfecfaefb3de6fa358367f9dc",
+      "final_head": "d94812fda45446bcfecfaefb3de6fa358367f9dc",
+      "source_visual_acceptance": "Native scoped source-to-implementation check passed; final integrated spot-check and production acceptance remain pending",
+      "status": "integrated; scoped native acceptance passed; final integrated release gate pending",
+      "files": [
+        "docs/visual-audit/usage-error-consolidation.md",
+        "frontend/app/console/profile/layout.tsx",
+        "frontend/scripts/cost-usage-recovery-playwright.mjs"
+      ],
+      "coordinator_supplied_head": "d94812fda45446bcfecfaefb3de6fa358367f9dc",
+      "integrated_source_head": "d94812fda45446bcfecfaefb3de6fa358367f9dc",
+      "source_commit_is_ancestor": true,
+      "final_head_basis": "Coordinator-supplied worker result; visual release acceptance still pending"
+    },
+    {
+      "scope": "PREFS-FORM-SCOPE",
+      "branch": "visual/prefs-form-scope",
+      "pr": 1349,
+      "observed_head": "c7df94b3d9d1d84bb7727ec6d14a8dff21e12d3f",
+      "final_head": "c7df94b3d9d1d84bb7727ec6d14a8dff21e12d3f",
+      "source_visual_acceptance": "Native scoped source-to-implementation check passed; final integrated spot-check and production acceptance remain pending",
+      "status": "integrated; scoped native acceptance passed; final integrated release gate pending",
+      "files": [
+        "docs/visual-audit/prefs-form-scope/README.md",
+        "docs/visual-audit/prefs-form-scope/after-1180x757.png",
+        "docs/visual-audit/prefs-form-scope/after-375x812.png",
+        "docs/visual-audit/prefs-form-scope/after-india-1180x757.png",
+        "docs/visual-audit/prefs-form-scope/after-new-york-1180x757.png",
+        "docs/visual-audit/prefs-form-scope/after-new-york-375x812.png",
+        "docs/visual-audit/prefs-form-scope/before-1180x757.png",
+        "docs/visual-audit/prefs-form-scope/before-375x812.png",
+        "frontend/app/console/profile/preferences/page.tsx",
+        "frontend/scripts/preferences-scope-offline-playwright.mjs"
+      ],
+      "coordinator_supplied_head": "c7df94b3d9d1d84bb7727ec6d14a8dff21e12d3f",
+      "integrated_source_head": "c7df94b3d9d1d84bb7727ec6d14a8dff21e12d3f",
+      "source_commit_is_ancestor": true,
+      "final_head_basis": "Coordinator-supplied worker result; visual release acceptance still pending"
+    },
+    {
+      "scope": "PROMPTS-LIST-DISCOVERY",
+      "branch": "visual/prompts-list-discovery",
+      "pr": null,
+      "observed_head": "8ac14d484efdf50931b1ba09e5f2e8ca780c42e6",
+      "final_head": "8ac14d484efdf50931b1ba09e5f2e8ca780c42e6",
+      "source_visual_acceptance": "Native scoped source-to-implementation check passed; final integrated spot-check and production acceptance remain pending",
+      "status": "integrated; scoped native acceptance passed; final integrated release gate pending",
+      "coordinator_supplied_head": "8ac14d484efdf50931b1ba09e5f2e8ca780c42e6",
+      "files": [
+        "frontend/app/console/prompts/page.tsx",
+        "frontend/scripts/prompts-discovery-offline-playwright.mjs"
+      ],
+      "integrated_source_head": "8ac14d484efdf50931b1ba09e5f2e8ca780c42e6",
+      "source_commit_is_ancestor": true,
+      "final_head_basis": "Coordinator-supplied worker result; visual release acceptance still pending"
+    },
+    {
+      "scope": "VISUAL-RUNS-STAGES-HIERARCHY",
+      "branch": "visual/runs-stages-hierarchy",
+      "pr": 1354,
+      "observed_head": "49205bbdb4b0f942ecade4bb0e54523bce60095d",
+      "final_head": "49205bbdb4b0f942ecade4bb0e54523bce60095d",
+      "source_visual_acceptance": "Native scoped source-to-implementation check passed; final integrated spot-check and production acceptance remain pending",
+      "status": "integrated; scoped native acceptance passed; final integrated release gate pending",
+      "files": [
+        "docs/visual-audit/runs-stages/README.md",
+        "docs/visual-audit/runs-stages/diagnostics-1180.png",
+        "docs/visual-audit/runs-stages/evidence-1180.png",
+        "docs/visual-audit/runs-stages/evidence-390.png",
+        "docs/visual-audit/runs-stages/summary-1180.png",
+        "frontend/app/console/runs/_components/HistoricalStageLedgerRow.tsx",
+        "frontend/app/console/runs/_components/PortfolioWorkflowHistoryCard.tsx",
+        "frontend/app/console/runs/page.tsx",
+        "frontend/tests/portfolio-stage-history.test.mjs",
+        "frontend/tests/runs-stages-browser.mjs"
+      ],
+      "coordinator_supplied_head": "49205bbdb4b0f942ecade4bb0e54523bce60095d",
+      "integrated_source_head": "49205bbdb4b0f942ecade4bb0e54523bce60095d",
+      "source_commit_is_ancestor": true,
+      "final_head_basis": "Coordinator-supplied worker result; visual release acceptance still pending"
+    },
+    {
+      "scope": "RANKINGS-BROWSER-GROUPING",
+      "branch": "visual/rankings-browser-grouping",
+      "pr": 1360,
+      "observed_head": "da6a4fbb594e7c7a98ead1947ff3225d926d3915",
+      "final_head": "da6a4fbb594e7c7a98ead1947ff3225d926d3915",
+      "source_visual_acceptance": "Native scoped source-to-implementation check passed; final integrated spot-check and production acceptance remain pending",
+      "status": "integrated; scoped native acceptance passed; final integrated release gate pending",
+      "files": [
+        "docs/visual-audit/rankings-browser-grouping/README.md",
+        "docs/visual-audit/rankings-browser-grouping/empty-desktop.png",
+        "docs/visual-audit/rankings-browser-grouping/failed-desktop.png",
+        "docs/visual-audit/rankings-browser-grouping/filters-desktop.png",
+        "docs/visual-audit/rankings-browser-grouping/filters-narrow.png",
+        "docs/visual-audit/rankings-browser-grouping/loaded-desktop.png",
+        "docs/visual-audit/rankings-browser-grouping/loaded-narrow.png",
+        "docs/visual-audit/rankings-browser-grouping/loading-desktop.png",
+        "docs/visual-audit/rankings-browser-grouping/partial-desktop.png",
+        "docs/visual-audit/rankings-browser-grouping/results.json",
+        "docs/visual-audit/rankings-browser-grouping/stale-desktop.png",
+        "frontend/app/console/sports-rankings/page.tsx",
+        "frontend/scripts/rankings-browser-offline-playwright.mjs",
+        "frontend/tests/sports-rankings-summary.test.mjs"
+      ],
+      "coordinator_supplied_head": "da6a4fbb594e7c7a98ead1947ff3225d926d3915",
+      "integrated_source_head": "da6a4fbb594e7c7a98ead1947ff3225d926d3915",
+      "source_commit_is_ancestor": true,
+      "final_head_basis": "Coordinator-supplied worker result; visual release acceptance still pending"
+    },
+    {
+      "scope": "SCANNER-TABLE-COMPARISON",
+      "branch": "visual/scanner-table-comparison",
+      "pr": 1348,
+      "observed_head": "6528616845a29f037d2af1c53b746ec558db63ab",
+      "final_head": "6528616845a29f037d2af1c53b746ec558db63ab",
+      "source_visual_acceptance": "Native scoped source-to-implementation check passed; final integrated spot-check and production acceptance remain pending",
+      "status": "integrated; scoped native acceptance passed; final integrated release gate pending",
+      "files": [
+        "docs/visual-audit/scanner-table-comparison.md",
+        "frontend/app/console/technical-setups/page.tsx",
+        "frontend/scripts/scanner-table-offline-playwright.mjs",
+        "frontend/tests/full-run-history.test.mjs"
+      ],
+      "coordinator_supplied_head": "6528616845a29f037d2af1c53b746ec558db63ab",
+      "integrated_source_head": "6528616845a29f037d2af1c53b746ec558db63ab",
+      "source_commit_is_ancestor": true,
+      "final_head_basis": "Coordinator-supplied worker result; visual release acceptance still pending"
+    },
+    {
+      "scope": "BOTS-OVERVIEW-RUNTIME",
+      "branch": "visual/bots-overview-runtime",
+      "pr": 1358,
+      "observed_head": "82260db0aac73d3252b316d1b79ea63dbc5a3980",
+      "final_head": "82260db0aac73d3252b316d1b79ea63dbc5a3980",
+      "source_visual_acceptance": "Native scoped source-to-implementation check passed; final integrated spot-check and production acceptance remain pending",
+      "status": "integrated; scoped native acceptance passed; final integrated release gate pending",
+      "files": [
+        "docs/bots-overview-runtime.md",
+        "docs/evidence/bots-overview-runtime/before-loading-desktop.png",
+        "docs/evidence/bots-overview-runtime/dark-Capital.png",
+        "docs/evidence/bots-overview-runtime/dark-Positions.png",
+        "docs/evidence/bots-overview-runtime/dark-Runtime.png",
+        "docs/evidence/bots-overview-runtime/empty-Capital-narrow.png",
+        "docs/evidence/bots-overview-runtime/empty-Capital.png",
+        "docs/evidence/bots-overview-runtime/empty-Positions-narrow.png",
+        "docs/evidence/bots-overview-runtime/empty-Positions.png",
+        "docs/evidence/bots-overview-runtime/empty-Runtime-narrow.png",
+        "docs/evidence/bots-overview-runtime/empty-Runtime.png",
+        "docs/evidence/bots-overview-runtime/failed-Capital-narrow.png",
+        "docs/evidence/bots-overview-runtime/failed-Capital.png",
+        "docs/evidence/bots-overview-runtime/failed-Positions-narrow.png",
+        "docs/evidence/bots-overview-runtime/failed-Positions.png",
+        "docs/evidence/bots-overview-runtime/failed-Runtime-narrow.png",
+        "docs/evidence/bots-overview-runtime/failed-Runtime.png",
+        "docs/evidence/bots-overview-runtime/loaded-Capital-narrow.png",
+        "docs/evidence/bots-overview-runtime/loaded-Capital.png",
+        "docs/evidence/bots-overview-runtime/loaded-Positions-narrow.png",
+        "docs/evidence/bots-overview-runtime/loaded-Positions.png",
+        "docs/evidence/bots-overview-runtime/loaded-Runtime-narrow.png",
+        "docs/evidence/bots-overview-runtime/loaded-Runtime.png",
+        "docs/evidence/bots-overview-runtime/loading-Capital-narrow.png",
+        "docs/evidence/bots-overview-runtime/loading-Capital.png",
+        "docs/evidence/bots-overview-runtime/loading-Positions-narrow.png",
+        "docs/evidence/bots-overview-runtime/loading-Positions.png",
+        "docs/evidence/bots-overview-runtime/loading-Runtime-narrow.png",
+        "docs/evidence/bots-overview-runtime/loading-Runtime.png",
+        "docs/evidence/bots-overview-runtime/partial-Capital-narrow.png",
+        "docs/evidence/bots-overview-runtime/partial-Capital.png",
+        "docs/evidence/bots-overview-runtime/partial-Positions-narrow.png",
+        "docs/evidence/bots-overview-runtime/partial-Positions.png",
+        "docs/evidence/bots-overview-runtime/partial-Runtime-narrow.png",
+        "docs/evidence/bots-overview-runtime/partial-Runtime.png",
+        "docs/evidence/bots-overview-runtime/stale-Capital-narrow.png",
+        "docs/evidence/bots-overview-runtime/stale-Capital.png",
+        "docs/evidence/bots-overview-runtime/stale-Positions-narrow.png",
+        "docs/evidence/bots-overview-runtime/stale-Positions.png",
+        "docs/evidence/bots-overview-runtime/stale-Runtime-narrow.png",
+        "docs/evidence/bots-overview-runtime/stale-Runtime.png",
+        "docs/evidence/bots-overview-runtime/unavailable-Capital-narrow.png",
+        "docs/evidence/bots-overview-runtime/unavailable-Capital.png",
+        "docs/evidence/bots-overview-runtime/unavailable-Positions-narrow.png",
+        "docs/evidence/bots-overview-runtime/unavailable-Positions.png",
+        "docs/evidence/bots-overview-runtime/unavailable-Runtime-narrow.png",
+        "docs/evidence/bots-overview-runtime/unavailable-Runtime.png",
+        "frontend/app/console/trading-bots/_components/TradingBotsOverviewPage.tsx",
+        "frontend/scripts/bots-overview-offline-playwright.mjs"
+      ],
+      "coordinator_supplied_head": "82260db0aac73d3252b316d1b79ea63dbc5a3980",
+      "integrated_source_head": "82260db0aac73d3252b316d1b79ea63dbc5a3980",
+      "source_commit_is_ancestor": true,
+      "final_head_basis": "Coordinator-supplied worker result; visual release acceptance still pending"
+    },
+    {
+      "scope": "INDIA-PORTFOLIO-HIERARCHY",
+      "branch": "visual/india-portfolio-hierarchy",
+      "pr": 1355,
+      "observed_head": "62795de2e96b9094fc1e633d620df70ac26d8aff",
+      "final_head": "62795de2e96b9094fc1e633d620df70ac26d8aff",
+      "source_visual_acceptance": "Native scoped source-to-implementation check passed; final integrated spot-check and production acceptance remain pending",
+      "status": "integrated; scoped native acceptance passed; final integrated release gate pending",
+      "files": [
+        "docs/visual-audit/india-portfolio-hierarchy.md",
+        "frontend/app/console/zerodha/_components/IndiaPortfolioNav.module.css",
+        "frontend/app/console/zerodha/_components/PortfolioSnapshotsPanel.tsx",
+        "frontend/app/console/zerodha/_components/ZerodhaConnectionGuide.tsx",
+        "frontend/app/console/zerodha/page.tsx",
+        "frontend/scripts/india-portfolio-hierarchy-playwright.mjs"
+      ],
+      "coordinator_supplied_head": "62795de2e96b9094fc1e633d620df70ac26d8aff",
+      "integrated_source_head": "62795de2e96b9094fc1e633d620df70ac26d8aff",
+      "source_commit_is_ancestor": true,
+      "final_head_basis": "Coordinator-supplied worker result; visual release acceptance still pending"
+    },
+    {
+      "scope": "DB-RECOVERY-PRESERVATION",
+      "branch": null,
+      "pr": null,
+      "observed_head": "1089c6f1c5dc01c6cb41be1da7b45e9e7a8b805b",
+      "final_head": "1089c6f1c5dc01c6cb41be1da7b45e9e7a8b805b",
+      "source_visual_acceptance": "Native scoped source-to-implementation check passed; final integrated spot-check and production acceptance remain pending",
+      "status": "preserve-only; coordinator reports six tests passed",
+      "files": [],
+      "integrated_source_head": "1089c6f1c5dc01c6cb41be1da7b45e9e7a8b805b",
+      "source_commit_is_ancestor": true,
+      "final_head_basis": "Preserve-only baseline; no source change"
+    }
+  ],
+  "ci_observed": [
+    {
+      "status": "fulfilled",
+      "value": {
+        "scope": "API-COST-PROVENANCE",
+        "head": "0a93a3a99cb1a40cfb235a84f58c1b01edcd21cb",
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Action completed."
+            }
+          ],
+          "structuredContent": {
+            "workflow_runs": [
+              {
+                "id": 41267918563,
+                "name": "Pull Request Checks",
+                "status": "completed",
+                "conclusion": "success",
+                "run_number": 1163,
+                "jobs_url": "https://api.github.com/repos/tarunxt/investment-engine/actions/runs/41267918563/jobs",
+                "logs_url": "https://api.github.com/repos/tarunxt/investment-engine/actions/runs/41267918563/logs",
+                "workflow_id": 319356523
+              }
+            ]
+          },
+          "isError": false
+        }
+      }
+    },
+    {
+      "status": "fulfilled",
+      "value": {
+        "scope": "AUTO-INPUTS-EVIDENCE",
+        "head": "88fe01d8e370d8f901b1725089e950ce6e7a44a0",
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Action completed."
+            }
+          ],
+          "structuredContent": {
+            "workflow_runs": [
+              {
+                "id": 41267209294,
+                "name": "Pull Request Checks",
+                "status": "completed",
+                "conclusion": "success",
+                "run_number": 1150,
+                "jobs_url": "https://api.github.com/repos/tarunxt/investment-engine/actions/runs/41267209294/jobs",
+                "logs_url": "https://api.github.com/repos/tarunxt/investment-engine/actions/runs/41267209294/logs",
+                "workflow_id": 319356523
+              }
+            ]
+          },
+          "isError": false
+        }
+      }
+    },
+    {
+      "status": "fulfilled",
+      "value": {
+        "scope": "AUTO-DURATION-EXPLANATION",
+        "head": "e0d47a7c7a452e1dbfb36ed3669546e8efe8a13a",
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Action completed."
+            }
+          ],
+          "structuredContent": {
+            "workflow_runs": [
+              {
+                "id": 41267564101,
+                "name": "Pull Request Checks",
+                "status": "completed",
+                "conclusion": "success",
+                "run_number": 1160,
+                "jobs_url": "https://api.github.com/repos/tarunxt/investment-engine/actions/runs/41267564101/jobs",
+                "logs_url": "https://api.github.com/repos/tarunxt/investment-engine/actions/runs/41267564101/logs",
+                "workflow_id": 319356523
+              }
+            ]
+          },
+          "isError": false
+        }
+      }
+    },
+    {
+      "status": "fulfilled",
+      "value": {
+        "scope": "AUTO-PROMPT-PREVIEW",
+        "head": "a89441ea3d0f9105c262285e3705aeeeec147085",
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Action completed."
+            }
+          ],
+          "structuredContent": {
+            "workflow_runs": [
+              {
+                "id": 41267373077,
+                "name": "Pull Request Checks",
+                "status": "completed",
+                "conclusion": "success",
+                "run_number": 1153,
+                "jobs_url": "https://api.github.com/repos/tarunxt/investment-engine/actions/runs/41267373077/jobs",
+                "logs_url": "https://api.github.com/repos/tarunxt/investment-engine/actions/runs/41267373077/logs",
+                "workflow_id": 319356523
+              }
+            ]
+          },
+          "isError": false
+        }
+      }
+    },
+    {
+      "status": "fulfilled",
+      "value": {
+        "scope": "DASH-LAYOUT-SUMMARY",
+        "head": "84c09d83f63f697758b2a8f473dab80eaf7d0f8e",
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Action completed."
+            }
+          ],
+          "structuredContent": {
+            "workflow_runs": [
+              {
+                "id": 41267592404,
+                "name": "Pull Request Checks",
+                "status": "completed",
+                "conclusion": "success",
+                "run_number": 1161,
+                "jobs_url": "https://api.github.com/repos/tarunxt/investment-engine/actions/runs/41267592404/jobs",
+                "logs_url": "https://api.github.com/repos/tarunxt/investment-engine/actions/runs/41267592404/logs",
+                "workflow_id": 319356523
+              }
+            ]
+          },
+          "isError": false
+        }
+      }
+    },
+    {
+      "status": "fulfilled",
+      "value": {
+        "scope": "NAV-SIDEBAR-HIERARCHY",
+        "head": "2eefd68654a45d393c682358c2fe68579a9d808d",
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Action completed."
+            }
+          ],
+          "structuredContent": {
+            "workflow_runs": [
+              {
+                "id": 41267928495,
+                "name": "Pull Request Checks",
+                "status": "in_progress",
+                "conclusion": null,
+                "run_number": 1164,
+                "jobs_url": "https://api.github.com/repos/tarunxt/investment-engine/actions/runs/41267928495/jobs",
+                "logs_url": "https://api.github.com/repos/tarunxt/investment-engine/actions/runs/41267928495/logs",
+                "workflow_id": 319356523
+              }
+            ]
+          },
+          "isError": false
+        }
+      }
+    },
+    {
+      "status": "fulfilled",
+      "value": {
+        "scope": "US-SNAPSHOT-PROVENANCE",
+        "head": "c620715dacfbbb79a5b51310e3c750435af99e9e",
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Action completed."
+            }
+          ],
+          "structuredContent": {
+            "workflow_runs": [
+              {
+                "id": 41267449413,
+                "name": "Pull Request Checks",
+                "status": "completed",
+                "conclusion": "success",
+                "run_number": 1155,
+                "jobs_url": "https://api.github.com/repos/tarunxt/investment-engine/actions/runs/41267449413/jobs",
+                "logs_url": "https://api.github.com/repos/tarunxt/investment-engine/actions/runs/41267449413/logs",
+                "workflow_id": 319356523
+              }
+            ]
+          },
+          "isError": false
+        }
+      }
+    },
+    {
+      "status": "fulfilled",
+      "value": {
+        "scope": "LLM-REPORT-COMPARISON",
+        "head": "442d385f99559457dd462cd6ab6148ca976d1c88",
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Action completed."
+            }
+          ],
+          "structuredContent": {
+            "workflow_runs": [
+              {
+                "id": 41267933291,
+                "name": "Pull Request Checks",
+                "status": "in_progress",
+                "conclusion": null,
+                "run_number": 1165,
+                "jobs_url": "https://api.github.com/repos/tarunxt/investment-engine/actions/runs/41267933291/jobs",
+                "logs_url": "https://api.github.com/repos/tarunxt/investment-engine/actions/runs/41267933291/logs",
+                "workflow_id": 319356523
+              }
+            ]
+          },
+          "isError": false
+        }
+      }
+    },
+    {
+      "status": "fulfilled",
+      "value": {
+        "scope": "USAGE-ERROR-CONSOLIDATION",
+        "head": "78a162eaf8f5f341331b93f040f55afd6f2c00a8",
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Action completed."
+            }
+          ],
+          "structuredContent": {
+            "workflow_runs": [
+              {
+                "id": 41267459718,
+                "name": "Pull Request Checks",
+                "status": "completed",
+                "conclusion": "success",
+                "run_number": 1156,
+                "jobs_url": "https://api.github.com/repos/tarunxt/investment-engine/actions/runs/41267459718/jobs",
+                "logs_url": "https://api.github.com/repos/tarunxt/investment-engine/actions/runs/41267459718/logs",
+                "workflow_id": 319356523
+              }
+            ]
+          },
+          "isError": false
+        }
+      }
+    },
+    {
+      "status": "fulfilled",
+      "value": {
+        "scope": "PREFS-FORM-SCOPE",
+        "head": "27b7d205af10cd9d76065f7a94329680ce11599d",
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Action completed."
+            }
+          ],
+          "structuredContent": {
+            "workflow_runs": [
+              {
+                "id": 41267366016,
+                "name": "Pull Request Checks",
+                "status": "completed",
+                "conclusion": "success",
+                "run_number": 1152,
+                "jobs_url": "https://api.github.com/repos/tarunxt/investment-engine/actions/runs/41267366016/jobs",
+                "logs_url": "https://api.github.com/repos/tarunxt/investment-engine/actions/runs/41267366016/logs",
+                "workflow_id": 319356523
+              }
+            ]
+          },
+          "isError": false
+        }
+      }
+    },
+    {
+      "status": "fulfilled",
+      "value": {
+        "scope": "VISUAL-RUNS-STAGES-HIERARCHY",
+        "head": "49205bbdb4b0f942ecade4bb0e54523bce60095d",
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Action completed."
+            }
+          ],
+          "structuredContent": {
+            "workflow_runs": [
+              {
+                "id": 41268047585,
+                "name": "Pull Request Checks",
+                "status": "in_progress",
+                "conclusion": null,
+                "run_number": 1167,
+                "jobs_url": "https://api.github.com/repos/tarunxt/investment-engine/actions/runs/41268047585/jobs",
+                "logs_url": "https://api.github.com/repos/tarunxt/investment-engine/actions/runs/41268047585/logs",
+                "workflow_id": 319356523
+              }
+            ]
+          },
+          "isError": false
+        }
+      }
+    },
+    {
+      "status": "fulfilled",
+      "value": {
+        "scope": "RANKINGS-BROWSER-GROUPING",
+        "head": "da6a4fbb594e7c7a98ead1947ff3225d926d3915",
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Action completed."
+            }
+          ],
+          "structuredContent": {
+            "workflow_runs": []
+          },
+          "isError": false
+        }
+      }
+    },
+    {
+      "status": "fulfilled",
+      "value": {
+        "scope": "SCANNER-TABLE-COMPARISON",
+        "head": "ff7103e616cd868ce5a27dd33c5be4545a423c56",
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Action completed."
+            }
+          ],
+          "structuredContent": {
+            "workflow_runs": [
+              {
+                "id": 41267340844,
+                "name": "Pull Request Checks",
+                "status": "completed",
+                "conclusion": "failure",
+                "run_number": 1151,
+                "jobs_url": "https://api.github.com/repos/tarunxt/investment-engine/actions/runs/41267340844/jobs",
+                "logs_url": "https://api.github.com/repos/tarunxt/investment-engine/actions/runs/41267340844/logs",
+                "workflow_id": 319356523
+              }
+            ]
+          },
+          "isError": false
+        }
+      }
+    },
+    {
+      "status": "fulfilled",
+      "value": {
+        "scope": "BOTS-OVERVIEW-RUNTIME",
+        "head": "a9ab619a76c46a4a6f4e33a6b1693743552b809d",
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Action completed."
+            }
+          ],
+          "structuredContent": {
+            "workflow_runs": [
+              {
+                "id": 41267862627,
+                "name": "Pull Request Checks",
+                "status": "completed",
+                "conclusion": "success",
+                "run_number": 1162,
+                "jobs_url": "https://api.github.com/repos/tarunxt/investment-engine/actions/runs/41267862627/jobs",
+                "logs_url": "https://api.github.com/repos/tarunxt/investment-engine/actions/runs/41267862627/logs",
+                "workflow_id": 319356523
+              }
+            ]
+          },
+          "isError": false
+        }
+      }
+    },
+    {
+      "status": "fulfilled",
+      "value": {
+        "scope": "INDIA-PORTFOLIO-HIERARCHY",
+        "head": "1e14a7f3f6a8ee116bbb5142634ac2fd96776131",
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Action completed."
+            }
+          ],
+          "structuredContent": {
+            "workflow_runs": [
+              {
+                "id": 41267476352,
+                "name": "Pull Request Checks",
+                "status": "completed",
+                "conclusion": "success",
+                "run_number": 1159,
+                "jobs_url": "https://api.github.com/repos/tarunxt/investment-engine/actions/runs/41267476352/jobs",
+                "logs_url": "https://api.github.com/repos/tarunxt/investment-engine/actions/runs/41267476352/logs",
+                "workflow_id": 319356523
+              }
+            ]
+          },
+          "isError": false
+        }
+      }
+    }
+  ],
+  "integration_verification": {
+    "runtime_verified_head": "3232fbdf865450dceecfd603ffd9a940fc6c7238",
+    "runtime_gate": "passed unchanged Webpack standalone budgets, fingerprint, auth boundary, mock backend proxy, routes and assets",
+    "dashboard_transferred_bytes": 235535,
+    "dashboard_decoded_bytes": 758488,
+    "documentation_only_dashboard_update": "a92263ded624704c30e03e9475acbe178cb2e01a",
+    "application_configuration_diff_after_runtime_verification": [],
+    "final_remote_ci": "pending draft publication"
+  }
+}

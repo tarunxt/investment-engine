@@ -1,3 +1,4 @@
+import { readBullpenScheduleSource } from "./helpers/bullpenScheduleSource.mjs";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
@@ -208,6 +209,47 @@ test("explicit empty Stage 2 contract never invents exits or buys", async () => 
   assert.deepEqual(result.hold.map((item) => item.marketId), ["active-hold"]);
 });
 
+test("authoritative exit IDs resolve through saved active-position question identities", async () => {
+  const { buildBullpenStage2Actionables } = await loadActionablesModule();
+  const exitPosition = activePosition({
+    marketId: "condition-exit",
+    title: "Named Active Exit",
+  });
+  const holdPosition = activePosition({
+    marketId: "condition-hold",
+    title: "Named Active Hold",
+  });
+  const result = buildBullpenStage2Actionables({
+    activePositions: [exitPosition, holdPosition],
+    activePositionQuestions: [
+      {
+        ...selectedRow({ marketId: "3253026", title: "Named Active Exit" }),
+        id: exitPosition.positionKey,
+        positionKey: exitPosition.positionKey,
+        conditionId: "condition-exit",
+      },
+      {
+        ...selectedRow({ marketId: "3253027", title: "Named Active Hold" }),
+        id: holdPosition.positionKey,
+        positionKey: holdPosition.positionKey,
+        conditionId: "condition-hold",
+      },
+    ],
+    decisions: [],
+    selectedRows: [],
+    authoritativeActionables: {
+      exitMarketIds: ["3253026"],
+      buyMarketIds: [],
+    },
+  });
+
+  assert.deepEqual(result.eventExits.map((item) => item.title), [
+    "Named Active Exit",
+  ]);
+  assert.deepEqual(result.hold.map((item) => item.title), ["Named Active Hold"]);
+  assert.doesNotMatch(JSON.stringify(result.eventExits), /metadata is unavailable/);
+});
+
 test("the actionables dialog keeps the required red, green, and yellow sections", () => {
   const dialogSource = readFileSync(
     new URL(
@@ -224,16 +266,17 @@ test("the actionables dialog keeps the required red, green, and yellow sections"
   assert.match(dialogSource, /title="Hold"/);
   assert.match(dialogSource, /tone="hold"/);
   assert.match(dialogSource, /Active Bullpen positions not included in Event Exits/);
+  assert.match(dialogSource, /marketTitles/);
+  assert.match(dialogSource, /market-urls/);
+  assert.match(dialogSource, /visibleActionables\.hold/);
+  assert.match(dialogSource, /Event URLs group multiple dated markets/);
+  assert.match(dialogSource, /historicalHoldCount/);
+  assert.match(dialogSource, /matchedHold\.slice\(0, historicalHoldCount\)/);
+  assert.doesNotMatch(dialogSource, /exitKeys\.has/);
 });
 
 test("the Stage 2 monitor renders the clickable Actionables line below New Events", () => {
-  const scheduleCardSource = readFileSync(
-    new URL(
-      "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
-      import.meta.url,
-    ),
-    "utf8",
-  );
+  const scheduleCardSource = readBullpenScheduleSource();
 
   const newEventsIndex = scheduleCardSource.indexOf("New Events to Invest in:");
   const actionablesIndex = scheduleCardSource.indexOf("Actionables: Exit=");
@@ -255,5 +298,12 @@ test("the Stage 2 monitor renders the clickable Actionables line below New Event
   assert.doesNotMatch(
     scheduleCardSource,
     /getBullpenTopTenStrongestLlmOddsRows/,
+  );
+  assert.match(scheduleCardSource, /HistoricalPlannedContractRows/);
+  assert.match(scheduleCardSource, /stage2_actionable_exit_market_ids/);
+  assert.match(scheduleCardSource, /stage2_actionable_buy_market_ids/);
+  assert.match(
+    scheduleCardSource,
+    /Preserved from the completed Stage 2 actionable contract/,
   );
 });

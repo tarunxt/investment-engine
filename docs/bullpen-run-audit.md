@@ -1,5 +1,272 @@
 # Bullpen Run Audit
 
+## UPS source integrity and filtering (2026-09-20)
+
+Manifest v2 captures the immutable export ID, byte size, SHA-256 and row count.
+The writer publishes pending ownership before writing rows, fsyncs and validates
+the source and retained archive before publishing completion. Frontend read
+cleanup cannot delete orphan or Universal files. New UPS runs no longer delete
+previous captures needed by queued profiles. The archive is a separate persistent
+directory (`UNIVERSAL_SCAN_ARCHIVE_DIRECTORY`, default sibling
+`.universal-scan-archive`); on the systemd host this is shared host storage, not an
+off-host backup. It can be mounted on EFS; provisioning EFS/S3 is not implicit.
+No automatic archival deletion is performed. Monitor free space and only remove
+captures after checking all dependent workflows and the chosen retention policy.
+
+The reader pins the export identity, verifies checksums and decoded counts, and
+can recover a missing/corrupt primary from its archive. Malformed or missing rows
+fail closed, never becoming a successful zero result. Handoff repair requires a
+successful completed Stage 1, not merely a terminal failure timestamp. Missing
+exports do not create requests with fabricated scan timestamps.
+
+Additive schema-v2 `stage_1.filter_ledger` records source identity/hash, expected,
+evaluated, accepted and rejected row counts, and overlapping per-reason reject
+counts. `UPS_FILTER_LEDGER_INVALID` blocks inconsistent new evidence; legacy
+snapshots without a ledger remain readable and are not rewritten. Registry/rule
+v32 captures this behavior. The UI labels failed pre-filter attempts Not evaluated
+and dependent stages Blocked, with no 100% success bar.
+
+## Sports ranking evidence (2026-09-18)
+
+Sports history uses the canonical `sports-ranking-v2` resolver. The parent event provides the competition tag and participant identities. Reviewed competition-scoped names and provider IDs resolve teams; spelling similarity and generated initials cannot select a ranking. Imported null placeholders never enter the ranked identity index. Provider IDs, season, group, source status, successful retrieval timestamp and content hash accompany each selected row.
+
+The preferred published provider is selected deterministically; duplicate providers do not make a valid pair ambiguous. Two ranks can be displayed independently, but a delta requires the same provider, season and group, current successful data and two distinct team identities. EFL Cup domestic fallback is restricted to English leagues. Cross-group U20/continental matches and cross-division EFL matches retain individual ranks with an explicit non-comparable status. Points efficiency is `points / (3 * played) * 100`, not a win probability; unplayed ratings remain null and published zeroes remain zeroes. Official adjusted points are retained.
+
+Ranking dispatch and provider refreshes use the `ai` worker queue rather than the congested control queue. Dispatch cycles are coalesced with a Redis lease, old scheduled dispatches expire after 15 minutes, and source jobs retain staggered admission, per-source cooldowns and bounded database concurrency. Failed enqueue attempts release the cycle lease for retry.
+
+History displays **current reference data**, labelled as such, with a coverage count and clickable source/error details. Current errors replace cached matches. There is no separate frontend resolver. Codes distinguish disconnected/pending/failed/stale feeds, unmapped teams, source conflicts, invalid participants and incompatible scopes. The next automatic refresh or manual refresh rechecks these states.
+
+Future scans capture `sports_ranking_at_scan` on sports candidate rows using existing stored snapshots, with no external requests. Run audits retain this evidence in `stage_1.sports_ranking_evidence`. Resumed scans do not overwrite captured evidence. Capture errors are explicit and validators flag missing/inconsistent evidence or unsafe deltas. This is additive schema-v2 JSON evidence, requiring no migration. Resolver/algorithm and audit rule registry versions are updated. Existing frozen runs are not backfilled with today's ranks; the reference enrichment does not alter eligibility, sizing or execution.
+
+| Tags | Corrective source / identity behavior |
+|---|---|
+| `grc` | Greek Cup league-phase table from FotMob 145, separate from Greek Super League. |
+| `u20wwc` | FotMob 10369, validated female U20 competition; group preserved, no senior-team substitution. |
+| `nwsl` | ESPN usa.nwsl, including Denver Summit and Bay FC provider IDs. |
+| `uel` | ESPN uefa.europa; reviewed long-name/diacritic mappings and provider IDs resolve all audited teams. |
+| `pol`, `egy1` | Invalid ESPN URLs removed; FotMob 196/519 validated tables. |
+| `idn1`, `rou1`, `isr` | FotMob 8983/189/127, country/gender/edition validation. |
+| `bol1`, `chi1`, `argpn`, `rus`, `enl`, `uslc`, `aut` | Connected published ESPN tables; group retained. |
+| `lib`, `sud`, `acle` | Published continental tables; different groups/regions are not subtracted. |
+| `efl` | Individual current English domestic ranks; cross-division comparisons explicitly unavailable. |
+| `bl2`, `sea` | ESPN preferred over duplicate derived tables, with deterministic selection. |
+| `epl`, `lal`, `bun`, `fl1`, `tur` | Published ESPN tables supplement existing derived sources; explicit provider provenance. |
+
+Regression evidence captured 2026-09-18 covers 97 audited market rows across 27 tags: both ranks for all rows, 82 comparable and 15 explicitly different scopes, including all 23 UEL rows comparable. Fixtures contain public tables and retain unrelated teams to test collision safety. Additional tests cover stale/failed sources, provider renames, duplicate providers, market-suffix contamination, wrong-club lookalikes, gender validation and immutable scan capture. External provider availability cannot be guaranteed; failures remain visible with retained last-good values labelled historical, never fabricated current rankings.
+
+## Workflow Stage 1 trigger contract (2026-09-15)
+
+Bullpen 007 and Bullpen Sports start their workflow-owned Stage 1 filters from
+the latest immutable completed Universal Polymarket Scan through three trigger
+sources: successful Universal Scan completion, the workflow's **Start Auto Run
+Now** action, and the configured scheduled time. Universal-completion and
+scheduled batches serialize Bullpen 007 and Sports through the single guarded
+execution lane, preventing one workflow from cancelling or overwriting the
+other. Each run persists its `workspace_profile`, `triggered_by`, Universal Scan
+snapshot ID, scan timestamps, and filters-completed timestamp in the existing
+run/audit contract. `triggered_by=universal_scan` is additive; historical trigger
+values remain valid. The workflow UI reads workspace-scoped History for passed,
+failed, running, and latest-attempt evidence and shows the next Universal Scan
+and workflow schedule timestamps in the **Stage 1 Trigger Monitor**.
+
+The compact dashboard read is also workspace-scoped. On first page load it
+selects the newest bounded projection owned by that workflow, so a newer run in
+the other workflow cannot replace the last completed Stage 1 tile with empty
+placeholders. **Start Auto Run Now** validates the latest immutable Universal
+Scan and immediately submits an idempotent, workspace-specific trigger to the
+guarded queue. Lane acquisition and durable run creation remain worker-owned;
+the HTTP acknowledgement therefore does not wait behind an existing Stage 1
+transaction. This changes only trigger latency and live projection selection;
+the frozen Stage 1–3 evidence and audit schema are unchanged.
+If the compact dashboard read times out, the same workspace-scoped History read
+hydrates the newest bounded exact-run console projection as a display-only
+fallback. This keeps the last/current Stage 1 tile populated during dashboard
+pool pressure without allowing cached UI state to become an execution input.
+The lightweight persisted-status request allows a bounded ten-second database
+recovery window, with a twelve-second browser budget. This keeps genuine
+failures bounded while preventing a healthy schedule from being labelled
+unavailable during brief production connection-pool pressure.
+The same-origin backend proxy classifies this status read with the dashboard
+budget (12.5 seconds per attempt, 14 seconds total), so it cannot terminate the
+request before either of those inner recovery deadlines.
+Startup recovery terminalizes running rows older than two hours through indexed
+scalar columns before hydrating any historical run payload. This prevents an
+orphaned legacy Full Universe payload from exhausting backend and PostgreSQL
+memory while preserving its immutable payload and compact console projection.
+Run age is measured from the immutable `started_at` value; later heartbeat or
+projection writes cannot make an hours-old orphan appear fresh again.
+
+The live dashboard projection preserves this lineage while Stage 1 is running:
+`snapshot_id`, `scanned_at`, `source_scan_completed_at`, and
+`filters_completed_at` remain available in compact responses. Its additive
+`scan_progress.totalMarkets` value accompanies `scannedMarkets` and page data so
+the console can render a determinate percentage without changing frozen audit
+facts. Active-run selection is workspace-scoped (legacy rows default to
+`bullpen007`); therefore a Bullpen 007 worker can never make the Bullpen Sports
+Stage 1 tile appear active. A running Stage 1 uses the yellow working treatment
+and current-run progress rather than the prior completed independent snapshot.
+For runs created before these compact output fields were retained, the same
+immutable `request_context.console_profile` lineage provides the display-only
+Universal Scan timestamp fallback; it does not rewrite the frozen run.
+
+## Workflow-owned History views
+
+Bullpen History reads are scoped by the compact indexed `workspace_profile`
+stored beside each durable run. The value is captured from
+`request_context.console_profile.workspace_profile` whenever a run is saved.
+`bullpen-sports` History includes only Sports-owned runs and event trends;
+event-trends reads use a browser-persisted 30-second backend threshold by
+default. The timeout duration in an event-trends error is clickable and may be
+changed to a whole number from 5 through 120 seconds. The selected value is
+sent to both the same-origin proxy and the backend projection so the displayed
+threshold and enforced deadline remain aligned.
+
+`bullpen007` includes explicit Bullpen 007 runs plus legacy rows that predate the
+workspace-profile field. The unscoped API behavior remains available for backward
+compatibility. Frontend History routes and local caches are namespaced by the same
+workspace profile so data cannot leak between workflow screens.
+The workflow card's external History shortcut uses authenticated client-side
+navigation to that workspace-owned route instead of opening a fresh browser tab.
+The release migration backfills only recent Sports rows and treats older null
+rows as Bullpen 007, avoiding repeated reads of large immutable run payloads.
+
+## Bullpen workspace filter profiles (2026-09-14)
+
+Bullpen 007 and Bullpen Sports render the same shared workspace widgets and
+consume the same completed Universal Polymarket Scan. Their Stage 1 filter
+settings and filtered export ownership are namespaced by workspace profile, so
+changing a Bullpen Sports filter cannot mutate Bullpen 007's filter set or its
+saved shortlist. Both workspaces call the exact same Stage 1 Scan Filters popup;
+the scan-scope selector is intentionally managed outside that popup. Bullpen
+Sports defaults to including sports and to the Full Universe scope. An Excel
+download carries the same workspace profile through the browser request and
+server-side export lookup, so a Sports export cannot be opened against the
+Bullpen 007 owner namespace. The browser uses the authenticated
+`/console/bullpen-ai/export-stage-one` route so content blockers do not
+intercept the workbook as API, downloads-directory, or `.xlsx` navigation. The
+filtered export is fetched in-page and converted to a browser-local Blob before
+the save begins, avoiding content-blocker navigation entirely and surfacing any
+server rejection in the console. The response still declares the Excel MIME
+type and `.xlsx` attachment filename. A run
+started from either workspace records
+`console_profile.workspace_profile` in the existing immutable run payload; the
+candidate rows, filter outcome, formulas, and audit schema remain otherwise
+unchanged and backward compatible (`bullpen007` is the default for older runs).
+
+## Scheduled-slot preemption
+
+Every enabled Auto-Live schedule slot creates a new durable run even when the
+previous run is still marked `running` or `confirming`. Before the new run is
+queued, the scheduler revokes the previous worker, marks that run failed with a
+`next_scheduled_slot` cancellation reason, terminalizes unfinished stages,
+cancels its unsubmitted Stage 3 intents, and freezes its audit snapshot.
+Already-submitted intents retain their durable reconciliation path and are never
+blindly resubmitted. This keeps calendar execution independent of stale runner
+state without allowing two scheduled runs to reuse one lifecycle or duplicate
+unsubmitted orders.
+
+## External Hourly Bullpen Rebalance status
+
+The ChatGPT Work automation named **Hourly Bullpen Rebalance** reports each
+terminal attempt through the authenticated
+`POST /polymarket/auto-live/hourly-rebalance/result` route. The backend assigns
+the timestamp when it accepts either `completed` or `failed`; clients cannot
+backdate a result. The latest status, server timestamp, and optional compact
+detail are stored in dedicated additive columns on the existing per-user
+Auto-Live state row and mirrored into its compatible payload as
+`latest_hourly_rebalance_status`, `latest_hourly_rebalance_at`, and
+`latest_hourly_rebalance_detail`.
+
+The external result timestamp is monotonic across scheduler writes. Long-lived
+workers refresh and lock the state row before saving, and the persistence
+adapter retains a newer external result when an older in-memory scheduler state
+is written later. Because legacy workers do not update the additive columns,
+even a process that began before this deployment cannot erase the authoritative
+marker. A Stage 1/2/3 progress save therefore cannot erase or rewind a
+completed/failed hourly-rebalance marker that the History endpoint accepted.
+
+The Run History header displays the external status and timestamp together. It
+falls back to the legacy internal `last_rebalance_at` value until the first
+external result is recorded. The internal Auto-Live rebalance timestamp remains
+unchanged, so an external workflow result cannot impersonate an engine run.
+
+The authenticated History page also accepts a one-shot
+`hourlyRebalanceResult=failed|completed` browser handoff. It records that result
+through the same authenticated endpoint before the heavier History reads finish,
+then removes the query parameter after a successful write so refreshes cannot
+duplicate or advance the timestamp. The visible buttons remain a manual fallback.
+This avoids losing the operational record when a browser workflow cannot locate
+the controls while History data is still loading.
+
+External hourly attempts are operational metadata, not Auto-Live Stage 1/2/3
+runs. They therefore do not create, mutate, or rematerialize frozen Bullpen run
+audit snapshots. The History controls are the browser-visible reporting surface
+used by the Cloud Browser automation; a failed result is recorded only after the
+workflow reaches its terminal reporting step.
+
+## History returns/day display cutoff
+
+The recurring-events table partitions its filtered rows at 0.1% Returns/day,
+placing finite values strictly above 0.1% before a red divider and values at or
+below the cutoff (or unavailable) after it. The selected ordering is retained
+within each section. The divider is independent of claimable and alert styling.
+This is a live history presentation rule only: it does not change return formulas,
+cluster selection, stage rankings, execution decisions, or frozen audit snapshots.
+No audit schema or capture change is required.
+
+## Bullpen 008 six-stage additive audit namespace
+
+Bullpen 008 does not rewrite or reinterpret the frozen three-stage snapshots
+described below. Its six-stage facts are stored in the isolated
+`bullpen008_stage_outputs`, `bullpen008_portfolio_certificates`,
+`bullpen008_action_plans`, `bullpen008_execution_intents`,
+`bullpen008_execution_attempts` and `bullpen008_execution_events` tables. The
+008 run-detail API and UI project those immutable records directly, including
+hash lineage, formula/calculation ledgers, prompts, cluster adjudication, Stage
+4 target certificate, Stage 5 plan certificate, Stage 6 attempts/remote IDs and
+final wallet evidence. See [Bullpen 008 Phase 2](bullpen008-phase2.md) and [P0 loss prevention](bullpen008-p0-loss-prevention.md).
+
+P0 audit persistence also includes deterministic classification evidence, Stage 4-certified scenario exposure snapshots, evidence and regime-change episodes, quote observations, contingent policies and activations, daily equity baselines, drawdown episodes, cooldowns, P&L attribution and explicitly estimated loss-prevention counterfactuals. Active regime episodes remain authoritative buy freezes across later runs until evidence-backed recovery; the monitor may evaluate only policies already certified by Stage 4.
+
+## Bullpen 008 Phase 1 isolation
+
+Bullpen 008 does not reuse or rewrite the frozen Bullpen 007 audit schema. Its immutable Stage 1–4 facts are stored additively in `bullpen008_stage_outputs`, linked to `bullpen008_runs`, with a workflow profile, previous-output hash, settings and wallet hashes, prompt/parser versions, provenance, build version, timing, pass condition and block reason. Deterministic Stage 4 certificates are stored in `bullpen008_portfolio_certificates`.
+
+Stage 1 v7 captures the normalized source universe through ordered Gamma event pagination with a rolling deadline cursor before any inherited 007 hard filters and records an explicit completeness proof. Offsets remain bounded to events sharing the current deadline boundary, and any non-advancing cursor fails closed. Its ten-minute full-universe budget is isolated to 008; 007 retains the shared 90-second default. Stage 2 v2 retains the raw provider payload even when strict JSON parsing fails. Stage 3 v3 cannot pass without both cluster IDs, a shared driver, a main joint-loss trigger, and an adjudication reason for every market. Stage 4 v2 emits one target row per analysed market and calculates weighted metrics over the full current-plus-proposed target exposure. These are new versioned 008 facts only; earlier 008 and all 007 records remain frozen.
+
+The existing Bullpen 007 endpoints and materialized records documented below retain their response shape and recomputation policy. Opening an 008 page reads stored stage outputs; it does not recompute historical facts. The complete 008 profile and component isolation contract is documented in `docs/bullpen008-phase1.md`.
+
+## Independent Stage 1 scans
+
+The console Stage 1 card can run an independent Bullpen market and active-position
+scan without starting the Auto-Live Stage 2 or Stage 3 worker stages. Its latest
+snapshot is stored separately from the frozen full Auto Run projection and replaces
+only the previous independent snapshot. The Stage 1 output widget retains accepted
+and rejected event rows plus their filter reasons. Selecting **Original** always
+returns to the latest persisted full Auto Run Stage 1 evidence, so independent scans
+do not rewrite historical run-audit facts or become an Auto Run audit record.
+While this independent scan is active, the console presents Stage 1 as a yellow
+working tile with a live elapsed timer. The **Scanning** control remains clickable
+and aborts the in-flight stateless pagination request, immediately restoring the
+blue **Scan** control. A stopped, timed-out, or otherwise interrupted enumeration
+saves its accumulated counts and rows as a clearly labelled partial independent
+snapshot. Passed and filtered rows are capped for browser storage while their
+authoritative totals are retained. The dated snapshot button reopens this latest
+partial or completed Stage 1 evidence without creating or mutating a frozen audit
+record.
+The working tile replaces historical Stage 1 totals with the current stateless
+enumeration progress: normalized markets scanned, current keyset page, response
+age, and retry count. Gamma timeouts, rate limits, temporary server errors, and
+frontend polling failures surface an explicit retry reason while the same cursor
+is retried. Completed-run totals return only after the new scan finishes or is
+cancelled; they are never presented as progress for an in-flight scan. Gamma
+enumeration is bounded by the same saved maximum-closing-days filter shown in the
+console, preventing irrelevant far-future markets from exhausting the scan budget.
+The preview calls the canonical backend Stage 1 scanner. If Bullpen CLI returns a
+silently truncated discover set, the scanner supplements it from Polymarket Gamma
+before applying the saved filters; the same completeness safeguard applies to new
+full Auto Run Stage 1 audit snapshots.
+
 Stage 1 console projections retain both accepted and rejected candidate
 summaries so the run monitor can display the complete scanned-event list
 without changing frozen audit snapshots. Older snapshots that do not contain
@@ -11,6 +278,99 @@ including the release-by event exclusion. That filter removes markets whose
 normalized scan text contains the phrase "released by" so release-deadline
 markets are consistently represented in new run-audit snapshots without
 rewriting historical frozen snapshots.
+
+The Yes/No market-odds floor is a persisted per-user Auto-Live setting and
+defaults to 0%, so there is no hidden minimum-side floor. New
+Stage 1 scans use that saved value for both Yes and No sides, include the exact
+configured percentage in every matching rejection reason, and retain it in the
+run's immutable settings snapshot. The console aggregates all retained
+per-event reasons for analysis; a market rejected by multiple rules is counted
+once under each matching rule. Historical snapshots keep their original reason
+text and remain backward compatible.
+
+Trending and Full Universe scans share this complete saved Stage 1 filter base.
+They also share persisted, user-editable minimum Volume (USD) and Liquidity
+(USD) thresholds (both default to 100 and require values strictly greater than
+the configured floor), plus a case-insensitive regular expression matched only
+against the normalized theme name. The default rejected-theme expression is
+`crypto prices|twitter|Mentions`. These values are captured in each new run's
+settings snapshot; historical snapshots remain unchanged.
+The Theme regex is evaluated case-insensitively against the complete composite
+Gamma theme trail retained in the `Theme` export column (including `·`-separated
+labels such as asset, cadence, market type, category, and tags), so a term such
+as `crypto prices` matches anywhere in that incoming value.
+
+The Scan Filters popup exposes **Reapply Filters**. It remains grey until a
+filter draft changes, then turns blue. Activating it saves the complete filter
+set and streams the existing completed Full Universe raw ledger through the
+same Stage 1 predicates without another Gamma request. It atomically replaces
+the compact passed-row ledger and updates accepted/rejected counts and samples,
+so the Stage 1 totals, passed-events popup, and downloadable filtered workbook
+all reflect the reapplied settings while the exhaustive scanned total remains
+unchanged.
+Each named filter section in the Scan Filters popup has a persisted checkbox:
+sports, weather, market predictions, tweet counts, release-by events, Yes/No-only,
+and custom Others phrases. Checked means the rule is applied; unchecked means the
+rule is bypassed. Manual, independent, scheduled, Trending, and Full Universe
+scans all reload this server-backed toggle set before filtering. New immutable
+settings snapshots record each toggle, while historical snapshots remain valid
+through the default-on compatibility values.
+Full Universe pagination does not filter parent events by the child-market
+deadline window: every open parent is expanded first, and the saved expiry
+window is applied to each child market. Active wallet positions are force
+included in Stage 1 results and in both Passed Filters and All Scanned exports,
+even when the position was absent from the fetched catalogue.
+Independent scans also retain a compact passed-row ledger beside the exhaustive
+raw Gamma ledger. Passed Filters Excel generation reads that compact ledger, so
+large Trending and Full Universe scans do not pause the download stream while
+rescanning hundreds of thousands of rejected rows. Scans created before this
+ledger was introduced materialize it once before response headers are sent;
+their frozen scan facts and filter reasons are unchanged.
+The compact Passed Filters worksheet is stored without inline ZIP deflation so
+large raw Gamma fields cannot stall the response after its ZIP headers. The
+frontend proxy gives this authenticated export route a ten-minute streaming
+window. Browser progress totals and the export ledger use the same multi-key
+market identity coalescing, so the displayed passed count matches the unique
+worksheet row count.
+
+The History summary treats the latest Stage 1 clustering and Bullpen rebalance
+labels as operational-status controls. Selecting either label opens a diagnostic
+dialog with the recorded state, timestamp, and the available source/run detail.
+When a completed Stage 1 is newer than the published clustering metadata, the
+dialog explains that the matching clustering result has not yet been published.
+The former manual “Record Hourly Rebalance Completed” and “Record Hourly
+Rebalance Failed” controls are intentionally absent: they only stamped the
+current time and could make an unexecuted workflow appear current. Rebalance
+status is now advanced only by the authenticated automation-result handoff.
+The dedicated Run History screen automatically reloads its current history
+page, event trends, live order books, active positions, portfolio, and runtime
+status. The interval defaults to 300 seconds and can be changed from the menu
+inside the Refresh control; the browser saves and reuses the last valid setting
+(60–86,400 seconds). A refresh-in-progress guard prevents timer and manual
+refresh requests from overlapping. This polling changes only the live console
+projection and does not mutate frozen run-audit snapshots.
+
+The shared `/console/runs` page keeps complete Bullpen run counts and the API's
+newest-first ordering while fetching history in batches of at most two pages.
+Its browser history deadline outlives the 12-second backend and 14-second BFF
+deadlines. A failed page leaves the previous complete list visible with an
+explicit error; it never presents a partially loaded list as complete. Navigation
+or a newer refresh cancels queued Bullpen reads and prevents stale responses
+from replacing the current results. These are read-only presentation changes;
+audit capture, frozen snapshots, schema versions, and trading behavior are unchanged.
+
+History database pagination materializes the requested page of scalar run IDs
+before extracting stage metadata from console JSON. This prevents PostgreSQL
+from reparsing skipped pages' projections for every later `OFFSET` page. The
+user/workspace filters, total counts, ordering, response fields, and existing
+JSON compatibility remain unchanged; no stored snapshot or schema is rewritten.
+
+The maximum days-until-expiry window is also a persisted per-user Auto-Live
+setting, defaulting to 30 days for existing and new users. New Stage 1 scans,
+including independent previews and scheduled runs, use the saved value until it
+is changed again. The configured window is retained in the immutable settings
+snapshot and appears in each matching rejection reason; historical snapshots
+remain unchanged.
 
 ## Purpose
 
@@ -24,6 +384,35 @@ run. It combines:
 
 The audit system is read-oriented. It must never alter live-trading behavior or
 recompute business decisions on page load.
+
+### Stage 2 active-position risk mail
+
+Immediately after the final Stage 2 result is persisted, and before Stage 3
+starts, the planner evaluates each serialized `active_position` review row
+against the position's held side. A held YES position breaches when consolidated
+YES odds or actual current YES Bullpen odds are strictly below 80%; a held NO
+position breaches when consolidated NO odds or actual current NO Bullpen odds
+are strictly below 80%. Candidate rows, missing odds, and values equal to 80%
+do not trigger the warning. A single consolidated mail is sent when either
+measure breaches, and identifies whether LLM odds, actual Bullpen odds, or both
+caused the warning.
+
+The checker reads `current_yes_odds` and `current_no_odds` from the Stage 2
+review row when present, then falls back to its nested prompt-market snapshot
+and the matching completed Stage 1 active-position snapshot. Historical rows
+without any actual-odds snapshot remain compatible and are evaluated on their
+available LLM odds only.
+
+All breached active positions for a run are consolidated into one actionable
+email. The delivery is reserved in the existing durable activity log before
+SMTP is called, using a deterministic run/threshold idempotency key, so Celery
+redelivery cannot send a duplicate. Sent, failed, and in-flight attempts remain
+visible through `GET /mails/history` and the Mails console, including the
+message, affected events, both held-side odds, breach reason, provider diagnostics, and operator
+remarks. Delivery metadata is also attached additively to
+`run.audit_metadata.stage2_position_warning_mail`; historical run payloads
+without this field remain valid. Mail failure is recorded and logged but does
+not block Stage 3 or alter trading decisions.
 
 ### Operator Stage 3 retries
 
@@ -333,18 +722,25 @@ different caller produced it. Passive UI mount or interval polling is
 cache-only: it may wait for an already-running refresh to publish, but it must
 not acquire the refresh lock or start a new Bullpen CLI positions command on
 its own.
-When that forced fresh wallet snapshot fails for a non-transient reason, Stage 1
-must record a failed workflow stage with the sanitized wallet-refresh error, and
-the persisted Stage 2 and Stage 3 workflow results must remain explicitly blocked with
-`blocked_by_stage1_wallet_refresh=true` instead of continuing with fallback
-wallet rereads. A distinct Stage 1 handoff timeout or shared-lock timeout is handled differently: the
+Stage 1 completion is now the durable candidate-scan boundary. As soon as the
+filtered candidate output, counts, source identity, and completeness marker are
+persisted, Stage 1 records `phase_status="completed"` and emits its completion
+event. The Bullpen wallet snapshot remains an independently bounded preflight
+for active-position enrichment and Stage 3; it must not keep Stage 1 visually
+running or retract an already-published scan completion. Progress writes made
+while that preflight is still resolving preserve the original Stage 1
+`completed_at` and candidate outputs.
+
+When the forced fresh wallet snapshot or its shared-lock recovery fails, the
 worker records `wallet_snapshot_status="unavailable"`,
 `wallet_refresh_error`, and `stage2_candidate_only=true`, cancels the lingering
 wallet read, and proceeds with read-only Stage 2 candidate analysis. Its Stage 3
 result is explicitly blocked with `blocked_by_stage1_wallet_refresh=true`; it
 must plan or submit no orders and the run ends as `partial_success`. This keeps a
 slow shared wallet refresh from indefinitely preventing LLM review while
-preserving the fresh-wallet safety gate for execution.
+preserving the fresh-wallet safety gate for execution. Both the fast-path wait
+and the shared-snapshot recovery use detached wall-clock deadlines: cancellation
+cleanup in Redis or the CLI broker cannot extend those advertised budgets.
 
 A fresh wallet snapshot that is present but contains unresolved positive-exposure
 rows is not the same as a missing wallet snapshot. In that degraded-enrichment
@@ -814,7 +1210,7 @@ history but are not reintroduced into current Stage 3 decisions or audit finding
 
 Defined in `AUDITED_ALGORITHM_REGISTRY`.
 The current registry version is
-`2026-07-27-stage3-submission-evidence-v29`. The
+`2026-09-05-stage1-common-filters-v30`. The
 `bullpen_position_claimability` entry is algorithm version `v4`; historical
 frozen bundles retain their earlier registry provenance and child findings.
 
@@ -856,8 +1252,20 @@ Current required keys:
 
 Materialized formula rows use the same provenance as the registry:
 `console_trade_amount_per_opportunity` is `v2`,
-`llm_returns_per_day` is `v3`, and both returns-per-day implementations point
-to their actual `console_profile` source module.
+`candidate_returns_per_day` and `llm_returns_per_day` are `v4`, while
+`position_returns_per_day` is `v2`. All three use the user's persisted,
+Excel-style Returns/day formula and point to their actual `console_profile`
+source module. The default is
+`=(100-CURRENT_CHOSEN_SIDE_BULLPEN_ODDS)/(DAYS_UNTIL_CLOSE+4)`; existing frozen
+outputs remain unchanged.
+
+Stage 1 candidate projections now retain `returns_per_day` beside each accepted
+row, and position projections retain the held-side value. On the console, a row
+without valid LLM Yes/No odds uses the strongest current Bullpen side, which is
+the same side selection used by `candidate_returns_per_day`. Once valid LLM odds
+exist, the existing `llm_returns_per_day` strongest-LLM-side selection continues
+to apply. This is presentation parity across the Stage 1 popup, Events Summary,
+and history; it does not make an uncovered candidate eligible for Stage 3.
 
 `stage3_active_reservation_cash_filter` algorithm version `v2` counts an
 otherwise consumed BUY reservation when its consumption timestamp is newer
@@ -956,7 +1364,7 @@ updated in the same change.
 Defined in `validators.py` with `BULLPEN_RUN_AUDIT_RULE_VERSION`.
 
 Rule version
-`2026-07-27-stage3-submission-evidence-v29` retains deterministic
+`2026-09-05-stage1-common-filters-v30` retains deterministic
 duplicate coalescing, buffered affordable-buy validation, verified-only Stage 1
 portfolio formulas, and remote-write-boundary sell-preflight validation. It also
 audits the v2 redeem wallet-lineage fence while registering alias-aware sell
@@ -1150,8 +1558,23 @@ paginated, compact records from `GET /polymarket/auto-live/history`. It must not
 treat `BullpenAutoLiveSummary.recent_runs` or `recent_decisions` as authoritative
 history. The first page reads scalar run columns plus the additive
 `console_projection`; it does not select the full run `payload` or all decision
-rows. Selecting one run lazily loads the compatible `GET /runs/{id}` detail and
-the additive `GET /runs/{id}/decisions` detail.
+rows. Selecting one run in History, or opening the dedicated
+`/console/bullpen-ai/runs/{id}` page, first loads the bounded, exact-run
+`GET /runs/{id}/console` projection and the Stage 1-only
+`GET /runs/{id}/stage-one` projection independently. The Stage 1 resource reads
+only the owning run's bounded projection and never joins decision rows, so a
+busy decision query cannot hide a completed scan or its accepted candidates.
+Both server reads have the same bounded twelve-second recovery budget used by
+History. If the console detail is temporarily unavailable, the API client falls
+back to the independent authenticated Stage 1 resource, so the History dialog
+and dedicated run page still render completed scan evidence; later-stage
+decision detail remains unavailable until its independent read recovers. When the console
+projection is available, it is the authoritative later-stage detail and the
+browser must not also request the
+immutable `GET /runs/{id}` payload: a complete Full Universe Stage 1 audit can
+contain hundreds of thousands of source rows. Only a legacy row explicitly
+returned with `projection_available=false` falls back to the compatible
+`GET /runs/{id}` and `GET /runs/{id}/decisions` detail resources.
 
 History requests bypass browser caches, preserve the current page if a refresh
 fails, and are cancelled when the dialog closes or the authenticated console is
@@ -1421,6 +1844,29 @@ presentation and consensus-validation rule over already-frozen output fields; it
 does not rewrite historical snapshots or change their schema version.
 # Run-history event trend presentation
 
+## 14 September 2026 memory outage protection
+
+A PostgreSQL OOM was traced to the legacy `trend_stage` compatibility query:
+expanding one very large frozen scan consumed gigabytes despite a small final
+response. The overlay now uses a SQL CASE before JSON extraction and only expands
+payloads with stored size at most 256 KiB. Larger snapshots continue using the
+existing bounded console projection; they can have partial historical candidate
+coverage. Frozen audit snapshots, hashes, decisions and raw exports are preserved.
+No earlier audit fact or missing model output is rewritten or inferred.
+
+The planning-worker service now has a 1.5 GiB memory pressure threshold and a
+2 GiB hard limit so an oversized task cannot exhaust the entire database host.
+The existing late-acknowledgement, execution leases and worker-loss lifecycle
+remain authoritative; exceeding the worker limit can interrupt a large task.
+This changes runtime containment, not order decisions or automatic retry policy.
+
+Production deployment installs PostgreSQL `OOMPolicy=continue` so PostgreSQL can
+perform its native child-crash recovery, plus `Restart=on-failure` for loss of the
+server itself and SIGINT for normal fast shutdown. A cluster already stuck in a
+confirmed OOM shutdown is recovered with bounded native shutdown and WAL replay;
+intentional maintenance stops are not restarted by this guard. Data files are
+never removed or reset.
+
 The Run History dialog includes a read-only, backward-compatible trend view over
 the latest 20 saved scans, including successful and failed runs. It does not
 alter any frozen audit snapshot or Bullpen stage formula. For each event, the
@@ -1428,6 +1874,27 @@ view records the strongest LLM-side probability in each scan (newest first),
 uses `null` when the event was absent, and sorts by `latest + 0.5 × previous +
 0.25 × third-latest`. This presentation-only score must not be interpreted as a
 Stage 2 or Stage 3 ranking input.
+
+The newest run that actually retained a completed Stage 1 candidate count has
+its complete `accepted_candidates` slice projected into the trend response
+before Stage 2 history is overlaid. Newer queued or payload-only run records do
+not hide that scan. Consequently every
+current filtered candidate retains its deadline and saved Stage 1 Returns/day
+even when no LLM output exists. The browser then refreshes current Bullpen odds
+for those same identities and recalculates Returns/day at that refresh timestamp.
+Both screens carry the exact condition ID and market slug into that refresh, so
+sibling contracts under one parent event cannot borrow each other's order book
+or held-position side.
+The Stage 1 popup performs the same refresh and calculation, so matching rows on
+the dashboard and history screens use the same latest odds and formula. Frozen
+run payloads remain unchanged.
+
+The compact dashboard projection retains up to 200 accepted Stage 1 rows, which
+keeps the complete current filtered set visible for the console's normal scan
+scope (including the 116-row production scan observed during this fix). If an
+older saved projection was truncated under the previous limit, the dashboard
+detects the count mismatch and hydrates the full frozen Stage 1 candidate list
+before synchronizing the Auto Scan snapshot and its popup.
 
 The trend response displays Returns/day from the latest decision's saved stage
 output when available. For backward compatibility with older decisions that did
@@ -1450,6 +1917,32 @@ Older or compact projections remain compatible: a scan without retained model
 outputs is represented by an empty array and its historical facts are not
 rewritten.
 
+Current console projections retain up to 100 normalized Stage 2 reviewed-event
+rows and up to 10 normalized model outputs per event. This keeps the full normal
+Stage 2 universe, per-model Yes/No estimates, and commentary available to the
+20-scan heatmap even when Stage 3 later fails. For older compact projections, the
+trend adapter reconstructs a missing latest consensus pair from the frozen
+strongest-side score and side, and enriches per-model detail from the immutable
+decision payload when it exists. Returns/day is then evaluated from that same
+latest-scan consensus, current odds, close time, and saved user formula. These are
+additive compatibility projections; immutable historical run facts are unchanged.
+An explicit failed or circuit-broken model output never qualifies as latest-scan
+coverage and never becomes a synthetic 0/100 consensus. Active-position
+Returns/day remains available in that case by using the held Bullpen side as the
+chosen side; non-position rows still require valid latest LLM odds.
+The live history screen reconciles current wallet-position metadata before it
+applies refreshed order-book odds. When a compact or failed LLM projection omits
+the deadline, the matched current position supplies its close time, and the same
+registered Returns/day formula uses the held position side without synthesizing
+LLM Yes/No odds. The LLM cell therefore remains truthfully “Not covered” while
+Deadline and Returns/day remain visible. If neither a held side nor a valid LLM
+pair identifies the chosen side, the presentation does not guess one.
+For the current latest run only, the trend read overlays the frozen Stage 2 stage
+slice when an older console projection had truncated reviewed rows or stripped
+their model outputs. The bounded projection remains authoritative for earlier
+scan slots, and the compatibility read never materializes twenty full run
+payloads.
+
 
 ## Candidate-only Stage 2 after wallet-read failure
 
@@ -1465,3 +1958,891 @@ omitted for that pass and `stage2_candidate_only` /
 kept blocked: no exits, sizing, order planning, or submission may use the
 candidate-only result until verified wallet evidence is restored. Historical
 frozen snapshots are not rewritten.
+
+## Run-detail failure diagnostics
+
+The run-detail route logs materialization failures with the run ID and user ID
+and preserves the full exception stack in backend service logs. Database-layer
+failures return a sanitized `503 RUN_AUDIT_DATABASE_UNAVAILABLE` response that
+identifies the required audit-table migration; other materialization failures
+return `500 RUN_AUDIT_MATERIALIZATION_FAILED`. The console displays the HTTP
+status, structured error code, run ID, failed phase, safe exception type and
+message, diagnostic ID, likely cause, server-generated remediation steps, and
+migration hint instead of replacing the response with a generic message. The
+error state also offers Retry and forced Rematerialize actions; a failed forced
+materialization uses the same diagnostic contract. Backend-capable production deployments run
+`alembic upgrade head` followed by `alembic current --check-heads`, so a deployment
+cannot report success while the database revision is behind the repository head.
+This is diagnostic-only and does not rewrite frozen snapshots or change their
+schema or response shape on successful requests.
+
+Snapshot freshness checks normalize both legacy offset-naive database timestamps
+and offset-aware ORM timestamps to UTC before comparing them. This preserves
+existing frozen snapshots, avoids a data backfill, and allows older durable run
+records to materialize under the current timezone-aware runtime.
+
+## Custom Stage 1 exclusions
+
+The immutable settings snapshot now records `console_custom_exclude_phrases`.
+Each normalized, case-insensitive phrase is applied to the canonical market search
+text before a candidate can pass Stage 1. The resulting rejection evidence names
+the matched custom phrase. Existing frozen snapshots remain valid because runs
+created before this setting was introduced retain their original settings payload.
+
+## Trending and Full Universe scan scopes
+
+Bullpen 007 persists `console_scan_scope` in the user settings snapshot. Legacy
+settings default to `trending`, which preserves the existing Bullpen CLI discovery
+feed and downstream workflow. Selecting `full_universe` changes only Stage 1
+discovery: the worker keyset-paginates Gamma events through the terminal cursor,
+enumerates every child market, unions the catalogue with Bullpen Trending and the
+active wallet, and deduplicates canonical market/condition identities.
+
+Successfully fetched catalogue pages are retained if a later page fails. Such a
+run is frozen as `scan_completeness=incomplete`; active positions can still be
+reviewed for safety, but the Stage 2 authoritative-universe contract is marked
+incomplete and Stage 3 cannot submit new purchases. The audit snapshot records
+Bullpen Trending rows, complete-catalogue markets, active wallet positions,
+filter-eligible markets, wallet markets added to the union, and the final missing
+wallet-market count. A complete Full Universe handoff requires
+`missing_active_market_count=0`.
+
+## Active Auto Run Stage 1 progress
+
+The active Auto Run takes precedence over a previously selected independent scan
+in the worker card. While Stage 1 runs, the card is yellow and shows live elapsed
+time plus the worker's normalized market count, page count, and last update age.
+The scanner emits progress after each successfully processed Gamma page. The
+additive `scan_progress` Stage 1 output is persisted and preserved by compact
+console projections and live detail merging; audit Stage 1 outputs retain the
+same evidence. Counts are not an estimated percentage of an unknown universe.
+Older snapshots without this field remain readable. No scan filters, LLM inputs,
+or execution eligibility change.
+
+## Exhaustive Stage 1 Excel schema
+
+All Stage 1 Excel downloads use the same ordered 220-column baseline, regardless
+of scope, trigger, or passed/all selection. Additional observed API fields append
+after that baseline. Missing historical fields remain blank; exports never fetch
+current values to silently rewrite a frozen scan. New scans retain compressed,
+export-only `scan_export_data` on both accepted and rejected rows, including parent
+event fields (excluding its repeated markets array) and child-market fields.
+Compact console projections omit that payload. Auto Run filtered downloads read
+the full persisted run through the existing Excel endpoint with `scope=filtered`,
+which retains the default all-scanned behaviour for existing callers. Header parity
+and source-value tests cover both selections and the frontend schema copy.
+
+## Large Stage 1 downloads and missing-field enrichment
+
+Successful Auto Run XLSX responses stream through the BFF without arrayBuffer
+materialization. The dedicated production proxy paths allow 600 seconds for
+workbook preparation and delivery; ordinary JSON request deadlines stay bounded.
+ZIP compression uses level 1 to reduce preparation time. Wallet rows promoted from
+rejected to accepted preserve their complete source snapshot.
+
+For older runs that did not retain source fields, the export may supplement missing
+fields using bounded, exact-ID Gamma lookups. This operates on export copies only:
+no frozen audit, historical odds, scan selection, or trading decision is rewritten.
+`export.source`, `export.fetchedAt`, and `export.status` explicitly distinguish
+current source enrichment from saved scan-time data and identify lookup failures.
+Absent/non-applicable fields and uncomputed LLM/allocation values display N/A.
+The workbook writer enables ZIP64 for worksheets above the standard ZIP size
+limit. Repeated N/A cells share one string entry to keep exhaustive exports small.
+
+### Gamma keyset export recovery
+
+Legacy Stage 1 exports for both Trending and Full Universe now recover missing
+source data from `/events/keyset?archived=false&closed=false&limit=500`, following
+`next_cursor` even for short pages. Exact child-market IDs preserve exported row
+membership. Complete parent event and child market fields are retained. Export-time
+provenance remains explicit; frozen scan odds, eligibility and audit records are
+unchanged. HTTP failures include status codes, and missing/closed historical
+markets or bounded incomplete recovery are distinguished from successful recovery.
+Full Universe scanning also explicitly sends `archived=false` to Gamma keyset.
+
+### Prepared Stage 1 Excel downloads
+
+The console now submits a read-only Celery export job and polls compact status
+responses before requesting the completed XLSX. Source recovery and workbook
+creation no longer hold the browser download request open. Jobs are keyed by
+user, run and scope; requests verify run ownership and status/download keys
+remain user-scoped. Repeated clicks reuse queued/working/completed artifacts.
+Failures are logged and displayed, and explicit retries can queue failed jobs.
+Worker redelivery is protected by a Redis lock. Frozen audit snapshots and
+trading state are unchanged. Export recovery is bounded to 25 minutes with a
+30-minute worker soft limit. Completed files are reusable for one hour and
+old generated artifacts are pruned after one day when a new export completes.
+Docker production workers and API share the export volume; systemd uses the
+same backend export directory. BULLPEN_EXPORT_DIR may override that location.
+The legacy direct endpoint is retained for compatibility, while the console
+uses prepared=true to serve only a completed artifact.
+The preparation/status proxy has a dedicated 30-second budget. A transient
+502/503/504 triggers bounded status checks before any repeat submission, so a
+successful publish followed by a proxy timeout does not become a false failure.
+
+### Full Universe source memory protection
+
+Full Universe handoff now writes exhaustive Gamma source payloads to immutable
+source packs before wallet reconciliation. Persisted rows retain a versioned
+`source-v1` reference with a per-row SHA-256 digest, offset and byte length instead
+of copying the base64 payload into every run serialization and lifecycle update.
+Rejected raw market objects and the completed catalogue container are released
+before the wallet handoff. Normalized candidate fields, filter reasons, run
+membership, eligibility and wallet safety gates are unchanged.
+
+Excel resolves both legacy embedded source data and versioned references, verifies
+the source bytes, and fails explicitly on corruption instead of silently dropping
+columns. Source packs live under BULLPEN_EXPORT_DIR/scan-sources, or the backend's
+.stage-one-exports/scan-sources directory by default. These immutable audit sources
+must be included in run backups and retained alongside their referencing runs;
+the temporary XLSX cleanup does not delete them. All Docker production scan,
+export and API workers share the source volume. No historical snapshots are
+rewritten by this change.
+
+
+### Stage 1 streaming rejection and page deadlines
+
+The automatic scan now applies the same configured console filters during Gamma
+pagination. Rejected rows are serialized with the existing candidate adapter and
+written to immutable source-v1 packs before their raw market objects are released.
+The final snapshot retains the same candidate fields, rejection reasons, source
+references and complete-universe flag. Accepted markets retain their raw data for
+wallet reconciliation and Stage 2. Legacy scanner callers keep their prior behavior.
+
+Each page has a 60-second total request budget in addition to HTTPX's inactivity
+timeout, capped by the remaining full-universe deadline. A timed-out scan preserves
+successful pages with complete_universe=false and the existing warning; it must
+not be reported as exhaustive. Progress timestamps now describe current Stage 1
+work, including export preparation, rather than retaining the last page timestamp
+through the handoff. No historical audit snapshots or eligibility rules are changed.
+
+### Full Universe completion budget and visible partial results
+
+The Full Universe scan budget is 90 minutes (formerly five minutes), inside the
+planner's two-hour soft limit. Streaming filter/source-pack time is included.
+A scan becomes complete only after traversing the final cursor. Transient keyset
+transport failures, HTTP 429 and 5xx responses retry the same cursor up to three
+attempts inside the existing 60-second total page budget; permanent errors and
+invalid payloads do not retry. Exhausted failures retain explicit incomplete
+status and prior successful pages. No new-purchase completeness gate is relaxed.
+
+The Stage 1 monitor renders finished Full Universe results without completion
+proof as Incomplete, in amber, with a partial-result label instead of a full
+progress bar. The count warning includes the saved scan error where available;
+legacy snapshots without proof remain unverified rather than inferred complete.
+The Gamma normalizer now populates volume_24hr_usd from volume24hr so the saved
+24-hour-volume filter evaluates actual data instead of an always-missing field.
+Historical snapshots and filter thresholds are not rewritten.
+
+The compact console projection and minimal-stage fallback now retain bounded
+`scan_scope`, `scan_completeness`, `scan_warning`, and `scan_details` fields so
+clients can distinguish partial Full Universe results. This is an additive v2
+projection change; existing frozen snapshots are not rewritten or assigned
+completion evidence they never recorded. Projection regression tests cover both
+partial and complete outcomes, warning truncation, and exclusion of raw exports.
+
+### Stage 1 worker-loss recovery and accepted-source retention
+
+Full Universe Auto Runs cache each successfully fetched Gamma keyset page under a
+run-scoped, versioned directory before applying filters. Writes use gzip, fsync,
+and atomic replacement. Worker redelivery replays those saved pages with the run's
+filters, deduplicates market IDs, then continues from the first unfetched cursor.
+A new run has a separate cache. A corrupt page is refetched. Completion still
+requires the terminal cursor; cached pages do not fabricate completion. This
+preserves original fetched source evidence rather than silently replacing it on
+retry. Existing runs without cached pages cannot recover work from before rollout.
+When the production host is below 4 GiB free, deployment and scheduled recovery
+reclaim run-scoped page-cache directories idle for more than 72 hours. This is
+past the worker recovery window; missing cache pages are fetched again if a run
+is retried. The immutable scan exports, source packs, archived copies, audit
+records, and completed snapshots are not part of this cleanup.
+
+Accepted markets now spool exhaustive source data during pagination as rejected
+markets already did. In-memory raw values keep scalar identity/routing fields and
+a source reference, avoiding accumulated nested event payloads. Stage 1 serializers
+reuse the reference; Excel and trade-analysis audit snapshots restore the stored
+source fields. Historical frozen snapshots and filter/trading eligibility are
+unchanged. Tests cover accepted-source fidelity, interrupted pagination replay,
+terminal-cursor reuse, deduplication, run/query isolation and corrupt-page fallback.
+
+### Bounded Stage 1 handoff text (normalized source extension v1)
+
+Rejected rows keep identity, pricing and rejection reasons in run JSON. Repeated
+rules, event descriptions, context, resolution sources and preflight text are now
+stored losslessly as `candidate_text_fields_v1` inside the existing checksummed
+source pack. `scan_text_storage_version: 1` identifies compact rows; their nullable
+text fields are restored one row at a time by Excel before raw-source fallbacks.
+This is an additive source-payload extension, not a rewrite of frozen snapshots.
+Older inline/base64 and source-v1 rows continue to export as before. Accepted LLM
+inputs and eligibility are unchanged. All original API fields remain in the pack.
+
+The pagination-to-wallet handoff transfers compact rejected dictionaries instead
+of copying the full list of dictionaries again. Regression verification compares
+every Excel cell before/after compaction, opens an actual generated workbook, and
+exercises 220,000 rows through in-memory result plus JSON persistence copies under
+an explicit process memory limit. The raw-page cache remains available for retries;
+page counts during replay describe reconstructed working results, not lost fetches.
+
+Reproduce the full-size handoff check with
+`PYTHONPATH=backend python backend/tests/bench_stage_one_handoff.py`.
+The September 7 check completed 220,000 rows with a 198,720,037-byte JSON payload,
+709 MiB peak RSS and a 1,800 MiB address-space limit. This is an isolated synthetic
+handoff measurement, not a claim that a production scan or export has completed.
+
+Export-time enrichment also carries `candidate_text_fields_v1` through source
+re-encoding, so recovering a missing API field cannot replace frozen normalized
+text with the current API description. A mocked Gamma recovery regression verifies
+both the recovered field and the exact original normalized rules.
+
+### Stage 1 Excel preparation progress and worker recovery
+
+Prepared Excel jobs now select only saved stage results and timestamps under the
+same run/user ownership check. They no longer load the entire run's diagnostics,
+trade history or a second Pydantic copy just to write a workbook. Workbook output
+and frozen row semantics are unchanged. Filtered exports retain the exhaustive
+shared header discovery but do not copy rejected rows that they never mutate.
+
+Progress reports distinguish source checks, missing-field recovery, column discovery
+and rows written, with processed/total counts and timestamps exposed through the
+existing status endpoint. The existing download notice renders these messages.
+Excel XML sanitization uses the equivalent C-backed character translation and
+precomputed column labels rather than per-cell Python character/name loops.
+
+A redelivered export retries while a previous worker's finite lock remains instead
+of acknowledging and dropping the job. Retries are bounded at 70 attempts, 30 seconds
+apart, covering the 1,900-second lock. Existing checksummed source references,
+normalized text extensions, download ownership and frozen snapshots remain intact.
+Tests cover workbook values, progress, minimal snapshots, XML escaping/control
+characters and lock-contention redelivery. A 10,000-cell text-cleanup comparison
+produced identical values and measured 2.634s before / 0.043s after; this is a focused
+microbenchmark, not a prediction of total workbook preparation time.
+
+Polling an existing working preparation now recovers it after its worker lease
+expires. It does not create jobs for absent status keys or steal a live lease, and
+keeps the same user/run/scope ownership key. This repairs old orphaned `working`
+records as well as new worker failures without rescanning markets. The targeted
+export/scanner suite passes 23 tests including this recovery boundary.
+
+### Duplicate planner delivery outcomes
+
+Duplicate deliveries rejected by the Redis lease or PostgreSQL execution fence
+raise Celery Ignore, preserving the executing owner's result and lifecycle.
+Recovery does not synthesize a failed audit snapshot from a retained SUCCESS
+result while inspection still observes that task active, reserved, or scheduled.
+The absolute runtime breaker remains authoritative. Existing frozen snapshots
+are unchanged; this uses the existing lifecycle and stage-status schema.
+
+### Event-trend read isolation
+
+History skips frozen overlays when retained candidate and per-model coverage is
+complete. Compatibility overlays select only stage metadata, accepted candidates
+and reviewed LLM rows in PostgreSQL. Rejected scan rows and export sources are
+excluded before HTTP transfer; frozen audit snapshots and exports remain unchanged.
+Current console-projection versions never re-open immutable run JSON merely because
+an individual failed model has no `llm_outputs`; only older projection versions may
+use the bounded compatibility overlay. This keeps the 20-scan History read responsive
+without changing any saved Stage 1/2/3 evidence.
+# Stage 1 export availability
+
+Filtered Excel downloads use the frozen run ID or independent scan export ID even
+when the dashboard projection omits candidate rows. A positive filtered count must
+not be disabled solely because the browser has no candidate rows. The output popup
+uses the same server export sources, with local rows only as a fallback. This changes
+download availability only; frozen audit snapshots, filter results and export contents
+remain unchanged and need no schema migration.
+
+
+### History read resilience (September 2026)
+
+History and event-trend HTTP reads authenticate and query through one short-lived
+SQLAlchemy session. The existing four-second deadline now covers authentication
+and pool checkout as well as the history query. This prevents concurrent reads
+from retaining one auth connection while waiting for a second data connection.
+The browser retains its sole transport during circuit cooldown and reports a
+structured timeout if its read budget expires before an attempt. Missing error
+details no longer render as `Unexpected error: null`.
+
+These are read-path changes only: frozen run snapshots, Stage 1–3 capture,
+formulas, decisions, audit versions, and historical findings are unchanged.
+Regression tests cover session reuse, timeout cleanup, sole-transport recovery,
+and null error rendering.
+
+The same-origin backend proxy also isolates the two database history routes
+with fixed circuit scopes. Production diagnostics showed wallet display reads
+exceeding their proxy budget and opening the shared origin circuit, which then
+returned 504 for history without forwarding a request. History/trend circuit
+failures and recovery now remain independent of wallet failures and each other.
+No audit data or trading behavior changes. Regression tests reproduce wallet
+circuit failures followed by successful history reads on the same origin.
+
+
+The shared History portfolio card now uses the compact dashboard summary. It
+must never invoke the legacy full-run summary on mount or refresh: that endpoint
+loads ten frozen scan payloads and can block the HTTP process while decoding
+large universes. The paginated history query now selects only order-funnel and
+stage identity, counts, timings, and blocker fields in PostgreSQL before rows
+reach Python. Production history pages previously transferred 40–44 MB of
+console projections to produce a roughly 36 KB response. Frozen snapshots and
+all history response fields remain unchanged; only the read projection changes.
+# History cluster display
+
+History accepts externally generated cluster JSON (`event_name`, `market_id`,
+`cluster_id`) matched by exact market ID. Cluster IDs normalize to C01, C02, etc.
+Assignments are editable and saved per signed-in user in the current browser;
+applying JSON replaces that browser mapping. No model is invoked by the import.
+This is a user-controlled history display, not a Stage 1/2/3 execution input.
+Frozen audit snapshots and automated trading rankings remain unchanged.
+
+Cluster display algorithm v1: apply the existing visible-row filter, exclude
+unassigned events, require at least one finite Current Odds value in (0, 100],
+and require finite numeric Returns/day. Group by cluster ID, sort each group by
+descending Returns/day (market ID breaks ties), and sort groups by their maximum
+Returns/day (numeric cluster ID breaks ties). Grouped mode shows every eligible
+member; top mode shows the first member of each group, including singletons.
+Default mode restores the existing table sort and position priorities. Tests:
+`frontend/tests/bullpen-event-clusters.test.mjs`.
+
+
+## Completion email handoff (September 2026)
+
+The console run repository records a completion notification in ActivityLog in the
+same transaction as each scan/LLM/invest completion transition. The source uses
+existing frozen stage fields: workflow_stage_key, phase_status, completed_at,
+scan_completeness and accepted_candidates_count. A Stage 1 handoff requires a
+complete scan and a concrete filtered count (including zero); it does not wait
+for Stage 2 or overall completion. No scoring, execution or historical snapshot
+schema changes are introduced.
+
+The outbox records schema_version 1, user, run ID, stage, completion time and
+filtered count. After commit it queues the email worker; periodic outbox recovery
+handles a broker outage. Mail reservations and Redis serialization prevent
+concurrent recovery deliveries; an ambiguous SMTP reservation is never resent
+automatically. Delivery details remain in the existing Mails audit, with exact
+source run ID and outcome. Failed mail is observable independently of trading.
+
+The stable subject `Cred-X: Bullpen Stage 1 completed` is the GPT Work clustering
+wake-up signal. The automation must still verify the actual completed source run
+and deduplicate by run ID before publishing any cluster mapping. Bullpen scan
+notifications default on; LLM, invest and overall notifications default off.
+Individual saved preferences override defaults and legacy stock email switches.
+Tests: backend/tests/test_completion_notifications.py.
+
+## History read resilience (September 2026)
+
+History and event-trend first paint remain read-only projections over frozen run
+evidence. The trends query now reads immutable decision JSON only for legacy
+rows whose bounded Stage 2 projection lacks per-model output; current projected
+rows no longer force PostgreSQL to de-TOAST every full decision payload.
+
+The backend keeps a firm twelve-second History deadline, with the same-origin
+proxy and browser request budgets ordered outside it. The dedicated History
+screen serializes its two heavy database reads, retries one transient
+network/429/5xx failure, and retains the last good page-one and event-trend
+responses in browser storage. A transient database or gateway delay therefore
+does not replace a usable History table with a false empty/error state. Frozen
+run records, stage semantics, scoring, clustering, and trading behavior are
+unchanged.
+
+## History claim-date Returns/day (2026-09-10)
+
+The live recurring-events projection uses algorithm `history-claim-date-v1`
+(`frontend/lib/bullpen-claim-returns.ts`). Inputs are exact market ID, the
+published or supported browser-imported `claim_date`, current Yes/No odds,
+latest LLM Yes/No odds, authoritative claimability, and calculation timestamp.
+Outputs retain claim date, calculation timestamp, side and side source, exact
+fractional days left for claim, formula version, and result. The row calculator
+renders this same projection; cluster ranking and the 0.1% divider consume it.
+
+Formula: `(100 - current odds on strongest LLM side) / ((claim_date - now) / 86400000)`.
+The existing strongest-current-side fallback applies when both LLM odds are not
+available. There is no deadline adjustment, four-day buffer, day rounding or
+minimum denominator. Nonfuture/missing/invalid estimates, invalid chosen odds,
+and claimable positions produce null, never a cached backend return. The live
+clock refreshes every 30 seconds and on window focus. Null-return rows remain
+available in the default all-events view and are excluded from ranked clusters.
+
+The shared cluster array accepts optional `claim_date` (timezone-qualified ISO
+8601 or null) while legacy three-field rows remain readable. Existing inline
+cluster edits preserve estimates. The initial fourteen estimates reproduce the
+requested planning table; they are guesses, not oracle finality evidence. In
+particular the ceasefire estimate is conditional and the Swedish PM estimate
+requires government formation. Future clustering runs research and refresh
+estimates with source/rationale metadata; missing evidence must be reported.
+
+This live History projection does not rewrite historical Stage 1/2/3 decisions,
+execution formulas or frozen audit snapshots. Their original versions and inputs
+remain authoritative for those runs. No database schema change is needed.
+Deterministic validators: `frontend/tests/bullpen-claim-returns.test.mjs` and
+`frontend/tests/bullpen-event-clusters.test.mjs` cover math, timezones, nulls,
+identity mapping, import compatibility and ranking.
+
+## Exact live-odds identity and portfolio reconciliation (2026-09-11)
+
+History current-odds refreshes must resolve every contract by its canonical
+numeric Polymarket market ID. The caller's synthetic response key is not a
+market identity. In particular, a shared multi-outcome event slug must never
+cause one sibling contract's CLOB odds to be displayed for another contract.
+For History, every numeric identity is fetched through Polymarket's dedicated
+`GET /markets/{id}` endpoint; repeated filters on the list endpoint are not an
+exact-identity transport.
+The current-odds route resolves by `marketId`, suppresses condition-id,
+parent-slug, URL, and runtime-title fallbacks when that canonical ID is
+available, then maps the result back to the
+caller's response key. `frontend/tests/bullpen-history-current-positions.test.mjs`
+and `frontend/tests/bullpen-ai-compatibility.test.mjs` enforce this contract.
+
+History's **Current Odds** column uses the exact contract's live CLOB order
+book. Each outcome shows its executable best bid, best ask, and their spread,
+matching Bullpen's Order Book rather than Gamma's complementary indicative
+probabilities. For active positions, the held outcome is valued at its best bid
+and is highlighted green only when that executable exit price is above 80c;
+otherwise it is highlighted red. History also shows the position's original
+average fill price in the adjacent **Bought** column. Trading workflows still
+obtain fresh executable quotes during their separate action-time preflight.
+
+The Hourly Bullpen Rebalance target portfolio is the latest stable Cluster Top
+Events set with Returns/day strictly above 0.1%, filtered again by live Bullpen
+tradeability and a selected-side quote of at least 75.0%. The 75.0% entry floor
+is the inverse of the strict held-side Safety Sell threshold and prevents a
+buy-then-immediate-sell loop. A market sold for safety is ineligible for
+repurchase during the same occurrence.
+
+Every occurrence explicitly reconciles every active position against that
+target set. A non-claimable, open and tradeable position that is no longer the
+top event for its cluster, has missing or at-most-0.1% Returns/day, or otherwise
+fails target eligibility is a full-position reconciliation Sell candidate even
+when settled cash is at least $5. Claimable, resolved, closed, untradeable and
+settlement-pending positions are reported separately and never forced through
+the Sell path. All new Sells remain subject to the existing combined preview
+and action-time confirmation. After authoritative outcomes, every retained
+active position must belong to the target set; the active count may be lower
+than the target count because safety and tradeability exclusions are allowed.
+# External Stage 1 clustering progress
+
+The progress proxy has a fixed circuit scope separate from wallet/CLI reads,
+so unrelated wallet timeouts cannot suppress healthy progress requests.
+
+Clustering progress is an additive, per-user/per-scan ActivityLog stream with
+resource `bullpen_clustering_progress`. The authenticated
+`/polymarket/auto-live/clustering/{run_id}/progress` GET/POST routes expose
+collecting, researching, validating, deploying, verifying and terminal reports.
+Reports include an attempt UUID, monotonic sequence, server timestamp and detail.
+Writes verify run ownership and take a nonblocking PostgreSQL transaction lock
+scoped only to clustering reporters, avoiding the busy scan row lock. They
+deduplicate repeated sequence numbers; they do not
+alter the scan, scheduler state, cluster mapping or successful publication time.
+Frozen run audit snapshots and their schema remain unchanged.
+
+The History popup separately reads the scan's completion email outbox result and
+external job progress. Missing progress is explicitly unconfirmed, not running.
+Active reports older than ten minutes are marked stale, not automatically failed.
+The popup refreshes its lightweight status read every fifteen seconds while open,
+without refreshing wallet positions. Browser job reports use the History query
+parameters `clusteringStatus`, `clusteringRun`, `clusteringAttempt`,
+`clusteringSequence` and `clusteringDetail`; parameters are removed only after a
+successful authenticated POST. Actual completion still requires deployment of
+matching source metadata and production verification.
+
+## Stage 1 completion and orphaned redelivery recovery (2026-09-12)
+
+Stage 1 is terminal once the candidate scan and filters are durably persisted;
+the parallel wallet snapshot remains a Stage 2/3 preflight and cannot hold the
+scan open. If a worker is restarted after that point, reconciliation preserves
+the completed scan counts and completion timestamp even when it must fail the
+parent run because the wallet preflight never finished.
+
+A genuinely queued or reserved delivery remains protected from stale-progress
+recovery. A `RESERVED` lifecycle that also contains prior worker-start or
+heartbeat evidence is different: it represents a regressed/redelivered task.
+After the heartbeat timeout and redelivery grace, it is terminalized as worker
+lost only when Celery inspection is completely negative and both the Redis
+execution lease and PostgreSQL advisory lock are confirmed absent. This closes
+the orphan without risking a second planner or order submission.
+
+
+## Cross-account Stage 1 clustering handoff (2026-09-12)
+
+Bullpen Stage 1 completion notifications use the exact subject reserved for the
+clustering webhook and route to the dedicated
+`BULLPEN_STAGE1_COMPLETION_RECIPIENT` inbox. The production-safe default is
+`tarunindian007@gmail.com`, which is monitored by the active ChatGPT Work
+webhook while SMTP continues to send from the 6893 account. Other completion,
+alert, and account emails retain their existing per-user recipient routing.
+The completion outbox, retry, preference, idempotency, and Delivery Audit
+semantics are unchanged.
+# Sports Rankings phase 1
+
+The independent Sports Rankings repository is reference-only. No Bullpen stage
+reads its rankings yet, and no existing execution or frozen audit schema changes.
+Future consumption must capture source_id, source_as_of, successful_at,
+content_hash, competition ID, Polymarket prefix, name match status and ranking
+kind in a versioned audit input. Derived results order must not be represented
+as official league rank. See sports-rankings.md.
+
+### Universal scan and workflow filter lineage
+
+The Trading Bots overview owns the unfiltered Universal Polymarket Scan controls.
+The authenticated capture uses the same exhaustive Gamma keyset pagination and
+raw export ledger in a separate owner namespace. Bullpen 007 filter reapplication
+forks the completed capture, adds its wallet positions, and writes its own filtered
+output; it never rewrites the universal source. New filter snapshots carry
+`sourceScanExportId`, mapped to `source_scan_export_id` in Stage 1 display outputs,
+alongside the existing `scan_export_id`. They also retain the completed universal
+capture time as `sourceScanCompletedAt` / `source_scan_completed_at` and the
+workflow filter completion time as `filtersCompletedAt` /
+`filters_completed_at`. The shared Stage 1 card displays both timestamps directly
+below its qualified-shortlist label across Bullpen workflows. When an older filter
+snapshot has a source export ID but predates the explicit timestamp field, the
+snapshot API resolves the completion time from that retained universal export.
+If that legacy export has already rotated out, it falls back to the latest saved
+Universal scan completion time instead of presenting an unknown timestamp.
+When a newer device-local workflow snapshot wins during hydration, the client
+still enriches its missing source completion time from the synchronized server
+snapshot instead of discarding the recovered lineage.
+Counts and exported evidence belong to
+that workflow output, while the source identifier records the common capture.
+Each workflow completion overwrites `filters_completed_at` with that run's own
+filter completion time; it never reuses the timestamp carried by an older source
+snapshot. Terminal saves retain the workspace captured when the run was queued,
+even after the large request context is removed, so Bullpen Sports results cannot
+fall back into Bullpen 007 history. The compact run projection also carries that
+non-sensitive workspace owner explicitly so the dashboard makes the same choice
+as the server-side History query. If a completed auto run and a saved independent
+Stage 1 snapshot both exist, the card displays the newer timestamped evidence.
+The successful Universal scheduler run's paired start time is used as the
+display fallback whenever older Stage 1 evidence does not carry an explicit
+source timestamp. The fallback may be newer than the displayed workflow run so
+the monitor can show the latest completed shared scan instead of a dash; a later
+failed or cancelled Universal attempt can never replace it. The status endpoint
+resolves this start timestamp from the persisted bounded completed-run history
+written by the same terminal worker path, without walking the export directory
+on every poll. The card also displays
+the workflow's own start timestamp as `Last stage run`, keeping workflow time and
+shared-scan time visibly distinct.
+
+Scheduler controls use a single effective state: a currently active workflow
+also renders the primary action as `Running` and exposes the stop control, so
+`Enable Auto Runs` cannot appear beside Pause/Kill. Pause/Kill remain hidden
+when no active run exists. A persisted running/confirming workflow older than
+the backend's two-hour absolute recovery limit is treated as stale display data,
+not live execution, so an orphaned record cannot leave Pause/Kill visible for
+days. Universal Scan status refreshes are explicitly
+labelled as status-only reads and do not start a scan. Failed status or control
+requests open a diagnostic dialog containing the operation, HTTP response,
+server detail, and recovery guidance; this presentation does not alter frozen
+Stage 1–3 evidence.
+
+The Universal Scan status read also closes its own orphaned running state after
+the existing 55-minute worker recovery window, even when the recurring schedule
+has been disabled. This uses the same terminal failure and history update path as
+the scheduled watchdog, so controls cannot remain live indefinitely when a
+worker disappears between scheduler ticks.
+Existing frozen auto-run audits and legacy scan APIs retain their current schema
+and meaning. Bullpen 008 can consume the same capture through the shared scan
+contract when its workflow is connected.
+
+The Universal Scan scheduler keeps its configured IST start time and refresh
+interval separate from an immediate execution. `Start Auto Run Now` atomically
+saves the visible schedule, enables recurrence, and queues one run immediately;
+that manual run never re-anchors the selected future start time. `Enable Auto
+Run` atomically saves the same visible schedule and enables recurrence without
+queuing an immediate run. The status path reads the persisted completed-run
+history instead of scanning the export directory, and the frontend retries
+transient 502/503/504 backend responses before showing the clickable diagnostic.
+
+`Start Auto Run Now` is an immediate workflow-scoped action. It first reapplies
+the selected workspace's Stage 1 filters to the shared Universal scan, validates
+the resulting `workspace_profile`, and queues that explicit frozen candidate set.
+It does not start, stop, enable, or reschedule the shared recurring scheduler;
+`Enable Auto Runs` remains the separate scheduling control.
+
+The shared scan overview derives a versioned, read-only summary from every row
+in the completed universal ledger. It records completion time and scan duration,
+then accounts for the same total across six display breakdowns: category, expiry,
+odds profile, total volume, liquidity, and market structure. The summary is cached
+on the completed export metadata and does not alter source rows, workflow filters,
+or frozen Stage 1 audit snapshots.
+
+Production stores the shared completed ledger under the frontend service user's
+durable data directory (or `BULLPEN_STAGE_ONE_EXPORT_DIRECTORY` when configured),
+so a frontend deployment or restart cannot erase it. Completed universal ledgers
+are retained until a replacement completes; ordinary workflow exports keep the
+existing bounded retention policy.
+
+The browser scanner retries the same cursor after bounded gateway, timeout,
+rate-limit, network, or malformed-response interruptions. Page-key deduplication
+makes these retries idempotent; after eight consecutive failures the run stops
+and leaves the last completed common scan untouched.
+
+After the terminal page is durable, the browser also retries summary hydration
+while the server performs any one-time legacy aggregation. A gateway timeout in
+that read phase therefore shows a finalizing state instead of misreporting the
+completed capture as failed.
+
+Universal raw ledgers use lossless per-row compression (`compressedRowV1`).
+Readers accept both compressed and legacy JSONL rows, preserving every exported
+field and deterministic byte-offset re-filtering. The common scan does not write
+a duplicate all-passed ledger. Starting its replacement discards only incomplete
+owner-scoped captures; completed evidence remains selectable.
+
+### Shared sports and Yes/No filter controls
+
+Every Bullpen workspace renders the same Sports event filters section. Its
+`Exclude sports` checkbox remains profile-specific; whenever sports are
+included, a candidate passes only when its event slug does not end in `draw`,
+`market.feeType` is `sports_fees_v2` or `sports_fees_v3`, and
+`market.sportsMarketType` is `moneyline`. The browser reapply path and canonical
+server-side console filter emit matching rejection reasons.
+
+The shared Yes/No odds thresholds section has its own profile-specific enable
+checkbox. Disabling it bypasses both lower-side and higher-side odds thresholds
+in browser reapplies, manual scans, and scheduled scans while preserving the
+saved numeric values for later re-enabling.
+
+### History Stage 1 shortlist availability
+
+The History event table opens in the ungrouped view so every candidate retained
+by the latest completed Stage 1 is visible immediately. Cluster grouping and the
+strongest-LLM filter remain optional derived views; a clustering snapshot that
+lags a newer Sports scan cannot hide that scan's Stage 1 evidence.
+
+While a stage is running, its published candidate count can temporarily lead its
+bounded candidate rows. The event-trends read treats that as live progress, not
+as evidence of a legacy projection, and therefore does not inspect the immutable
+full-run payload. Once a stage is terminal, the existing bounded compatibility
+overlay remains available for older projections. This changes only History read
+performance and presentation; frozen Stage 1/2/3 audit payloads are unchanged.
+
+### Read-only history state (September 2026)
+
+`GET /polymarket/auto-live/state` reads authenticated scheduler/configuration
+metadata in one bounded session. It preserves the state response fields, including
+hourly rebalance results, but no longer hydrates frozen run payloads, takes scheduler
+write locks, reconciles runs, or enqueues execution on a browser refresh. Recovery
+and execution remain in existing worker/control paths. Reading history creates no
+audit event and does not change any frozen run or audit snapshot.
+
+Sports ranking enrichment now reuses matching work within each HTTP batch and runs
+outside the API event-loop thread. Numeric metrics are read anew for each request;
+matching thresholds and source/identity boundaries are unchanged. This affects
+read-time enrichment only and does not rewrite frozen inputs or audit snapshots.
+
+### 2026-09-17 — Bound imported-team fuzzy matching
+
+Live traffic exposed a remaining CPU bottleneck after moving comparisons off the API loop: fuzzy matching grew with every unranked imported participant. Ranking tables now index exact names incrementally and run conservative fuzzy matching only against validated source rows. Unranked imported rows remain available through exact names and aliases, but cannot become fuzzy proxies for unrelated teams. Safe similarity upper bounds skip pairs that cannot meet either the acceptance threshold or ambiguity margin. This preserves published metrics and avoids fabricating rankings. Regression coverage includes a 3,000-participant unranked import and unique/ambiguous source matches.
+
+### 2026-09-17 — Render successful history enrichment promptly
+
+Live browser verification found that successful comparison responses were followed by a detail-request fan-out for every unmatched event. The page withheld all comparisons and the portfolio until those redundant reads finished. Successful comparison batches are now authoritative, including legitimate missing/ambiguous rankings; independent detail recovery remains available after a failed batch request. The wallet-primed portfolio becomes visible before optional event enrichment. Behavioral frontend tests cover successful unmatched responses and failed-request recovery.
+
+### October 2026: Passive legacy Auto-Live console reads
+
+The legacy Auto-Live console now loads `/summary/dashboard` with a bounded
+20-second read budget instead of the operational `/summary` and global
+`/decisions` readers. Opening or refreshing this screen no longer invokes their
+scheduler-recovery or decision-reconciliation paths. The summary's latest-run
+projection remains authoritative, degraded sections remain visible, and saved
+run history remains reachable for complete evidence. A failed summary can fall
+back to passive `/state`, with the settings editor unavailable. Superseded or
+unmounted reads are cancelled and cannot replace a newer result.
+
+Guardrail saves and exports include only fields owned by that editor. Omitted
+LLM prompts, targets, strategy profiles, and other hidden settings cannot be
+reset by defaults in a bounded projection. Existing explicit execution controls,
+confirmations, backend validation, and frozen Stage 1/2/3 audit evidence are
+unchanged. Regression coverage checks passive endpoints, failure/cancellation,
+degraded results, and hidden-setting preservation.
+
+### October 2026: Distinguish requested trades from confirmed positions
+
+Trade Analysis no longer substitutes requested or generic order values for
+missing filled amounts, shares, prices, or odds. Records without execution
+provenance display `EXECUTION_UNCONFIRMED` rather than an inferred `OPEN` outcome.
+The open-position summary now requires the same recorded buy-execution timestamp
+as the executed-trade count, and the UI calls this `Confirmed Open Positions`.
+Explicit zero/partial fills remain visible. These are read-time presentation and
+summary corrections only: raw records, execution capture, broker actions,
+reconciliation, and frozen audit evidence are unchanged. Regression tests cover
+failed/pending requests, explicit fills, and open versus closed confirmed buys.
+
+### October 2026: Isolate portfolio analysis sources and read-only displays
+
+Scanner, Final Actionables, and automated-rebalance display selectors now resolve
+market and stage from explicit run metadata and leading prompt headers. Quoted
+historical input bundles cannot relabel a US Swing run as an India Rebalance run;
+contradictory or ambiguous source identities fail closed. Previously derived
+browser run/history caches use new versions, while workflow control state and
+persisted historical records remain unchanged. Consensus input sources are
+deduplicated by run/job ID, retaining separate jobs from the same model.
+
+Actionables page loads and Refresh no longer POST history or queue backfills.
+Server terminal-run reconstruction remains the durable history path. This does
+not repair or rewrite historical records created before source validation.
+Closed Calculations dialogs no longer mount their expensive computation child.
+No action formulas, execution controls, or frozen audit evidence are changed.
+## Analysis-only recovery containment
+
+When CREDX_RECOVERY_MODE=1, no Bullpen bot initialization, runtime CLI command, direct live order, or background redeem/claim submission is admitted. All Bullpen commands, including reads and auth refresh, are refused before subprocess execution. Recovery exposes a narrow INDmoney/auth/results API surface; it does not mutate frozen historical audit evidence or classify refused work as executed. INDmoney jobs retain their portfolio/stage metadata; optional sheet exports and completion emails are suppressed, with run export_status disabled. Normal behavior remains available only outside explicit recovery mode.
+
+Celery analysis uses the dedicated credx_recovery_analysis queue and credx:recovery:analysis:v1: broker/result prefix, which isolates legacy unacked, unacked_index and queues. Only execute_ai_job and the read-only Zerodha portfolio snapshot task are published/executed, with an INDmoney equity-context check before registration or status mutation. Existing scheduler and financial consumers must remain stopped; recovery startup hooks do not enqueue old recovery/outbox/sports work. Changing the mode does not authorize restoring financial execution or acknowledge, purge, migrate or requeue reserved tasks.
+
+
+Recovery equity analysis now also admits Zerodha India threats/events and matching India run/job contexts. This expands analysis only: broker order routes, Bullpen commands, bots, scheduler, exports, and legacy financial queues remain blocked. No historical audit evidence is rewritten.
+
+# Read-only display quote fallback
+
+The owner-scoped Upstox fallback at `GET /zerodha/portfolio/quotes` can supply
+missing Kite prices. The additive `upstox_quotes` field separately supplies
+provider comparison prices for the Upstox LTP display column; it does not mutate
+executable quantities or amounts. Quote responses preserve the existing `instrument`, `price`,
+`as_of`, and `source` fields, with Upstox source and exchange last-trade timestamp
+retained by `technicalPriceEvidence` in `TECHNICAL_PRICE_ANCHORS_V1` when used as
+Technical validation input. This does not change Stage 1–3 algorithms, allocation,
+execution guards, or frozen audit snapshots. No historical quote provenance is
+rewritten. See `docs/upstox-ltp-fallback.md` for freshness and failure rules.
+
+## Executable basket Units explanation
+
+The Units value between the existing decrement/increment buttons opens a stacked,
+read-only calculation summary above the basket. This uses executable row sizing,
+not the independent allocation Shares/Target Weight display calculation. New
+basket rows capture their actual formula-estimate/holding base, requested percent,
+unrounded and rounded quantity, cap and final baseline. Manual unit changes,
+percentage changes and quote-refresh caps retain the original baseline and record
+the latest quantity transition. The current displayed quantity remains authoritative;
+missing or unreconciled history is explicitly unavailable. No historic LLM inputs
+or frozen audit evidence are reconstructed or rewritten. The optional `unitsTrace`
+metadata does not change executable sizing, selection, order guards or broker payloads.
+
+## Basket display columns and original sell groups
+
+Weight Difference and Zerodha Stocks are the displayed header names. A dedicated
+trailing column control opens a stacked checkbox picker; visibility is session
+state held above the keyed snapshot/open remount and never mutates orders,
+selection or execution guards. Group/detail/empty
+row spans follow visible columns. The removed banners' estimate and provenance
+details remain in calculation popups and value tooltips. A read-only,
+authenticated owner-scoped quote-capabilities flag identifies actual Upstox
+configuration, independently of provider quote success.
+
+For original Sell All and Trim basket actions, Zerodha Stocks shows the exact
+listing's current Kite snapshot holding quantity, including settled plus T1
+units. This is a display total, not a claim about sellable quantity. Matching
+multiple holding entries is additive; a complete snapshot can verify zero, while
+missing/incomplete/invalid snapshots remain unavailable. Zerodha Amount is that
+quantity times valid Quoted LTP, falling back to genuine Upstox LTP; it never uses
+a Limit Price estimate for these actions. Calculation summaries retain holding
+source/as-of and price source/as-of. Buy, Add and Hold allocation semantics and
+all executable Units/Amount and broker payloads remain unchanged.
+
+### Unknown runtime display (2026-11-01)
+
+The console treats absent run evidence as unknown execution, including workflow
+stage labels and Stage 1 coverage. It does not infer queue membership from a
+workflow template. Saved run status identifies the run and its recorded start or
+completion time; it does not verify current worker execution. Portfolio counts
+without position/runtime evidence render as unavailable, while reported zero
+counts retain their source and observation/freshness qualification. This is a
+presentation change only: audit capture, frozen snapshots, schema, validators,
+calculations, execution and recovery behavior are unchanged.
+
+The scoped source-state correction also covers lower Events Summary counts,
+empty-state text, missing-run timings/history and LLM diagnostics. Missing saved
+snapshots do not imply zero activity or invite execution; verified empty saved
+snapshots retain zero counts. An overview read settling without data clears only
+its transient loading note, preserving cached values, source notes and timestamps.
+Audit capture, frozen snapshots and execution remain unchanged.
+
+The remaining Stage 1 event-action labels use unknown counts when source evidence
+is not evaluated. Filtered/scanned export names, their tooltips and adjacent
+included-active labels follow the same existing display guard. Verified zero and
+saved known counts remain visible. Action handlers, disabled predicates, audit
+capture, frozen snapshots, calculations and execution remain unchanged.
+
+### Audit6 A6-07: Bullpen 008 source presentation
+
+The Bullpen 008 workspace renders runtime, settings, schedule, alerts and history
+only after bootstrap succeeds. A later retrieval failure preserves the last
+successful response with an explicit retrieval timestamp and stale-data warning;
+it does not rewrite saved run or audit records. Wallet values are labelled as
+saved run snapshots, and absent snapshots do not establish zero positions.
+Missing stage records do not establish pending status or zero progress. Separate
+Stage 4 detail failures leave bootstrap configuration and history available while
+marking target rows and certified exits unavailable. Monitoring queries omitted
+by bootstrap during queued/running runs are labelled unavailable, not empty.
+This is presentation only: audit capture, frozen snapshots, formulas, API shapes,
+execution permissions and mutation endpoints are unchanged.
+
+Controlled synthetic coverage: `frontend/tests/bullpen008-source-state.test.mjs`.
+
+### Runs Audit list read provenance (A6-12)
+
+The list treats a successful paginated summary response as evidence only for its
+requested filters and page. Loading and failed reads do not imply an empty history
+or a filter mismatch. Last successful snapshot records remain visible during a
+refresh or failure with the read time and original page, explicitly marked as
+possibly using previous filters. Pagination counts and controls are available only
+for the successfully verified current request. Filtered zero results describe a
+filter match, never the existence of all saved history. The supplemental Bullpen
+run source remains independent and is labeled as unfiltered. A history retry only
+repeats the existing list read; it does not invoke explicit materialization.
+
+
+### Trade-analysis presentation evidence
+
+Trade-analysis list and detail views preserve missing or invalid confidence as
+not evaluated, separate failed retrieval from empty learning categories, and mark
+legacy learning fields as unvalidated hypotheses. A stored exit-timing or
+confidence-alignment field alone does not establish evaluated advice. Its original
+value remains available in the raw-evidence disclosure. Filter scope and displayed
+record counts are visible; aggregate totals do not establish complete outcome or
+fee coverage. Coverage denominators, declared exit windows/units and version
+provenance require the analytics response contract before evaluated display.
+This presentation change does not alter capture, frozen snapshots, formulas,
+execution permissions or API responses. Offline component/browser fixtures are in
+`frontend/tests/bullpen-trade-analysis-source-state.test.mjs` and
+`frontend/scripts/audit10-trade-analysis-offline.mjs`; neither requires production
+navigation or provider calls.
+## Stage 1 nested source evidence (2 November 2026)
+
+The shared Stage 1 detail popup preserves unknown versus verified-empty source
+semantics independently of normalized fallback arrays. Unavailable, partial or
+incomplete evidence does not establish zero totals or absent positions. Saved
+known totals retain their completion timestamp, and retained rows remain visible.
+This is presentation-only: no audit schema, frozen snapshot, validator, execution
+input or financial calculation changes. Regression evidence is recorded in
+`docs/evidence/a6-06-nested-stage1-regression.md`.
+
+## Post-trade descriptive analysis v2 (Audit10, 2026-11-01)
+
+`bullpen-descriptive-v2` is a derived post-trade review algorithm, separate from
+Stage 1/2/3 decision formulas and frozen run snapshots. Single outcomes do not
+establish calibration, causality or validated learning. Reinforcement and policy
+change flags are withheld; no training, routing, prompt or trading consumer was
+found in the repository. Legacy stored analysis remains original evidence.
+
+Detail GET computes a labelled transient review without writes. The existing
+explicit recompute action appends an `ANALYSIS_VERSION` to the existing trade
+snapshot table with algorithm version, calculation time, source trade identity
+and calculation inputs. It does not overwrite the original analysis columns,
+source snapshots, units or executions. Repeated revisions are separate snapshots;
+there is no bulk recomputation/backfill or new schema/migration. Analysis revision
+is not a changed execution or original decision-time evidence.
+
+Only declared `cents`/`unit_price` operands normalize. New in-position monitor
+maxima declare their existing heldProbability × 100 source; legacy units remain
+unknown. Execution-summary extraction no longer substitutes order intent for
+missing fill fields, and genuine zero fills survive. In-hold maxima never prove
+an executable post-exit opportunity; post-exit advice remains Not evaluated until
+a bounded horizon and executable liquidity/size/spread/fee convention are approved.
+
+Null outcome and execution fees remain unknown. Closed population, known/unknown
+outcomes, known-outcome denominator, recorded subtotals and fee component coverage
+are separate. Known zero is a non-win (`net_pnl > 0` is a win). Metrics describe
+the selected cohort; raw-dollar ranks do not establish comparable risk-adjusted
+performance. Tax/spread/FX coverage is not asserted. Existing financial execution,
+exit/partial-close lifecycle policy and run-audit capture remain unchanged.
+
+Acceptance and task-specific unresolved gates are tracked in
+`docs/audit10-bullpen-analysis-acceptance.md`; frozen run audit schemas need no
+change because this revision neither changes nor backfills decision-time runs.

@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import calendar
 import os
+from _thread import LockType
 from datetime import date, datetime, timedelta, timezone
+from threading import Lock
 from typing import Any
+from weakref import WeakValueDictionary
+from contextlib import nullcontext
 
 from sqlalchemy import desc
 
@@ -12,6 +16,7 @@ from app.infrastructure.database.sync_session import SyncSessionLocal
 
 from .cache import (
     claim_refresh_cooldown,
+    collection_lease,
     dashboard_cache_ttl_seconds,
     load_cached_dashboard,
     load_stale_good_dashboard,
@@ -19,6 +24,10 @@ from .cache import (
 )
 from .estimators import classify_traffic_path, estimate_data_transfer_cost, estimate_projected_month_end
 from .models import TrafficCostRollup
+from .billing import collect_query, grouped_rows, amount
+from .collection import MeteredClient, collection_budget, require_durable_budget
+from .admission import durable_collection
+from .storage_pricing import estimate_storage
 from .recommendations import (
     generateCloudWatchLogsRecommendation,
     generateCostExplorerRecommendation,
@@ -33,6 +42,21 @@ from .recommendations import (
 from .transfer import summarize_transfer_usage_types
 
 logger = get_logger(__name__)
+
+_DASHBOARD_LOCKS_GUARD = Lock()
+_DASHBOARD_LOCKS: WeakValueDictionary[str, LockType] = WeakValueDictionary()
+
+
+def _dashboard_lock(cache_key: str) -> LockType:
+    # Offloaded HTTP handlers may reach a cache miss concurrently. Serialize
+    # the fill and refresh cooldown per month/mode without retaining old locks.
+    with _DASHBOARD_LOCKS_GUARD:
+        lock = _DASHBOARD_LOCKS.get(cache_key)
+        if lock is None:
+            lock = Lock()
+            _DASHBOARD_LOCKS[cache_key] = lock
+        return lock
+
 
 FREE_TRANSFER_GB = 100.0
 TRANSFER_RATE_PER_GB_DEFAULT = 0.09
@@ -80,16 +104,17 @@ def _month_window(
 
 
 def _aws_client(service: str, region: str):
+    require_durable_budget()
     try:
         import boto3  # type: ignore
         from botocore.config import Config  # type: ignore
     except Exception as exc:
         raise RuntimeError("boto3 is not installed in the backend image") from exc
-    return boto3.client(
+    return MeteredClient(boto3.client(
         service,
         region_name=region,
-        config=Config(connect_timeout=3, read_timeout=8, retries={"max_attempts": 2}),
-    )
+        config=Config(connect_timeout=3, read_timeout=8, retries={"total_max_attempts": 1}),
+    ), service)
 
 
 def _metric_summary(cloudwatch: Any, instance_id: str, metric_name: str) -> dict[str, float] | None:
@@ -138,6 +163,30 @@ def _public_ipv4_monthly_cost(count: int, days_in_month: int) -> float:
     )
 
 
+def _public_ipv4_billed_cost(usage_rows: list[dict[str, Any]]) -> float:
+    """Return only Public IPv4 cost that Cost Explorer actually itemised.
+
+    An attached public address is inventory evidence, not billing evidence.  Keep
+    the two separate so a theoretical list-price exposure is never presented as
+    an already-paid or immediately removable charge.
+    """
+    markers = (
+        "publicipv4",
+        "public-ipv4",
+        "inuseaddress",
+        "idleaddress",
+        "ipaddress",
+    )
+    return round(
+        sum(
+            float(row.get("cost") or 0)
+            for row in usage_rows
+            if any(marker in str(row.get("name") or "").lower() for marker in markers)
+        ),
+        2,
+    )
+
+
 def _cloudwatch_storage_monthly_cost(stored_gb: float) -> float:
     return round(
         max(stored_gb, 0.0)
@@ -150,11 +199,14 @@ def _cloudwatch_storage_monthly_cost(stored_gb: float) -> float:
 
 
 def _estimated_unattached_ebs_savings(volumes: list[dict[str, Any]]) -> float | None:
-    total_gb = sum(float(volume.get("sizeGb") or 0) for volume in volumes)
-    if total_gb <= 0:
-        return None
-    rate = _env_float("EBS_GP3_STORAGE_RATE_PER_GB_MONTH", 0.08)
-    return round(total_gb * rate, 2)
+    # Inventory does not establish owner-approved removable capacity.
+    return None
+
+
+def _storage_exposure(volumes):
+    return estimate_storage(volumes, os.getenv("EBS_GP3_STORAGE_RATE_PER_GB_MONTH"),
+                            os.getenv("EBS_GP3_STORAGE_RATE_SOURCE"),
+                            os.getenv("EBS_GP3_STORAGE_RATE_EFFECTIVE_DATE"))
 
 
 def _service_savings_profile(
@@ -246,7 +298,7 @@ def _build_cost_driver_rows(
                 ),
                 "usageQuantity": float(service.get("usageQuantity") or 0),
                 "unit": str(service.get("unit") or "usage units"),
-                "confidence": "actual",
+                "confidence": "estimated",
                 "severity": "high" if index <= 2 else "medium",
                 "whyItCostsMoney": "AWS Cost Explorer reports month-to-date spend for this service.",
                 "suggestedAction": "Review the matching AWS service, usage type, and recommendations below.",
@@ -294,99 +346,74 @@ def _collect_cost_explorer(
             _env_float("DATA_TRANSFER_OUT_RATE_PER_GB", TRANSFER_RATE_PER_GB_DEFAULT),
         ),
     }
+    provenance = {
+        "requestedPeriod": {"startInclusive": start, "endExclusive": end},
+        "scope": "account_aggregate", "collectedAt": datetime.now(timezone.utc).isoformat(),
+        "dataCutoff": None, "estimateState": "unknown", "currency": None,
+        "complete": False, "queries": {}, "meter": {"requests": 0, "sdkRetries": 0, "requestCap": 30},
+        "resourceInvoiceReconciled": False,
+    }
+    empty["provenance"] = provenance
     try:
         ce = _aws_client("ce", "us-east-1")
-        daily_resp = ce.get_cost_and_usage(
-            TimePeriod={"Start": start, "End": end},
-            Granularity="DAILY",
-            Metrics=["UnblendedCost"],
-        )
-        daily_cost = [
-            {
-                "date": r["TimePeriod"]["Start"],
-                "cost": round(float(r["Total"]["UnblendedCost"]["Amount"]), 2),
-            }
-            for r in daily_resp.get("ResultsByTime", [])
-        ]
-        mtd_cost = round(sum(float(r["cost"]) for r in daily_cost), 2)
-        services_resp = ce.get_cost_and_usage(
-            TimePeriod={"Start": start, "End": end},
-            Granularity="MONTHLY",
-            Metrics=["UnblendedCost", "UsageQuantity"],
-            GroupBy=[{"Type": "DIMENSION", "Key": "SERVICE"}],
-        )
-        services = []
-        for g in (services_resp.get("ResultsByTime") or [{}])[0].get("Groups", []):
-            cost = float(g["Metrics"]["UnblendedCost"]["Amount"])
-            if cost > 0:
-                services.append(
-                    {
-                        "name": g["Keys"][0],
-                        "cost": round(cost, 2),
-                        "usageQuantity": round(
-                            float(g["Metrics"]["UsageQuantity"]["Amount"]), 3
-                        ),
-                        "unit": "mixed",
-                    }
-                )
-        services.sort(key=lambda x: x["cost"], reverse=True)
-        usage_resp = ce.get_cost_and_usage(
-            TimePeriod={"Start": start, "End": end},
-            Granularity="MONTHLY",
-            Metrics=["UnblendedCost", "UsageQuantity"],
-            GroupBy=[{"Type": "DIMENSION", "Key": "USAGE_TYPE"}],
-        )
-        usage = []
-        for g in (usage_resp.get("ResultsByTime") or [{}])[0].get("Groups", []):
-            name = g["Keys"][0]
-            qty = float(g["Metrics"]["UsageQuantity"]["Amount"])
-            cost = float(g["Metrics"]["UnblendedCost"]["Amount"])
-            if cost > 0 or qty > 0:
-                usage.append(
-                    {
-                        "name": name,
-                        "cost": round(cost, 2),
-                        "usageQuantity": round(qty, 3),
-                        "unit": "usage units",
-                    }
-                )
-        usage.sort(key=lambda x: (x["cost"], x["usageQuantity"]), reverse=True)
-        diagnostics.append(
-            {
-                "service": "Cost Explorer",
-                "status": "ok",
-                "message": "Loaded live AWS billing data.",
-            }
-        )
-        return {
-            "loaded": True,
-            "mtd_cost": mtd_cost,
-            "top_services": services[:8],
-            "top_usage_types": usage[:10],
-            "daily_cost": daily_cost,
-            "transfer_summary": summarize_transfer_usage_types(
-                usage,
-                elapsed,
-                days,
-                FREE_TRANSFER_GB,
-                _env_float(
-                    "DATA_TRANSFER_OUT_RATE_PER_GB",
-                    TRANSFER_RATE_PER_GB_DEFAULT,
-                ),
-            ),
-        }
+        windows = {}
+        for name, granularity, dimension in [("daily", "DAILY", None), ("services", "MONTHLY", "SERVICE"), ("usage", "MONTHLY", "USAGE_TYPE")]:
+            request = {"TimePeriod": {"Start": start, "End": end}, "Granularity": granularity,
+                       "Metrics": ["UnblendedCost"] if dimension is None else ["UnblendedCost", "UsageQuantity"]}
+            if dimension:
+                request["GroupBy"] = [{"Type": "DIMENSION", "Key": dimension}]
+            windows[name], provenance["queries"][name] = collect_query(ce, request, provenance["meter"])
+        currencies = set()
+        daily_cost = []
+        total = amount({"Amount": "0"})
+        for row in windows["daily"]:
+            metric = row["Total"]["UnblendedCost"]
+            currencies.add(metric.get("Unit", "unknown"))
+            value = amount(metric)
+            total += value
+            daily_cost.append({"date": row["TimePeriod"]["Start"], "cost": float(value), "rawCost": str(value)})
+        services = grouped_rows(windows["services"], currencies)
+        usage = grouped_rows(windows["usage"], currencies)
+        if len(currencies) != 1 or "unknown" in currencies:
+            raise ValueError("Incompatible or unknown billing currency")
+        currency = next(iter(currencies))
+        # Existing dashboard money labels are USD. Do not display another unit as dollars.
+        if currency != "USD":
+            raise ValueError("Unsupported dashboard currency: " + currency)
+        provenance["currency"] = currency
+        flags = [row.get("Estimated") for rows in windows.values() for row in rows]
+        provenance["estimateState"] = "estimated" if any(flag is True for flag in flags) else ("final" if flags and all(flag is False for flag in flags) else "unknown")
+        totals = {"daily": total, "services": sum((amount({"Amount": r["rawCost"]}) for r in services), amount({"Amount": "0"})),
+                  "usage": sum((amount({"Amount": r["rawCost"]}) for r in usage), amount({"Amount": "0"}))}
+        provenance["rawTotals"] = {key: str(value) for key, value in totals.items()}
+        provenance["reconciled"] = len(set(totals.values())) == 1
+        provenance["complete"] = all(q["complete"] for q in provenance["queries"].values()) and provenance["reconciled"]
+        diagnostics.append({"service": "Cost Explorer", "status": "ok" if provenance["complete"] else "partial",
+                            "message": "Account billing coverage: " + ("complete" if provenance["complete"] else "partial; see provenance")})
+        return {"loaded": bool(daily_cost), "mtd_cost": float(total), "top_services": services[:12],
+                "top_usage_types": usage[:25], "daily_cost": daily_cost, "provenance": provenance,
+                "transfer_summary": summarize_transfer_usage_types(usage, elapsed, days, FREE_TRANSFER_GB,
+                    _env_float("DATA_TRANSFER_OUT_RATE_PER_GB", TRANSFER_RATE_PER_GB_DEFAULT))}
     except Exception as exc:
         logger.exception("Cost Explorer collection failed")
-        diagnostics.append(
-            {"service": "Cost Explorer", "status": "error", "message": str(exc)[:300]}
-        )
+        provenance["error"] = str(exc)[:300]
+        diagnostics.append({"service": "Cost Explorer", "status": "error", "message": str(exc)[:300]})
         return empty
 
 
 def _collect_inventory(diagnostics: list[dict[str, str]]) -> dict[str, Any]:
     region = os.getenv("AWS_REGION", "ap-south-1")
+    configured_regions = [
+        value.strip()
+        for value in os.getenv(
+            "COST_DASHBOARD_AWS_REGIONS", f"{region},eu-west-1"
+        ).split(",")
+        if value.strip()
+    ]
+    audit_regions = list(dict.fromkeys([region, *configured_regions]))
     inventory: dict[str, Any] = {
         "region": region,
+        "regions": audit_regions,
         "instances": [],
         "volumes": [],
         "logGroups": [],
@@ -482,6 +509,9 @@ def _collect_inventory(diagnostics: list[dict[str, str]]) -> dict[str, Any]:
                     "sizeGb": vol.get("Size", 0),
                     "state": vol.get("State"),
                     "type": vol.get("VolumeType"),
+                    "region": region,
+                    "iops": vol.get("Iops"),
+                    "throughput": vol.get("Throughput"),
                     "ageDays": age,
                     "unattached": True,
                 }
@@ -546,27 +576,50 @@ def _collect_inventory(diagnostics: list[dict[str, str]]) -> dict[str, Any]:
             {"service": "CloudWatch Logs", "status": "error", "message": str(exc)[:300]}
         )
         inventory["missingPermissions"].append("logs:DescribeLogGroups")
-    try:
-        lightsail = _aws_client("lightsail", region)
-        inventory["lightsail"]["instances"] = lightsail.get_instances().get("instances", [])
-        inventory["lightsail"]["staticIps"] = lightsail.get_static_ips().get("staticIps", [])
-        inventory["lightsail"]["disks"] = lightsail.get_disks().get("disks", [])
-        inventory["lightsail"]["snapshots"] = (
-            lightsail.get_instance_snapshots().get("instanceSnapshots", [])
-            + lightsail.get_disk_snapshots().get("diskSnapshots", [])
-        )
+    lightsail_regions_loaded: list[str] = []
+    for lightsail_region in audit_regions:
+        try:
+            lightsail = _aws_client("lightsail", lightsail_region)
+
+            def tagged(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+                return [{**row, "auditRegion": lightsail_region} for row in rows]
+
+            inventory["lightsail"]["instances"].extend(
+                tagged(lightsail.get_instances().get("instances", []))
+            )
+            inventory["lightsail"]["staticIps"].extend(
+                tagged(lightsail.get_static_ips().get("staticIps", []))
+            )
+            inventory["lightsail"]["disks"].extend(
+                tagged(lightsail.get_disks().get("disks", []))
+            )
+            inventory["lightsail"]["snapshots"].extend(
+                tagged(
+                    lightsail.get_instance_snapshots().get("instanceSnapshots", [])
+                    + lightsail.get_disk_snapshots().get("diskSnapshots", [])
+                )
+            )
+            lightsail_regions_loaded.append(lightsail_region)
+        except Exception as exc:
+            logger.exception("Lightsail inventory collection failed in %s", lightsail_region)
+            diagnostics.append(
+                {
+                    "service": f"Lightsail ({lightsail_region})",
+                    "status": "error",
+                    "message": str(exc)[:300],
+                }
+            )
+    if lightsail_regions_loaded:
         diagnostics.append(
             {
                 "service": "Lightsail",
                 "status": "ok",
-                "message": "Loaded read-only Lightsail inventory.",
+                "message": "Loaded read-only Lightsail inventory in "
+                + ", ".join(lightsail_regions_loaded)
+                + ".",
             }
         )
-    except Exception as exc:
-        logger.exception("Lightsail inventory collection failed")
-        diagnostics.append(
-            {"service": "Lightsail", "status": "error", "message": str(exc)[:300]}
-        )
+    else:
         inventory["missingPermissions"].append(
             "lightsail:GetInstances/GetStaticIps/GetDisks/GetInstanceSnapshots/GetDiskSnapshots"
         )
@@ -1201,6 +1254,9 @@ def _should_use_stale_dashboard(
 ) -> bool:
     if stale_record is None:
         return False
+    provenance = (current.get("debug") or {}).get("billingProvenance")
+    if provenance and not provenance.get("complete"):
+        return True
     if current.get("topServices"):
         return False
 
@@ -1221,15 +1277,16 @@ def _annotate_stale_dashboard(
     stale = {**data}
     stale_debug = {**(data.get("debug") or {})}
     stale_debug["servedStaleData"] = True
-    stale_debug["staleReason"] = "AWS live refresh failed; returning the last known good dashboard snapshot."
+    stale_debug["staleReason"] = "Stored snapshot is stale; see request diagnostics for any collection attempt."
     stale_debug["lastAwsRefreshTime"] = cached_at
     stale_debug["cacheTtlSeconds"] = ttl_seconds
+    stale_debug["sourceAgeSeconds"] = _snapshot_age(data, cached_at)
     stale["debug"] = stale_debug
     stale["diagnostics"] = diagnostics + [
         {
             "service": "Shared cache",
             "status": "stale",
-            "message": "Served the last known good dashboard snapshot after a live AWS refresh failure.",
+            "message": "Served the last known good dashboard snapshot; source age is unchanged.",
         }
     ]
     return stale
@@ -1270,10 +1327,12 @@ def _live_dashboard(month: str | None = None) -> dict:
     mtd_cost = float(ce.get("mtd_cost") or 0)
     projected = estimate_projected_month_end(mtd_cost, elapsed, days)
     top_services = list(ce.get("top_services") or [])
+    top_usage_types = list(ce.get("top_usage_types") or [])
     public_ipv4_count = max(
         len(inventory.get("publicIpv4Addresses") or []),
         sum(1 for instance in inventory.get("instances", []) if instance.get("publicIpv4")),
     )
+    public_ipv4_billed_cost = _public_ipv4_billed_cost(top_usage_types)
     unattached_volumes = list(inventory.get("volumes") or [])
     unattached_gb = sum(float(volume.get("sizeGb") or 0) for volume in unattached_volumes)
     lightsail_inventory = dict(inventory.get("lightsail") or {})
@@ -1333,9 +1392,11 @@ def _live_dashboard(month: str | None = None) -> dict:
                 {
                     "count": public_ipv4_count,
                     "projectedMonthlyCostUsd": _public_ipv4_monthly_cost(public_ipv4_count, days),
-                    "estimatedMonthlySavingsUsd": _public_ipv4_monthly_cost(public_ipv4_count, days)
-                    if public_ipv4_count > 0
-                    else None,
+                    "billedCostUsd": public_ipv4_billed_cost,
+                    # Inventory proves that an address exists, but not that it is
+                    # unnecessary. Savings remain unclaimed until both billing
+                    # and the production dependency are verified.
+                    "estimatedMonthlySavingsUsd": None,
                     "lastCheckedAt": now_iso,
                 }
             ),
@@ -1377,8 +1438,8 @@ def _live_dashboard(month: str | None = None) -> dict:
 
     return {
         "summary": {
-            "monthToDateAwsCost": mtd_cost,
-            "projectedMonthEndCost": projected,
+            "monthToDateAwsCost": mtd_cost if ce.get("loaded") else None,
+            "projectedMonthEndCost": projected if ce.get("loaded") else None,
             "dataTransferUsedGb": eligible_transfer_gb,
             "freeTransferRemainingGb": transfer["remainingFreeGb"],
             "estimatedOverageGb": transfer["estimatedOverageGb"],
@@ -1386,6 +1447,7 @@ def _live_dashboard(month: str | None = None) -> dict:
             "ec2RunningInstances": len(inventory.get("instances", [])),
             "unattachedEbsGb": unattached_gb,
             "activePublicIpv4Count": public_ipv4_count,
+            "publicIpv4BilledCostUsd": public_ipv4_billed_cost,
             "activeHighRiskResources": {
                 "transferFamily": 0,
                 "natGateways": int(
@@ -1405,7 +1467,7 @@ def _live_dashboard(month: str | None = None) -> dict:
             else []
         ),
         "topServices": top_services,
-        "topUsageTypes": ce.get("top_usage_types") or [],
+        "topUsageTypes": top_usage_types,
         "costDrivers": drivers,
         "traffic": traffic,
         "recommendations": recommendations,
@@ -1416,8 +1478,10 @@ def _live_dashboard(month: str | None = None) -> dict:
             "selectedMonth": selected_month,
             "lastAwsRefreshTime": None,
             "awsRegion": os.getenv("AWS_REGION", "ap-south-1"),
+            "billingProvenance": ce.get("provenance"),
+            "storageExposure": _storage_exposure(unattached_volumes),
             "costExplorerLabel": (
-                "AWS actuals loaded"
+                "AWS account billing snapshot loaded"
                 if ce.get("loaded")
                 else "not available — see diagnostics"
             ),
@@ -1430,6 +1494,14 @@ def _live_dashboard(month: str | None = None) -> dict:
             "transferCategorySummary": transfer_summary.get("categories") or [],
         },
     }
+
+
+def _snapshot_age(data, cached_at):
+    source = ((data.get("debug") or {}).get("billingProvenance") or {}).get("collectedAt") or cached_at
+    try:
+        return max(0, int((datetime.now(timezone.utc) - datetime.fromisoformat(source)).total_seconds()))
+    except (TypeError, ValueError):
+        return None
 
 
 def get_dashboard(force_refresh: bool = False, month: str | None = None) -> dict:
@@ -1446,37 +1518,69 @@ def get_dashboard(force_refresh: bool = False, month: str | None = None) -> dict
     ttl_seconds = dashboard_cache_ttl_seconds(is_current_month)
     cache_key = f"{selected_month}:{'mock' if mock else 'live'}"
 
-    if force_refresh:
-        claim_refresh_cooldown(cache_key)
-    else:
-        cached = load_cached_dashboard(cache_key)
-        if cached is not None:
-            cached.data.setdefault("debug", {})
-            cached.data["debug"]["lastAwsRefreshTime"] = cached.cached_at
-            cached.data["debug"]["cacheTtlSeconds"] = ttl_seconds
-            cached.data["debug"]["servedStaleData"] = False
-            return cached.data
+    with (_dashboard_lock(cache_key) if force_refresh else nullcontext()), (durable_collection(cache_key) if force_refresh and not mock else nullcontext()) as intent, (collection_lease(cache_key) if force_refresh and not mock else nullcontext()) as require_ownership:
+        if force_refresh:
+            claim_refresh_cooldown(cache_key)
+        else:
+            cached = load_cached_dashboard(cache_key)
+            if cached is not None:
+                cached.data.setdefault("debug", {})
+                cached.data["debug"]["lastAwsRefreshTime"] = cached.cached_at
+                cached.data["debug"]["cacheTtlSeconds"] = ttl_seconds
+                cached.data["debug"]["servedStaleData"] = False
+                cached.data["debug"]["collectionOccurred"] = False
+                cached.data["debug"]["snapshotState"] = "stored"
+                cached.data["debug"]["sourceAgeSeconds"] = _snapshot_age(cached.data, cached.cached_at)
+                return cached.data
+            if not mock:
+                stale = load_stale_good_dashboard(cache_key)
+                if stale is not None:
+                    data = _annotate_stale_dashboard(stale.data, stale.cached_at, [], ttl_seconds)
+                    data["debug"].update({"collectionOccurred": False, "snapshotState": "stale"})
+                    return data
+                data = _empty_live_dashboard(selected_month)
+                data["summary"] = {key: None for key in data["summary"]}
+                data["debug"].update({"lastAwsRefreshTime": None, "collectionOccurred": False,
+                                      "snapshotState": "not_collected", "billingProvenance": None})
+                return data
 
-    if mock:
-        data = _mock_dashboard(selected_month)
-        data["debug"]["mockMode"] = True
-    else:
-        data = _live_dashboard(selected_month)
-        stale = load_stale_good_dashboard(cache_key)
-        if _should_use_stale_dashboard(
-            data,
-            stale.data if stale is not None else None,
-        ):
-            return _annotate_stale_dashboard(
-                stale.data,
-                stale.cached_at if stale is not None else None,
-                list(data.get("diagnostics") or []),
-                ttl_seconds,
-            )
+        if mock:
+            data = _mock_dashboard(selected_month)
+            data["debug"]["mockMode"] = True
+        else:
+            with collection_budget(require_ownership, intent) as provider_meter:
+                try:
+                    data = _live_dashboard(selected_month)
+                except Exception:
+                    logger.exception("Cost dashboard collector failed")
+                    data = _empty_live_dashboard(selected_month)
+                    data["summary"] = {key: None for key in data["summary"]}
+                    data["diagnostics"] = [{"service": "Cost Explorer", "status": "error",
+                                            "message": "Collection failed; costs remain unknown."}]
+            require_ownership()  # Lost/uncertain ownership must not publish a new snapshot.
+            intent.require_owned()
+            data.setdefault("debug", {})["providerMeter"] = provider_meter
+            stale = load_stale_good_dashboard(cache_key)
+            if _should_use_stale_dashboard(
+                data,
+                stale.data if stale is not None else None,
+            ):
+                stale.data.setdefault("debug", {}).update({"collectionOccurred": True,
+                    "lastCollectionAttemptMeter": provider_meter,
+                    "lastCollectionAttemptProvenance": data.get("debug", {}).get("billingProvenance")})
+                return _annotate_stale_dashboard(
+                    stale.data,
+                    stale.cached_at if stale is not None else None,
+                    list(data.get("diagnostics") or []),
+                    ttl_seconds,
+                )
 
-    cached_at = store_dashboard(cache_key, data, ttl_seconds)
-    data.setdefault("debug", {})
-    data["debug"]["lastAwsRefreshTime"] = cached_at
-    data["debug"]["cacheTtlSeconds"] = ttl_seconds
-    data["debug"]["servedStaleData"] = False
-    return data
+        cached_at = store_dashboard(cache_key, data, ttl_seconds)
+        data.setdefault("debug", {})
+        data["debug"]["lastAwsRefreshTime"] = cached_at
+        data["debug"]["cacheTtlSeconds"] = ttl_seconds
+        data["debug"]["servedStaleData"] = False
+        data["debug"]["collectionOccurred"] = not mock
+        data["debug"]["snapshotState"] = "collected" if not mock else "demo"
+        data["debug"]["sourceAgeSeconds"] = _snapshot_age(data, cached_at)
+        return data

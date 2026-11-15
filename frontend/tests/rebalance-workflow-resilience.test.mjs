@@ -9,6 +9,7 @@ const source = readFileSync(
   ),
   "utf8",
 );
+const stageTileSource = readFileSync(new URL("../components/shared/WorkflowStageTile.tsx", import.meta.url), "utf8");
 const bridgeSource = readFileSync(
   new URL(
     "../app/console/automated-rebalance/_components/AutomatedRebalanceReliabilityBridge.tsx",
@@ -26,6 +27,21 @@ const recoverySource = readFileSync(
 const clientSource = readFileSync(
   new URL(
     "../app/console/automated-rebalance/_components/AutomatedRebalanceClient.tsx",
+    import.meta.url,
+  ),
+  "utf8",
+);
+const apiSource = readFileSync(
+  new URL("../services/api.ts", import.meta.url),
+  "utf8",
+);
+const callbackSource = readFileSync(
+  new URL("../app/zerodha/callback/page.tsx", import.meta.url),
+  "utf8",
+);
+const dashboardUtilsSource = readFileSync(
+  new URL(
+    "../app/console/dashboard/_components/dashboardOverviewUtils.ts",
     import.meta.url,
   ),
   "utf8",
@@ -89,6 +105,29 @@ test("auto-rebalance idle tiles include active run progress", () => {
   assert.match(source, /activeLlms > 0/);
 });
 
+test("last completed auto-rebalance audit repopulates every idle stage tile", () => {
+  assert.match(source, /function summarizeAutoRebalanceHistoryStage/);
+  assert.match(source, /apiService\.getAutoRebalanceHistory\("india", \{ limit: 25 \}\)/);
+  assert.match(
+    source,
+    /apiService\.getAutoRebalanceHistory\("indmoney_us", \{ limit: 25 \}\)/,
+  );
+  for (const stage of [
+    "sync",
+    "threats",
+    "swing",
+    "rebalance",
+    "technical",
+    "actionables",
+  ]) {
+    assert.match(source, new RegExp(`historyInfo\\("${stage}"\\)`));
+  }
+  assert.match(source, /recommended_stocks/);
+  assert.match(source, /rebalance_inputs/);
+  assert.match(source, /completed_provider_count/);
+  assert.match(source, /estimated_cost/);
+});
+
 test("each auto-rebalance stage writes a durable audit update", () => {
   assert.match(source, /const activeAutoRebalanceMetadataRef = useRef/);
   assert.match(source, /const recordAutoRebalanceStage = useCallback/);
@@ -116,6 +155,15 @@ test("automated-rebalance LLM detail loading has threat and recent-run fallbacks
   assert.doesNotMatch(bridgeSource, /window\.alert|globalThis\.alert/);
 });
 
+test("technical output opens the exact latest run even when that run failed", () => {
+  assert.match(
+    source,
+    /if \(stage === "technical"\)\s+return isTechnicalScanRun\(run, market\);/,
+  );
+  assert.match(stageTileSource, /Provider credits insufficient/);
+  assert.match(stageTileSource, /no\\s\+credits\?\\s\+remaining/);
+});
+
 test("ambiguous threat starts reconcile against durable history instead of producing Error null", () => {
   assert.match(clientSource, /installAutomatedRebalanceStartRecovery\(\);/);
   assert.match(recoverySource, /RECONCILIATION_DELAYS_MS/);
@@ -132,7 +180,7 @@ test("Zerodha Run preserves the popup user gesture and surfaces start failures",
   const runWorkflowSource = source.slice(start, end);
   const popupIndex = runWorkflowSource.indexOf('window.open("about:blank"');
   const reservationIndex = runWorkflowSource.indexOf(
-    "await reserveAutoRebalanceRunMetadata(portfolio)",
+    "await reserveAutoRebalanceRunMetadata(portfolio, analysisOnlyRuns[portfolio])",
   );
   assert.ok(popupIndex >= 0, "Zerodha popup should be pre-opened");
   assert.ok(reservationIndex >= 0, "run metadata should still be reserved");
@@ -145,7 +193,39 @@ test("Zerodha Run preserves the popup user gesture and surfaces start failures",
   assert.match(runWorkflowSource, /Could not start \$\{/);
   assert.match(runWorkflowSource, /window\.alert\(message\)/);
   assert.match(
-    source,
-    /if \(info\.error\) rows\.push\(\{ label: "Error", value: info\.error \}\);/,
+    stageTileSource,
+    /rows\.push\(getStageTileError\(info\)\);/,
   );
+});
+
+test("Zerodha login waits for durable token readiness and retries sync only once", () => {
+  assert.match(source, /async function confirmZerodhaConnectionReady/);
+  assert.match(source, /await apiService\.zerodhaStatus\(\)/);
+  assert.match(source, /ZERODHA_AUTH_CLOSE_GRACE_MS/);
+  assert.match(source, /async function queueZerodhaPortfolioSyncWithAuthRetry/);
+  assert.match(source, /if \(!isZerodhaAuthPropagationError\(error\)\) throw error/);
+  assert.match(source, /await confirmZerodhaConnectionReady\(undefined, owner\)/);
+  assert.equal(
+    (source.match(/queueZerodhaPortfolioSyncWithAuthRetry\(runtimeOwner\)/g) ?? []).length,
+    2,
+    "full-run and Sync Now callers must retain their captured owner",
+  );
+  assert.match(apiSource, /zerodhaSyncPortfolio\(\)[\s\S]*?skipUnauthorizedRefresh: true/);
+});
+
+test("Zerodha callback and workflow close the popup on every terminal outcome", () => {
+  assert.match(callbackSource, /const closePopupSoon/);
+  assert.match(callbackSource, /notifyHost\(\{ type: 'zerodha_connected' \}\);[\s\S]*?closePopupSoon\(900\)/);
+  assert.equal(
+    (callbackSource.match(/closePopupSoon\(1_500\)/g) ?? []).length,
+    2,
+    "both callback error paths should close the popup after showing the error",
+  );
+  assert.match(source, /if \(!popup\.closed\) popup\.close\(\)/);
+});
+
+test("dashboard errors never render literal null or undefined", () => {
+  assert.match(dashboardUtilsSource, /error === null \|\| error === undefined/);
+  assert.match(dashboardUtilsSource, /request correlation ID/);
+  assert.match(dashboardUtilsSource, /\[object Object\\\]/);
 });

@@ -85,15 +85,32 @@ function collectApiErrorDetails(
 
   if (detail && typeof detail === "object" && !Array.isArray(detail)) {
     const record = detail as Record<string, unknown>;
+    const nestedDetail =
+      record.detail && typeof record.detail === "object" && !Array.isArray(record.detail)
+        ? (record.detail as Record<string, unknown>)
+        : null;
     const errorCode = normalizeText(stringifyErrorDetail(record.error));
-    if (errorCode) {
-      appendUniqueDetail(parts, seen, `Code: ${errorCode}`);
+    const nestedErrorCode = normalizeText(stringifyErrorDetail(nestedDetail?.error));
+    if (errorCode || nestedErrorCode) {
+      appendUniqueDetail(parts, seen, `Code: ${errorCode || nestedErrorCode}`);
     }
 
     appendUniqueDetail(parts, seen, stringifyErrorDetail(record.detail));
     appendUniqueDetail(parts, seen, stringifyErrorDetail(record.reason));
     appendUniqueDetail(parts, seen, stringifyErrorDetail(record.title));
     appendUniqueDetail(parts, seen, stringifyErrorDetail(record.details));
+    appendUniqueDetail(
+      parts,
+      seen,
+      nestedDetail?.required_migration
+        ? `Required migration: ${String(nestedDetail.required_migration)}`
+        : null,
+    );
+    appendUniqueDetail(
+      parts,
+      seen,
+      nestedDetail?.run_id ? `Run ID: ${String(nestedDetail.run_id)}` : null,
+    );
   }
 
   appendUniqueDetail(parts, seen, stringifyErrorDetail(detail));
@@ -183,12 +200,14 @@ export function splitApiErrorSummary(
 export function formatApiErrorSummary(error: ApiErrorLike) {
   const { statusText, message, details } = splitApiErrorSummary(error);
   const prefix = statusText ?? "API error";
+  const detailSeparator = /[.!?]$/.test(message) ? " Details: " : ". Details: ";
   return details
-    ? `${prefix}: ${message}. Details: ${details}`
+    ? `${prefix}: ${message}${detailSeparator}${details}`
     : `${prefix}: ${message}`;
 }
 
 export function formatUnknownError(error: unknown) {
+  if (error == null) return "The request failed without returning error details. Please retry.";
   if (error instanceof Error) {
     const message = error.message?.trim() || "Unexpected error";
     return `${error.name}: ${message}`;

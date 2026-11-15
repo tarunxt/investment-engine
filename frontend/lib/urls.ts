@@ -233,13 +233,33 @@ const bullpenAutoLiveApiUrls = {
   // recovery, runtime diagnostics, or a Bullpen CLI auth refresh.
   status: () => `${resolveApiBaseUrl()}/polymarket/auto-live/status`,
   summary: () => `${resolveApiBaseUrl()}/polymarket/auto-live/summary`,
-  dashboardSummary: () =>
-    `${resolveApiBaseUrl()}/polymarket/auto-live/summary/dashboard`,
+  dashboardSummary: (workspaceProfile?: "bullpen007" | "bullpen-sports") => {
+    const resolvedWorkspaceProfile =
+      workspaceProfile ??
+      (typeof window !== "undefined" &&
+      window.location.pathname.startsWith("/console/bullpen-sports")
+        ? "bullpen-sports"
+        : undefined);
+    return `${resolveApiBaseUrl()}/polymarket/auto-live/summary/dashboard${
+      resolvedWorkspaceProfile
+        ? `?workspace_profile=${encodeURIComponent(resolvedWorkspaceProfile)}`
+        : ""
+    }`;
+  },
   state: () => `${resolveApiBaseUrl()}/polymarket/auto-live/state`,
-  settings: () => `${resolveApiBaseUrl()}/polymarket/auto-live/settings`,
+  hourlyRebalanceResult: () =>
+    `${resolveApiBaseUrl()}/polymarket/auto-live/hourly-rebalance/result`,
+  clusteringProgress: (runId: string) =>
+    `${resolveApiBaseUrl()}/polymarket/auto-live/clustering/${encodeURIComponent(runId)}/progress`,
+  settings: (profile?: string) =>
+    `${resolveApiBaseUrl()}/polymarket/auto-live/settings${
+      profile ? `?profile=${encodeURIComponent(profile)}` : ""
+    }`,
   history: () => `${resolveApiBaseUrl()}/polymarket/auto-live/history`,
   historyEventTrends: () =>
     `${resolveApiBaseUrl()}/polymarket/auto-live/history/event-trends`,
+  historyEventTrendsScanCount: () =>
+    `${resolveApiBaseUrl()}/polymarket/auto-live/history/event-trends/scan-count`,
   runs: (includeDetail = false) =>
     `${resolveApiBaseUrl()}/polymarket/auto-live/runs${
       includeDetail ? "?include_detail=true" : ""
@@ -248,6 +268,10 @@ const bullpenAutoLiveApiUrls = {
     `${resolveApiBaseUrl()}/polymarket/auto-live/runs/${encodeURIComponent(runId)}`,
   runConsole: (runId: string) =>
     `${resolveApiBaseUrl()}/polymarket/auto-live/runs/${encodeURIComponent(runId)}/console`,
+  runStageOne: (runId: string) =>
+    `${resolveApiBaseUrl()}/polymarket/auto-live/runs/${encodeURIComponent(runId)}/stage-one`,
+  runStageOneExcel: (runId: string) =>
+    `${resolveApiBaseUrl()}/polymarket/auto-live/runs/${encodeURIComponent(runId)}/stage-one.xlsx`,
   runDecisions: (runId: string) =>
     `${resolveApiBaseUrl()}/polymarket/auto-live/runs/${encodeURIComponent(runId)}/decisions`,
   runOrders: (runId: string) => `${resolveApiBaseUrl()}/polymarket/auto-live/runs/${runId}/orders`,
@@ -261,6 +285,8 @@ const bullpenAutoLiveApiUrls = {
   cancelOrder: (intentId: string) =>
     `${resolveApiBaseUrl()}/polymarket/auto-live/orders/${intentId}/cancel`,
   runOnce: () => `${resolveApiBaseUrl()}/polymarket/auto-live/run-once`,
+  workflowRunNow: () =>
+    `${resolveApiBaseUrl()}/polymarket/auto-live/workflow-run-now`,
   start: () => `${resolveApiBaseUrl()}/polymarket/auto-live/start`,
   stop: () => `${resolveApiBaseUrl()}/polymarket/auto-live/stop`,
   pause: () => `${resolveApiBaseUrl()}/polymarket/auto-live/pause`,
@@ -268,6 +294,34 @@ const bullpenAutoLiveApiUrls = {
   resetSettings: () => `${resolveApiBaseUrl()}/polymarket/auto-live/settings/reset`,
   emergencyStop: () => `${resolveApiBaseUrl()}/polymarket/auto-live/emergency-stop`,
   clearEmergencyStop: () => `${resolveApiBaseUrl()}/polymarket/auto-live/clear-emergency-stop`,
+};
+
+const bullpen008ApiUrls = {
+  bootstrap: () => `${resolveApiBaseUrl()}/polymarket/bullpen008/bootstrap`,
+  settings: () => `${resolveApiBaseUrl()}/polymarket/bullpen008/settings`,
+  schedulerStart: () =>
+    `${resolveApiBaseUrl()}/polymarket/bullpen008/scheduler/start`,
+  schedulerStop: () =>
+    `${resolveApiBaseUrl()}/polymarket/bullpen008/scheduler/stop`,
+  schedulerPause: () =>
+    `${resolveApiBaseUrl()}/polymarket/bullpen008/scheduler/pause`,
+  schedulerResume: () =>
+    `${resolveApiBaseUrl()}/polymarket/bullpen008/scheduler/resume`,
+  emergencyStop: () =>
+    `${resolveApiBaseUrl()}/polymarket/bullpen008/emergency-stop`,
+  clearEmergencyStop: () =>
+    `${resolveApiBaseUrl()}/polymarket/bullpen008/emergency-stop/clear`,
+  kill: () => `${resolveApiBaseUrl()}/polymarket/bullpen008/kill`,
+  runOnce: () => `${resolveApiBaseUrl()}/polymarket/bullpen008/run-once`,
+  runs: () => `${resolveApiBaseUrl()}/polymarket/bullpen008/runs`,
+  historyEventTrends: () =>
+    `${resolveApiBaseUrl()}/polymarket/bullpen008/history/event-trends`,
+  run: (runId: string) =>
+    `${resolveApiBaseUrl()}/polymarket/bullpen008/runs/${encodeURIComponent(runId)}`,
+  retryRun: (runId: string) =>
+    `${resolveApiBaseUrl()}/polymarket/bullpen008/runs/${encodeURIComponent(runId)}/retry`,
+  stage: (runId: string, stageNumber: number) =>
+    `${resolveApiBaseUrl()}/polymarket/bullpen008/runs/${encodeURIComponent(runId)}/stages/${stageNumber}`,
 };
 
 const bullpenTradeAnalysisApiUrls = {
@@ -324,6 +378,14 @@ export const URLs = {
     summary: () => `${resolveApiBaseUrl()}/dashboard/summary`,
   },
 
+  mails: {
+    sendTest: () => `${resolveApiBaseUrl()}/mails/send-test`,
+    history: () => `${resolveApiBaseUrl()}/mails/history`,
+    sellAction: (historyId: number) =>
+      `${resolveApiBaseUrl()}/mails/history/${historyId}/sell-action`,
+    preferences: () => `${resolveApiBaseUrl()}/mails/preferences`,
+  },
+
   // Health Check endpoints
   health: {
     ping: () => `${resolveApiBaseUrl()}/health`,
@@ -336,6 +398,7 @@ export const URLs = {
   auth: {
     register: () => `${resolveApiBaseUrl()}/auth/register`,
     login: () => `${resolveApiBaseUrl()}/auth/login`,
+    google: () => `${resolveApiBaseUrl()}/auth/google`,
     logout: () => `${resolveApiBaseUrl()}/auth/logout`,
     refresh: () => `${resolveApiBaseUrl()}/auth/refresh`,
     me: () => `${resolveApiBaseUrl()}/auth/me`,
@@ -421,6 +484,8 @@ export const URLs = {
     portfolio: () => `${resolveApiBaseUrl()}/indmoney-us/portfolio`,
     portfolioSnapshot: (snapshotId: number) => `${resolveApiBaseUrl()}/indmoney-us/portfolio/${snapshotId}`,
     currentPrices: () => `${resolveApiBaseUrl()}/indmoney-us/prices/current`,
+    displayQuotes: () => `${resolveApiBaseUrl()}/indmoney-us/prices/display`,
+    displayListings: () => `${resolveApiBaseUrl()}/indmoney-us/prices/listings`,
     eventsLatest: () => `${resolveApiBaseUrl()}/indmoney-us/events/latest`,
     eventsHistory: () => `${resolveApiBaseUrl()}/indmoney-us/events/history`,
     eventJob: (jobId: number) => `${resolveApiBaseUrl()}/indmoney-us/events/${jobId}`,
@@ -480,6 +545,7 @@ export const URLs = {
   },
 
   bullpenAutoLive: bullpenAutoLiveApiUrls,
+  bullpen008: bullpen008ApiUrls,
   bullpenTradeAnalysis: bullpenTradeAnalysisApiUrls,
   bullpenRunAudit: bullpenRunAuditApiUrls,
   polymarketAutoLive: bullpenAutoLiveApiUrls,
@@ -586,6 +652,13 @@ export const URLs = {
       polymarketBot: () => "/console/polymarket-bot",
       polymarketDirectBot: () => "/console/polymarket-direct-bot",
       bullpenAi: () => "/console/bullpen-ai",
+      bullpenSports: () => "/console/bullpen-sports",
+      bullpen008: () => "/console/bullpen008",
+      bullpen008History: () => "/console/bullpen-ai/008history",
+      bullpen008AnalyseEvents: () => "/console/bullpen008/analyse-events",
+      bullpen008AnalyseRuns: () => "/console/bullpen008/analyse-runs",
+      bullpen008RunDetail: (runId: string) =>
+        `/console/bullpen008/runs/${encodeURIComponent(runId)}`,
       bullpenAiAnalyseEvents: () => "/console/bullpen-ai/analyse-events",
       bullpenAiAnalyseEventDetail: (tradeId: string) =>
         `/console/bullpen-ai/analyse-events/${tradeId}`,
@@ -595,10 +668,13 @@ export const URLs = {
       bullpenAiAutoLive: () => "/console/trading-bots/bullpen-ai-auto-live",
       bullpenAi30Days: () => "/console/bullpen-ai?tab=30-days",
       bullpenAiEndOfMonth: () => "/console/bullpen-ai?tab=end-of-month",
-      googleSheets: () => "/console/google-sheets",
+      bullpenSports30Days: () => "/console/bullpen-sports?tab=30-days",
+      bullpenSportsEndOfMonth: () =>
+        "/console/bullpen-sports?tab=end-of-month",
       apis: () => "/console/apis",
       llms: () => "/console/llms",
       technicalSetups: () => "/console/technical-setups",
+      mails: () => "/console/mails",
     },
 
     profile: {

@@ -30,6 +30,10 @@ function safeSessionUser(session: Session) {
             notification_preferences:
               userData.profile.notification_preferences,
             theme_preference: userData.profile.theme_preference,
+            zerodha_buy_threshold:
+              userData.profile.zerodha_buy_threshold ?? 2.5,
+            indmoney_buy_threshold:
+              userData.profile.indmoney_buy_threshold ?? 2.5,
             created_at: userData.profile.created_at,
             updated_at: userData.profile.updated_at,
           }

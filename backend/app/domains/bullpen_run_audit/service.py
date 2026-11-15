@@ -94,6 +94,19 @@ def _parse_iso(value: str | None) -> datetime | None:
     return parsed.astimezone(UTC)
 
 
+def _as_utc(value: datetime | None) -> datetime | None:
+    """Normalize legacy naive and current aware database timestamps for comparison."""
+
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        # PostgreSQL timestamp columns historically returned naive UTC values
+        # for some audit rows. Treat those stored values as UTC rather than
+        # comparing them directly with aware ORM timestamps.
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
 def _duration_seconds(started_at: str | None, completed_at: str | None) -> float | None:
     start = _parse_iso(started_at)
     end = _parse_iso(completed_at)
@@ -771,7 +784,7 @@ def _build_formula_records(
                         if is_active_position
                         else "Stage 2 current-odds returns per day"
                     ),
-                    algorithm_version="v1" if is_active_position else "v3",
+                    algorithm_version="v2" if is_active_position else "v4",
                     source_module="app.domains.polymarket_auto_live.console_profile",
                     source_function=(
                         "position_returns_per_day"
@@ -1147,6 +1160,14 @@ def _build_bundle(
             "missing_fields": missing_fields,
         },
         "stage_1": {
+            "filter_ledger": stage1_outputs.get("filter_ledger"),
+            "sports_ranking_evidence": [
+                {"market_id": row.get("market_id"),
+                 "ranking": row.get("sports_ranking_at_scan"),
+                 "capture_error": row.get("sports_ranking_capture_error")}
+                for row in (stage1_outputs.get("accepted_candidates") or [])
+                if isinstance(row, dict) and row.get("sports_event_slug")
+            ],
             "run_stages": [
                 stage for stage in run_stage_results if _logical_stage_number_for_result(stage) == 1
             ],
@@ -1158,6 +1179,28 @@ def _build_bundle(
             "scan_context": {
                 "scan_source_label": diagnostics.get("scan_source_label"),
                 "scan_source_url": diagnostics.get("scan_source_url"),
+                "scan_scope": stage1_outputs.get("scan_scope")
+                or diagnostics.get("scan_scope"),
+                "scan_completeness": stage1_outputs.get("scan_completeness")
+                or diagnostics.get("scan_completeness"),
+                "bullpen_trending_rows": stage1_outputs.get(
+                    "bullpen_trending_rows"
+                ),
+                "complete_catalogue_markets": stage1_outputs.get(
+                    "complete_catalogue_markets"
+                ),
+                "active_wallet_positions": stage1_outputs.get(
+                    "active_wallet_positions"
+                ),
+                "filter_eligible_markets": stage1_outputs.get(
+                    "accepted_candidates_count"
+                ),
+                "active_wallet_markets_added_to_union": stage1_outputs.get(
+                    "active_wallet_markets_added_to_union"
+                ),
+                "missing_active_market_count": stage1_outputs.get(
+                    "missing_active_market_count"
+                ),
                 "used_manual_console_rows": diagnostics.get("used_manual_console_rows"),
                 "selected_manual_candidate_ids": diagnostics.get("selected_manual_candidate_ids") or [],
                 "scanned_candidates": diagnostics.get("scanned_candidates"),
@@ -1473,13 +1516,20 @@ def materialize_run_audit_snapshot_sync(
         and getattr(current_snapshot, "lifecycle_status", None)
         == SNAPSHOT_STATUS_FROZEN
     )
+    snapshot_source_updated_at = _as_utc(
+        current_snapshot.source_run_updated_at if current_snapshot is not None else None
+    )
+    durable_run_updated_at = _as_utc(run_record.updated_at)
+    snapshot_covers_durable_run = (
+        snapshot_source_updated_at is not None
+        and durable_run_updated_at is not None
+        and snapshot_source_updated_at >= durable_run_updated_at
+    )
     frozen_snapshot_is_unchanged = (
         current_is_frozen
         and current_snapshot.snapshot_schema_version
         == BULLPEN_RUN_AUDIT_SCHEMA_VERSION
-        and current_snapshot.source_run_updated_at is not None
-        and run_record.updated_at is not None
-        and current_snapshot.source_run_updated_at >= run_record.updated_at
+        and snapshot_covers_durable_run
     )
     # A frozen snapshot is immutable evidence.  ``force=True`` means "observe
     # the latest durable run state", not "rewrite history".  Return the
@@ -1492,9 +1542,7 @@ def materialize_run_audit_snapshot_sync(
         current_snapshot is not None
         and not force
         and current_snapshot.snapshot_schema_version == BULLPEN_RUN_AUDIT_SCHEMA_VERSION
-        and current_snapshot.source_run_updated_at is not None
-        and run_record.updated_at is not None
-        and current_snapshot.source_run_updated_at >= run_record.updated_at
+        and snapshot_covers_durable_run
     ):
         return _materialized_snapshot_from_record(current_snapshot)
 

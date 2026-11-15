@@ -7,24 +7,40 @@ function read(relativePath) {
   return readFileSync(new URL(relativePath, import.meta.url), "utf8");
 }
 
-test("Bullpen Auto-Live reads outlive the backend's four-second route deadline", () => {
+test("Bullpen Auto-Live reads outlive the backend's bounded history deadline", () => {
   const proxySource = read("../app/backend-api/[...path]/route.ts");
   const backendSource = read(
     "../../backend/app/domains/polymarket_auto_live/router.py",
   );
 
-  assert.match(backendSource, /DASHBOARD_SUMMARY_TIMEOUT_SECONDS = 4\.0/);
-  assert.match(backendSource, /HISTORY_TIMEOUT_SECONDS = 4\.0/);
-  assert.match(backendSource, /CONSOLE_RUN_DETAIL_TIMEOUT_SECONDS = 4\.0/);
+  assert.match(backendSource, /DASHBOARD_SUMMARY_TIMEOUT_SECONDS = 12\.0/);
+  assert.match(backendSource, /HISTORY_TIMEOUT_SECONDS = 12\.0/);
+  assert.match(backendSource, /CONSOLE_RUN_DETAIL_TIMEOUT_SECONDS = 12\.0/);
 
   assert.match(
     proxySource,
-    /DEFAULT_BULLPEN_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS = 4_200/,
+    /BULLPEN_HISTORY_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS = 12_500/,
   );
   assert.match(
     proxySource,
-    /DEFAULT_BULLPEN_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 4_750/,
+    /BULLPEN_HISTORY_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 14_000/,
   );
+  assert.match(
+    proxySource,
+    /BULLPEN_DASHBOARD_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS = 12_500/,
+  );
+  assert.match(
+    proxySource,
+    /BULLPEN_DASHBOARD_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 14_000/,
+  );
+  assert.match(proxySource, /path === "polymarket\/auto-live\/status"/);
+  assert.match(proxySource, /path === "polymarket\/auto-live\/summary\/dashboard"/);
+  assert.match(proxySource, /path === "polymarket\/state"/);
+  assert.match(
+    proxySource,
+    /SPORTS_RANKINGS_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 14_000/,
+  );
+  assert.match(proxySource, /isBullpenHistoryRead\(method, path\)/);
   assert.match(proxySource, /path\.startsWith\("polymarket\/auto-live\/"\)/);
   assert.match(
     proxySource,
@@ -32,6 +48,13 @@ test("Bullpen Auto-Live reads outlive the backend's four-second route deadline",
   );
   assert.match(proxySource, /getProxyTotalTimeoutMs\(request\.method, path\)/);
   assert.match(proxySource, /X-Backend-Proxy-Budget-Ms/);
+  assert.match(
+    proxySource,
+    /The backend did not respond in time \(\$\{formatTimeoutBudget\(eventTrendsTimeoutMs \?\? totalTimeoutMs\)\}\)\. Please retry\./,
+  );
+  assert.match(proxySource, /DEFAULT_EVENT_TRENDS_PROXY_TIMEOUT_MS = 30_000/);
+  assert.match(proxySource, /MAX_EVENT_TRENDS_PROXY_TIMEOUT_MS = 120_000/);
+  assert.match(proxySource, /proxy_timeout_seconds/);
 });
 
 test("ordinary API reads retain the strict fast-failure budget", () => {
@@ -39,6 +62,41 @@ test("ordinary API reads retain the strict fast-failure budget", () => {
 
   assert.match(proxySource, /DEFAULT_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS = 1_200/);
   assert.match(proxySource, /DEFAULT_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 4_000/);
+});
+
+test("Bullpen 008 summary reads have an explicit long-running budget", () => {
+  const proxySource = read("../app/backend-api/[...path]/route.ts");
+  const pageSource = read(
+    "../app/console/bullpen008/_components/Bullpen008PageClient.tsx",
+  );
+  const historySource = read(
+    "../app/console/bullpen008/_components/Bullpen008RunHistoryScreen.tsx",
+  );
+
+  assert.match(
+    proxySource,
+    /BULLPEN008_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS = 10_000/,
+  );
+  assert.match(
+    proxySource,
+    /BULLPEN008_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 12_000/,
+  );
+  assert.match(proxySource, /path\.startsWith\("polymarket\/bullpen008\/"\)/);
+  assert.match(pageSource, /timeoutMs: 15_000/);
+  assert.match(historySource, /timeoutMs: 15_000/);
+});
+
+test("read circuit failures cannot suppress idempotent mutations", () => {
+  const proxySource = read("../app/backend-api/[...path]/route.ts");
+
+  assert.match(
+    proxySource,
+    /const mutationOriginCircuit = new ApiOriginCircuitBreaker\(\s*Number\.MAX_SAFE_INTEGER,\s*0,\s*\)/,
+  );
+  assert.match(
+    proxySource,
+    /SAFE_FALLBACK_METHODS\.has\(request\.method\)\s*\? originCircuit\s*: mutationOriginCircuit/,
+  );
 });
 
 test("the updated backend proxy route parses as TypeScript", () => {
@@ -61,4 +119,34 @@ test("the updated backend proxy route parses as TypeScript", () => {
     ),
     [],
   );
+});
+
+test("database history routes use fixed circuit scopes distinct from wallet reads", () => {
+  const source = read("../app/backend-api/[...path]/route.ts");
+  assert.match(source, /path === "polymarket\/auto-live\/history"/);
+  assert.match(source, /path === "polymarket\/auto-live\/history\/event-trends"/);
+  assert.match(source, /circuitScope: readCircuitScope/);
+});
+
+test("public health reads have isolated circuits for deployment probes", () => {
+  const source = read("../app/backend-api/[...path]/route.ts");
+  assert.match(
+    source,
+    /SAFE_FALLBACK_METHODS\.has\(request\.method\) && PUBLIC_BACKEND_PATHS\.has\(path\)/,
+  );
+  assert.match(source, /\? path\s*:\s*SAFE_FALLBACK_METHODS/);
+});
+
+test("clustering progress uses a bounded dedicated circuit across scan IDs", () => {
+  const source = read("../app/backend-api/[...path]/route.ts");
+  const parsed = ts.createSourceFile("route.ts", source, ts.ScriptTarget.Latest, true);
+  const fn = parsed.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === "isClusteringProgressRead");
+  assert.ok(fn);
+  const js = ts.transpileModule(fn.getText(parsed), { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
+  const classify = new Function(`const SAFE_FALLBACK_METHODS = new Set(["GET", "HEAD"]); ${js}; return isClusteringProgressRead;`)();
+  assert.equal(classify("GET", "polymarket/auto-live/clustering/scan-a/progress"), true);
+  assert.equal(classify("HEAD", "polymarket/auto-live/clustering/scan-b/progress"), true);
+  assert.equal(classify("POST", "polymarket/auto-live/clustering/scan-a/progress"), false);
+  assert.equal(classify("GET", "polymarket/auto-live/state"), false);
+  assert.match(source, /isClusteringProgressRead\(request.method, path\)\s*\? "polymarket\/auto-live\/clustering\/progress"/);
 });

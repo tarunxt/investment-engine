@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import "./bullpen-ui.css";
 import { BRAND_TITLE } from "@/lib/brand";
 import { cn } from "@/lib/utils";
 

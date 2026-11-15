@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.auth.dependencies import get_current_user
@@ -14,11 +14,13 @@ from app.domains.indmoney_us.schemas import (
     IndMoneyUsCurrentPricesRequest,
     IndMoneyUsCurrentPricesResponse,
     IndMoneyUsPortfolioOverviewResponse,
+    LastPasteResponse,
     IndMoneyUsPortfolioSnapshotCreateRequest,
     IndMoneyUsPortfolioSnapshotDetailResponse,
     IndMoneyUsPortfolioSnapshotSummaryResponse,
 )
 from app.domains.indmoney_us.service import IndMoneyUsPortfolioService
+from app.domains.indmoney_us.snapshot_validation import validate_holdings_snapshot
 from app.infrastructure.database.session import get_async_db
 from app.shared.exceptions import NotFoundException
 
@@ -60,6 +62,7 @@ async def create_portfolio_snapshot(
         request.raw_text,
         captured_at=request.captured_at,
     )
+    validate_holdings_snapshot(snapshot_data)
     snapshot = await repo.create_snapshot(
         {
             **snapshot_data,
@@ -74,6 +77,17 @@ async def create_portfolio_snapshot(
         snapshot.parse_status,
     )
     return IndMoneyUsPortfolioSnapshotDetailResponse(**service.serialize_detail(snapshot))
+
+
+@router.get("/portfolio/last-paste", response_model=LastPasteResponse | None)
+async def last_pasted_snapshot(
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    row = await IndMoneyUsPortfolioSnapshotRepository(db).last_paste(current_user.id)
+    if row is None:
+        return None
+    return LastPasteResponse(raw_text=row.raw_text, pasted_at=row.created_at.replace(tzinfo=timezone.utc))
 
 
 @router.get("/portfolio/{snapshot_id}", response_model=IndMoneyUsPortfolioSnapshotDetailResponse)
@@ -108,3 +122,24 @@ async def get_current_prices(
         market_open=any(quote.get("market_open") for quote in quotes),
         fetched_at=datetime.now(timezone.utc),
     )
+
+
+@router.get("/prices/display")
+async def get_display_quotes(
+    instruments: list[str] = Query(min_length=1, max_length=50),
+    current_user: User = Depends(get_current_user),
+):
+    """Read-only IEX display estimates; credentials never enter the response."""
+    from .alpaca_quotes import read_alpaca_quotes, validate_instruments
+    try:
+        keys = validate_instruments(instruments)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return await read_alpaca_quotes(current_user.id, keys)
+
+
+@router.get("/prices/listings")
+async def get_verified_display_listings(current_user: User = Depends(get_current_user)):
+    """Read existing owner-bound nonsecret mappings; never contact a vendor."""
+    from .alpaca_quotes import read_verified_listings
+    return read_verified_listings(current_user.id)

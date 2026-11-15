@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import {
-  applyCanonicalPolymarketMarketUrls,
   buildPolymarketEventUrl,
   getCanonicalPolymarketEventSlug,
 } from "./_lib/polymarketMarketUrls";
@@ -12,6 +11,15 @@ import {
   POLYMARKET_DEFAULT_CATEGORY,
 } from "./_lib/polymarketCategory";
 import { fetchBackendRuntimeJson } from "./_lib/backendBullpenRuntime";
+import {
+  createBackendSessionContext,
+} from "./_lib/serverBackendSession";
+import {
+  appendStageOneGammaExportPage,
+  forkUniversalScan,
+  reapplyStageOneGammaExportFilters,
+  type StageOneGammaExportRow,
+} from "./_lib/stageOneGammaExport";
 import {
   BULLPEN_SOURCE_URLS,
   normalizeBullpenScanFilters,
@@ -32,6 +40,7 @@ import {
   SPORTS_PATTERNS,
   WEATHER_KEYWORDS,
 } from "@/lib/bullpenScanExclusions";
+import type { BullpenActivePositionView } from "@/lib/bullpenPositions";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -45,19 +54,25 @@ type FilterableBullpenQuestion = Omit<BullpenQuestion, "category"> & {
   category: string | null;
   _categorySearchText: string;
   _searchText: string;
+  _eventSlug: string | null;
+  _feeType: string | null;
+  _sportsMarketType: string | null;
   _customExcludeSportsKeywords: string[];
   _customExcludeWeatherKeywords: string[];
   _customExcludeMarketPredictionsKeywords: string[];
   _customExcludeTweetCountQuestionsKeywords: string[];
+  _customExcludeOtherPhrases: string[];
 };
 
 const CLI_SOURCE_LABEL = "Bullpen CLI";
 const WEB_SOURCE_LABEL = "Bullpen trending page";
 const GAMMA_SOURCE_LABEL = "Polymarket Gamma API";
-const POLYMARKET_GAMMA_MARKETS_URL = "https://gamma-api.polymarket.com/markets";
-const CLI_DISCOVER_LIMIT = 1_000;
-const DISCOVER_FALLBACK_LIMIT = 10_000;
-const GAMMA_PAGE_SIZE = 500;
+const POLYMARKET_GAMMA_EVENTS_URL = "https://gamma-api.polymarket.com/events";
+const POLYMARKET_GAMMA_EVENTS_KEYSET_URL = `${POLYMARKET_GAMMA_EVENTS_URL}/keyset`;
+const GAMMA_EVENT_PAGE_SIZE = 500;
+const GAMMA_PAGE_TIMEOUT_MS = 20_000;
+const GAMMA_TERMINAL_CURSOR = "LTE=";
+
 const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
 const CATEGORY_KEYS = [
   "category",
@@ -376,6 +391,63 @@ function readCategory(
   return formatPolymarketCategory(
     collectCategoryLabels(record, contextCategory),
   );
+}
+
+function readSportsTournament(record: Record<string, unknown>) {
+  return (
+    readString(record, [
+      "tournament",
+      "tournamentName",
+      "league",
+      "leagueName",
+      "competition",
+      "competitionName",
+      "series",
+      "seriesName",
+    ]) ??
+    readDeepString(record, [
+      "tournament",
+      "tournamentName",
+      "league",
+      "leagueName",
+      "competition",
+      "competitionName",
+      "series",
+      "seriesName",
+    ])
+  );
+}
+
+function readSportsTags(record: Record<string, unknown>) {
+  const tags: string[] = [];
+  const seen = new Set<string>();
+  const add = (value: unknown) => {
+    let label: string | null = null;
+    if (typeof value === "string") {
+      label = value.trim() || null;
+    } else if (value && typeof value === "object" && !Array.isArray(value)) {
+      label = readString(value as Record<string, unknown>, [
+        "code",
+        "slug",
+        "label",
+        "name",
+        "title",
+      ]);
+    }
+    if (!label) return;
+    const normalized = label.toLowerCase();
+    if (seen.has(normalized)) return;
+    seen.add(normalized);
+    tags.push(label);
+  };
+
+  for (const key of ["tags", "categories", "tag", "sport", "sports"] as const) {
+    const value = record[key];
+    if (Array.isArray(value)) value.forEach(add);
+    else add(value);
+  }
+
+  return tags;
 }
 
 function readDeepString(value: unknown, keys: string[]): string | null {
@@ -860,8 +932,22 @@ function normalizeGammaMarket(
   );
   const yesPrice = yesIndex >= 0 ? outcomePrices[yesIndex] : null;
   const noPrice = noIndex >= 0 ? outcomePrices[noIndex] : null;
-  const yesOdds = normalizeOdds(yesPrice);
-  const noOdds = normalizeOdds(noPrice);
+  const indicativeYesOdds = normalizeOdds(yesPrice);
+  const indicativeNoOdds = normalizeOdds(noPrice);
+  const bestAskOdds = normalizeOdds(parseNumber(record.bestAsk));
+  const bestBidOdds = normalizeOdds(parseNumber(record.bestBid));
+  const isBinaryYesNo =
+    new Set(normalizedOutcomeLabels).size === 2 &&
+    normalizedOutcomeLabels.includes("yes") &&
+    normalizedOutcomeLabels.includes("no");
+  // Use executable order-book asks. Gamma's market-level book is the YES
+  // token, so Buy No is the complement of the best YES bid.
+  const yesOdds =
+    isBinaryYesNo && bestAskOdds !== null ? bestAskOdds : indicativeYesOdds;
+  const noOdds =
+    isBinaryYesNo && bestBidOdds !== null
+      ? Number((100 - bestBidOdds).toFixed(2))
+      : indicativeNoOdds;
   const slug = readString(record, MARKET_SLUG_KEYS);
   const closeTime = chooseCloseTime(
     readString(record, CLOSE_TIME_KEYS),
@@ -917,6 +1003,8 @@ function normalizeGammaMarket(
       "liquidityUsd",
       "liquidityUSD",
     ]),
+    volume24hr: readDisplayValue(record, ["volume24hr", "volume24h"]),
+    spreadCents: normalizeOdds(readNumber(record, ["spread"])),
     sourceUrl,
     slug,
     marketUrl: buildPolymarketEventUrl(eventSlug),
@@ -934,10 +1022,14 @@ function normalizeGammaMarket(
     resolutionSource: null,
     _categorySearchText: categorySearchText,
     _searchText: searchText,
+    _eventSlug: eventSlug,
+    _feeType: readString(record, ["feeType"]),
+    _sportsMarketType: readString(record, ["sportsMarketType"]),
     _customExcludeSportsKeywords: [],
     _customExcludeWeatherKeywords: [],
     _customExcludeMarketPredictionsKeywords: [],
     _customExcludeTweetCountQuestionsKeywords: [],
+    _customExcludeOtherPhrases: [],
   };
 }
 
@@ -1023,6 +1115,8 @@ function normalizeQuestion(
     question,
     closeTime,
     category,
+    sportsTournament: readSportsTournament(record),
+    sportsTags: readSportsTags(record),
     yesOdds,
     noOdds,
     volume: readDisplayValue(record, [
@@ -1041,6 +1135,8 @@ function normalizeQuestion(
       "liquidityUsd",
       "liquidityUSD",
     ]),
+    volume24hr: readDisplayValue(record, ["volume24hr", "volume24h"]),
+    spreadCents: normalizeOdds(readNumber(record, ["spread"])),
     sourceUrl,
     slug,
     marketUrl: buildPolymarketEventUrl(eventSlug),
@@ -1058,10 +1154,14 @@ function normalizeQuestion(
     resolutionSource: null,
     _categorySearchText: categorySearchText,
     _searchText: searchText,
+    _eventSlug: eventSlug,
+    _feeType: readString(record, ["feeType"]),
+    _sportsMarketType: readString(record, ["sportsMarketType"]),
     _customExcludeSportsKeywords: [],
     _customExcludeWeatherKeywords: [],
     _customExcludeMarketPredictionsKeywords: [],
     _customExcludeTweetCountQuestionsKeywords: [],
+    _customExcludeOtherPhrases: [],
   };
 }
 
@@ -1085,33 +1185,206 @@ function passesTimeFilter(
   );
 }
 
-function passesFilters(
+function getFilterReasons(
   question: FilterableBullpenQuestion,
   mode: ScanMode,
   filters: BullpenScanFilters,
 ) {
-  if (!passesTimeFilter(question, mode, filters)) return false;
-  if (filters.excludeSports && isSportsQuestion(question)) return false;
-  if (filters.excludeWeather && isWeatherQuestion(question)) return false;
-  if (filters.excludeMarketPredictions && isMarketPredictionQuestion(question))
-    return false;
-  if (filters.excludeTweetCountQuestions && isTweetCountQuestion(question))
-    return false;
-  if (filters.excludeReleasedByEvents && isReleasedByEventQuestion(question))
-    return false;
-  if (isInsultMarket(question)) return false;
-  if (filters.onlyBinaryYesNo && !question.isBinaryYesNo) return false;
+  const reasons: string[] = [];
+  const volumeUsd = question.volume === null ? null : Number(question.volume);
+  const liquidityUsd = question.liquidity === null ? null : Number(question.liquidity);
+  if (volumeUsd === null || !Number.isFinite(volumeUsd) || volumeUsd <= filters.minVolumeUsd) {
+    reasons.push(`Excluded market with Volume USD not greater than ${filters.minVolumeUsd}.`);
+  }
+  if (liquidityUsd === null || !Number.isFinite(liquidityUsd) || liquidityUsd <= filters.minLiquidityUsd) {
+    reasons.push(`Excluded market with Liquidity USD not greater than ${filters.minLiquidityUsd}.`);
+  }
+  const volume24hrUsd = question.volume24hr === null || question.volume24hr === undefined
+    ? null
+    : Number(question.volume24hr.replace(/,/g, ""));
+  if (volume24hrUsd === null || !Number.isFinite(volume24hrUsd) || volume24hrUsd <= filters.minVolume24hrUsd) {
+    reasons.push(`Excluded market with volume24hr USD not greater than ${filters.minVolume24hrUsd}.`);
+  }
+  if (question.spreadCents === null || question.spreadCents === undefined || question.spreadCents >= filters.maxSpreadCents) {
+    reasons.push(`Excluded market with spread not below ${filters.maxSpreadCents} cents.`);
+  }
+  if (filters.rejectedThemePattern) {
+    try {
+      if (new RegExp(filters.rejectedThemePattern, "i").test(question.category ?? "")) {
+        reasons.push("Excluded by the Theme Names pattern.");
+      }
+    } catch {
+      // The persisted settings API validates the expression. Ignore malformed
+      // direct query-string values so this compatibility route remains usable.
+    }
+  }
+  if (!passesTimeFilter(question, mode, filters)) {
+    reasons.push("Excluded market outside the selected scan window.");
+  }
+  if (filters.excludeSports && isSportsQuestion(question)) {
+    reasons.push("Excluded sports market.");
+  }
+  if (filters.sportsMoneylineOnly) {
+    if ((question._eventSlug || "").trim().toLowerCase().endsWith("draw")) {
+      reasons.push('Excluded sports event whose event slug ends with "draw".');
+    }
+    if (
+      !["sports_fees_v2", "sports_fees_v3"].includes(
+        (question._feeType || "").trim().toLowerCase(),
+      )
+    ) {
+      reasons.push(
+        "Excluded sports market without feeType sports_fees_v2 or sports_fees_v3.",
+      );
+    }
+    if ((question._sportsMarketType || "").trim().toLowerCase() !== "moneyline") {
+      reasons.push(
+        "Excluded sports market whose sportsMarketType is not moneyline.",
+      );
+    }
+  }
+  if (filters.excludeWeather && isWeatherQuestion(question)) {
+    reasons.push("Excluded weather market.");
+  }
+  if (
+    filters.excludeMarketPredictions &&
+    isMarketPredictionQuestion(question)
+  ) {
+    reasons.push("Excluded market-prediction or finance market.");
+  }
+  if (
+    filters.excludeTweetCountQuestions &&
+    isTweetCountQuestion(question)
+  ) {
+    reasons.push("Excluded tweet-count or social-post-count market.");
+  }
+  if (
+    filters.excludeReleasedByEvents &&
+    isReleasedByEventQuestion(question)
+  ) {
+    reasons.push("Excluded release-by event market.");
+  }
+  if (isInsultMarket(question)) {
+    reasons.push("Excluded insult or name-calling market.");
+  }
+  if (includesAnyCustomKeyword(question._searchText, question._customExcludeOtherPhrases)) {
+    reasons.push("Excluded by a custom phrase in Others.");
+  }
+  if (filters.onlyBinaryYesNo && !question.isBinaryYesNo) {
+    reasons.push("Excluded unclear non-binary market.");
+  }
   if (
     filters.minYesOdds > 0 &&
     (question.yesOdds === null || question.yesOdds < filters.minYesOdds)
-  )
-    return false;
+  ) {
+    reasons.push(
+      question.yesOdds === null
+        ? "Excluded market without Yes odds."
+        : `Excluded market below the ${filters.minYesOdds}% Yes odds floor.`,
+    );
+  }
   if (
     filters.minNoOdds > 0 &&
     (question.noOdds === null || question.noOdds < filters.minNoOdds)
-  )
-    return false;
-  return true;
+  ) {
+    reasons.push(
+      question.noOdds === null
+        ? "Excluded market without No odds."
+        : `Excluded market below the ${filters.minNoOdds}% No odds floor.`,
+    );
+  }
+  if (filters.applyYesNoOddsThresholds && filters.minLowerOutcomeOdds > 0) {
+    const lowerOutcomeOdds =
+      question.yesOdds === null || question.noOdds === null
+        ? null
+        : Math.min(question.yesOdds, question.noOdds);
+    if (lowerOutcomeOdds === null || lowerOutcomeOdds <= filters.minLowerOutcomeOdds) {
+      reasons.push(
+        lowerOutcomeOdds === null
+          ? "Excluded market without a complete Yes/No odds pair."
+          : `Excluded because min(Yes, No) must be above ${filters.minLowerOutcomeOdds}%.`,
+      );
+    }
+  }
+  if (filters.applyYesNoOddsThresholds && filters.minHigherOutcomeOdds > 0) {
+    const higherOutcomeOdds =
+      question.yesOdds === null || question.noOdds === null
+        ? null
+        : Math.max(question.yesOdds, question.noOdds);
+    if (higherOutcomeOdds === null || higherOutcomeOdds <= filters.minHigherOutcomeOdds) {
+      reasons.push(
+        higherOutcomeOdds === null
+          ? "Excluded market without a complete Yes/No odds pair."
+          : `Excluded because max(Yes, No) must be above ${filters.minHigherOutcomeOdds}%.`,
+      );
+    }
+  }
+  return reasons;
+}
+
+function hydrateStoredCandidateForFiltering(
+  question: BullpenQuestion,
+  filters: BullpenScanFilters,
+  market: Record<string, unknown>,
+  event: Record<string, unknown>,
+): FilterableBullpenQuestion {
+  const theme = question.category ?? "";
+  const sportsTournament =
+    question.sportsTournament ??
+    readSportsTournament(market) ??
+    readSportsTournament(event);
+  const sportsTags = Array.from(
+    new Map(
+      [
+        ...(question.sportsTags ?? []),
+        ...readSportsTags(event),
+        ...readSportsTags(market),
+      ].map((tag) => [tag.toLowerCase(), tag] as const),
+    ).values(),
+  );
+
+  // Re-filtering stores the same candidate object in the accepted sample.
+  // Enrich that object from the preserved raw Gamma event/market so the
+  // Sports Breakup can describe the already-saved Universal Scan as well as
+  // newly captured scans.
+  question.sportsTournament = sportsTournament;
+  question.sportsTags = sportsTags;
+  return {
+    ...question,
+    volume24hr:
+      question.volume24hr ??
+      readDisplayValue(market, ["volume24hr", "volume24h"]) ??
+      readDisplayValue(event, ["volume24hr", "volume24h"]),
+    spreadCents:
+      question.spreadCents ??
+      normalizeOdds(readNumber(market, ["spread"])) ??
+      normalizeOdds(readNumber(event, ["spread"])),
+    category: question.category,
+    // Gamma's complete dot-separated Theme trail is persisted in `category`.
+    // Re-filter it as one composite value, matching the Theme Excel column.
+    _categorySearchText: normalizeSearchTextParts([theme]),
+    _searchText: normalizeSearchTextParts([
+      question.question,
+      theme,
+      question.slug,
+      question.outcomeLabels.join(" "),
+    ]),
+    _eventSlug:
+      readString(event, EVENT_SLUG_KEYS) ??
+      readString(market, EVENT_SLUG_KEYS) ??
+      null,
+    _feeType: readString(market, ["feeType"]) ?? readString(event, ["feeType"]),
+    _sportsMarketType:
+      readString(market, ["sportsMarketType"]) ??
+      readString(event, ["sportsMarketType"]),
+    _customExcludeSportsKeywords: filters.customExcludeSportsKeywords,
+    _customExcludeWeatherKeywords: filters.customExcludeWeatherKeywords,
+    _customExcludeMarketPredictionsKeywords:
+      filters.customExcludeMarketPredictionsKeywords,
+    _customExcludeTweetCountQuestionsKeywords:
+      filters.customExcludeTweetCountQuestionsKeywords,
+    _customExcludeOtherPhrases: filters.customExcludeOtherPhrases,
+  };
 }
 
 function collectQuestions(payloads: unknown[], sourceUrl: string) {
@@ -1129,18 +1402,26 @@ function stripFilterMetadata(question: FilterableBullpenQuestion): BullpenQuesti
   const {
     _categorySearchText,
     _searchText,
+    _eventSlug,
+    _feeType,
+    _sportsMarketType,
     _customExcludeSportsKeywords,
     _customExcludeWeatherKeywords,
     _customExcludeMarketPredictionsKeywords,
     _customExcludeTweetCountQuestionsKeywords,
+    _customExcludeOtherPhrases,
     ...publicQuestion
   } = question;
   void _categorySearchText;
   void _searchText;
+  void _eventSlug;
+  void _feeType;
+  void _sportsMarketType;
   void _customExcludeSportsKeywords;
   void _customExcludeWeatherKeywords;
   void _customExcludeMarketPredictionsKeywords;
   void _customExcludeTweetCountQuestionsKeywords;
+  void _customExcludeOtherPhrases;
   return {
     ...publicQuestion,
     category:
@@ -1152,27 +1433,6 @@ function stripFilterMetadata(question: FilterableBullpenQuestion): BullpenQuesti
       ) ??
       POLYMARKET_DEFAULT_CATEGORY,
   };
-}
-
-function applyFilters(
-  candidates: FilterableBullpenQuestion[],
-  mode: ScanMode,
-  filters: BullpenScanFilters,
-) {
-  return sortQuestions(
-    candidates
-      .map((question) => ({
-        ...question,
-        _customExcludeSportsKeywords: filters.customExcludeSportsKeywords,
-        _customExcludeWeatherKeywords: filters.customExcludeWeatherKeywords,
-        _customExcludeMarketPredictionsKeywords:
-          filters.customExcludeMarketPredictionsKeywords,
-        _customExcludeTweetCountQuestionsKeywords:
-          filters.customExcludeTweetCountQuestionsKeywords,
-      }))
-      .filter((question) => passesFilters(question, mode, filters))
-      .map((question) => stripFilterMetadata(question)),
-  );
 }
 
 function sourceHasFutureCandidates<
@@ -1188,73 +1448,121 @@ async function runBullpenDiscover() {
   return fetchBackendRuntimeJson("/polymarket/runtime/discover");
 }
 
-async function fetchGammaMarkets(mode: ScanMode, filters: BullpenScanFilters) {
+type GammaPageCandidate = {
+  candidateId: string;
+  candidate: FilterableBullpenQuestion;
+  event: Record<string, unknown>;
+  market: Record<string, unknown>;
+};
+
+async function fetchGammaEventPage({
+  cursor,
+}: {
+  cursor: string | null;
+}) {
   const candidates = new Map<string, FilterableBullpenQuestion>();
-  let offset = 0;
+  const exportCandidates: GammaPageCandidate[] = [];
+  const params = new URLSearchParams({
+    archived: "false",
+    closed: "false",
+    limit: String(GAMMA_EVENT_PAGE_SIZE),
+  });
+  if (cursor) params.set("after_cursor", cursor);
 
-  while (offset < DISCOVER_FALLBACK_LIMIT) {
-    const params = new URLSearchParams({
-      active: "true",
-      archived: "false",
-      closed: "false",
-      limit: String(GAMMA_PAGE_SIZE),
-      offset: String(offset),
-      order: "endDate",
-      ascending: "true",
-    });
-
-    const response = await fetch(
-      `${POLYMARKET_GAMMA_MARKETS_URL}?${params.toString()}`,
+  let response: Response;
+  try {
+    response = await fetch(
+      `${POLYMARKET_GAMMA_EVENTS_KEYSET_URL}?${params.toString()}`,
       {
         cache: "no-store",
         headers: { accept: "application/json" },
+        signal: AbortSignal.timeout(GAMMA_PAGE_TIMEOUT_MS),
       },
     );
-
-    if (!response.ok) {
-      throw new Error(`Polymarket Gamma returned HTTP ${response.status}`);
+  } catch (error: unknown) {
+    const name = error instanceof Error ? error.name : "";
+    if (
+      error instanceof TypeError ||
+      name === "AbortError" ||
+      name === "TimeoutError"
+    ) {
+      return {
+        candidates,
+        exportCandidates,
+        nextCursor: cursor,
+        retryableFailure: true,
+        retryReason:
+          name === "TimeoutError" || name === "AbortError"
+            ? "Polymarket Gamma page request timed out."
+            : "Polymarket Gamma page request failed at the network layer.",
+      };
     }
-
-    const payload = await response.json();
-    const rows = Array.isArray(payload) ? payload : [];
-    for (const row of rows) {
-      if (!row || typeof row !== "object") continue;
-      const normalized = normalizeGammaMarket(
-        row as Record<string, unknown>,
-        POLYMARKET_GAMMA_MARKETS_URL,
-      );
-      if (normalized) candidates.set(normalized.id, normalized);
-    }
-
-    if (rows.length < GAMMA_PAGE_SIZE) break;
-    offset += GAMMA_PAGE_SIZE;
-
-    const earliestOutsideWindow = rows.every((row) => {
-      if (!row || typeof row !== "object") return false;
-      const closeTime = readString(
-        row as Record<string, unknown>,
-        CLOSE_TIME_KEYS,
-      );
-      if (!closeTime) return false;
-      const closeDate = new Date(closeTime);
-      if (Number.isNaN(closeDate.getTime())) return false;
-
-      if (mode === "end-of-month") {
-        const targetDate = filters.targetDate;
-        const rowDate = getDateKey(closeTime);
-        return rowDate !== null && rowDate > targetDate;
-      }
-
-      return (
-        closeDate.getTime() - Date.now() >=
-        filters.maxClosingDays * MILLISECONDS_PER_DAY
-      );
-    });
-
-    if (earliestOutsideWindow) break;
+    throw error;
+  }
+  if (response.status === 429 || response.status >= 500) {
+    return {
+      candidates,
+      exportCandidates,
+      nextCursor: cursor,
+      retryableFailure: true,
+      retryReason:
+        response.status === 429
+          ? "Polymarket Gamma rate-limited this page (HTTP 429)."
+          : `Polymarket Gamma returned a temporary server error (HTTP ${response.status}).`,
+    };
+  }
+  if (!response.ok) {
+    throw new Error(`Polymarket Gamma returned HTTP ${response.status}`);
   }
 
-  return sortQuestions(Array.from(candidates.values()));
+  const payload = (await response.json()) as Record<string, unknown>;
+  const events = Array.isArray(payload.events) ? payload.events : [];
+  for (const eventValue of events) {
+    if (!eventValue || typeof eventValue !== "object") continue;
+    const event = eventValue as Record<string, unknown>;
+    if (event.closed === true || event.archived === true) continue;
+    const eventWithoutMarkets = Object.fromEntries(
+      Object.entries(event).filter(([key]) => key !== "markets"),
+    );
+    for (const marketValue of toArray(event.markets)) {
+      if (!marketValue || typeof marketValue !== "object") continue;
+      const market = marketValue as Record<string, unknown>;
+      if (market.closed === true || market.archived === true) continue;
+      const marketForNormalization = {
+        ...market,
+        events: [eventWithoutMarkets],
+      };
+      const normalized = normalizeGammaMarket(
+        marketForNormalization,
+        POLYMARKET_GAMMA_EVENTS_URL,
+      );
+      if (!normalized) continue;
+      candidates.set(normalized.id, normalized);
+      exportCandidates.push({
+        candidateId: normalized.id,
+        candidate: normalized,
+        event: eventWithoutMarkets,
+        market,
+      });
+    }
+  }
+
+  const rawNextCursor =
+    typeof payload.next_cursor === "string" && payload.next_cursor
+      ? payload.next_cursor
+      : null;
+  const reachedEnd =
+    !rawNextCursor ||
+    rawNextCursor === GAMMA_TERMINAL_CURSOR ||
+    rawNextCursor === cursor;
+  const nextCursor = reachedEnd ? null : rawNextCursor;
+  return {
+    candidates,
+    exportCandidates,
+    nextCursor,
+    retryableFailure: false,
+    retryReason: null,
+  };
 }
 
 function isVercelSecurityCheckpoint(html: string) {
@@ -1291,6 +1599,8 @@ async function buildResponse({
   candidates,
   warning,
   details,
+  forcedIdentityKeys = new Set<string>(),
+  unfiltered = false,
 }: {
   mode: ScanMode;
   sourceUrl: string;
@@ -1300,9 +1610,41 @@ async function buildResponse({
   candidates: FilterableBullpenQuestion[];
   warning?: string;
   details?: string;
+  forcedIdentityKeys?: Set<string>;
+  unfiltered?: boolean;
 }) {
-  const questions = await applyCanonicalPolymarketMarketUrls(
-    applyFilters(candidates, mode, filters),
+  const candidatesWithFilters = candidates.map((question) => ({
+    ...question,
+    _customExcludeSportsKeywords: filters.customExcludeSportsKeywords,
+    _customExcludeWeatherKeywords: filters.customExcludeWeatherKeywords,
+    _customExcludeMarketPredictionsKeywords:
+      filters.customExcludeMarketPredictionsKeywords,
+    _customExcludeTweetCountQuestionsKeywords:
+      filters.customExcludeTweetCountQuestionsKeywords,
+    _customExcludeOtherPhrases: filters.customExcludeOtherPhrases,
+  }));
+  const evaluatedCandidates = candidatesWithFilters.map((question) => ({
+    question,
+    filterReasons: unfiltered || questionIdentityKeys(question).some((key) =>
+      forcedIdentityKeys.has(key),
+    )
+      ? []
+      : getFilterReasons(question, mode, filters),
+  }));
+  const acceptedCandidates = evaluatedCandidates
+    .filter(({ filterReasons }) => filterReasons.length === 0)
+    .map(({ question }) => question);
+  const rejectedCandidates = evaluatedCandidates.filter(
+    ({ filterReasons }) => filterReasons.length > 0,
+  );
+  const questions = sortQuestions(
+    acceptedCandidates.map((question) => stripFilterMetadata(question)),
+  );
+  const rejectedQuestions = sortQuestions(
+    rejectedCandidates.map(({ question, filterReasons }) => ({
+      ...stripFilterMetadata(question),
+      filterReasons,
+    })),
   );
 
   return {
@@ -1313,118 +1655,338 @@ async function buildResponse({
     filters,
     totalCandidates: candidates.length,
     questions,
+    rejectedQuestions,
     ...(warning ? { warning } : {}),
     ...(details ? { details } : {}),
   };
 }
 
-export async function GET(request: NextRequest) {
+function normalizeIdentity(value: unknown) {
+  return typeof value === "string" && value.trim()
+    ? value.trim().toLowerCase()
+    : null;
+}
+
+function questionIdentityKeys(question: {
+  conditionId?: string | null;
+  marketId?: string | null;
+  slug?: string | null;
+  id: string;
+}) {
+  return [
+    question.conditionId,
+    question.marketId,
+    question.slug,
+    question.id,
+  ]
+    .map(normalizeIdentity)
+    .filter((value): value is string => Boolean(value));
+}
+
+function positionIdentityKeys(position: BullpenActivePositionView) {
+  return [position.conditionId, position.marketId, position.marketSlug, position.slug]
+    .map(normalizeIdentity)
+    .filter((value): value is string => Boolean(value));
+}
+
+function activePositionCandidate(position: BullpenActivePositionView): FilterableBullpenQuestion {
+  const id = position.conditionId || position.marketId || position.marketSlug || position.key;
+  const publicQuestion: BullpenQuestion = {
+    id,
+    question: position.marketTitle,
+    positionKey: position.key,
+    conditionId: position.conditionId,
+    marketId: position.marketId,
+    closeTime: position.closeTime,
+    category: "Active Bullpen Position",
+    yesOdds: position.yesOdds,
+    noOdds: position.noOdds,
+    volume: null,
+    liquidity: null,
+    sourceUrl: position.marketUrl || POLYMARKET_GAMMA_EVENTS_URL,
+    slug: position.marketSlug || position.slug,
+    marketUrl: position.marketUrl,
+    outcomeLabels: ["Yes", "No"],
+    outcomeCount: 2,
+    isBinaryYesNo: true,
+    daysUntilClose: null,
+    rules: position.rules,
+    marketContext: position.marketContext,
+    resolutionSource: position.resolutionSource,
+  };
+  return {
+    ...publicQuestion,
+    _categorySearchText: "",
+    _searchText: "",
+    _eventSlug: null,
+    _feeType: null,
+    _sportsMarketType: null,
+    _customExcludeSportsKeywords: [],
+    _customExcludeWeatherKeywords: [],
+    _customExcludeMarketPredictionsKeywords: [],
+    _customExcludeTweetCountQuestionsKeywords: [],
+    _customExcludeOtherPhrases: [],
+  };
+}
+
+async function handleScan(
+  request: NextRequest,
+  activePositions: BullpenActivePositionView[],
+) {
+  const backendSession = await createBackendSessionContext(request);
+  if (!backendSession.hasAuthJsSession || !backendSession.accessToken) {
+    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  }
   const searchParams = request.nextUrl.searchParams;
+  const universal = searchParams.get("universal") === "true";
+  const sessionOwner = backendSession.sessionSubject ?? backendSession.sessionGeneration;
+  const requestedWorkspaceProfile = searchParams.get("workspaceProfile");
+  const workspaceProfile = requestedWorkspaceProfile === "bullpen-sports"
+    ? "bullpen-sports"
+    : "bullpen007";
+  const workflowOwner = workspaceProfile === "bullpen007"
+    ? sessionOwner
+    : `${sessionOwner}:${workspaceProfile}`;
+  const scanOwner = universal ? `${sessionOwner}:universal` : workflowOwner;
+  if (universal) activePositions = [];
   const mode: ScanMode =
     searchParams.get("mode") === "end-of-month" ? "end-of-month" : "30-days";
   const filters = normalizeBullpenScanFilters(mode, searchParams);
-  const sourceUrl = BULLPEN_SOURCE_URLS[mode];
-  const scannedAt = new Date().toISOString();
+  const requestedScannedAt = searchParams.get("scanStartedAt");
+  const requestedScannedAtDate = requestedScannedAt
+    ? new Date(requestedScannedAt)
+    : null;
+  const scannedAt =
+    requestedScannedAtDate &&
+    !Number.isNaN(requestedScannedAtDate.getTime())
+      ? requestedScannedAtDate.toISOString()
+      : new Date().toISOString();
+  const cursor = searchParams.get("scanCursor");
+  const requestedExportId = searchParams.get("scanExportId");
+  let reapplyExportId = searchParams.get("reapplyExportId");
+  const reapplyCursorValue = searchParams.get("reapplyCursor");
+  const reapplyCursor = reapplyCursorValue === null
+    ? undefined
+    : Number.parseInt(reapplyCursorValue, 10);
+  const forcedIdentityKeys = new Set(
+    activePositions.flatMap(positionIdentityKeys),
+  );
 
   try {
-    const cliPayload = await runBullpenDiscover();
-    const candidates = collectQuestions([cliPayload], sourceUrl);
-    if (!sourceHasFutureCandidates(candidates)) {
-      throw new Error(
-        "Bullpen CLI returned stale markets with past close dates",
-      );
+    if (universal && (reapplyExportId || searchParams.get("useUniversal") === "true")) {
+      return NextResponse.json({ error: "Universal captures cannot be filtered in place." }, { status: 400 });
     }
-    if (candidates.length > 0) {
-      return NextResponse.json(
-        await buildResponse({
-          mode,
-          sourceUrl,
-          sourceLabel: CLI_SOURCE_LABEL,
-          scannedAt,
-          filters,
-          candidates,
-        }),
-      );
+    if (searchParams.get("useUniversal") === "true" && !reapplyExportId) {
+      reapplyExportId = workspaceProfile === "bullpen007"
+        ? await forkUniversalScan(sessionOwner)
+        : await forkUniversalScan(workflowOwner, undefined, sessionOwner);
+      await appendStageOneGammaExportPage({ exportId: reapplyExportId, ownerKey: workflowOwner,
+        pageKey: "__WORKFLOW_ACTIVE_POSITIONS__", completed: true,
+        rows: activePositions.map(position => ({ candidate: stripFilterMetadata(activePositionCandidate(position)),
+          event: { source: "active_wallet_position" }, market: {}, scanStatus: "passed" as const,
+          filterReasons: [], forceIncluded: true, forceIncludedPosition: true })) });
     }
-    throw new Error("Bullpen CLI returned no discoverable markets");
-  } catch (cliError) {
-    try {
-      const html = await fetchBullpenPage(sourceUrl);
-      const candidates = collectQuestions(extractEmbeddedJson(html), sourceUrl);
-      if (!sourceHasFutureCandidates(candidates)) {
-        throw new Error(
-          "Bullpen web returned stale markets with past close dates",
-        );
-      }
-      if (candidates.length > 0) {
-        return NextResponse.json(
-          await buildResponse({
+    if (reapplyExportId) {
+      const reapplyResult = await reapplyStageOneGammaExportFilters({
+        exportId: reapplyExportId,
+        ownerKey:
+          scanOwner,
+        filters,
+        cursor: Number.isFinite(reapplyCursor) ? reapplyCursor : undefined,
+        evaluate: (candidate, market, event) =>
+          questionIdentityKeys(candidate).some(key => forcedIdentityKeys.has(key)) ? [] : getFilterReasons(
+            hydrateStoredCandidateForFiltering(candidate, filters, market, event),
             mode,
-            sourceUrl,
-            sourceLabel: WEB_SOURCE_LABEL,
-            scannedAt,
             filters,
-            candidates,
-            warning:
-              cliError instanceof Error
-                ? `Using Bullpen web fallback because the CLI scan failed. ${cliError.message}`
-                : "Using Bullpen web fallback because the CLI scan failed.",
-          }),
-        );
-      }
-      throw new Error("Bullpen web returned no discoverable markets");
-    } catch (webError) {
-      try {
-        const candidates = await fetchGammaMarkets(mode, filters);
-        if (candidates.length > 0) {
-          return NextResponse.json(
-            await buildResponse({
-              mode,
-              sourceUrl: POLYMARKET_GAMMA_MARKETS_URL,
-              sourceLabel: GAMMA_SOURCE_LABEL,
-              scannedAt,
-              filters,
-              candidates,
-              warning:
-                "Using Polymarket Gamma API fallback because Bullpen sources were unavailable.",
-              details: [
-                cliError instanceof Error
-                  ? cliError.message
-                  : "Bullpen CLI scan failed",
-                webError instanceof Error
-                  ? webError.message
-                  : "Bullpen web scan failed",
-              ].join("; "),
-            }),
-          );
-        }
-        throw new Error("Polymarket Gamma returned no discoverable markets");
-      } catch (gammaError) {
+          ),
+      });
+      const metadata = reapplyResult.metadata;
+      if (!reapplyResult.completed) {
         return NextResponse.json(
           {
-            mode,
-            sourceUrl,
-            sourceLabel: WEB_SOURCE_LABEL,
-            scannedAt,
-            filters,
-            totalCandidates: 0,
-            questions: [],
-            error:
-              gammaError instanceof Error
-                ? gammaError.message
-                : "Unable to scan prediction markets",
-            details: [
-              cliError instanceof Error
-                ? cliError.message
-                : "Bullpen CLI scan failed",
-              webError instanceof Error
-                ? webError.message
-                : "Bullpen web scan failed",
-            ].join("; "),
+            status: "reapplying",
+            scanExportId: metadata.exportId,
+            retryAfterMs: 100,
+            reapplyCursor: metadata.reapplyState?.processedCount ?? 0,
+            processedCandidates: metadata.reapplyState?.processedCount ?? 0,
+            totalCandidates: metadata.rowCount,
           },
-          { status: 502 },
+          { status: 202 },
         );
       }
+      return NextResponse.json({
+        mode,
+        sourceUrl:
+          metadata.sourceUrl ?? POLYMARKET_GAMMA_EVENTS_KEYSET_URL,
+        sourceLabel: metadata.sourceLabel ?? GAMMA_SOURCE_LABEL,
+        scannedAt: new Date().toISOString(),
+        filters,
+        totalCandidates: metadata.rowCount,
+        questions: metadata.acceptedSample ?? [],
+        rejectedQuestions: metadata.rejectedSample ?? [],
+        totalAcceptedQuestions: metadata.acceptedCount ?? 0,
+        totalRejectedQuestions: metadata.rejectedCount ?? 0,
+        pagesScanned: metadata.processedPages.length,
+        scanExportId: metadata.exportId,
+        sourceScanExportId: metadata.sourceScanExportId,
+        sourceScanCompletedAt: metadata.sourceScanCompletedAt,
+        filtersCompletedAt: metadata.filtersCompletedAt ?? metadata.updatedAt,
+        details:
+          "Reapplied saved Stage 1 filters to the existing Full Universe data without fetching Gamma again.",
+      });
     }
+    const {
+      candidates,
+      exportCandidates,
+      nextCursor,
+      retryableFailure,
+      retryReason,
+    } = await fetchGammaEventPage({
+      cursor,
+    });
+
+    if (retryableFailure) {
+      return NextResponse.json(
+        {
+          status: "scanning",
+          retryAfterMs: 1_000,
+          resultChunk: true,
+          scanStartedAt: scannedAt,
+          nextCursor: cursor,
+          scanExportId: requestedExportId,
+          retryReason,
+          totalCandidates: 0,
+          questions: [],
+          rejectedQuestions: [],
+        },
+        { status: 202 },
+      );
+    }
+
+    const gammaCandidates = Array.from(candidates.values());
+    const resultCandidates = nextCursor
+      ? gammaCandidates
+      : [...gammaCandidates, ...activePositions.map(activePositionCandidate)];
+    const result = await buildResponse({
+      mode,
+      sourceUrl: POLYMARKET_GAMMA_EVENTS_KEYSET_URL,
+      sourceLabel: GAMMA_SOURCE_LABEL,
+      scannedAt,
+      filters,
+      candidates: sortQuestions(resultCandidates),
+      forcedIdentityKeys,
+      unfiltered: universal,
+      ...(nextCursor
+        ? {}
+        : {
+            details:
+              "Polymarket Gamma scanned every open parent event, applied the configured window to child markets, and merged active wallet positions.",
+          }),
+    });
+    const acceptedIds = new Set(result.questions.map((question) => question.id));
+    const rejectedReasons = new Map(
+      result.rejectedQuestions.map((question) => [
+        question.id,
+        question.filterReasons,
+      ]),
+    );
+    const exportRows: StageOneGammaExportRow[] = exportCandidates.map(
+      ({ candidateId, candidate, event, market }) => ({
+        candidate: stripFilterMetadata(candidate),
+        event,
+        market,
+        scanStatus: acceptedIds.has(candidateId) ? "passed" : "filtered",
+        filterReasons: rejectedReasons.get(candidateId) ?? [],
+        forceIncluded: questionIdentityKeys(candidate).some((key) =>
+          forcedIdentityKeys.has(key),
+        ),
+        forceIncludedPosition: questionIdentityKeys(candidate).some((key) =>
+          forcedIdentityKeys.has(key),
+        ),
+      }),
+    );
+    if (nextCursor === null) {
+      for (const position of activePositions) {
+        const candidate = activePositionCandidate(position);
+        exportRows.push({
+          candidate: stripFilterMetadata(candidate),
+          event: { source: "active_wallet_position" },
+          market: {
+            id: position.marketId,
+            conditionId: position.conditionId,
+            slug: position.marketSlug || position.slug,
+            source: "active_wallet_position",
+          },
+          scanStatus: "passed",
+          filterReasons: [],
+          forceIncluded: true,
+          forceIncludedPosition: true,
+        });
+      }
+    }
+    const exportState = request.signal.aborted
+      ? { exportId: requestedExportId, rowCount: 0 }
+      : await appendStageOneGammaExportPage({
+          exportId: requestedExportId,
+          ownerKey:
+            scanOwner,
+          pageKey: cursor || "__FIRST__",
+        rows: exportRows,
+        completed: nextCursor === null,
+        snapshot: {
+          mode,
+          filters,
+          sourceUrl: POLYMARKET_GAMMA_EVENTS_KEYSET_URL,
+          sourceLabel: GAMMA_SOURCE_LABEL,
+          scannedAt,
+        },
+      });
+    const chunk = {
+      ...result,
+      resultChunk: true,
+      scanStartedAt: scannedAt,
+      nextCursor,
+      scanExportId: exportState.exportId,
+      cumulativeTotalCandidates: exportState.rowCount,
+      ...(nextCursor
+        ? {
+            status: "scanning",
+            retryAfterMs: 250,
+          }
+        : {}),
+    };
+
+    return NextResponse.json(chunk, { status: nextCursor ? 202 : 200 });
+  } catch (error: unknown) {
+    const message =
+      error instanceof Error ? error.message : "Complete Gamma scan failed";
+    return NextResponse.json(
+      {
+        mode,
+        sourceUrl: POLYMARKET_GAMMA_EVENTS_URL,
+        sourceLabel: GAMMA_SOURCE_LABEL,
+        scannedAt,
+        filters,
+        totalCandidates: 0,
+        questions: [],
+        rejectedQuestions: [],
+        error: message,
+      },
+      { status: 502 },
+    );
   }
+}
+
+export async function GET(request: NextRequest) {
+  return handleScan(request, []);
+}
+
+export async function POST(request: NextRequest) {
+  const payload = (await request.json().catch(() => ({}))) as {
+    activePositions?: BullpenActivePositionView[];
+  };
+  return handleScan(
+    request,
+    Array.isArray(payload.activePositions) ? payload.activePositions.slice(0, 250) : [],
+  );
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ElementType } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ElementType } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   AlertCircle,
@@ -10,24 +10,29 @@ import {
   ChevronRight,
   Clock3,
   Loader2,
-  RefreshCw,
 } from 'lucide-react';
 
-import { Button } from '@/components/ui/button';
-import { apiService, APIError } from '@/services/api';
-import { RunListItem } from '@/types/api';
+import { PortfolioWorkflowHistoryCard } from './_components/PortfolioWorkflowHistoryCard';
+import { buildPortfolioHistoryEntries } from '@/lib/portfolioStageHistory';
+import { ReportRefreshButton } from '@/components/ui/report-refresh-button';
 import { formatApiTimestamp } from '@/lib/datetime';
+import {
+  getAutoRebalanceRunDisplayLabel,
+  getRunDetailPathFromPrompt,
+} from '@/lib/runPresentation';
 import { cn } from '@/lib/utils';
-import { URLs } from '@/lib/urls';
-import { getAutoRebalanceRunDisplayLabel, getRunDetailPathFromPrompt } from '@/lib/runPresentation';
-import { WSClient } from '@/services/websocket';
+import { apiService, APIError } from '@/services/api';
+import type { AutoRebalanceHistoryItemResponse, AutoRebalancePortfolioKey, BullpenAutoLiveHistoryItem, RunListItem } from '@/types/api';
 import { INDIA_TIMEZONE } from '../dashboard/_context';
 
 const STATUS_STYLES: Record<string, string> = {
   scheduled: 'bg-violet-50 text-violet-700 ring-violet-200',
   pending: 'bg-amber-50 text-amber-700 ring-amber-200',
   processing: 'bg-blue-50 text-blue-700 ring-blue-200',
+  running: 'bg-blue-50 text-blue-700 ring-blue-200',
   completed: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+  partial: 'bg-amber-50 text-amber-700 ring-amber-200',
+  partial_success: 'bg-amber-50 text-amber-700 ring-amber-200',
   failed: 'bg-red-50 text-red-700 ring-red-200',
 };
 
@@ -35,13 +40,27 @@ const STATUS_ICONS: Record<string, ElementType> = {
   scheduled: CalendarClock,
   pending: Clock3,
   processing: Loader2,
+  running: Loader2,
   completed: CheckCircle2,
+  partial: AlertCircle,
+  partial_success: AlertCircle,
   failed: AlertCircle,
 };
 
-type StatusFilter = 'all' | 'scheduled' | 'pending' | 'processing' | 'completed' | 'failed';
+const TABS = [
+  { id: 'indmoney', label: 'IndMoney Runs' },
+  { id: 'zerodha', label: 'Zerodha' },
+  { id: 'bullpen', label: 'Bullpen' },
+] as const;
+
+type RunTab = (typeof TABS)[number]['id'];
+type PortfolioTab = Exclude<RunTab, 'bullpen'>;
+type RunErrors = Record<'portfolio' | 'india' | 'indmoney_us' | 'bullpen', string | null>;
 
 const PAGE_SIZE = 20;
+const API_PAGE_SIZE = 100;
+const BULLPEN_API_PAGE_SIZE = 50;
+const BULLPEN_HISTORY_PAGE_CONCURRENCY = 2;
 
 function normalizeError(error: unknown) {
   if (error instanceof APIError) return error.message;
@@ -49,393 +68,472 @@ function normalizeError(error: unknown) {
   return 'Something went wrong';
 }
 
-
-function isBullpenAiRun(run: RunListItem) {
-  return run.run_jobs.some(({ job }) => {
-    const context = job.request_context_json;
-    return Boolean(
-      context &&
-        typeof context === 'object' &&
-        'kind' in context &&
-        context.kind === 'polymarket_bullpen_event',
-    );
-  });
-}
-
-function getBullpenTargetCount(run: RunListItem) {
-  const context = run.run_jobs.find(({ job }) => job.request_context_json)?.job.request_context_json;
-  if (!context || typeof context !== 'object' || !('execution_options' in context)) return run.run_jobs.length;
-  const executionOptions = context.execution_options;
-  if (!executionOptions || typeof executionOptions !== 'object' || !('target_count' in executionOptions)) return run.run_jobs.length;
-  const targetCount = Number(executionOptions.target_count);
-  return Number.isFinite(targetCount) && targetCount > 0 ? targetCount : run.run_jobs.length;
-}
-
-function formatRuntime(startedAt?: string | null, completedAt?: string | null) {
-  const start = startedAt ? Date.parse(startedAt) : Number.NaN;
-  const end = completedAt ? Date.parse(completedAt) : Number.NaN;
-  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return '—';
-  const totalSeconds = Math.max(0, Math.round((end - start) / 1000));
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
-}
-
-function formatUsdCost(value?: number | null) {
-  if (!Number.isFinite(value ?? Number.NaN) || !value) return '$0.00';
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 2,
-    maximumFractionDigits: value < 0.01 ? 4 : 2,
-  }).format(value);
-}
-
-function getBullpenStatusCounts(run: RunListItem) {
-  return run.run_jobs.reduce(
-    (counts, { job }) => {
-      const status = job.status.toLowerCase();
-      if (status === 'completed') counts.completed += 1;
-      else if (status === 'failed') counts.failed += 1;
-      else if (status === 'processing') counts.partial += 1;
-      else counts.pending += 1;
-      return counts;
-    },
-    { completed: 0, partial: 0, failed: 0, pending: 0 },
-  );
+function normalizeStatus(value?: string | null) {
+  return (value || 'pending').trim().toLowerCase();
 }
 
 function formatTimestamp(value?: string | null) {
   return formatApiTimestamp(value, {
-    emptyValue: null,
+    emptyValue: 'Time unavailable',
     timeZone: INDIA_TIMEZONE,
     weekday: 'short',
     day: '2-digit',
+    month: 'short',
+    year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
   });
 }
 
+function getPortfolioTab(run: RunListItem): PortfolioTab | null {
+  if (run.auto_rebalance_portfolio === 'indmoney_us') return 'indmoney';
+  if (run.auto_rebalance_portfolio === 'india') return 'zerodha';
+
+  const text = [run.auto_rebalance_label, run.prompt_preview]
+    .filter(Boolean)
+    .join('\n')
+    .toLowerCase();
+
+  if (
+    text.includes('indmoney') ||
+    text.includes('market: us equities') ||
+    text.includes('[rebalance_flow:us]') ||
+    /\b(?:us|u\.s\.|usa|united states)\b.{0,160}\b(?:equities|stocks|portfolio|swing)\b/i.test(text)
+  ) {
+    return 'indmoney';
+  }
+
+  if (
+    text.includes('india run') ||
+    text.includes('market: india equities') ||
+    text.includes('[rebalance_flow:india]') ||
+    /\b(?:india|indian)\b.{0,160}\b(?:equities|stocks|portfolio|swing)\b/i.test(text)
+  ) {
+    return 'zerodha';
+  }
+
+  return null;
+}
+
+async function loadWorkflowHistory(portfolio: AutoRebalancePortfolioKey, signal?: AbortSignal) {
+  const items: AutoRebalanceHistoryItemResponse[] = [];
+  // Each group hydrates saved stages and jobs. Keep individual DB projections
+  // small instead of loading 250 groups' output bodies on a cold request.
+  const limit = 50;
+  let total: number | undefined;
+  for (let offset = 0; total === undefined || offset < total; offset += limit) {
+    signal?.throwIfAborted();
+    const response = await apiService.getAutoRebalanceHistory(portfolio, { limit, offset }, { signal });
+    signal?.throwIfAborted();
+    if (!Number.isSafeInteger(response.total) || response.total < 0) throw new Error('Saved history returned an invalid total. Refresh to retry.');
+    total ??= response.total;
+    if (response.items.length < Math.min(limit, total - offset)) throw new Error('Saved history changed while loading. Refresh to retry the complete history.');
+    items.push(...response.items);
+  }
+  if (new Set(items.map(group => `${group.portfolio}:${group.sequence}`)).size !== items.length) throw new Error('Saved history changed while loading. Refresh to retry the complete history.');
+  return items;
+}
+
+async function loadAllPortfolioRuns(signal?: AbortSignal) {
+  signal?.throwIfAborted();
+  const first = await apiService.getRuns({ page: 1, limit: API_PAGE_SIZE, summary: true }, { signal });
+  signal?.throwIfAborted();
+  const items = [...first.items];
+  // A bounded batch avoids issuing every summary page into the connection pool
+  // alongside both grouped histories and Bullpen. Never publish a partial list.
+  for (let page = 2; page <= first.pages; page += 2) {
+    signal?.throwIfAborted();
+    const batch = await Promise.all(Array.from({ length: Math.min(2, first.pages - page + 1) }, (_, index) =>
+      apiService.getRuns({ page: page + index, limit: API_PAGE_SIZE, summary: true }, { signal }),
+    ));
+    signal?.throwIfAborted();
+    items.push(...batch.flatMap(response => response.items));
+  }
+  return items;
+}
+
+async function loadAllBullpenRuns(signal?: AbortSignal) {
+  signal?.throwIfAborted();
+  const first = await apiService.getBullpenAutoLiveHistory(
+    { page: 1, size: BULLPEN_API_PAGE_SIZE },
+    { signal },
+  );
+  signal?.throwIfAborted();
+  if (!first.has_next) return first.items;
+
+  const items = [...first.items];
+  // Keep the complete-list counts and client-side pagination, but avoid
+  // exhausting the backend connection pool with every history page at once.
+  // A rejected page fails the whole refresh rather than publishing a partial
+  // list as complete; previous successful results remain visible in the UI.
+  for (let page = 2; page <= first.pages; page += BULLPEN_HISTORY_PAGE_CONCURRENCY) {
+    signal?.throwIfAborted();
+    const batch = await Promise.all(
+      Array.from(
+        { length: Math.min(BULLPEN_HISTORY_PAGE_CONCURRENCY, first.pages - page + 1) },
+        (_, index) => apiService.getBullpenAutoLiveHistory(
+          { page: page + index, size: BULLPEN_API_PAGE_SIZE },
+          { signal },
+        ),
+      ),
+    );
+    signal?.throwIfAborted();
+    items.push(...batch.flatMap((response) => response.items));
+  }
+  return items;
+}
+
+function StatusBadge({ status, label }: { status?: string | null; label?: string }) {
+  const normalized = normalizeStatus(status);
+  const StatusIcon = label ? Clock3 : STATUS_ICONS[normalized] ?? Clock3;
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold capitalize ring-1',
+        label ? 'bg-amber-50 text-amber-700 ring-amber-200' : STATUS_STYLES[normalized] ?? 'bg-gray-50 text-gray-700 ring-gray-200',
+      )}
+    >
+      <StatusIcon
+        className={cn(
+          'size-3.5',
+          (normalized === 'processing' || normalized === 'running') && 'animate-spin',
+        )}
+      />
+      {label ?? normalized.replaceAll('_', ' ')}
+    </span>
+  );
+}
+
+function PortfolioRunTile({
+  run,
+  onOpen,
+}: {
+  run: RunListItem;
+  onOpen: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="w-full rounded-2xl border border-gray-200 bg-white p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-violet-300 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
+    >
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <h2 className="font-semibold text-gray-950">
+            {getAutoRebalanceRunDisplayLabel(run)}
+          </h2>
+          <p className="mt-1 line-clamp-2 text-sm leading-6 text-gray-600">
+            {run.prompt_preview || 'Run details and generated results'}
+          </p>
+        </div>
+        <StatusBadge status={run.status} label={normalizeStatus(run.status) === 'completed' ? 'Finished · completeness unverified' : undefined} />
+      </div>
+      <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-gray-100 pt-4 text-xs text-gray-500">
+        <span>Run #{run.id}</span>
+        <span>{formatTimestamp(run.created_at)}</span>
+        <span>{run.run_jobs.length} provider job{run.run_jobs.length === 1 ? '' : 's'}</span>
+      </div>
+    </button>
+  );
+}
+
+function BullpenRunTile({
+  run,
+  onOpen,
+}: {
+  run: BullpenAutoLiveHistoryItem;
+  onOpen: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="w-full rounded-2xl border border-gray-200 bg-white p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-violet-300 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
+    >
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
+              {run.triggered_by === 'manual' ? 'Manual Run' : 'Auto Run'}
+            </span>
+            {run.dry_run ? (
+              <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">
+                Dry run
+              </span>
+            ) : null}
+          </div>
+          <h2 className="mt-3 font-semibold text-gray-950">
+            {run.summary || 'Bullpen allocation run'}
+          </h2>
+          <p className="mt-1 truncate text-sm text-gray-500">Run {run.id}</p>
+        </div>
+        <StatusBadge status={run.status} />
+      </div>
+      <div className="mt-4 grid grid-cols-2 gap-2 border-t border-gray-100 pt-4 text-xs sm:grid-cols-4">
+        <span className="rounded-lg bg-gray-50 px-3 py-2 text-gray-600">
+          {run.decisions_count} decisions
+        </span>
+        <span className="rounded-lg bg-gray-50 px-3 py-2 text-gray-600">
+          {run.orders_planned} planned
+        </span>
+        <span className="rounded-lg bg-gray-50 px-3 py-2 text-gray-600">
+          {run.orders_submitted} submitted
+        </span>
+        <span className="rounded-lg bg-gray-50 px-3 py-2 text-gray-600">
+          {formatTimestamp(run.started_at)}
+        </span>
+      </div>
+      {run.error_message || run.blocker_preview ? (
+        <p className="mt-3 line-clamp-2 text-xs leading-5 text-amber-700">
+          {run.error_message || run.blocker_preview}
+        </p>
+      ) : null}
+    </button>
+  );
+}
+
 export default function RunsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [runs, setRuns] = useState<RunListItem[]>([]);
-  const [total, setTotal] = useState(0);
-  const [pages, setPages] = useState(1);
+  const requestedTab = searchParams.get('tab');
+  const initialTab = TABS.some((tab) => tab.id === requestedTab)
+    ? (requestedTab as RunTab)
+    : 'indmoney';
+
+  const [activeTab, setActiveTab] = useState<RunTab>(initialTab);
+  const [portfolioRuns, setPortfolioRuns] = useState<RunListItem[]>([]);
+  const [bullpenRuns, setBullpenRuns] = useState<BullpenAutoLiveHistoryItem[]>([]);
+  const [page, setPage] = useState(() => Math.max(1, Number(searchParams.get('page')) || 1));
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [sourceErrors, setSourceErrors] = useState<RunErrors>({ portfolio: null, india: null, indmoney_us: null, bullpen: null });
+  const error = [sourceErrors.portfolio, activeTab === 'zerodha' ? sourceErrors.india : activeTab === 'indmoney' ? sourceErrors.indmoney_us : sourceErrors.bullpen].filter(Boolean).join(' ') || null;
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-  const [page, setPage] = useState(
-    () => Number(searchParams.get('page')) || 1
-  );
-  const [wsConnected, setWsConnected] = useState(false);
+  const loadAbortControllerRef = useRef<AbortController | null>(null);
 
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const wsClientRef = useRef<WSClient | null>(null);
-  const loadRunsRef = useRef<typeof loadRuns>(loadRuns);
+  const [workflowGroups, setWorkflowGroups] = useState<AutoRebalanceHistoryItemResponse[]>([]);
 
-  const updateURLParams = useCallback((params: { status?: string; page?: number; search?: string }) => {
-    const newParams = new URLSearchParams(searchParams);
+  const [loadedSources, setLoadedSources] = useState<Partial<Record<keyof RunErrors, boolean>>>({});
+  const categoryLoaded = (tab: RunTab) => tab === 'bullpen'
+    ? Boolean(loadedSources.bullpen)
+    : Boolean(loadedSources.portfolio && loadedSources[tab === 'zerodha' ? 'india' : 'indmoney_us']);
 
-    if (params.status !== undefined) {
-      if (params.status === 'all') {
-        newParams.delete('status');
-      } else {
-        newParams.set('status', params.status);
+  const categoryEmptyVerified = (tab: RunTab) => categoryLoaded(tab) && !loading
+    && !sourceErrors[tab === 'bullpen' ? 'bullpen' : tab === 'zerodha' ? 'india' : 'indmoney_us']
+    && (tab === 'bullpen' || !sourceErrors.portfolio);
+
+  const loadRuns = useCallback(async () => {
+    loadAbortControllerRef.current?.abort();
+    const controller = new AbortController();
+    loadAbortControllerRef.current = controller;
+    setLoading(true);
+    setSourceErrors({ portfolio: null, india: null, indmoney_us: null, bullpen: null });
+    // Publish each successful source immediately. A slow/failed market or
+    // Bullpen must not erase another source, or delay its already saved groups.
+    const publish = async <T,>(source: keyof RunErrors, label: string, read: () => Promise<T>, save: (value: T) => void) => {
+      try {
+        const value = await read();
+        if (!controller.signal.aborted) {
+          save(value);
+          setLoadedSources(current => ({ ...current, [source]: true }));
+        }
+      } catch (error) {
+        if (!controller.signal.aborted) setSourceErrors(current => ({ ...current, [source]: label + normalizeError(error) }));
       }
-    }
+    };
+    await Promise.allSettled([
+      publish('portfolio', 'IndMoney/Zerodha: ', () => loadAllPortfolioRuns(controller.signal), setPortfolioRuns),
+      ...(['india', 'indmoney_us'] as const).map(portfolio => publish(
+        portfolio, portfolio === 'india' ? 'Zerodha grouped history: ' : 'IndMoney grouped history: ',
+        () => loadWorkflowHistory(portfolio, controller.signal),
+        groups => setWorkflowGroups(current => [...current.filter(group => group.portfolio !== portfolio), ...groups]),
+      )),
+      publish('bullpen', 'Bullpen: ', () => loadAllBullpenRuns(controller.signal), setBullpenRuns),
+    ]);
+    if (controller.signal.aborted) return;
 
-    if (params.page !== undefined) {
-      if (params.page === 1) {
-        newParams.delete('page');
-      } else {
-        newParams.set('page', params.page.toString());
-      }
-    }
-
-    if (params.search !== undefined) {
-      if (!params.search) {
-        newParams.delete('search');
-      } else {
-        newParams.set('search', params.search);
-      }
-    }
-
-    const queryString = newParams.toString();
-    const newURL = queryString ? `/console/runs?${queryString}` : '/console/runs';
-    router.replace(newURL, { scroll: false });
-  }, [router, searchParams]);
-
-  async function loadRuns({
-    silent = false,
-    p = page,
-  }: { silent?: boolean; p?: number; s?: StatusFilter; q?: string } = {}) {
-    if (!silent) setLoading(true);
-    try {
-      const data = await apiService.getRuns({
-        page: p,
-        limit: PAGE_SIZE,
-        summary: true,
-      });
-      setRuns(data.items);
-      setTotal(data.total);
-      setPage(data.page);
-      setPages(data.pages);
-      setLastUpdated(new Date());
-      setError(null);
-    } catch (err) {
-      setError(normalizeError(err));
-    } finally {
-      if (!silent) setLoading(false);
-    }
-  }
-
-  useLayoutEffect(() => {
-    loadRunsRef.current = loadRuns;
-  });
-
-  const initWS = useCallback(() => {
-    const client = new WSClient({
-      url: URLs.runs.ws(),
-      onMessage: (data) => {
-        if (data.type !== 'run.updated') return;
-        const { run_id, ...patch } = data as {
-          type: string;
-          run_id: number;
-          [key: string]: unknown;
-        };
-        setRuns((prev) => {
-          if (!prev.some((j) => j.id === run_id)) {
-            // Run created after initial fetch — reload silently to surface it
-            setTimeout(() => loadRunsRef.current({ silent: true }), 0);
-            return prev;
-          }
-          return prev.map((j) => (j.id === run_id ? { ...j, ...patch } : j));
-        });
-        setLastUpdated(new Date());
-      },
-      onStatusChange: setWsConnected,
-    });
-    wsClientRef.current = client;
-    client.connect();
+    setLastUpdated(new Date());
+    setLoading(false);
   }, []);
 
-  // Initial load and setup
   useEffect(() => {
-    const debounceTimer = debounceRef.current;
-
-    loadRuns({ p: page });
-    initWS();
-
+    const timer = window.setTimeout(() => void loadRuns(), 0);
     return () => {
-      if (debounceTimer) {
-        clearTimeout(debounceTimer);
-      }
-      wsClientRef.current?.close();
-      wsClientRef.current = null;
+      window.clearTimeout(timer);
+      loadAbortControllerRef.current?.abort();
     };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [loadRuns]);
 
-  function handlePageChange(next: number) {
-    setPage(next);
-    updateURLParams({ page: next });
-    loadRuns({ p: next });
+  const categorizedRuns = useMemo(
+    () => ({
+      indmoney: portfolioRuns.filter((run) => getPortfolioTab(run) === 'indmoney'),
+      zerodha: portfolioRuns.filter((run) => getPortfolioTab(run) === 'zerodha'),
+    }),
+    [portfolioRuns],
+  );
+
+  const groupedRuns = useMemo(() => ({
+    indmoney: buildPortfolioHistoryEntries(workflowGroups.filter(group => group.portfolio === 'indmoney_us'), categorizedRuns.indmoney),
+    zerodha: buildPortfolioHistoryEntries(workflowGroups.filter(group => group.portfolio === 'india'), categorizedRuns.zerodha),
+  }), [workflowGroups, categorizedRuns]);
+  const selectedItems =
+    activeTab === 'bullpen' ? bullpenRuns : groupedRuns[activeTab];
+  const pages = Math.max(1, Math.ceil(selectedItems.length / PAGE_SIZE));
+  const safePage = Math.min(page, pages);
+  const visibleItems = selectedItems.slice(
+    (safePage - 1) * PAGE_SIZE,
+    safePage * PAGE_SIZE,
+  );
+
+  function updateLocation(nextTab: RunTab, nextPage: number) {
+    const params = new URLSearchParams(searchParams);
+    params.set('tab', nextTab);
+    if (nextPage > 1) params.set('page', String(nextPage));
+    else params.delete('page');
+    router.replace('/console/runs?' + params.toString(), { scroll: false });
   }
 
-  const from = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
-  const to = Math.min(page * PAGE_SIZE, total);
+  function selectTab(tab: RunTab) {
+    setActiveTab(tab);
+    setPage(1);
+    updateLocation(tab, 1);
+  }
+
+  function selectPage(nextPage: number) {
+    setPage(nextPage);
+    updateLocation(activeTab, nextPage);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function adjacentPortfolioGroups(group: AutoRebalanceHistoryItemResponse) {
+    const groups = groupedRuns[group.portfolio === 'india' ? 'zerodha' : 'indmoney'].flatMap(entry => entry.group ? [entry.group] : []);
+    const index = groups.findIndex(item => item.portfolio === group.portfolio && item.sequence === group.sequence);
+    return [groups[index - 1], groups[index + 1]].filter((item): item is AutoRebalanceHistoryItemResponse => Boolean(item));
+  }
+
+  const from = selectedItems.length === 0 ? 0 : (safePage - 1) * PAGE_SIZE + 1;
+  const to = Math.min(safePage * PAGE_SIZE, selectedItems.length);
 
   return (
-    <div className="mx-auto flex max-w-7xl flex-col gap-6">
+    <div className="mx-auto flex max-w-7xl flex-col gap-6 lg:max-w-none">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-gray-950">All Runs</h1>
+          <h1 className="text-2xl font-semibold tracking-tight text-gray-950">Run History</h1>
           <p className="mt-1 text-sm text-gray-600">
             {lastUpdated
-              ? `Last updated ${lastUpdated.toLocaleTimeString('en-IN', { timeZone: INDIA_TIMEZONE })}`
-              : 'Loading…'}
-            {wsConnected && (
-              <span className="ml-3 inline-flex items-center gap-1 text-emerald-600">
-                <span className="inline-block size-1.5 rounded-full bg-emerald-500" />
-                Live
-              </span>
-            )}
+              ? 'Last refreshed ' +
+                lastUpdated.toLocaleTimeString('en-IN', { timeZone: INDIA_TIMEZONE })
+              : 'Loading all runs…'}
           </p>
         </div>
-        <Button
+        <ReportRefreshButton
           type="button"
-          variant="outline"
-          onClick={() => loadRuns()}
+          onClick={() => void loadRuns()}
           disabled={loading}
           className="w-full sm:w-auto"
-        >
-          <RefreshCw className={cn('mr-2 size-4', loading && 'animate-spin')} />
-          Refresh
-        </Button>
+          loading={loading}
+        />
       </div>
 
-      {error && (
-        <div className="flex items-start gap-3 border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
-          <AlertCircle className="mt-0.5 size-4 shrink-0" />
-          <span>{error}</span>
-        </div>
-      )}
-
-      <div className="border border-gray-200 bg-white shadow-sm">
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200 text-sm">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="w-[45%] px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
-                  Run
-                </th>
-                <th className="w-[15%] px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
-                  Status
-                </th>
-                <th className="w-[20%] px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
-                  Created At
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100 bg-white">
-              {loading ? (
-                <tr>
-                  <td colSpan={3} className="px-5 py-12 text-center text-sm text-gray-500">
-                    <Loader2 className="mx-auto mb-2 size-5 animate-spin text-gray-400" />
-                    Loading runs…
-                  </td>
-                </tr>
-              ) : runs.length === 0 ? (
-                <tr>
-                  <td colSpan={3} className="px-5 py-12 text-center text-sm text-gray-500">
-                    {total === 0 ? 'No runs yet.' : 'No runs match your filters.'}
-                  </td>
-                </tr>
-              ) : (
-                runs.map((run) => {
-                  const StatusIcon = STATUS_ICONS[run.status] ?? Clock3;
-                  const isBullpen = isBullpenAiRun(run);
-                  const bullpenCounts = isBullpen ? getBullpenStatusCounts(run) : null;
-                  const targetCount = isBullpen ? getBullpenTargetCount(run) : run.run_jobs.length;
-                  return (
-                    <tr
-                      key={run.id}
-                      onClick={() => router.push(getRunDetailPathFromPrompt(run.id, run.prompt_preview))}
-                      className="cursor-pointer align-top hover:bg-gray-50"
-                    >
-                      <td className="max-w-90 px-5 py-4">
-                        <div className="font-medium text-gray-950">
-                          {isBullpen ? `Bullpen AI Run #${run.id}` : getAutoRebalanceRunDisplayLabel(run)}
-                        </div>
-                        {isBullpen ? (
-                          <div className="mt-2 space-y-3">
-                            <div className="text-xs font-semibold text-gray-600">
-                              LLM progress: {run.run_jobs.length}/{targetCount} returned
-                            </div>
-                            {bullpenCounts ? (
-                              <div className="grid max-w-xl grid-cols-4 gap-2 text-center text-[10px] font-bold uppercase tracking-[0.12em]">
-                                <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1.5 text-emerald-700">
-                                  <span className="block text-sm">{bullpenCounts.completed}</span>Completed
-                                </div>
-                                <div className="rounded-lg border border-sky-200 bg-sky-50 px-2 py-1.5 text-sky-700">
-                                  <span className="block text-sm">{bullpenCounts.partial}</span>Partial
-                                </div>
-                                <div className="rounded-lg border border-red-200 bg-red-50 px-2 py-1.5 text-red-700">
-                                  <span className="block text-sm">{bullpenCounts.failed}</span>Failed
-                                </div>
-                                <div className="rounded-lg border border-gray-200 bg-gray-50 px-2 py-1.5 text-gray-600">
-                                  <span className="block text-sm">{bullpenCounts.pending}</span>Pending
-                                </div>
-                              </div>
-                            ) : null}
-                            <div className="overflow-hidden rounded-xl border border-gray-200">
-                              <table className="min-w-full text-left text-xs">
-                                <thead className="bg-gray-50 uppercase tracking-[0.12em] text-gray-500">
-                                  <tr>
-                                    <th className="px-3 py-2 font-bold">Provider</th>
-                                    <th className="px-3 py-2 font-bold">Model</th>
-                                    <th className="px-3 py-2 font-bold">Status</th>
-                                    <th className="px-3 py-2 font-bold">Runtime</th>
-                                    <th className="px-3 py-2 font-bold">Cost</th>
-                                  </tr>
-                                </thead>
-                                <tbody className="divide-y divide-gray-100 bg-white">
-                                  {run.run_jobs.map(({ job }) => (
-                                    <tr key={job.id}>
-                                      <td className="px-3 py-2 font-bold capitalize text-gray-900">{job.provider}</td>
-                                      <td className="px-3 py-2 font-semibold text-gray-700">{job.model}</td>
-                                      <td className="px-3 py-2">
-                                        <span className={cn('rounded-full border px-2 py-0.5 text-[10px] font-bold capitalize', STATUS_STYLES[job.status] ?? 'bg-gray-50 text-gray-700 ring-gray-200')}>
-                                          {job.status}
-                                        </span>
-                                      </td>
-                                      <td className="px-3 py-2 font-mono text-gray-600">
-                                        {formatRuntime(job.created_at, job.updated_at)}
-                                      </td>
-                                      <td className="px-3 py-2 font-bold text-gray-700">
-                                        {formatUsdCost(job.estimated_cost)}
-                                      </td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                            </div>
-                          </div>
-                        ) : (
-                          <div className="mt-1 line-clamp-2 text-xs leading-5 text-gray-600">
-                            {run.prompt_preview}
-                          </div>
-                        )}
-                      </td>
-                      <td className="px-5 py-4">
-                        <span
-                          className={cn(
-                            'inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold capitalize ring-1',
-                            STATUS_STYLES[run.status] ?? 'bg-gray-50 text-gray-700 ring-gray-200',
-                          )}
-                        >
-                          <StatusIcon
-                            className={cn('size-3.5', run.status === 'processing' && 'animate-spin')}
-                          />
-                          {run.status}
-                        </span>
-                      </td>
-                      <td className="px-5 py-4">
-                        {formatTimestamp(run.created_at)}
-                      </td>
-                    </tr>
-                  );
-                })
+      <div
+        className="grid grid-cols-3 gap-1 rounded-xl border border-gray-200 bg-gray-100 p-1"
+        role="tablist"
+        aria-label="Run categories"
+      >
+        {TABS.map((tab) => {
+          const count =
+            tab.id === 'bullpen'
+              ? bullpenRuns.length
+              : groupedRuns[tab.id].length;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              role="tab"
+              aria-selected={activeTab === tab.id}
+              onClick={() => selectTab(tab.id)}
+              className={cn(
+                'rounded-lg px-3 py-3 text-sm font-semibold transition',
+                activeTab === tab.id
+                  ? 'bg-white text-violet-700 shadow-sm'
+                  : 'text-gray-600 hover:bg-white/60 hover:text-gray-950',
               )}
-            </tbody>
-          </table>
-        </div>
+            >
+              <span>{tab.label}</span>
+              <span className="ml-2 rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-500">
+                {count > 0 || categoryEmptyVerified(tab.id) ? count : '—'}
+              </span>
+            </button>
+          );
+        })}
+      </div>
 
-        {/* Footer: count + pagination */}
-        <div className="flex items-center justify-between border-t border-gray-200 px-5 py-3">
-          <span className="text-xs text-gray-500">
-            {total === 0 ? 'No results' : `${from}–${to} of ${total} run${total !== 1 ? 's' : ''}`}
-          </span>
-          <div className="flex items-center gap-1">
-            <button
-              onClick={() => handlePageChange(page - 1)}
-              disabled={page <= 1 || loading}
-              className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:pointer-events-none disabled:opacity-40"
-            >
-              <ChevronLeft className="size-4" />
-            </button>
-            <span className="min-w-16 text-center text-xs text-gray-600">
-              {page} / {pages}
-            </span>
-            <button
-              onClick={() => handlePageChange(page + 1)}
-              disabled={page >= pages || loading}
-              className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:pointer-events-none disabled:opacity-40"
-            >
-              <ChevronRight className="size-4" />
-            </button>
+      {error ? (
+        <div className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+          <AlertCircle className="mt-0.5 size-4 shrink-0" />
+          <span>{error} Available saved results remain visible; use Refresh to retry unavailable history.</span>
+        </div>
+      ) : null}
+
+      {loading ? <p role="status" className="text-sm text-gray-600">Refreshing run history… Available saved results remain visible.</p> : null}
+
+      <div className="space-y-3" role="tabpanel" aria-busy={loading}>
+        {loading && selectedItems.length === 0 ? (
+          <div className="rounded-2xl border border-gray-200 bg-white px-5 py-16 text-center text-sm text-gray-500">
+            <Loader2 className="mx-auto mb-3 size-5 animate-spin text-gray-400" />
+            Loading all {TABS.find((tab) => tab.id === activeTab)?.label}…
           </div>
+        ) : visibleItems.length === 0 ? (
+          <div className="rounded-2xl border border-gray-200 bg-white px-5 py-16 text-center text-sm text-gray-500">
+            {error ? 'History could not be fully loaded. Use Refresh to retry; saved runs have not been deleted.' : 'No runs found in this category.'}
+          </div>
+        ) : activeTab === 'bullpen' ? (
+          (visibleItems as BullpenAutoLiveHistoryItem[]).map((run) => (
+            <BullpenRunTile
+              key={run.id}
+              run={run}
+              onOpen={() =>
+                router.push('/console/bullpen-ai/runs/' + encodeURIComponent(run.id))
+              }
+            />
+          ))
+        ) : (
+          (visibleItems as ReturnType<typeof buildPortfolioHistoryEntries>).map((entry) => entry.group ? (
+            <PortfolioWorkflowHistoryCard key={entry.key} group={entry.group} runs={portfolioRuns} runLinksAvailable={!loading && !sourceErrors.portfolio} lastRefreshed={lastUpdated?.toLocaleTimeString('en-IN', { timeZone: INDIA_TIMEZONE })} adjacentGroups={adjacentPortfolioGroups(entry.group)} onOpen={path => router.push(path)} />
+          ) : entry.run ? (
+            <PortfolioRunTile key={entry.key} run={entry.run} onOpen={() => router.push(getRunDetailPathFromPrompt(entry.run.id, entry.run.prompt_preview))} />
+          ) : null)
+        )}
+      </div>
+
+      <div className="flex items-center justify-between rounded-xl border border-gray-200 bg-white px-5 py-3 shadow-sm">
+        <span className="text-xs text-gray-500">
+          {selectedItems.length === 0
+            ? loading ? 'Loading results…' : error || !categoryLoaded(activeTab) ? 'Results unavailable' : 'No results'
+            : from + '–' + to + ' of ' + selectedItems.length + (activeTab === 'bullpen' ? ' runs' : ' run groups')}
+        </span>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            aria-label="Previous page"
+            onClick={() => selectPage(safePage - 1)}
+            disabled={safePage <= 1 || loading}
+            className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:pointer-events-none disabled:opacity-40"
+          >
+            <ChevronLeft className="size-4" />
+          </button>
+          <span className="min-w-16 text-center text-xs text-gray-600">
+            {safePage} / {pages}
+          </span>
+          <button
+            type="button"
+            aria-label="Next page"
+            onClick={() => selectPage(safePage + 1)}
+            disabled={safePage >= pages || loading}
+            className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:pointer-events-none disabled:opacity-40"
+          >
+            <ChevronRight className="size-4" />
+          </button>
         </div>
       </div>
     </div>

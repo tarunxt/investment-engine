@@ -59,7 +59,7 @@ export function BullpenScanFilterDetailsDialog({
     detailId === "onlyBinaryYesNo"
       ? "Exact keep algorithm"
       : "Exact exclusion algorithm";
-  const supportsCustomKeywords = detailId !== "onlyBinaryYesNo";
+  const supportsCustomKeywords = detailId === "excludeOthers";
   const [draftKeywords, setDraftKeywords] = useState<string[]>(customKeywords);
   const [newKeyword, setNewKeyword] = useState("");
   const [saveMessage, setSaveMessage] = useState<string | null>(null);

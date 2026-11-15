@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.exc import SQLAlchemyError
 
+from app.core.logging import get_logger
 from app.domains.ai_providers.factory import ProviderFactory
 from app.domains.auth.dependencies import get_current_user
 from app.domains.auth.models import User
@@ -21,6 +24,7 @@ from app.domains.bullpen_run_audit.schemas import (
     BullpenRunAuditRemarkCreateRequest,
     BullpenRunAuditSectionResponse,
 )
+from app.domains.bullpen_run_audit.sanitizer import sanitize_secret_value
 from app.domains.bullpen_run_audit.service import (
     add_run_audit_manual_check_sync,
     add_run_audit_remark_sync,
@@ -36,6 +40,96 @@ from app.domains.bullpen_run_audit.service import (
 from app.infrastructure.database.sync_session import SyncSessionLocal
 
 router = APIRouter(prefix="/bullpen-ai/run-audits", tags=["bullpen-ai"])
+logger = get_logger(__name__)
+
+
+def _safe_exception_summary(exc: Exception) -> str:
+    message = str(sanitize_secret_value(str(exc))).replace("\n", " ").strip()
+    # SQLAlchemy may append an entire parameter payload containing the frozen
+    # run bundle. It is neither useful in the browser nor safe to return.
+    message = message.split("[parameters:", 1)[0].strip()
+    if len(message) > 600:
+        message = f"{message[:597]}..."
+    return f"{type(exc).__name__}: {message or 'No exception message was provided.'}"
+
+
+def _run_audit_failure_detail(
+    *,
+    run_id: str,
+    database_error: bool,
+    exc: Exception,
+    diagnostic_id: str,
+) -> dict[str, object]:
+    if database_error:
+        return {
+            "error": "RUN_AUDIT_DATABASE_UNAVAILABLE",
+            "message": (
+                "The run audit database is unavailable or its schema migration is incomplete."
+            ),
+            "run_id": run_id,
+            "diagnostic_id": diagnostic_id,
+            "failed_phase": "audit_snapshot_database_access",
+            "cause_type": type(exc).__name__,
+            "technical_detail": _safe_exception_summary(exc),
+            "likely_cause": (
+                "The audit tables are unavailable, the database connection failed, or the "
+                "production database is not at the repository migration head."
+            ),
+            "required_migration": "u7v8w9x0y1z2_add_bullpen_run_audit_tables",
+            "fix_steps": [
+                "Retry once to rule out a temporary database interruption.",
+                "Confirm the production database passes `alembic current --check-heads`.",
+                "Run `alembic upgrade head` through the production deployment if it is behind.",
+                f"Search investor-backend logs for diagnostic ID {diagnostic_id} and this run ID.",
+            ],
+        }
+    return {
+        "error": "RUN_AUDIT_MATERIALIZATION_FAILED",
+        "message": "The run audit snapshot could not be prepared.",
+        "run_id": run_id,
+        "diagnostic_id": diagnostic_id,
+        "failed_phase": "audit_snapshot_materialization",
+        "cause_type": type(exc).__name__,
+        "technical_detail": _safe_exception_summary(exc),
+        "likely_cause": (
+            "The saved run payload contains a legacy, malformed, or newly introduced value "
+            "that the audit snapshot adapter could not normalize."
+        ),
+        "fix_steps": [
+            "Use Rematerialize once to rebuild the snapshot from the durable run record.",
+            f"Search investor-backend logs for diagnostic ID {diagnostic_id} to locate the exact failing code line.",
+            "Repair the audit adapter for the reported cause type while preserving legacy snapshot compatibility.",
+            "Add the affected run shape as a regression test, then rematerialize this run.",
+        ],
+    }
+
+
+def _raise_run_audit_failure(
+    *,
+    exc: Exception,
+    run_id: str,
+    user_id: int,
+    operation: str,
+) -> None:
+    database_error = isinstance(exc, SQLAlchemyError)
+    diagnostic_id = uuid4().hex[:12]
+    logger.exception(
+        "Bullpen run audit %s failed diagnostic_id=%s run_id=%s user_id=%s cause_type=%s",
+        operation,
+        diagnostic_id,
+        run_id,
+        user_id,
+        type(exc).__name__,
+    )
+    raise HTTPException(
+        status_code=503 if database_error else 500,
+        detail=_run_audit_failure_detail(
+            run_id=run_id,
+            database_error=database_error,
+            exc=exc,
+            diagnostic_id=diagnostic_id,
+        ),
+    ) from exc
 
 
 def _parse_date(value: str | None, *, end_of_day: bool = False) -> datetime | None:
@@ -121,6 +215,13 @@ async def materialize_run_audit(
         return await asyncio.to_thread(_materialize)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        _raise_run_audit_failure(
+            exc=exc,
+            run_id=run_id,
+            user_id=current_user.id,
+            operation="forced materialization",
+        )
 
 
 @router.get("/{run_id}", response_model=BullpenRunAuditDetailResponse)
@@ -138,6 +239,13 @@ async def get_run_audit_detail(
         return await asyncio.to_thread(_load)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        _raise_run_audit_failure(
+            exc=exc,
+            run_id=run_id,
+            user_id=current_user.id,
+            operation="detail materialization",
+        )
 
 
 @router.get("/{run_id}/sections/{section}", response_model=BullpenRunAuditSectionResponse)
@@ -301,4 +409,3 @@ async def export_run_audit_bundle(
         return await asyncio.to_thread(_export)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-

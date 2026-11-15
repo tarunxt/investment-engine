@@ -1,6 +1,29 @@
 from __future__ import annotations
 
+import math
 from typing import Any
+
+
+def signed_holding_return_percent(
+    percent: float | None,
+    *,
+    pnl: float | None,
+    invested_value: float | None,
+) -> float | None:
+    """Keep a pasted percentage's precision but use its signed dollar return.
+
+    Copied portfolio text can lose an arrow/color that conveys the sign. For
+    long holdings with a positive cost basis the percentage and P&L must have
+    the same sign. Do not infer direction for missing/zero or short cost bases.
+    This also repairs presentation of older imports without rewriting records.
+    """
+    if (
+        percent is None or pnl is None or invested_value is None
+        or invested_value <= 0 or pnl == 0
+        or not all(math.isfinite(value) for value in (percent, pnl, invested_value))
+    ):
+        return percent
+    return math.copysign(abs(percent), pnl)
 
 
 def _number(value: Any, default: float = 0) -> float:
