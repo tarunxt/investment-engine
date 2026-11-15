@@ -20,7 +20,7 @@ try{
  function App(){const[props,setProps]=useState({open:true,scope:'A',keys:['NSE:AAA']}),[mounted,setMounted]=useState(true);window.configure=p=>setProps(v=>({...v,...p}));window.unmount=()=>setMounted(false);return mounted?<Basket {...props}/>:null}createRoot(document.getElementById('root')).render(<App/>);`;
  const bundle=await build({stdin:{contents:entry,loader:'tsx',resolveDir:frontend},bundle:true,write:false,outfile:path.join(temporary,'bundle.js'),format:'iife',alias:{'@/services/api':mock,'@':frontend},loader:{'.css':'empty'},define:{'process.env.NODE_ENV':'"production"'}});
  server=createServer((req,res)=>{res.setHeader('Content-Type','text/html');res.end(`<div id="root"></div><script>${bundle.outputFiles[0].text}</script>`)});await new Promise(r=>server.listen(0,'127.0.0.1',r));
- browser=await chromium.launch({headless:true,executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE??'/usr/bin/chromium',args:['--no-sandbox']});const page=await browser.newPage();page.on('pageerror',e=>console.error(e));await page.clock.install();await page.goto(`http://127.0.0.1:${server.address().port}`);
+ browser=await chromium.launch({headless:true,executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE,args:['--no-sandbox']});const page=await browser.newPage();page.on('pageerror',e=>console.error(e));await page.clock.install();await page.goto(`http://127.0.0.1:${server.address().port}`);
  const settle=()=>page.waitForTimeout(50);
  const count=()=>page.evaluate(()=>window.calls.length),advance=ms=>page.clock.fastForward(ms);
  const reply=async(i,k)=>{await page.evaluate(([i,k])=>window.reply(i,k),[i,k]);await settle()};

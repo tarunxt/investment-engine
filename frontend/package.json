@@ -10,7 +10,7 @@
     "test:playwright-hardening": "node scripts/auth-rendering-playwright.mjs",
     "test:mail-preferences-offline": "node scripts/mail-preferences-offline-playwright.mjs",
     "test:basket-quote-refresh-offline": "node scripts/basket-quote-refresh-offline.mjs",
-    "test:basket-offline": "node scripts/basket-offline-playwright.mjs",
+    "test:basket-offline": "node scripts/basket-offline-playwright.mjs && npm run test:basket-quote-refresh-offline",
     "test:secure-auth-bff": "node scripts/verify-secure-auth-bff.mjs",
     "start": "next start",
     "lint": "eslint",
