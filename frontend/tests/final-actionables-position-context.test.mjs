@@ -336,6 +336,8 @@ test('true dual US listings stay distinct; generic alias and generic holding rem
 
 test('US identity resolution rejects conflicting symbol prefixes and forged model verification',()=>{
  const mapping=syntheticUsMapping('SIM00');
+ assert.equal(bindings.resolveUsIdentity({symbol:'NASDAQ:SIM00',exchange:'US'},[mapping]).exchange,'NASDAQ');
+ assert.equal(bindings.resolveUsIdentity({symbol:'NYSE:SIM00',exchange:'US'},[mapping]).listing,null);
  assert.match(bindings.resolveUsIdentity({symbol:'NYSE:SIM00',exchange:'NASDAQ'},[mapping]).issue,/prefix conflicts/);
  assert.ok(bindings.resolveUsIdentity({symbol:'SIM00',exchange:'US'},[{...mapping,verified:false}]).issue);
  const row=modelRow(1,{'Stock Symbol':'SIM00','Exchange Symbol':'US','verified':'true','security_id':'invented'}),run=oneUsJob([row]);

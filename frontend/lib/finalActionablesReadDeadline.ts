@@ -1,6 +1,8 @@
 /** Bound the view's wait without truncating or caching a partial history. */
-export async function withFinalActionablesReadDeadline<T>(read: Promise<T>, timeoutMs = 30_000): Promise<T> {
+export async function withFinalActionablesReadDeadline<T>(read: Promise<T>, timeoutMs = 30_000, onSlow?: () => void, slowMs = 30_000): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let slowTimer: ReturnType<typeof setTimeout> | undefined;
+  if (onSlow && slowMs < timeoutMs) slowTimer = setTimeout(onSlow, slowMs);
   try {
     return await Promise.race([
       read,
@@ -10,5 +12,6 @@ export async function withFinalActionablesReadDeadline<T>(read: Promise<T>, time
     ]);
   } finally {
     clearTimeout(timer);
+    clearTimeout(slowTimer);
   }
 }
