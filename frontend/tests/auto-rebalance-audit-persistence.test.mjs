@@ -110,7 +110,8 @@ function harness({ analysisOnly = false, formulaScore = 0, intercept, read, emai
     createRun: async (payload) => { modelCalls.push(payload); return { id: modelCalls.length }; },
   };
   const bindings = {
-    runtimeOwner: {}, isCurrentWorkflowOwner: () => true,
+    runtimeOwner: { id: 7 }, isCurrentWorkflowOwner: () => true, requireWorkflowOwner: owner => owner,
+    actionablesActivityKey: helperModule.exports.actionablesActivityKey, announceActionablesActivity: helperModule.exports.announceActionablesActivity,
     savedStageReadGeneration: {current:0}, setWorkflowHistoryError: set("historyError"),
     readLatestIndmoneySnapshot: () => apiService.indmoneyUsPortfolioOverview(),
     readIndmoneySnapshotSource, useCallback: (fn) => fn, technicalInputPlanIssue, AutoRebalanceAuditSession, assertAutoRebalanceRunMetadata, autoRebalanceAuditKey, assertIndmoneyHoldingsSnapshot,

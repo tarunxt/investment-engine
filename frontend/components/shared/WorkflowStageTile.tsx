@@ -265,7 +265,7 @@ export function isInsufficientBalanceError(error?: string | null) {
 }
 
 export function formatBriefTileError(error?: string | null) {
-  if (!error?.trim() || isSheetExportError(error)) return "None";
+  if (!error?.trim() || isSheetExportError(error)) return "-";
   if (/partial(?:ly)?/i.test(error)) return "LLM output partial";
   if (isInsufficientBalanceError(error)) return "Provider credits insufficient";
   if (/timeout|timed?\s*out|deadline/i.test(error)) return "Request timed out";
@@ -277,7 +277,7 @@ export function formatBriefTileError(error?: string | null) {
 }
 
 export function getTileErrorDetail(error?: string | null) {
-  if (!error?.trim() || isSheetExportError(error)) return null;
+  if (!error?.trim() || error.trim().toLowerCase() === "none" || isSheetExportError(error)) return null;
   return error;
 }
 
@@ -286,7 +286,7 @@ export function getStageLedgerTone(info: StageInfo) {
   const status = info.runStatus?.trim().toLowerCase();
   if (info.state === "running" || info.state === "queued") return getStageBackgroundClass(info.state);
   if (info.state === "failed" || ["failed", "error", "canceled", "cancelled", "interrupted"].includes(status ?? "")) return "bg-red-50";
-  if (info.state === "completed" || ["completed", "partial", "synced", "last synced portfolio", "succeeded", "success"].includes(status ?? "")) return "bg-emerald-50";
+  if (info.state === "completed" || ["completed", "partial", "saved calculation", "synced", "last synced portfolio", "succeeded", "success"].includes(status ?? "")) return "bg-emerald-50";
   if (["processing", "running"].includes(status ?? "")) return "bg-amber-50";
   if (["pending", "queued"].includes(status ?? "")) return "bg-sky-50";
   return getStageBackgroundClass(info.state);
@@ -305,7 +305,7 @@ export function getStageTileError(info: StageInfo): StageTileRow {
       ? `Recorded partial output${info.partialLlms != null ? `: ${info.partialLlms} partial LLM responses` : ""}.` : null;
   const detail = [error, partial && partial !== error ? partial : null].filter(Boolean).join("\n\n") ||
     (info.errorDetails?.length ? info.errorDetails.map(item => item.message).join("\n\n") : null);
-  return { label: "Error", value: error ? formatBriefTileError(error) : partial ? "LLM output partial" : detail ? "Stage execution failed" : "None", detail, errorDetails: info.errorDetails };
+  return { label: "Error", value: error ? formatBriefTileError(error) : partial ? "LLM output partial" : detail ? "Stage execution failed" : "-", detail, errorDetails: info.errorDetails };
 }
 
 export function getLlmStageTileRows(info: StageInfo, now: number): StageTileRow[] {
