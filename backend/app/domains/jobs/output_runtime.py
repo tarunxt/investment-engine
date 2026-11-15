@@ -206,7 +206,17 @@ def output_validation_metadata(content: str | None) -> dict[str, Any] | None:
     result = normalize_runtime_output(content)
     if result is None:
         return None
+    row_identity = {row.source: row.values for row in result.rows}
+    exclusions = []
+    for finding in result.findings:
+        if finding.code not in {'missing_field_excluded', 'unaligned_rationale'}:
+            continue
+        values = row_identity.get(finding.source, {})
+        exclusions.append({'symbol': values.get('stock_symbol'), 'exchange': values.get('exchange_symbol'),
+                           'row': finding.source.row if finding.source else None, 'field': finding.field,
+                           'reason': finding.message})
     return {
+        'exclusions': exclusions[:500], 'exclusion_count': len(exclusions),
         'version': CONTRACT_VERSION,
         'schema_hash': active_contract_hash(),
         'response_hash': source_hash(content),

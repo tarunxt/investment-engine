@@ -5669,13 +5669,14 @@ ${zerodhaExecutionMode === "direct_market"
           failed_llms: info.failedLlms ?? null,
           recommended_stocks: info.recommendedStocks ?? null,
           rebalance_inputs: info.rebalanceInputs ?? null,
+          ...(info.finalInputs ? { final_inputs: info.finalInputs } : {}),
           ...(info.frozenFinal ? { frozen_final: info.frozenFinal } : {}),
           cost_usd: info.costUsd ?? null,
           cost_inr: info.costInr ?? null,
         },
         error_message: info.error ?? null,
-        started_at: info.startedAt ?? undefined,
-        completed_at: info.completedAt ?? info.endedAt ?? undefined,
+        started_at: stage === "sync" || stage === "actionables" ? undefined : info.startedAt ?? undefined,
+        completed_at: stage === "sync" || stage === "actionables" ? undefined : info.completedAt ?? info.endedAt ?? undefined,
       };
       return getAuditSession(portfolio, metadata).record(stage as AutoRebalanceStageKey, payload);
     },
@@ -7257,6 +7258,8 @@ ${zerodhaExecutionMode === "direct_market"
           await markCompleted(portfolio, "technical", {
             ...summarizeRun(completedTechnicalRun),
             ...getRunProgress(completedTechnicalRun),
+            finalInputs: { formula: scoreMatrixFormulaConfig, rebalance_run_ids: rebalanceInputs.map(run => run.id),
+              response_hashes: await auditResponseHashes([...rebalanceInputs, completedTechnicalRun]) },
             lastRunId: completedTechnicalRun.id,
             recommendedStocks: countUniqueStocksFromRun(completedTechnicalRun),
           });
@@ -7295,6 +7298,7 @@ ${zerodhaExecutionMode === "direct_market"
           const frozenFinal = {
             schema: "workflow-final-v2", formula_version: "score-matrix-v1",
             scorePolicy: "score-matrix-raw-effective-v2",
+            broker: runMetadata.auto_rebalance_portfolio, workflow_sequence: runMetadata.auto_rebalance_sequence,
             captured_at: actionablesCompletedAt, formula: scoreMatrixFormulaConfig,
             rebalance_run_id: finalRebalanceInputs[0].id, rebalance_run_ids: finalRebalanceInputs.map(run => run.id), technical_run_id: generatedTechnicalRun.id,
             response_hashes: await auditResponseHashes([...finalRebalanceInputs, generatedTechnicalRun]),
@@ -7308,10 +7312,15 @@ ${zerodhaExecutionMode === "direct_market"
               scorePolicy: "score-matrix-raw-effective-v2", estimate: row.formulaEstimate,
               formula_inputs: row.detail, valid_suggestions: row.stock.totalSuggestions })),
           };
-          await markCompleted(portfolio, "actionables", {
+          const savedFinal = await markCompleted(portfolio, "actionables", {
             completedAt: actionablesCompletedAt, runStatus: "saved calculation",
             rebalanceInputs: finalRebalanceInputs.length, recommendedStocks: finalRows.length, frozenFinal,
           });
+          if (savedFinal?.saved === false) {
+            updateStage(portfolio, "actionables", {
+              state: "idle", runStatus: "Completion unconfirmed", error: savedFinal.error,
+            });
+          }
           await Promise.resolve().then(onDashboardRefresh).catch(error => console.error("Could not refresh dashboard after Actionables", error));
           window.dispatchEvent(new CustomEvent("final-actionables-refresh", {
             detail: {
