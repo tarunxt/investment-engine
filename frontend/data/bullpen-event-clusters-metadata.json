@@ -1,0 +1,1762 @@
+{
+  "claim_estimates": [
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "high",
+      "estimated_claim_at": "2026-09-19T04:00:00Z",
+      "is_estimate": true,
+      "market_id": "2589853",
+      "plausible_range": {
+        "end": "2026-09-20T12:00:00Z",
+        "start": "2026-09-18T03:00:00Z"
+      },
+      "rationale": "The September 17–18 Bank of Japan meeting must conclude and its official policy statement must publish; the estimate allows publication plus ordinary oracle proposal and finalization.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/bank-of-japan-decision-in-september-20260616002734979",
+        "https://www.boj.or.jp/en/mopo/mpmsche_minu/index.htm"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-18T15:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "high",
+      "estimated_claim_at": "2026-09-19T04:00:00Z",
+      "is_estimate": true,
+      "market_id": "2589854",
+      "plausible_range": {
+        "end": "2026-09-20T12:00:00Z",
+        "start": "2026-09-18T03:00:00Z"
+      },
+      "rationale": "The September 17–18 Bank of Japan meeting must conclude and its official policy statement must publish; the estimate allows publication plus ordinary oracle proposal and finalization.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/bank-of-japan-decision-in-september-20260616002734979",
+        "https://www.boj.or.jp/en/mopo/mpmsche_minu/index.htm"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-18T15:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "high",
+      "estimated_claim_at": "2026-09-19T04:00:00Z",
+      "is_estimate": true,
+      "market_id": "2589855",
+      "plausible_range": {
+        "end": "2026-09-20T12:00:00Z",
+        "start": "2026-09-18T03:00:00Z"
+      },
+      "rationale": "The September 17–18 Bank of Japan meeting must conclude and its official policy statement must publish; the estimate allows publication plus ordinary oracle proposal and finalization.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/bank-of-japan-decision-in-september-20260616002734979",
+        "https://www.boj.or.jp/en/mopo/mpmsche_minu/index.htm"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-18T15:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "high",
+      "estimated_claim_at": "2026-09-19T04:00:00Z",
+      "is_estimate": true,
+      "market_id": "2589856",
+      "plausible_range": {
+        "end": "2026-09-20T12:00:00Z",
+        "start": "2026-09-18T03:00:00Z"
+      },
+      "rationale": "The September 17–18 Bank of Japan meeting must conclude and its official policy statement must publish; the estimate allows publication plus ordinary oracle proposal and finalization.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/bank-of-japan-decision-in-september-20260616002734979",
+        "https://www.boj.or.jp/en/mopo/mpmsche_minu/index.htm"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-18T15:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "high",
+      "estimated_claim_at": "2026-09-19T04:00:00Z",
+      "is_estimate": true,
+      "market_id": "2589857",
+      "plausible_range": {
+        "end": "2026-09-20T12:00:00Z",
+        "start": "2026-09-18T03:00:00Z"
+      },
+      "rationale": "The September 17–18 Bank of Japan meeting must conclude and its official policy statement must publish; the estimate allows publication plus ordinary oracle proposal and finalization.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/bank-of-japan-decision-in-september-20260616002734979",
+        "https://www.boj.or.jp/en/mopo/mpmsche_minu/index.htm"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-18T15:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "high",
+      "estimated_claim_at": "2026-09-18T04:00:00Z",
+      "is_estimate": true,
+      "market_id": "2661519",
+      "plausible_range": {
+        "end": "2026-09-19T12:00:00Z",
+        "start": "2026-09-17T11:00:00Z"
+      },
+      "rationale": "The September 17 Bank of England decision is established by the official MPC release; the estimate allows the scheduled release and overnight oracle finalization.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/bank-of-england-decision-in-september-20260623013317237",
+        "https://www.bankofengland.co.uk/monetary-policy-summary-and-minutes"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-17T23:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "high",
+      "estimated_claim_at": "2026-09-18T04:00:00Z",
+      "is_estimate": true,
+      "market_id": "2661520",
+      "plausible_range": {
+        "end": "2026-09-19T12:00:00Z",
+        "start": "2026-09-17T11:00:00Z"
+      },
+      "rationale": "The September 17 Bank of England decision is established by the official MPC release; the estimate allows the scheduled release and overnight oracle finalization.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/bank-of-england-decision-in-september-20260623013317237",
+        "https://www.bankofengland.co.uk/monetary-policy-summary-and-minutes"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-17T23:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "medium",
+      "estimated_claim_at": "2026-09-16T12:00:00Z",
+      "is_estimate": true,
+      "market_id": "3502075",
+      "plausible_range": {
+        "end": "2026-09-18T18:00:00Z",
+        "start": "2026-09-16T03:59:00+00:00"
+      },
+      "rationale": "The market's complete stated observation window must elapse unless the qualifying occurrence is confirmed earlier; the estimate allows source review and ordinary oracle finalization.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/trump-declassifies-new-ufo-files-byptptpt-20260810145949434"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-16T03:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "medium",
+      "estimated_claim_at": "2026-09-16T12:00:00Z",
+      "is_estimate": true,
+      "market_id": "3701629",
+      "plausible_range": {
+        "end": "2026-09-18T18:00:00Z",
+        "start": "2026-09-16T03:59:00+00:00"
+      },
+      "rationale": "The market's complete stated observation window must elapse unless the qualifying occurrence is confirmed earlier; the estimate allows source review and ordinary oracle finalization.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/us-iran-hormuz-agreement-byptptpt-20260803235957575"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-16T03:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "medium",
+      "estimated_claim_at": "2026-09-16T08:00:00Z",
+      "is_estimate": true,
+      "market_id": "3710795",
+      "plausible_range": {
+        "end": "2026-09-17T18:00:00Z",
+        "start": "2026-09-15T20:59:00+00:00"
+      },
+      "rationale": "The complete timezone-specific military-action observation window must elapse unless a qualifying strike is confirmed earlier; the estimate allows attribution review and ordinary oracle finalization.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/will-iran-target-saudi-arabia-byptptpt"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-15T20:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "medium",
+      "estimated_claim_at": "2026-09-16T08:00:00Z",
+      "is_estimate": true,
+      "market_id": "3710804",
+      "plausible_range": {
+        "end": "2026-09-17T18:00:00Z",
+        "start": "2026-09-15T20:59:00+00:00"
+      },
+      "rationale": "The complete timezone-specific military-action observation window must elapse unless a qualifying strike is confirmed earlier; the estimate allows attribution review and ordinary oracle finalization.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/will-iran-target-egypt-byptptpt"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-15T20:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "medium",
+      "estimated_claim_at": "2026-09-16T08:00:00Z",
+      "is_estimate": true,
+      "market_id": "3710810",
+      "plausible_range": {
+        "end": "2026-09-17T18:00:00Z",
+        "start": "2026-09-15T20:59:00+00:00"
+      },
+      "rationale": "The complete timezone-specific military-action observation window must elapse unless a qualifying strike is confirmed earlier; the estimate allows attribution review and ordinary oracle finalization.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/will-iran-target-syria-byptptpt"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-15T20:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "medium",
+      "estimated_claim_at": "2026-09-16T08:00:00Z",
+      "is_estimate": true,
+      "market_id": "3711103",
+      "plausible_range": {
+        "end": "2026-09-17T18:00:00Z",
+        "start": "2026-09-15T19:59:00+00:00"
+      },
+      "rationale": "The complete timezone-specific military-action observation window must elapse unless a qualifying strike is confirmed earlier; the estimate allows attribution review and ordinary oracle finalization.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/will-iran-target-oman-byptptpt"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-15T19:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "medium",
+      "estimated_claim_at": "2026-09-16T12:00:00Z",
+      "is_estimate": true,
+      "market_id": "3741669",
+      "plausible_range": {
+        "end": "2026-09-18T18:00:00Z",
+        "start": "2026-09-16T03:59:00+00:00"
+      },
+      "rationale": "The market's complete stated observation window must elapse unless the qualifying occurrence is confirmed earlier; the estimate allows source review and ordinary oracle finalization.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/russia-x-ukraine-any-diplomatic-meeting-byptptpt-20260819"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-16T03:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "medium",
+      "estimated_claim_at": "2026-09-16T12:00:00Z",
+      "is_estimate": true,
+      "market_id": "3758826",
+      "plausible_range": {
+        "end": "2026-09-18T18:00:00Z",
+        "start": "2026-09-15T23:59:00+00:00"
+      },
+      "rationale": "The market's complete stated observation window must elapse unless the qualifying occurrence is confirmed earlier; the estimate allows source review and ordinary oracle finalization.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/will-xi-jinping-visit-us-before-2027"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-15T23:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "medium",
+      "estimated_claim_at": "2026-09-16T12:00:00Z",
+      "is_estimate": true,
+      "market_id": "3840177",
+      "plausible_range": {
+        "end": "2026-09-18T18:00:00Z",
+        "start": "2026-09-16T03:59:00+00:00"
+      },
+      "rationale": "The market's complete stated observation window must elapse unless the qualifying occurrence is confirmed earlier; the estimate allows source review and ordinary oracle finalization.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/israel-x-lebanon-diplomatic-meeting-byptptpt-20260810145737299"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-16T03:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "medium",
+      "estimated_claim_at": "2026-09-16T08:00:00Z",
+      "is_estimate": true,
+      "market_id": "3861936",
+      "plausible_range": {
+        "end": "2026-09-17T18:00:00Z",
+        "start": "2026-09-15T20:59:00+00:00"
+      },
+      "rationale": "The complete timezone-specific military-action observation window must elapse unless a qualifying strike is confirmed earlier; the estimate allows attribution review and ordinary oracle finalization.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/israel-military-action-against-syria-byptptpt-21"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-15T20:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "medium",
+      "estimated_claim_at": "2026-09-16T12:00:00Z",
+      "is_estimate": true,
+      "market_id": "3861943",
+      "plausible_range": {
+        "end": "2026-09-18T18:00:00Z",
+        "start": "2026-09-16T03:59:00+00:00"
+      },
+      "rationale": "The market's complete stated observation window must elapse unless the qualifying occurrence is confirmed earlier; the estimate allows source review and ordinary oracle finalization.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/moscow-air-traffic-suspended-byptptpt-20260824"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-16T03:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "medium",
+      "estimated_claim_at": "2026-09-16T12:00:00Z",
+      "is_estimate": true,
+      "market_id": "4117966",
+      "plausible_range": {
+        "end": "2026-09-18T18:00:00Z",
+        "start": "2026-09-15T23:59:00+00:00"
+      },
+      "rationale": "The market's complete stated observation window must elapse unless the qualifying occurrence is confirmed earlier; the estimate allows source review and ordinary oracle finalization.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/will-apple-release-a-foldable-iphone-before-2027"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-15T23:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "medium",
+      "estimated_claim_at": "2026-09-16T08:00:00Z",
+      "is_estimate": true,
+      "market_id": "4178257",
+      "plausible_range": {
+        "end": "2026-09-17T18:00:00Z",
+        "start": "2026-09-15T23:59:00+00:00"
+      },
+      "rationale": "The complete timezone-specific military-action observation window must elapse unless a qualifying strike is confirmed earlier; the estimate allows attribution review and ordinary oracle finalization.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/israel-military-action-against-lebanon-onptptpt-20260903"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-15T23:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "medium",
+      "estimated_claim_at": "2026-09-17T08:00:00Z",
+      "is_estimate": true,
+      "market_id": "4178258",
+      "plausible_range": {
+        "end": "2026-09-18T18:00:00Z",
+        "start": "2026-09-16T21:00:00Z"
+      },
+      "rationale": "The September 16 Israel-day observation window must finish before a No can be established; the estimate allows source review and ordinary oracle finalization.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/israel-military-action-against-lebanon-onptptpt-20260903"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-16T23:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "medium",
+      "estimated_claim_at": "2026-09-18T08:00:00Z",
+      "is_estimate": true,
+      "market_id": "4178259",
+      "plausible_range": {
+        "end": "2026-09-19T18:00:00Z",
+        "start": "2026-09-17T21:00:00Z"
+      },
+      "rationale": "The September 17 Israel-day observation window must finish before a No can be established; the estimate allows source review and ordinary oracle finalization.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/israel-military-action-against-lebanon-onptptpt-20260903"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-17T23:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "medium",
+      "estimated_claim_at": "2026-09-16T08:00:00Z",
+      "is_estimate": true,
+      "market_id": "4376146",
+      "plausible_range": {
+        "end": "2026-09-17T18:00:00Z",
+        "start": "2026-09-15T19:59:00+00:00"
+      },
+      "rationale": "The complete timezone-specific military-action observation window must elapse unless a qualifying strike is confirmed earlier; the estimate allows attribution review and ordinary oracle finalization.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/will-iran-target-united-arab-emirates-byptptpt-20260907"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-15T19:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "medium",
+      "estimated_claim_at": "2026-09-16T08:00:00Z",
+      "is_estimate": true,
+      "market_id": "4376690",
+      "plausible_range": {
+        "end": "2026-09-17T18:00:00Z",
+        "start": "2026-09-15T20:59:00+00:00"
+      },
+      "rationale": "The complete timezone-specific military-action observation window must elapse unless a qualifying strike is confirmed earlier; the estimate allows attribution review and ordinary oracle finalization.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/will-iran-target-iraq-byptptpt-20260907"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-15T20:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "medium",
+      "estimated_claim_at": "2026-09-16T08:00:00Z",
+      "is_estimate": true,
+      "market_id": "4377387",
+      "plausible_range": {
+        "end": "2026-09-17T18:00:00Z",
+        "start": "2026-09-15T20:59:00+00:00"
+      },
+      "rationale": "The complete timezone-specific military-action observation window must elapse unless a qualifying strike is confirmed earlier; the estimate allows attribution review and ordinary oracle finalization.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/will-ukraine-target-moscow-by-20260907"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-15T20:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "high",
+      "estimated_claim_at": "2026-09-16T04:00:00Z",
+      "is_estimate": true,
+      "market_id": "4426567",
+      "plausible_range": {
+        "end": "2026-09-18T18:00:00Z",
+        "start": "2026-09-15T19:00:00Z"
+      },
+      "rationale": "The rules identify Netflix's Tuesday September 15, 3:00 PM ET Top 10 update; the estimate allows the chart and view figures to publish and the market outcome to finalize.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/what-will-be-the-top-global-netflix-movie-this-week-20260915",
+        "https://www.netflix.com/tudum/top10/"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-15T23:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "high",
+      "estimated_claim_at": "2026-09-16T04:00:00Z",
+      "is_estimate": true,
+      "market_id": "4426568",
+      "plausible_range": {
+        "end": "2026-09-18T18:00:00Z",
+        "start": "2026-09-15T19:00:00Z"
+      },
+      "rationale": "The rules identify Netflix's Tuesday September 15, 3:00 PM ET Top 10 update; the estimate allows the chart and view figures to publish and the market outcome to finalize.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/what-will-be-the-top-global-netflix-movie-this-week-20260915",
+        "https://www.netflix.com/tudum/top10/"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-15T23:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "high",
+      "estimated_claim_at": "2026-09-16T04:00:00Z",
+      "is_estimate": true,
+      "market_id": "4426569",
+      "plausible_range": {
+        "end": "2026-09-18T18:00:00Z",
+        "start": "2026-09-15T19:00:00Z"
+      },
+      "rationale": "The rules identify Netflix's Tuesday September 15, 3:00 PM ET Top 10 update; the estimate allows the chart and view figures to publish and the market outcome to finalize.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/what-will-be-the-top-global-netflix-movie-this-week-20260915",
+        "https://www.netflix.com/tudum/top10/"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-15T23:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "high",
+      "estimated_claim_at": "2026-09-16T04:00:00Z",
+      "is_estimate": true,
+      "market_id": "4426570",
+      "plausible_range": {
+        "end": "2026-09-18T18:00:00Z",
+        "start": "2026-09-15T19:00:00Z"
+      },
+      "rationale": "The rules identify Netflix's Tuesday September 15, 3:00 PM ET Top 10 update; the estimate allows the chart and view figures to publish and the market outcome to finalize.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/what-will-be-the-top-global-netflix-movie-this-week-20260915",
+        "https://www.netflix.com/tudum/top10/"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-15T23:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "high",
+      "estimated_claim_at": "2026-09-16T04:00:00Z",
+      "is_estimate": true,
+      "market_id": "4426577",
+      "plausible_range": {
+        "end": "2026-09-18T18:00:00Z",
+        "start": "2026-09-15T19:00:00Z"
+      },
+      "rationale": "The rules identify Netflix's Tuesday September 15, 3:00 PM ET Top 10 update; the estimate allows the chart and view figures to publish and the market outcome to finalize.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/what-will-be-the-2-global-netflix-movie-this-week-20260915",
+        "https://www.netflix.com/tudum/top10/"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-15T23:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "high",
+      "estimated_claim_at": "2026-09-16T04:00:00Z",
+      "is_estimate": true,
+      "market_id": "4426578",
+      "plausible_range": {
+        "end": "2026-09-18T18:00:00Z",
+        "start": "2026-09-15T19:00:00Z"
+      },
+      "rationale": "The rules identify Netflix's Tuesday September 15, 3:00 PM ET Top 10 update; the estimate allows the chart and view figures to publish and the market outcome to finalize.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/what-will-be-the-2-global-netflix-movie-this-week-20260915",
+        "https://www.netflix.com/tudum/top10/"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-15T23:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "high",
+      "estimated_claim_at": "2026-09-16T04:00:00Z",
+      "is_estimate": true,
+      "market_id": "4426579",
+      "plausible_range": {
+        "end": "2026-09-18T18:00:00Z",
+        "start": "2026-09-15T19:00:00Z"
+      },
+      "rationale": "The rules identify Netflix's Tuesday September 15, 3:00 PM ET Top 10 update; the estimate allows the chart and view figures to publish and the market outcome to finalize.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/what-will-be-the-2-global-netflix-movie-this-week-20260915",
+        "https://www.netflix.com/tudum/top10/"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-15T23:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "high",
+      "estimated_claim_at": "2026-09-16T04:00:00Z",
+      "is_estimate": true,
+      "market_id": "4426581",
+      "plausible_range": {
+        "end": "2026-09-18T18:00:00Z",
+        "start": "2026-09-15T19:00:00Z"
+      },
+      "rationale": "The rules identify Netflix's Tuesday September 15, 3:00 PM ET Top 10 update; the estimate allows the chart and view figures to publish and the market outcome to finalize.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/what-will-be-the-2-global-netflix-movie-this-week-20260915",
+        "https://www.netflix.com/tudum/top10/"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-15T23:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "high",
+      "estimated_claim_at": "2026-09-16T04:00:00Z",
+      "is_estimate": true,
+      "market_id": "4426589",
+      "plausible_range": {
+        "end": "2026-09-18T18:00:00Z",
+        "start": "2026-09-15T19:00:00Z"
+      },
+      "rationale": "The rules identify Netflix's Tuesday September 15, 3:00 PM ET Top 10 update; the estimate allows the chart and view figures to publish and the market outcome to finalize.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/what-will-be-the-top-us-netflix-movie-this-week-20260915",
+        "https://www.netflix.com/tudum/top10/"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-15T23:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "high",
+      "estimated_claim_at": "2026-09-16T04:00:00Z",
+      "is_estimate": true,
+      "market_id": "4426590",
+      "plausible_range": {
+        "end": "2026-09-18T18:00:00Z",
+        "start": "2026-09-15T19:00:00Z"
+      },
+      "rationale": "The rules identify Netflix's Tuesday September 15, 3:00 PM ET Top 10 update; the estimate allows the chart and view figures to publish and the market outcome to finalize.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/what-will-be-the-top-us-netflix-movie-this-week-20260915",
+        "https://www.netflix.com/tudum/top10/"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-15T23:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "high",
+      "estimated_claim_at": "2026-09-16T04:00:00Z",
+      "is_estimate": true,
+      "market_id": "4426591",
+      "plausible_range": {
+        "end": "2026-09-18T18:00:00Z",
+        "start": "2026-09-15T19:00:00Z"
+      },
+      "rationale": "The rules identify Netflix's Tuesday September 15, 3:00 PM ET Top 10 update; the estimate allows the chart and view figures to publish and the market outcome to finalize.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/what-will-be-the-top-us-netflix-movie-this-week-20260915",
+        "https://www.netflix.com/tudum/top10/"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-15T23:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "high",
+      "estimated_claim_at": "2026-09-16T04:00:00Z",
+      "is_estimate": true,
+      "market_id": "4426592",
+      "plausible_range": {
+        "end": "2026-09-18T18:00:00Z",
+        "start": "2026-09-15T19:00:00Z"
+      },
+      "rationale": "The rules identify Netflix's Tuesday September 15, 3:00 PM ET Top 10 update; the estimate allows the chart and view figures to publish and the market outcome to finalize.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/what-will-be-the-top-us-netflix-movie-this-week-20260915",
+        "https://www.netflix.com/tudum/top10/"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-15T23:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "high",
+      "estimated_claim_at": "2026-09-16T04:00:00Z",
+      "is_estimate": true,
+      "market_id": "4426593",
+      "plausible_range": {
+        "end": "2026-09-18T18:00:00Z",
+        "start": "2026-09-15T19:00:00Z"
+      },
+      "rationale": "The rules identify Netflix's Tuesday September 15, 3:00 PM ET Top 10 update; the estimate allows the chart and view figures to publish and the market outcome to finalize.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/what-will-be-the-top-us-netflix-movie-this-week-20260915",
+        "https://www.netflix.com/tudum/top10/"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-15T23:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "high",
+      "estimated_claim_at": "2026-09-16T04:00:00Z",
+      "is_estimate": true,
+      "market_id": "4426871",
+      "plausible_range": {
+        "end": "2026-09-18T18:00:00Z",
+        "start": "2026-09-15T19:00:00Z"
+      },
+      "rationale": "The rules identify Netflix's Tuesday September 15, 3:00 PM ET Top 10 update; the estimate allows the chart and view figures to publish and the market outcome to finalize.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/what-will-be-the-2-us-netflix-movie-this-week-20260915",
+        "https://www.netflix.com/tudum/top10/"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-15T23:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "high",
+      "estimated_claim_at": "2026-09-16T04:00:00Z",
+      "is_estimate": true,
+      "market_id": "4426872",
+      "plausible_range": {
+        "end": "2026-09-18T18:00:00Z",
+        "start": "2026-09-15T19:00:00Z"
+      },
+      "rationale": "The rules identify Netflix's Tuesday September 15, 3:00 PM ET Top 10 update; the estimate allows the chart and view figures to publish and the market outcome to finalize.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/what-will-be-the-2-us-netflix-movie-this-week-20260915",
+        "https://www.netflix.com/tudum/top10/"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-15T23:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "high",
+      "estimated_claim_at": "2026-09-16T04:00:00Z",
+      "is_estimate": true,
+      "market_id": "4426873",
+      "plausible_range": {
+        "end": "2026-09-18T18:00:00Z",
+        "start": "2026-09-15T19:00:00Z"
+      },
+      "rationale": "The rules identify Netflix's Tuesday September 15, 3:00 PM ET Top 10 update; the estimate allows the chart and view figures to publish and the market outcome to finalize.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/what-will-be-the-2-us-netflix-movie-this-week-20260915",
+        "https://www.netflix.com/tudum/top10/"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-15T23:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "high",
+      "estimated_claim_at": "2026-09-16T04:00:00Z",
+      "is_estimate": true,
+      "market_id": "4426874",
+      "plausible_range": {
+        "end": "2026-09-18T18:00:00Z",
+        "start": "2026-09-15T19:00:00Z"
+      },
+      "rationale": "The rules identify Netflix's Tuesday September 15, 3:00 PM ET Top 10 update; the estimate allows the chart and view figures to publish and the market outcome to finalize.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/what-will-be-the-2-us-netflix-movie-this-week-20260915",
+        "https://www.netflix.com/tudum/top10/"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-15T23:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "high",
+      "estimated_claim_at": "2026-09-16T04:00:00Z",
+      "is_estimate": true,
+      "market_id": "4426875",
+      "plausible_range": {
+        "end": "2026-09-18T18:00:00Z",
+        "start": "2026-09-15T19:00:00Z"
+      },
+      "rationale": "The rules identify Netflix's Tuesday September 15, 3:00 PM ET Top 10 update; the estimate allows the chart and view figures to publish and the market outcome to finalize.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/what-will-be-the-2-us-netflix-movie-this-week-20260915",
+        "https://www.netflix.com/tudum/top10/"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-15T23:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "high",
+      "estimated_claim_at": "2026-09-16T04:00:00Z",
+      "is_estimate": true,
+      "market_id": "4426958",
+      "plausible_range": {
+        "end": "2026-09-18T18:00:00Z",
+        "start": "2026-09-15T19:00:00Z"
+      },
+      "rationale": "The rules identify Netflix's Tuesday September 15, 3:00 PM ET Top 10 update; the estimate allows the chart and view figures to publish and the market outcome to finalize.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/what-will-be-the-top-global-netflix-show-this-week-20260915",
+        "https://www.netflix.com/tudum/top10/"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-15T23:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "high",
+      "estimated_claim_at": "2026-09-16T04:00:00Z",
+      "is_estimate": true,
+      "market_id": "4426963",
+      "plausible_range": {
+        "end": "2026-09-18T18:00:00Z",
+        "start": "2026-09-15T19:00:00Z"
+      },
+      "rationale": "The rules identify Netflix's Tuesday September 15, 3:00 PM ET Top 10 update; the estimate allows the chart and view figures to publish and the market outcome to finalize.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/what-will-be-the-top-global-netflix-show-this-week-20260915",
+        "https://www.netflix.com/tudum/top10/"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-15T23:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "high",
+      "estimated_claim_at": "2026-09-16T04:00:00Z",
+      "is_estimate": true,
+      "market_id": "4426977",
+      "plausible_range": {
+        "end": "2026-09-18T18:00:00Z",
+        "start": "2026-09-15T19:00:00Z"
+      },
+      "rationale": "The rules identify Netflix's Tuesday September 15, 3:00 PM ET Top 10 update; the estimate allows the chart and view figures to publish and the market outcome to finalize.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/what-will-be-the-2-global-netflix-show-this-week-20260915",
+        "https://www.netflix.com/tudum/top10/"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-15T23:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "high",
+      "estimated_claim_at": "2026-09-16T04:00:00Z",
+      "is_estimate": true,
+      "market_id": "4426978",
+      "plausible_range": {
+        "end": "2026-09-18T18:00:00Z",
+        "start": "2026-09-15T19:00:00Z"
+      },
+      "rationale": "The rules identify Netflix's Tuesday September 15, 3:00 PM ET Top 10 update; the estimate allows the chart and view figures to publish and the market outcome to finalize.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/what-will-be-the-2-global-netflix-show-this-week-20260915",
+        "https://www.netflix.com/tudum/top10/"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-15T23:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "high",
+      "estimated_claim_at": "2026-09-16T04:00:00Z",
+      "is_estimate": true,
+      "market_id": "4426990",
+      "plausible_range": {
+        "end": "2026-09-18T18:00:00Z",
+        "start": "2026-09-15T19:00:00Z"
+      },
+      "rationale": "The rules identify Netflix's Tuesday September 15, 3:00 PM ET Top 10 update; the estimate allows the chart and view figures to publish and the market outcome to finalize.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/what-will-be-the-top-us-netflix-show-this-week-20260915",
+        "https://www.netflix.com/tudum/top10/"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-15T23:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "high",
+      "estimated_claim_at": "2026-09-16T04:00:00Z",
+      "is_estimate": true,
+      "market_id": "4426991",
+      "plausible_range": {
+        "end": "2026-09-18T18:00:00Z",
+        "start": "2026-09-15T19:00:00Z"
+      },
+      "rationale": "The rules identify Netflix's Tuesday September 15, 3:00 PM ET Top 10 update; the estimate allows the chart and view figures to publish and the market outcome to finalize.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/what-will-be-the-top-us-netflix-show-this-week-20260915",
+        "https://www.netflix.com/tudum/top10/"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-15T23:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "high",
+      "estimated_claim_at": "2026-09-16T04:00:00Z",
+      "is_estimate": true,
+      "market_id": "4426992",
+      "plausible_range": {
+        "end": "2026-09-18T18:00:00Z",
+        "start": "2026-09-15T19:00:00Z"
+      },
+      "rationale": "The rules identify Netflix's Tuesday September 15, 3:00 PM ET Top 10 update; the estimate allows the chart and view figures to publish and the market outcome to finalize.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/what-will-be-the-top-us-netflix-show-this-week-20260915",
+        "https://www.netflix.com/tudum/top10/"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-15T23:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "high",
+      "estimated_claim_at": "2026-09-16T04:00:00Z",
+      "is_estimate": true,
+      "market_id": "4426993",
+      "plausible_range": {
+        "end": "2026-09-18T18:00:00Z",
+        "start": "2026-09-15T19:00:00Z"
+      },
+      "rationale": "The rules identify Netflix's Tuesday September 15, 3:00 PM ET Top 10 update; the estimate allows the chart and view figures to publish and the market outcome to finalize.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/what-will-be-the-top-us-netflix-show-this-week-20260915",
+        "https://www.netflix.com/tudum/top10/"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-15T23:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "high",
+      "estimated_claim_at": "2026-09-16T04:00:00Z",
+      "is_estimate": true,
+      "market_id": "4426994",
+      "plausible_range": {
+        "end": "2026-09-18T18:00:00Z",
+        "start": "2026-09-15T19:00:00Z"
+      },
+      "rationale": "The rules identify Netflix's Tuesday September 15, 3:00 PM ET Top 10 update; the estimate allows the chart and view figures to publish and the market outcome to finalize.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/what-will-be-the-top-us-netflix-show-this-week-20260915",
+        "https://www.netflix.com/tudum/top10/"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-15T23:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "high",
+      "estimated_claim_at": "2026-09-16T04:00:00Z",
+      "is_estimate": true,
+      "market_id": "4427004",
+      "plausible_range": {
+        "end": "2026-09-18T18:00:00Z",
+        "start": "2026-09-15T19:00:00Z"
+      },
+      "rationale": "The rules identify Netflix's Tuesday September 15, 3:00 PM ET Top 10 update; the estimate allows the chart and view figures to publish and the market outcome to finalize.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/what-will-be-the-2-us-netflix-show-this-week-20260915",
+        "https://www.netflix.com/tudum/top10/"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-15T23:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "high",
+      "estimated_claim_at": "2026-09-16T04:00:00Z",
+      "is_estimate": true,
+      "market_id": "4427005",
+      "plausible_range": {
+        "end": "2026-09-18T18:00:00Z",
+        "start": "2026-09-15T19:00:00Z"
+      },
+      "rationale": "The rules identify Netflix's Tuesday September 15, 3:00 PM ET Top 10 update; the estimate allows the chart and view figures to publish and the market outcome to finalize.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/what-will-be-the-2-us-netflix-show-this-week-20260915",
+        "https://www.netflix.com/tudum/top10/"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-15T23:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "high",
+      "estimated_claim_at": "2026-09-16T04:00:00Z",
+      "is_estimate": true,
+      "market_id": "4427006",
+      "plausible_range": {
+        "end": "2026-09-18T18:00:00Z",
+        "start": "2026-09-15T19:00:00Z"
+      },
+      "rationale": "The rules identify Netflix's Tuesday September 15, 3:00 PM ET Top 10 update; the estimate allows the chart and view figures to publish and the market outcome to finalize.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/what-will-be-the-2-us-netflix-show-this-week-20260915",
+        "https://www.netflix.com/tudum/top10/"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-15T23:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "high",
+      "estimated_claim_at": "2026-09-16T04:00:00Z",
+      "is_estimate": true,
+      "market_id": "4427009",
+      "plausible_range": {
+        "end": "2026-09-18T18:00:00Z",
+        "start": "2026-09-15T19:00:00Z"
+      },
+      "rationale": "The rules identify Netflix's Tuesday September 15, 3:00 PM ET Top 10 update; the estimate allows the chart and view figures to publish and the market outcome to finalize.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/what-will-be-the-2-us-netflix-show-this-week-20260915",
+        "https://www.netflix.com/tudum/top10/"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-15T23:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "high",
+      "estimated_claim_at": "2026-09-16T04:00:00Z",
+      "is_estimate": true,
+      "market_id": "4427020",
+      "plausible_range": {
+        "end": "2026-09-18T18:00:00Z",
+        "start": "2026-09-15T19:00:00Z"
+      },
+      "rationale": "The rules identify Netflix's Tuesday September 15, 3:00 PM ET Top 10 update; the estimate allows the chart and view figures to publish and the market outcome to finalize.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/how-many-views-will-the-1-movie-on-netflix-have-this-week-20260915",
+        "https://www.netflix.com/tudum/top10/"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-15T23:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "high",
+      "estimated_claim_at": "2026-09-16T04:00:00Z",
+      "is_estimate": true,
+      "market_id": "4427021",
+      "plausible_range": {
+        "end": "2026-09-18T18:00:00Z",
+        "start": "2026-09-15T19:00:00Z"
+      },
+      "rationale": "The rules identify Netflix's Tuesday September 15, 3:00 PM ET Top 10 update; the estimate allows the chart and view figures to publish and the market outcome to finalize.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/how-many-views-will-the-1-movie-on-netflix-have-this-week-20260915",
+        "https://www.netflix.com/tudum/top10/"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-15T23:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "high",
+      "estimated_claim_at": "2026-09-16T04:00:00Z",
+      "is_estimate": true,
+      "market_id": "4427027",
+      "plausible_range": {
+        "end": "2026-09-18T18:00:00Z",
+        "start": "2026-09-15T19:00:00Z"
+      },
+      "rationale": "The rules identify Netflix's Tuesday September 15, 3:00 PM ET Top 10 update; the estimate allows the chart and view figures to publish and the market outcome to finalize.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/how-many-views-will-the-1-show-on-netflix-have-this-week-20260915",
+        "https://www.netflix.com/tudum/top10/"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-15T23:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "high",
+      "estimated_claim_at": "2026-09-16T04:00:00Z",
+      "is_estimate": true,
+      "market_id": "4427029",
+      "plausible_range": {
+        "end": "2026-09-18T18:00:00Z",
+        "start": "2026-09-15T19:00:00Z"
+      },
+      "rationale": "The rules identify Netflix's Tuesday September 15, 3:00 PM ET Top 10 update; the estimate allows the chart and view figures to publish and the market outcome to finalize.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/how-many-views-will-the-1-show-on-netflix-have-this-week-20260915",
+        "https://www.netflix.com/tudum/top10/"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-15T23:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "medium",
+      "estimated_claim_at": "2026-09-16T08:00:00Z",
+      "is_estimate": true,
+      "market_id": "4442766",
+      "plausible_range": {
+        "end": "2026-09-17T18:00:00Z",
+        "start": "2026-09-15T20:59:00+00:00"
+      },
+      "rationale": "The complete timezone-specific military-action observation window must elapse unless a qualifying strike is confirmed earlier; the estimate allows attribution review and ordinary oracle finalization.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/will-iran-target-an-arab-country-by-20260909"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-15T20:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "medium",
+      "estimated_claim_at": "2026-09-18T12:00:00Z",
+      "is_estimate": true,
+      "market_id": "4503081",
+      "plausible_range": {
+        "end": "2026-09-19T20:00:00Z",
+        "start": "2026-09-18T03:59:00Z"
+      },
+      "rationale": "The diplomatic-meeting observation window runs through September 17 at 11:59 PM ET; the estimate allows public confirmation review and ordinary oracle finalization.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/israel-x-lebanon-diplomatic-meeting-byptptpt-20260810145737299"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-18T03:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "medium",
+      "estimated_claim_at": "2026-09-17T08:00:00Z",
+      "is_estimate": true,
+      "market_id": "4569814",
+      "plausible_range": {
+        "end": "2026-09-18T12:00:00Z",
+        "start": "2026-09-16T23:59:00Z"
+      },
+      "rationale": "The rules require the complete first 72-hour YouTube view count, so redemption cannot be expected before the observation completes; the estimate allows the count to settle and finalize.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/of-views-of-mrbeast-gaming-video-on-day-3-20260910",
+        "https://www.youtube.com/@MrBeastGaming"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-16T23:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "medium",
+      "estimated_claim_at": "2026-09-17T08:00:00Z",
+      "is_estimate": true,
+      "market_id": "4569815",
+      "plausible_range": {
+        "end": "2026-09-18T12:00:00Z",
+        "start": "2026-09-16T23:59:00Z"
+      },
+      "rationale": "The rules require the complete first 72-hour YouTube view count, so redemption cannot be expected before the observation completes; the estimate allows the count to settle and finalize.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/of-views-of-mrbeast-gaming-video-on-day-3-20260910",
+        "https://www.youtube.com/@MrBeastGaming"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-16T23:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "medium",
+      "estimated_claim_at": "2026-09-17T08:00:00Z",
+      "is_estimate": true,
+      "market_id": "4569816",
+      "plausible_range": {
+        "end": "2026-09-18T12:00:00Z",
+        "start": "2026-09-16T23:59:00Z"
+      },
+      "rationale": "The rules require the complete first 72-hour YouTube view count, so redemption cannot be expected before the observation completes; the estimate allows the count to settle and finalize.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/of-views-of-mrbeast-gaming-video-on-day-3-20260910",
+        "https://www.youtube.com/@MrBeastGaming"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-16T23:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "medium",
+      "estimated_claim_at": "2026-09-17T08:00:00Z",
+      "is_estimate": true,
+      "market_id": "4569818",
+      "plausible_range": {
+        "end": "2026-09-18T12:00:00Z",
+        "start": "2026-09-16T23:59:00Z"
+      },
+      "rationale": "The rules require the complete first 72-hour YouTube view count, so redemption cannot be expected before the observation completes; the estimate allows the count to settle and finalize.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/of-views-of-mrbeast-gaming-video-on-day-3-20260910",
+        "https://www.youtube.com/@MrBeastGaming"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-16T23:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "medium",
+      "estimated_claim_at": "2026-09-17T08:00:00Z",
+      "is_estimate": true,
+      "market_id": "4569819",
+      "plausible_range": {
+        "end": "2026-09-18T12:00:00Z",
+        "start": "2026-09-16T23:59:00Z"
+      },
+      "rationale": "The rules require the complete first 72-hour YouTube view count, so redemption cannot be expected before the observation completes; the estimate allows the count to settle and finalize.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/of-views-of-mrbeast-gaming-video-on-day-3-20260910",
+        "https://www.youtube.com/@MrBeastGaming"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-16T23:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    },
+    {
+      "conditional_assumptions": "The stated resolution source publishes or confirms the outcome normally and the oracle outcome is not disputed; this estimate does not indicate that shares are currently claimable.",
+      "confidence": "medium",
+      "estimated_claim_at": "2026-09-17T08:00:00Z",
+      "is_estimate": true,
+      "market_id": "4569820",
+      "plausible_range": {
+        "end": "2026-09-18T12:00:00Z",
+        "start": "2026-09-16T23:59:00Z"
+      },
+      "rationale": "The rules require the complete first 72-hour YouTube view count, so redemption cannot be expected before the observation completes; the estimate allows the count to settle and finalize.",
+      "research_at": "2026-09-15T18:36:29.881Z",
+      "source_urls": [
+        "https://polymarket.com/event/of-views-of-mrbeast-gaming-video-on-day-3-20260910",
+        "https://www.youtube.com/@MrBeastGaming"
+      ],
+      "verified_facts": [
+        "Exact market ID, name, positive Current Odds and visible resolution text were verified in the authoritative 68-row payload for completed Stage 1 run wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390.",
+        "Cred-X Stage 1 deadline: 2026-09-16T23:59:00+00:00.",
+        "The Stage 1 payload exposed no live oracle proposal, challenge or finalization timestamp; the estimate does not assume a proposal already exists."
+      ]
+    }
+  ],
+  "cluster_summaries": [
+    {
+      "cluster_id": "C01",
+      "member_ids": [
+        "2589853",
+        "2589854",
+        "2589855",
+        "2589856",
+        "2589857"
+      ],
+      "rationale": "All members are mutually exclusive outcomes of the same scheduled BOJ decision.",
+      "shared_cause": "Bank of Japan September 2026 policy-rate decision"
+    },
+    {
+      "cluster_id": "C02",
+      "member_ids": [
+        "2661519",
+        "2661520"
+      ],
+      "rationale": "Both members resolve from the same scheduled BOE decision.",
+      "shared_cause": "Bank of England September 2026 policy-rate decision"
+    },
+    {
+      "cluster_id": "C03",
+      "member_ids": [
+        "3502075"
+      ],
+      "rationale": "No other eligible market is controlled by the same specific external occurrence and identical observation condition.",
+      "shared_cause": "Independent resolution condition for market 3502075"
+    },
+    {
+      "cluster_id": "C04",
+      "member_ids": [
+        "3701629"
+      ],
+      "rationale": "No other eligible market is controlled by the same specific external occurrence and identical observation condition.",
+      "shared_cause": "Independent resolution condition for market 3701629"
+    },
+    {
+      "cluster_id": "C05",
+      "member_ids": [
+        "3710795"
+      ],
+      "rationale": "No other eligible market is controlled by the same specific external occurrence and identical observation condition.",
+      "shared_cause": "Independent resolution condition for market 3710795"
+    },
+    {
+      "cluster_id": "C06",
+      "member_ids": [
+        "3710804"
+      ],
+      "rationale": "No other eligible market is controlled by the same specific external occurrence and identical observation condition.",
+      "shared_cause": "Independent resolution condition for market 3710804"
+    },
+    {
+      "cluster_id": "C07",
+      "member_ids": [
+        "3710810"
+      ],
+      "rationale": "No other eligible market is controlled by the same specific external occurrence and identical observation condition.",
+      "shared_cause": "Independent resolution condition for market 3710810"
+    },
+    {
+      "cluster_id": "C08",
+      "member_ids": [
+        "3711103"
+      ],
+      "rationale": "No other eligible market is controlled by the same specific external occurrence and identical observation condition.",
+      "shared_cause": "Independent resolution condition for market 3711103"
+    },
+    {
+      "cluster_id": "C09",
+      "member_ids": [
+        "3741669"
+      ],
+      "rationale": "No other eligible market is controlled by the same specific external occurrence and identical observation condition.",
+      "shared_cause": "Independent resolution condition for market 3741669"
+    },
+    {
+      "cluster_id": "C10",
+      "member_ids": [
+        "3758826"
+      ],
+      "rationale": "No other eligible market is controlled by the same specific external occurrence and identical observation condition.",
+      "shared_cause": "Independent resolution condition for market 3758826"
+    },
+    {
+      "cluster_id": "C11",
+      "member_ids": [
+        "3840177"
+      ],
+      "rationale": "No other eligible market is controlled by the same specific external occurrence and identical observation condition.",
+      "shared_cause": "Independent resolution condition for market 3840177"
+    },
+    {
+      "cluster_id": "C12",
+      "member_ids": [
+        "3861936"
+      ],
+      "rationale": "No other eligible market is controlled by the same specific external occurrence and identical observation condition.",
+      "shared_cause": "Independent resolution condition for market 3861936"
+    },
+    {
+      "cluster_id": "C13",
+      "member_ids": [
+        "3861943"
+      ],
+      "rationale": "No other eligible market is controlled by the same specific external occurrence and identical observation condition.",
+      "shared_cause": "Independent resolution condition for market 3861943"
+    },
+    {
+      "cluster_id": "C14",
+      "member_ids": [
+        "4117966"
+      ],
+      "rationale": "No other eligible market is controlled by the same specific external occurrence and identical observation condition.",
+      "shared_cause": "Independent resolution condition for market 4117966"
+    },
+    {
+      "cluster_id": "C15",
+      "member_ids": [
+        "4178257"
+      ],
+      "rationale": "No other eligible market is controlled by the same specific external occurrence and identical observation condition.",
+      "shared_cause": "Independent resolution condition for market 4178257"
+    },
+    {
+      "cluster_id": "C16",
+      "member_ids": [
+        "4178258"
+      ],
+      "rationale": "No other eligible market is controlled by the same specific external occurrence and identical observation condition.",
+      "shared_cause": "Independent resolution condition for market 4178258"
+    },
+    {
+      "cluster_id": "C17",
+      "member_ids": [
+        "4178259"
+      ],
+      "rationale": "No other eligible market is controlled by the same specific external occurrence and identical observation condition.",
+      "shared_cause": "Independent resolution condition for market 4178259"
+    },
+    {
+      "cluster_id": "C18",
+      "member_ids": [
+        "4376146"
+      ],
+      "rationale": "No other eligible market is controlled by the same specific external occurrence and identical observation condition.",
+      "shared_cause": "Independent resolution condition for market 4376146"
+    },
+    {
+      "cluster_id": "C19",
+      "member_ids": [
+        "4376690"
+      ],
+      "rationale": "No other eligible market is controlled by the same specific external occurrence and identical observation condition.",
+      "shared_cause": "Independent resolution condition for market 4376690"
+    },
+    {
+      "cluster_id": "C20",
+      "member_ids": [
+        "4377387"
+      ],
+      "rationale": "No other eligible market is controlled by the same specific external occurrence and identical observation condition.",
+      "shared_cause": "Independent resolution condition for market 4377387"
+    },
+    {
+      "cluster_id": "C21",
+      "member_ids": [
+        "4426567",
+        "4426568",
+        "4426569",
+        "4426570",
+        "4426577",
+        "4426578",
+        "4426579",
+        "4426581",
+        "4427020",
+        "4427021"
+      ],
+      "rationale": "One official weekly Netflix chart directly determines all member identities, ranks and view thresholds.",
+      "shared_cause": "Netflix weekly global movie chart for the week ending 13 September 2026"
+    },
+    {
+      "cluster_id": "C22",
+      "member_ids": [
+        "4426589",
+        "4426590",
+        "4426591",
+        "4426592",
+        "4426593",
+        "4426871",
+        "4426872",
+        "4426873",
+        "4426874",
+        "4426875"
+      ],
+      "rationale": "One official weekly Netflix chart directly determines all member identities and ranks.",
+      "shared_cause": "Netflix weekly US movie chart for the week ending 13 September 2026"
+    },
+    {
+      "cluster_id": "C23",
+      "member_ids": [
+        "4426958",
+        "4426963",
+        "4426977",
+        "4426978",
+        "4427027",
+        "4427029"
+      ],
+      "rationale": "One official weekly Netflix chart directly determines all member identities, ranks and view thresholds.",
+      "shared_cause": "Netflix weekly global TV chart for the week ending 13 September 2026"
+    },
+    {
+      "cluster_id": "C24",
+      "member_ids": [
+        "4426990",
+        "4426991",
+        "4426992",
+        "4426993",
+        "4426994",
+        "4427004",
+        "4427005",
+        "4427006",
+        "4427009"
+      ],
+      "rationale": "One official weekly Netflix chart directly determines all member identities and ranks.",
+      "shared_cause": "Netflix weekly US TV chart for the week ending 13 September 2026"
+    },
+    {
+      "cluster_id": "C25",
+      "member_ids": [
+        "4442766"
+      ],
+      "rationale": "No other eligible market is controlled by the same specific external occurrence and identical observation condition.",
+      "shared_cause": "Independent resolution condition for market 4442766"
+    },
+    {
+      "cluster_id": "C26",
+      "member_ids": [
+        "4503081"
+      ],
+      "rationale": "No other eligible market is controlled by the same specific external occurrence and identical observation condition.",
+      "shared_cause": "Independent resolution condition for market 4503081"
+    },
+    {
+      "cluster_id": "C27",
+      "member_ids": [
+        "4569814",
+        "4569815",
+        "4569816",
+        "4569818",
+        "4569819",
+        "4569820"
+      ],
+      "rationale": "All members are mutually exclusive ranges resolved by the same video observation.",
+      "shared_cause": "MrBeast Gaming next video's first 72-hour view count"
+    }
+  ],
+  "completed_at": "2026-09-15T18:36:29.881Z",
+  "counts": {
+    "classified": 68,
+    "clusters": 27,
+    "eligible": 68,
+    "inspected": 68,
+    "invalid_odds_excluded": 0,
+    "unresolved": 0
+  },
+  "covered_unprocessed_run_ids": [
+    "7dea9c69-9f8d-48d0-aae9-058a895ff4d3",
+    "5623c61c-16eb-4666-b702-97ae07d479c0",
+    "d01b1f2a-a743-4539-9f91-11f460cd51ad",
+    "wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390"
+  ],
+  "filtered_count": 68,
+  "source_commit": null,
+  "source_count_reconciliation": "The wake email and authoritative live completed Stage 1 both reported 68 eligible candidates. All 68 payload records had valid finite positive Current Odds.",
+  "source_run_id": "wf-e020d03c4c507e21f2cdc8727e7ce3f2ae496ebe7ad95390",
+  "source_stage1_completed_at": "2026-09-15T18:28:59.344466Z",
+  "status": "completed",
+  "unresolved_market_ids": [],
+  "wake_email_filtered_count": 68
+}

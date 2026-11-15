@@ -1,0 +1,1011 @@
+from __future__ import annotations
+
+import html
+import json
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from typing import Any
+from uuid import uuid4
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.domains.auth.models import ActivityLog
+from app.domains.polymarket_auto_live.schemas import (
+    BullpenAutoLiveRun,
+    BullpenAutoLiveStageResult,
+)
+from app.infrastructure.database.sync_session import SyncSessionLocal
+from app.services.email import EmailSendResult, EmailService
+
+from app.domains.mails.completion_preferences import (
+    COMPLETION_CATALOG, COMPLETION_DEFAULTS, inherit_legacy_preferences,
+)
+
+MAIL_ACTION_PREFIX = "mail."
+MAIL_RESOURCE_TYPE = "cred_x_mail"
+MAIL_CATEGORY_ALL = "all"
+MAIL_CATEGORY_RUNS = "runs"
+MAIL_CATEGORY_ALERTS = "alerts"
+MAIL_CATEGORY_ACCOUNT = "account"
+STAGE2_WARNING_ACTION = "mail.stage2_position_warning"
+MANUAL_TEST_ACTION = "mail.manual_test"
+STAGE2_WARNING_THRESHOLD = 80.0
+BULLPEN_WALLET_PORTFOLIO_URL = (
+    "https://app.bullpen.fi/wallet/predictions?ref=intrepid-crane-3"
+)
+
+TEST_RECIPIENTS = ("tarun.singh6893@gmail.com",)
+TEST_SUBJECT = "Message from Tarun's Cred-X"
+TEST_MESSAGE = "Hi, this a message from Tarun's Cred-X"
+
+MAIL_PREFERENCES_RESOURCE_TYPE = "cred_x_mail_preferences"
+MAIL_PREFERENCES_ACTION = "mail.preferences_updated"
+SELL_ACTION_STATUSES = (
+    "detected",
+    "awaiting_confirmation",
+    "confirmed",
+    "submitting",
+    "filled",
+    "pending",
+    "failed",
+    "cleared",
+)
+SELL_ACTION_TRANSITIONS: dict[str, frozenset[str]] = {
+    "detected": frozenset({"awaiting_confirmation", "cleared"}),
+    "awaiting_confirmation": frozenset({"confirmed", "cleared"}),
+    "confirmed": frozenset({"submitting", "cleared"}),
+    "submitting": frozenset({"filled", "pending", "failed"}),
+    "pending": frozenset({"filled", "pending", "failed"}),
+    "filled": frozenset(),
+    "failed": frozenset(),
+    "cleared": frozenset(),
+}
+MAIL_PREFERENCE_CATALOG: tuple[dict[str, object], ...] = (
+    {
+        "key": "run_completion",
+        "label": "Stage and scan completion",
+        "description": "Choose individual stages and overall completion for Zerodha, IndMoney and Bullpen.",
+        "category": MAIL_CATEGORY_RUNS,
+        "segments": ("Zerodha", "IndMoney", "Bullpen"),
+    },
+    {
+        "key": "auto_rebalance_success",
+        "label": "Final auto-rebalance completion",
+        "description": "One final success email after every selected auto-rebalance stage has finished.",
+        "category": MAIL_CATEGORY_RUNS,
+        "segments": ("Zerodha", "IndMoney"),
+    },
+    {
+        "key": "stage2_position_warning",
+        "label": "Bullpen position-risk alerts",
+        "description": "Urgent warnings when either held-side consolidated LLM odds or actual current Bullpen odds fall below the configured safety threshold.",
+        "category": MAIL_CATEGORY_ALERTS,
+        "segments": ("Bullpen",),
+    },
+    {
+        "key": "password_reset",
+        "label": "Password reset and account security",
+        "description": "Requested password-reset and account-security messages. Disabling this can prevent password recovery emails.",
+        "category": MAIL_CATEGORY_ACCOUNT,
+        "segments": ("All",),
+    },
+)
+MAIL_PREFERENCE_CATALOG += COMPLETION_CATALOG
+DEFAULT_MAIL_PREFERENCES: dict[str, bool] = {
+    **COMPLETION_DEFAULTS,
+    "run_completion": False,
+    "auto_rebalance_success": True,
+    "stage2_position_warning": True,
+    "password_reset": True,
+}
+MAIL_PREFERENCE_BY_ACTION: dict[str, str] = {
+    "mail.run_completion": "run_completion",
+    "mail.auto_rebalance_success": "auto_rebalance_success",
+    STAGE2_WARNING_ACTION: "stage2_position_warning",
+    "mail.password_reset": "password_reset",
+}
+
+
+@dataclass(frozen=True)
+class Stage2PositionWarning:
+    market_id: str
+    question: str
+    market_url: str | None
+    position_side: str
+    held_side_llm_odds: float | None
+    opposite_side_llm_odds: float | None
+    held_side_bullpen_odds: float | None
+    opposite_side_bullpen_odds: float | None
+    breach_sources: tuple[str, ...]
+    threshold: float
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "market_id": self.market_id,
+            "question": self.question,
+            "market_url": self.market_url,
+            "position_side": self.position_side,
+            "held_side_llm_odds": self.held_side_llm_odds,
+            "opposite_side_llm_odds": self.opposite_side_llm_odds,
+            "held_side_bullpen_odds": self.held_side_bullpen_odds,
+            "opposite_side_bullpen_odds": self.opposite_side_bullpen_odds,
+            "breach_sources": list(self.breach_sources),
+            "threshold": self.threshold,
+            "recommended_action": "EXIT",
+        }
+
+
+@dataclass(frozen=True)
+class LoggedMailDelivery:
+    history_id: int
+    result: EmailSendResult
+    details: dict[str, object]
+    deduplicated: bool = False
+
+
+def _utc_iso() -> str:
+    return datetime.now(UTC).isoformat()
+
+
+def _sell_warnings(warnings: object) -> list[dict[str, object]]:
+    if not isinstance(warnings, list):
+        return []
+    return [
+        warning
+        for warning in warnings
+        if isinstance(warning, dict)
+        and (
+            str(warning.get("recommended_action") or "").upper() == "EXIT"
+            or str(warning.get("breach_type") or "").lower()
+            in {"llm", "actual", "both"}
+        )
+    ]
+
+
+def _initial_sell_action(
+    warnings: object,
+    *,
+    at: str,
+    inferred: bool = False,
+) -> dict[str, object] | None:
+    sell_warnings = _sell_warnings(warnings)
+    if not sell_warnings:
+        return None
+    market_ids = [
+        str(warning.get("market_id"))
+        for warning in sell_warnings
+        if warning.get("market_id")
+    ]
+    return {
+        "status": "detected",
+        "updated_at": at,
+        "source": "gpt_work_cloud_browser",
+        "inferred": inferred,
+        "market_ids": market_ids,
+        "evaluated_market_id": None,
+        "market_question": None,
+        "position_side": None,
+        "live_held_side_bullpen_odds": None,
+        "sell_threshold": STAGE2_WARNING_THRESHOLD,
+        "average_sell_price": None,
+        "evaluated_at": None,
+        "batch_id": None,
+        "eligibility_decision": "unverified",
+        "shares": None,
+        "expected_proceeds": None,
+        "proceeds": None,
+        "transaction_url": None,
+        "note": "Sell requirement detected from the delivered Cred-X risk alert.",
+        "error": None,
+        "history": [
+            {
+                "status": "detected",
+                "at": at,
+                "note": "Sell requirement detected from the delivered Cred-X risk alert.",
+            }
+        ],
+    }
+
+
+def _sell_handoff_email_footer(history_id: int, action: dict[str, object]) -> tuple[str, str]:
+    market_ids = ", ".join(str(value) for value in action.get("market_ids", [])) or "unavailable"
+    audit_url = f"https://cred-x.in/console/mails?deliveryId={history_id}"
+    text = (
+        "\n\nGPT WORK SELL HANDOFF\n"
+        f"Delivery audit ID: {history_id}\n"
+        "Action: SELL FULL POSITION\n"
+        f"Market IDs: {market_ids}\n"
+        "Action status: detected\n"
+        f"Delivery audit: {audit_url}\n"
+        "Live Bullpen validation and one grouped confirmation are required before execution."
+    )
+    html_footer = (
+        '<div style="margin-top:24px;padding:16px;border:1px solid #ef4444;'
+        'border-radius:10px;background:#fff7f7;color:#7f1d1d">'
+        '<p style="margin:0 0 10px;font-weight:800">GPT Work Sell handoff</p>'
+        f'<p style="margin:4px 0"><strong>Delivery audit ID:</strong> {history_id}</p>'
+        '<p style="margin:4px 0"><strong>Action:</strong> SELL FULL POSITION</p>'
+        f'<p style="margin:4px 0"><strong>Market IDs:</strong> {html.escape(market_ids)}</p>'
+        '<p style="margin:4px 0"><strong>Action status:</strong> detected</p>'
+        f'<p style="margin:10px 0 0"><a href="{audit_url}">Open Delivery audit</a></p>'
+        '<p style="margin:10px 0 0">Live Bullpen validation and one grouped confirmation are required before execution.</p>'
+        '</div>'
+    )
+    return html_footer, text
+
+
+def get_mail_preferences_from_session(
+    session: Session,
+    user_id: int,
+) -> dict[str, bool]:
+    preferences = dict(DEFAULT_MAIL_PREFERENCES)
+    row = session.execute(
+        select(ActivityLog)
+        .where(ActivityLog.user_id == user_id)
+        .where(ActivityLog.action == MAIL_PREFERENCES_ACTION)
+        .where(ActivityLog.resource_type == MAIL_PREFERENCES_RESOURCE_TYPE)
+        .order_by(ActivityLog.created_at.desc(), ActivityLog.id.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    if row is None:
+        return preferences
+    saved = _details_from_row(row).get("preferences")
+    if isinstance(saved, dict):
+        inherit_legacy_preferences(preferences, saved)
+        for key in preferences:
+            value = saved.get(key)
+            if isinstance(value, bool):
+                preferences[key] = value
+    return preferences
+
+
+def list_mail_preferences_sync(user_id: int) -> list[dict[str, object]]:
+    with SyncSessionLocal() as session:
+        saved = get_mail_preferences_from_session(session, user_id)
+    return [
+        {**item, "enabled": saved[item["key"]]}
+        for item in MAIL_PREFERENCE_CATALOG
+    ]
+
+
+def update_mail_preferences_sync(
+    user_id: int,
+    updates: dict[str, bool],
+) -> list[dict[str, object]]:
+    with SyncSessionLocal() as session:
+        preferences = get_mail_preferences_from_session(session, user_id)
+        # Old clients can still toggle the coarse switches. New clients submit
+        # explicit child keys, which take precedence over legacy values.
+        inherit_legacy_preferences(preferences, updates)
+        for key, value in updates.items():
+            if key in preferences and isinstance(value, bool):
+                preferences[key] = value
+        row = ActivityLog(
+            user_id=user_id,
+            action=MAIL_PREFERENCES_ACTION,
+            resource_type=MAIL_PREFERENCES_RESOURCE_TYPE,
+            resource_id=None,
+            details=json.dumps(
+                {
+                    "schema_version": 1,
+                    "preferences": preferences,
+                    "updated_at": _utc_iso(),
+                },
+                ensure_ascii=False,
+            ),
+        )
+        session.add(row)
+        session.commit()
+    return [
+        {**item, "enabled": preferences[item["key"]]}
+        for item in MAIL_PREFERENCE_CATALOG
+    ]
+
+
+def _mail_type_enabled(session: Session, user_id: int, action: str) -> bool:
+    preference_key = MAIL_PREFERENCE_BY_ACTION.get(action)
+    if preference_key is None:
+        return True
+    return get_mail_preferences_from_session(session, user_id).get(
+        preference_key,
+        True,
+    )
+
+
+def _as_probability(value: object) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        probability = float(value)
+    except (TypeError, ValueError):
+        return None
+    if probability < 0 or probability > 100:
+        return None
+    return round(probability, 2)
+
+
+def _first_probability(*values: object) -> float | None:
+    for value in values:
+        probability = _as_probability(value)
+        if probability is not None:
+            return probability
+    return None
+
+
+def _completed_stage_two(
+    run: BullpenAutoLiveRun,
+) -> BullpenAutoLiveStageResult | None:
+    for stage in run.stage_results:
+        if (
+            stage.stage_number == 2
+            or stage.outputs.get("workflow_stage_key") == "llm"
+        ) and stage.completed_at:
+            return stage
+    return None
+
+
+def extract_stage2_position_warnings(
+    run: BullpenAutoLiveRun,
+    *,
+    threshold: float = STAGE2_WARNING_THRESHOLD,
+) -> list[Stage2PositionWarning]:
+    """Return active positions whose held-side LLM or Bullpen odds breach the threshold."""
+    stage = _completed_stage_two(run)
+    if stage is None:
+        return []
+
+    rows = stage.outputs.get("llm_reviewed_candidates")
+    if not isinstance(rows, list):
+        return []
+
+    stage1_positions: dict[str, dict[str, Any]] = {}
+    for candidate_stage in run.stage_results:
+        if not (
+            candidate_stage.stage_number == 1
+            or candidate_stage.outputs.get("workflow_stage_key") == "scan"
+        ):
+            continue
+        active_positions = candidate_stage.outputs.get("active_positions_found")
+        if not isinstance(active_positions, list):
+            continue
+        for position in active_positions:
+            if not isinstance(position, dict):
+                continue
+            position_market_id = str(position.get("market_id") or "").strip()
+            position_side = str(position.get("side") or "").strip().upper()
+            position_key = str(
+                position.get("position_key")
+                or f"{position_market_id}::{position_side}"
+            )
+            if position_market_id:
+                stage1_positions[position_market_id] = position
+            if position_key:
+                stage1_positions[position_key] = position
+
+    warnings: list[Stage2PositionWarning] = []
+    seen: set[str] = set()
+    for row in rows:
+        if not isinstance(row, dict) or row.get("source_kind") != "active_position":
+            continue
+        side = str(row.get("position_side") or "").strip().upper()
+        if side not in {"YES", "NO"}:
+            continue
+        market_id = str(row.get("market_id") or "").strip()
+        position_key = str(row.get("position_key") or f"{market_id}::{side}")
+        stage1_position = (
+            stage1_positions.get(position_key)
+            or stage1_positions.get(market_id)
+            or {}
+        )
+        prompt_inputs = (
+            row.get("llm_prompt_inputs")
+            if isinstance(row.get("llm_prompt_inputs"), dict)
+            else {}
+        )
+        prompt_market = (
+            prompt_inputs.get("market")
+            if isinstance(prompt_inputs.get("market"), dict)
+            else {}
+        )
+        yes_odds = _as_probability(row.get("fair_yes_probability_pct"))
+        no_odds = _as_probability(row.get("fair_no_probability_pct"))
+        held_llm_odds = yes_odds if side == "YES" else no_odds
+        opposite_llm_odds = no_odds if side == "YES" else yes_odds
+        current_yes_odds = _first_probability(
+            row.get("current_yes_odds"),
+            prompt_market.get("current_yes_odds"),
+            stage1_position.get("current_yes_odds"),
+        )
+        current_no_odds = _first_probability(
+            row.get("current_no_odds"),
+            prompt_market.get("current_no_odds"),
+            stage1_position.get("current_no_odds"),
+        )
+        held_bullpen_odds = (
+            current_yes_odds if side == "YES" else current_no_odds
+        )
+        opposite_bullpen_odds = (
+            current_no_odds if side == "YES" else current_yes_odds
+        )
+        breach_sources: list[str] = []
+        if held_llm_odds is not None and held_llm_odds < threshold:
+            breach_sources.append("LLM odds")
+        if held_bullpen_odds is not None and held_bullpen_odds < threshold:
+            breach_sources.append("Actual Current Bullpen Odds")
+        if not breach_sources:
+            continue
+
+        if not market_id or position_key in seen:
+            continue
+        seen.add(position_key)
+        warnings.append(
+            Stage2PositionWarning(
+                market_id=market_id,
+                question=str(row.get("question") or market_id),
+                market_url=(
+                    str(row["market_url"]).strip()
+                    if row.get("market_url")
+                    else None
+                ),
+                position_side=side,
+                held_side_llm_odds=held_llm_odds,
+                opposite_side_llm_odds=opposite_llm_odds,
+                held_side_bullpen_odds=held_bullpen_odds,
+                opposite_side_bullpen_odds=opposite_bullpen_odds,
+                breach_sources=tuple(breach_sources),
+                threshold=threshold,
+            )
+        )
+    return warnings
+
+
+def build_stage2_warning_email(
+    run: BullpenAutoLiveRun,
+    warnings: list[Stage2PositionWarning],
+) -> tuple[str, str, str, str]:
+    count = len(warnings)
+    noun = "position" if count == 1 else "positions"
+    subject = (
+        f"WARNING: Exit required — {count} active {noun} below "
+        f"{STAGE2_WARNING_THRESHOLD:g}% safety threshold"
+    )
+    intro = (
+        "Stage 2 has completed and the position-risk check has run. "
+        "Either the consolidated held-side LLM odds, the actual current held-side "
+        f"Bullpen odds, or both are below {STAGE2_WARNING_THRESHOLD:g}% for "
+        f"{count} active {noun}."
+    )
+    text_parts = [
+        "WARNING — ACTIVE POSITION EXIT REQUIRED",
+        "",
+        intro,
+        "",
+    ]
+    html_rows: list[str] = []
+    for index, warning in enumerate(warnings, start=1):
+        url_line = f"\nMarket: {warning.market_url}" if warning.market_url else ""
+        llm_value = (
+            f"{warning.held_side_llm_odds:g}%"
+            if warning.held_side_llm_odds is not None
+            else "unavailable"
+        )
+        bullpen_value = (
+            f"{warning.held_side_bullpen_odds:g}%"
+            if warning.held_side_bullpen_odds is not None
+            else "unavailable"
+        )
+        trigger_reason = " and ".join(warning.breach_sources)
+        text_parts.extend(
+            [
+                f"{index}. {warning.question}",
+                f"Held side: {warning.position_side}",
+                f"Consolidated held-side LLM odds: {llm_value}",
+                f"Actual current held-side Bullpen odds: {bullpen_value}",
+                f"Alert triggered by: {trigger_reason}",
+                "Action: EXIT this position as soon as practical." + url_line,
+                "",
+            ]
+        )
+        safe_url = html.escape(warning.market_url or "")
+        market_link = (
+            f'<p><a href="{safe_url}">Open market</a></p>' if safe_url else ""
+        )
+        html_rows.append(
+            "<li style=\"margin-bottom:16px\">"
+            f'<strong><a href="{BULLPEN_WALLET_PORTFOLIO_URL}" '
+            'style="color:inherit;text-decoration:underline">'
+            f"{html.escape(warning.question)}</a></strong>"
+            f"<p>Held side: {warning.position_side}</p>"
+            f"<p>Consolidated held-side LLM odds: "
+            f"<strong>{html.escape(llm_value)}</strong></p>"
+            f"<p>Actual current held-side Bullpen odds: "
+            f"<strong>{html.escape(bullpen_value)}</strong></p>"
+            f"<p>Alert triggered by: <strong>{html.escape(trigger_reason)}</strong></p>"
+            f"<p>Action: <strong>EXIT this position as soon as practical.</strong></p>"
+            f"{market_link}</li>"
+        )
+
+    footer = (
+        f"Bullpen run: {run.id}\n"
+        "This warning was generated immediately after Stage 2 and before Stage 3. "
+        "It is an alert only and does not itself submit an exit order."
+    )
+    text_parts.extend([footer])
+    html_content = (
+        "<h2 style=\"color:#b91c1c\">WARNING — Active position exit required</h2>"
+        f"<p>{html.escape(intro)}</p>"
+        f"<ol>{''.join(html_rows)}</ol>"
+        f"<p><strong>Bullpen run:</strong> {html.escape(run.id)}</p>"
+        "<p>This warning was generated immediately after Stage 2 and before "
+        "Stage 3. It is an alert only and does not itself submit an exit order.</p>"
+    )
+    remarks = (
+        "Automatic Stage 2 risk warning. Consolidated held-side LLM odds or "
+        "actual current held-side Bullpen odds fell "
+        f"below {STAGE2_WARNING_THRESHOLD:g}%; immediate exit review is required. "
+        "The notification was evaluated before Stage 3."
+    )
+    return subject, html_content, "\n".join(text_parts), remarks
+
+
+def _details_from_row(row: ActivityLog) -> dict[str, Any]:
+    try:
+        payload = json.loads(row.details or "{}")
+    except (TypeError, json.JSONDecodeError):
+        payload = {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _result_from_details(details: dict[str, Any]) -> EmailSendResult:
+    return EmailSendResult(
+        sent=details.get("status") == "sent",
+        code=str(details.get("provider_code") or "EMAIL_DELIVERY_ALREADY_RESERVED"),
+        summary=str(
+            details.get("provider_summary")
+            or "This mail delivery was already reserved by an earlier attempt."
+        ),
+        provider_message=(
+            str(details["provider_message"])
+            if details.get("provider_message")
+            else None
+        ),
+        how_to_fix=tuple(
+            str(item)
+            for item in details.get("how_to_fix", [])
+            if isinstance(item, str)
+        ),
+    )
+
+
+def send_logged_email_sync(
+    session: Session,
+    *,
+    user_id: int,
+    action: str,
+    trigger: str,
+    recipients: tuple[str, ...],
+    subject: str,
+    html_content: str,
+    text_content: str,
+    remarks: str,
+    idempotency_key: str,
+    run_id: str | None = None,
+    threshold: float | None = None,
+    warnings: list[dict[str, object]] | None = None,
+    category: str = MAIL_CATEGORY_ALERTS,
+    audit_message: str | None = None,
+    completion_preference: str | None = None,
+) -> LoggedMailDelivery:
+    """Reserve, send, and finalize a user-visible delivery record.
+
+    The reservation is committed before SMTP. A redelivered Stage 2 task therefore
+    observes the existing idempotency key and never sends a duplicate message.
+    """
+    enabled = (
+        get_mail_preferences_from_session(session, user_id).get(completion_preference, False)
+        if completion_preference else _mail_type_enabled(session, user_id, action)
+    )
+    if not enabled:
+        details: dict[str, object] = {
+            "status": "skipped",
+            "provider_code": "EMAIL_DISABLED_BY_USER",
+            "provider_summary": "This email type is disabled in Mail settings.",
+            "preference_key": completion_preference or MAIL_PREFERENCE_BY_ACTION.get(action),
+        }
+        return LoggedMailDelivery(
+            history_id=0,
+            result=EmailSendResult(
+                sent=True,
+                code="EMAIL_DISABLED_BY_USER",
+                summary="This email type is disabled in Mail settings.",
+            ),
+            details=details,
+            deduplicated=True,
+        )
+
+    marker = f'"idempotency_key": "{idempotency_key}"'
+    existing = session.execute(
+        select(ActivityLog)
+        .where(ActivityLog.user_id == user_id)
+        .where(ActivityLog.action == action)
+        .where(ActivityLog.resource_type == MAIL_RESOURCE_TYPE)
+        .where(ActivityLog.details.contains(marker))
+        .order_by(ActivityLog.id.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    if existing is not None:
+        existing_details = _details_from_row(existing)
+        return LoggedMailDelivery(
+            history_id=int(existing.id),
+            result=_result_from_details(existing_details),
+            details=existing_details,
+            deduplicated=True,
+        )
+
+    attempted_at = _utc_iso()
+    details: dict[str, object] = {
+        "schema_version": 2,
+        "idempotency_key": idempotency_key,
+        "status": "sending",
+        "category": category,
+        "trigger": trigger,
+        "recipients": list(recipients),
+        "subject": subject,
+        "message": audit_message if audit_message is not None else text_content,
+        "remarks": remarks,
+        "run_id": run_id,
+        "threshold": threshold,
+        "warnings": warnings or [],
+        "attempted_at": attempted_at,
+        "sent_at": None,
+        "provider_code": None,
+        "provider_summary": "Delivery reserved; awaiting SMTP result.",
+        "provider_message": None,
+        "how_to_fix": [],
+    }
+    sell_action = _initial_sell_action(warnings or [], at=attempted_at)
+    if sell_action is not None:
+        details["sell_action"] = sell_action
+    row = ActivityLog(
+        user_id=user_id,
+        action=action,
+        resource_type=MAIL_RESOURCE_TYPE,
+        resource_id=None,
+        details=json.dumps(details, ensure_ascii=False),
+    )
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+
+    if sell_action is not None:
+        html_footer, text_footer = _sell_handoff_email_footer(int(row.id), sell_action)
+        html_content = f"{html_content}{html_footer}"
+        text_content = f"{text_content}{text_footer}"
+
+    results = [
+        EmailService.send_email_detailed(
+            recipient,
+            subject,
+            html_content,
+            text_content,
+        )
+        for recipient in recipients
+    ]
+    first_failure = next((result for result in results if not result.sent), None)
+    result = first_failure or EmailSendResult(
+        sent=True,
+        code="EMAIL_SENT",
+        summary="Email accepted by the SMTP provider.",
+    )
+    details.update(
+        {
+            "status": "sent" if result.sent else "failed",
+            "sent_at": _utc_iso() if result.sent else None,
+            "provider_code": result.code,
+            "provider_summary": result.summary,
+            "provider_message": result.provider_message,
+            "how_to_fix": list(result.how_to_fix),
+        }
+    )
+    row.details = json.dumps(details, ensure_ascii=False)
+    session.add(row)
+    session.commit()
+    return LoggedMailDelivery(
+        history_id=int(row.id),
+        result=result,
+        details=details,
+    )
+
+
+def send_manual_test_mail_sync(user_id: int) -> LoggedMailDelivery:
+    with SyncSessionLocal() as session:
+        return send_logged_email_sync(
+            session,
+            user_id=user_id,
+            action=MANUAL_TEST_ACTION,
+            trigger="Manual test",
+            recipients=TEST_RECIPIENTS,
+            subject=TEST_SUBJECT,
+            html_content=f"<p>{html.escape(TEST_MESSAGE)}</p>",
+            text_content=TEST_MESSAGE,
+            remarks="Manual test email sent from the Cred-X Mails screen.",
+            idempotency_key=f"manual-test:{uuid4()}",
+        )
+
+
+def notify_stage2_position_warnings_sync(
+    session: Session,
+    *,
+    user_id: int,
+    run: BullpenAutoLiveRun,
+) -> dict[str, object]:
+    stage = _completed_stage_two(run)
+    if stage is None:
+        return {"status": "stage2_not_complete"}
+
+    existing_metadata = run.audit_metadata.get("stage2_position_warning_mail")
+    if isinstance(existing_metadata, dict):
+        return existing_metadata
+
+    warnings = extract_stage2_position_warnings(run)
+    processed_at = _utc_iso()
+    if not warnings:
+        metadata: dict[str, object] = {
+            "status": "not_required",
+            "threshold": STAGE2_WARNING_THRESHOLD,
+            "breach_count": 0,
+            "stage2_completed_at": stage.completed_at,
+            "processed_at": processed_at,
+        }
+    else:
+        subject, html_content, text_content, remarks = build_stage2_warning_email(
+            run,
+            warnings,
+        )
+        delivery = send_logged_email_sync(
+            session,
+            user_id=user_id,
+            action=STAGE2_WARNING_ACTION,
+            trigger="Stage 2 active-position LLM / Bullpen odds",
+            recipients=TEST_RECIPIENTS,
+            subject=subject,
+            html_content=html_content,
+            text_content=text_content,
+            remarks=remarks,
+            idempotency_key=(
+                f"stage2-position-warning:{run.id}:"
+                f"{STAGE2_WARNING_THRESHOLD:g}:v2"
+            ),
+            run_id=run.id,
+            threshold=STAGE2_WARNING_THRESHOLD,
+            warnings=[warning.as_dict() for warning in warnings],
+        )
+        metadata = {
+            "status": str(delivery.details.get("status") or "unknown"),
+            "history_id": delivery.history_id,
+            "threshold": STAGE2_WARNING_THRESHOLD,
+            "breach_count": len(warnings),
+            "stage2_completed_at": stage.completed_at,
+            "processed_at": processed_at,
+            "deduplicated": delivery.deduplicated,
+            "provider_code": delivery.result.code,
+        }
+
+    run.audit_metadata = dict(run.audit_metadata)
+    run.audit_metadata["stage2_position_warning_mail"] = metadata
+    return metadata
+
+
+def _mail_category(action: str, details: dict[str, Any]) -> str:
+    explicit = str(details.get("category") or "").strip().lower()
+    if explicit in {MAIL_CATEGORY_RUNS, MAIL_CATEGORY_ALERTS, MAIL_CATEGORY_ACCOUNT}:
+        return explicit
+    if action in {"mail.run_completion", "mail.auto_rebalance_success"}:
+        return MAIL_CATEGORY_RUNS
+    if action == "mail.password_reset":
+        return MAIL_CATEGORY_ACCOUNT
+    return MAIL_CATEGORY_ALERTS
+
+
+def update_mail_sell_action_sync(
+    user_id: int,
+    history_id: int,
+    *,
+    action_status: str,
+    note: str | None = None,
+    market_id: str | None = None,
+    shares: float | None = None,
+    expected_proceeds: float | None = None,
+    proceeds: float | None = None,
+    transaction_url: str | None = None,
+    error: str | None = None,
+    market_question: str | None = None,
+    position_side: str | None = None,
+    live_held_side_bullpen_odds: float | None = None,
+    sell_threshold: float | None = None,
+    average_sell_price: float | None = None,
+    evaluated_at: str | None = None,
+    batch_id: str | None = None,
+) -> dict[str, object]:
+    if action_status not in SELL_ACTION_STATUSES:
+        raise ValueError("Unsupported Sell action status.")
+    with SyncSessionLocal() as session:
+        row = session.execute(
+            select(ActivityLog)
+            .where(ActivityLog.id == history_id)
+            .where(ActivityLog.user_id == user_id)
+            .where(ActivityLog.resource_type == MAIL_RESOURCE_TYPE)
+            .where(ActivityLog.action.like(f"{MAIL_ACTION_PREFIX}%"))
+            .with_for_update()
+            .limit(1)
+        ).scalar_one_or_none()
+        if row is None:
+            raise LookupError("Mail delivery was not found.")
+
+        details = _details_from_row(row)
+        sell_action = details.get("sell_action")
+        if not isinstance(sell_action, dict):
+            sell_action = _initial_sell_action(
+                details.get("warnings") or [],
+                at=row.created_at.isoformat(),
+                inferred=True,
+            )
+        if sell_action is None:
+            raise ValueError("This mail delivery does not contain a Sell action.")
+
+        current_status = str(sell_action.get("status") or "detected")
+        if action_status != current_status and action_status not in SELL_ACTION_TRANSITIONS.get(
+            current_status,
+            frozenset(),
+        ):
+            raise ValueError(
+                f"Invalid Sell action transition: {current_status} -> {action_status}."
+            )
+
+        updated_at = _utc_iso()
+        if market_id:
+            market_ids = [str(value) for value in sell_action.get("market_ids", [])]
+            if market_id not in market_ids:
+                market_ids.append(market_id)
+            sell_action["market_ids"] = market_ids
+            sell_action["evaluated_market_id"] = market_id
+
+        effective_threshold = float(
+            sell_threshold
+            if sell_threshold is not None
+            else sell_action.get("sell_threshold") or STAGE2_WARNING_THRESHOLD
+        )
+        effective_live_odds = (
+            live_held_side_bullpen_odds
+            if live_held_side_bullpen_odds is not None
+            else sell_action.get("live_held_side_bullpen_odds")
+        )
+        if action_status in {"awaiting_confirmation", "confirmed", "submitting"}:
+            if effective_live_odds is None:
+                raise ValueError(
+                    "Fresh live held-side Bullpen odds are required before this Sell action can advance."
+                )
+            if float(effective_live_odds) >= effective_threshold:
+                raise ValueError(
+                    "Sell blocked: live held-side Bullpen odds must be strictly below "
+                    f"{effective_threshold:g}%."
+                )
+        if action_status == "cleared":
+            if effective_live_odds is None or float(effective_live_odds) < effective_threshold:
+                raise ValueError(
+                    "A Sell alert can be cleared only when fresh live held-side Bullpen odds "
+                    f"are {effective_threshold:g}% or above."
+                )
+
+        eligibility_decision = "unverified"
+        if effective_live_odds is not None:
+            eligibility_decision = (
+                "eligible"
+                if float(effective_live_odds) < effective_threshold
+                else "recovered"
+            )
+        for key, value in {
+            "market_question": market_question,
+            "position_side": position_side,
+            "live_held_side_bullpen_odds": live_held_side_bullpen_odds,
+            "sell_threshold": effective_threshold,
+            "average_sell_price": average_sell_price,
+            "evaluated_at": evaluated_at or (updated_at if effective_live_odds is not None else None),
+            "batch_id": batch_id,
+            "eligibility_decision": eligibility_decision,
+            "shares": shares,
+            "expected_proceeds": expected_proceeds,
+            "proceeds": proceeds,
+            "transaction_url": transaction_url,
+            "note": note,
+            "error": error,
+        }.items():
+            if value is not None:
+                sell_action[key] = value
+        sell_action["status"] = action_status
+        sell_action["updated_at"] = updated_at
+        sell_action["inferred"] = False
+        history = sell_action.get("history")
+        if not isinstance(history, list):
+            history = []
+        if action_status != current_status:
+            history.append(
+                {
+                    "status": action_status,
+                    "at": updated_at,
+                    "note": note,
+                    "market_id": market_id,
+                    "market_question": market_question,
+                    "position_side": position_side,
+                    "live_held_side_bullpen_odds": live_held_side_bullpen_odds,
+                    "sell_threshold": effective_threshold,
+                    "average_sell_price": average_sell_price,
+                    "evaluated_at": evaluated_at,
+                    "batch_id": batch_id,
+                    "eligibility_decision": eligibility_decision,
+                    "shares": shares,
+                    "expected_proceeds": expected_proceeds,
+                    "proceeds": proceeds,
+                    "transaction_url": transaction_url,
+                    "error": error,
+                }
+            )
+        sell_action["history"] = history
+        details["schema_version"] = max(int(details.get("schema_version") or 1), 2)
+        details["sell_action"] = sell_action
+        row.details = json.dumps(details, ensure_ascii=False)
+        session.add(row)
+        session.commit()
+        return dict(sell_action)
+
+
+def list_mail_history_sync(user_id: int, *, limit: int = 100) -> list[dict[str, object]]:
+    bounded_limit = max(1, min(limit, 200))
+    with SyncSessionLocal() as session:
+        rows = (
+            session.execute(
+                select(ActivityLog)
+                .where(ActivityLog.user_id == user_id)
+                .where(ActivityLog.resource_type == MAIL_RESOURCE_TYPE)
+                .where(ActivityLog.action.like(f"{MAIL_ACTION_PREFIX}%"))
+                .order_by(ActivityLog.created_at.desc(), ActivityLog.id.desc())
+                .limit(bounded_limit)
+            )
+            .scalars()
+            .all()
+        )
+        items: list[dict[str, object]] = []
+        for row in rows:
+            details = _details_from_row(row)
+            sell_action = details.get("sell_action")
+            if not isinstance(sell_action, dict):
+                sell_action = _initial_sell_action(
+                    details.get("warnings") or [],
+                    at=row.created_at.isoformat(),
+                    inferred=True,
+                )
+            items.append(
+                {
+                    "id": int(row.id),
+                    "created_at": row.created_at.isoformat(),
+                    "status": str(details.get("status") or "unknown"),
+                    "category": _mail_category(row.action, details),
+                    "trigger": str(details.get("trigger") or row.action),
+                    "recipients": details.get("recipients") or [],
+                    "subject": str(details.get("subject") or ""),
+                    "message": str(details.get("message") or ""),
+                    "remarks": str(details.get("remarks") or ""),
+                    "run_id": details.get("run_id"),
+                    "threshold": details.get("threshold"),
+                    "warnings": details.get("warnings") or [],
+                    "attempted_at": details.get("attempted_at"),
+                    "sent_at": details.get("sent_at"),
+                    "provider_code": details.get("provider_code"),
+                    "provider_summary": details.get("provider_summary"),
+                    "provider_message": details.get("provider_message"),
+                    "how_to_fix": details.get("how_to_fix") or [],
+                    "sell_action": sell_action,
+                }
+            )
+        return items

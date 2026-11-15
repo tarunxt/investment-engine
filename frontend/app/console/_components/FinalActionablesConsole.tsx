@@ -1,26 +1,40 @@
 "use client";
+import { groupUsIdentityRows, usIdentityHolding, type VerifiedUsListing, type UsIdentity } from "@/lib/usSecurityIdentity";
+import { useReviewDialog } from "@/hooks/useReviewDialog";
+import { withFinalActionablesReadDeadline } from "@/lib/finalActionablesReadDeadline";
+import { ActionablesRunGroup, ActionablesEmptyState } from "@/components/shared/ActionablesRunGroup";
+import { mergeSummarySourceRows, originalRebalanceSources, originalSourceCell } from "@/lib/summarySourceRows";
+import type { StockSourceObservation } from "@/types/api";
 
-import { Fragment, useCallback, useEffect, useMemo, useState, type MouseEvent, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent as ReactDragEvent, type MouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import Link from "next/link";
-import { ArrowDown, ArrowLeft, ArrowUp, ChevronDown, ChevronUp, FileSpreadsheet, FunctionSquare, Info, RefreshCw, X } from "lucide-react";
+import { RecommendationAuditPanel } from "@/components/RecommendationAuditPanel";
+import { CollapsedSection } from "@/components/CollapsedSection";
+import { StockScanHistory } from "@/components/StockScanHistory";
+import { AlertTriangle, ArrowDown, ArrowLeft, ArrowUp, ChevronDown, ChevronRight, ChevronUp, FileSpreadsheet, FunctionSquare, Info, RefreshCw, Triangle, X } from "lucide-react";
 
 import {
   parseInvestmentRecommendationContent,
   REBALANCE_HEADER_ORDER,
+  type CanonicalHeader,
   type CanonicalRow,
   type RebalanceHeader,
 } from "@/components/InvestmentRecommendationTable";
 import { EventScanRunControls } from "@/components/shared/EventScanRunControls";
 import { ScanHistoryButton } from "@/components/shared/ScanHistoryButton";
 import { PortfolioAnalysisNav } from "@/components/shared/PortfolioAnalysisNav";
+import { OperationalErrorNotice, normalizeOperationalErrorMessage } from "@/components/shared/OperationalErrorNotice";
+import { AllocationScoreContext } from "@/components/AllocationScoreContext";
 import { TradingViewSymbolLink } from "@/components/shared/TradingViewSymbolLink";
+import { TradingViewUrlListButton } from "@/components/shared/TradingViewUrlListButton";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
-  inferRebalanceMarketFromPrompt,
   type RebalancePortfolioKey,
 } from "@/lib/rebalance";
 import type { SwingTradeMarket } from "@/lib/swingTrade";
+import { getAnalysisRunIdentity, isAnalysisRunForStage } from "@/lib/rebalanceRunIdentity";
 import {
   BULLISH_SETUPS,
   BEARISH_SETUPS,
@@ -28,6 +42,20 @@ import {
   type SetupRow,
 } from "@/lib/technicalSetups";
 import { STANDARD_ACTION_ORDER, getStandardActionBadgeClass } from "@/lib/actionColorScheme";
+import {
+  formatUsdAsVerifiedInr,
+  isVerifiedFxRate,
+} from "@/lib/fxPresentation";
+import {
+  calculateWeightedRationaleScore,
+  getMissingScoreDenominatorWeight,
+  getScoreMatrixRowOutOfBoundsDenominatorWeight,
+  isScoreMatrixRowOutOfBounds,
+  type ScoreMatrixWeightedRow,
+} from "@/lib/scoreMatrixMath";
+import { getAutoRebalanceRunDisplayLabel } from "@/lib/runPresentation";
+import { writeOptionalBrowserCache } from "@/lib/optionalBrowserCache";
+import { formatConsolidatedQuantityCell } from "@/lib/actionableQuantityDisplay";
 import { URLs } from "@/lib/urls";
 import { cn } from "@/lib/utils";
 import { useUsdInrRate } from "@/hooks/useUsdInrRate";
@@ -36,10 +64,16 @@ import type {
   IndMoneyUsEventsAnalysis,
   IndMoneyUsPortfolioSnapshotDetail,
   IndMoneyUsThreatAnalysis,
+  FinalActionableHistoryCreateItem,
+  FinalActionableHistoryItem,
+  HistoricalScoreEvidenceResponse,
+  HistoricalScoreObservation,
   PortfolioAnalysisHistoryItem,
   ProviderModelTarget,
+  RunListItem,
   RunResponse,
   ZerodhaEventsAnalysis,
+  ZerodhaOrder,
   ZerodhaPortfolioSnapshotDetail,
   ZerodhaThreatAnalysis,
 } from "@/types/api";
@@ -49,6 +83,7 @@ export type ActionCategory = "Sell All" | "Trim" | "Hold" | "Add more" | "Buy Ne
 type LlmMeta = {
   runId: number;
   jobId: number;
+  runLabel: string;
   provider: string;
   model: string;
   createdAt: string;
@@ -61,12 +96,52 @@ type LlmBreakupRow = {
   meta: LlmMeta;
 };
 
+type ActionablesInputSelectionKind = "rebalance" | "technical";
+
+type ActionablesInputCandidate = {
+  id: string;
+  kind: ActionablesInputSelectionKind;
+  label: string;
+  jobNo: string;
+  timestamp: string | null;
+  status: string;
+  costUsd: number | null;
+  error: string | null;
+  runId: number;
+  jobId: number;
+  runLabel: string;
+  market: SwingTradeMarket;
+};
+
 type ConsensusBreakupEntry = {
+  sourceRows?: LlmBreakupRow[];
   meta: LlmMeta;
   row: LlmBreakupRow | null;
 };
 
-type ActionEstimate = {
+type SwingScanBreakupEntry = {
+  meta: LlmMeta;
+  row: CanonicalRow;
+};
+
+type SwingScanParseCache = Map<RunResponse, Map<
+  NonNullable<RunResponse["run_jobs"]>[number],
+  ReturnType<typeof parseInvestmentRecommendationContent>
+>>;
+
+function getInputMarketLabel(market?: SwingTradeMarket) {
+  if (market === "india") return "India";
+  if (market === "us") return "US";
+  return "Market unknown";
+}
+
+function getInputMarketBadgeClass(market?: SwingTradeMarket) {
+  if (market === "india") return "border-orange-200 bg-orange-50 text-orange-800";
+  if (market === "us") return "border-indigo-200 bg-indigo-50 text-indigo-800";
+  return "border-slate-200 bg-slate-50 text-slate-600";
+}
+
+export type ActionEstimate = {
   currentUnits: number | null;
   currentInvestmentAmount: number | null;
   units: number | null;
@@ -79,6 +154,13 @@ type CurrentValueSnapshot = {
 };
 
 type CurrentValueSnapshotMap = Map<string, CurrentValueSnapshot>;
+
+type PositionContext = {
+  source: "portfolio-snapshot" | "captured-model-rows";
+  holdingMatch?: "matched" | "absent" | "unresolved";
+  currentUnits: number | null;
+  currentInvestmentAmount: number | null;
+};
 
 type ScoreMatrixEntry = {
   id: string;
@@ -101,12 +183,43 @@ type ScoreMatrixRuleEvaluation = {
   matched: boolean;
 };
 
-type DetailedRationaleScoreRow = {
+type DetailedRationaleScoreRow = ScoreMatrixWeightedRow & {
   id: string;
   parameter: string;
-  score: number | null;
-  multiplier: number;
-  denominatorWeight?: number;
+  missingReason?: string;
+};
+
+type ScoreMatrixValidationIssue = {
+  id: string;
+  parameter: string;
+  message: string;
+};
+
+export type ScoreMatrixValidationSummary = {
+  rawScore: number | null;
+  displayScore: number | null;
+  finalScoreOutOfRange: boolean;
+  finalScoreMessage: string | null;
+  rangeIssues: ScoreMatrixValidationIssue[];
+  parameterIssues: ScoreMatrixValidationIssue[];
+  hasIssues: boolean;
+};
+
+type TechnicalScanMultiplierKey = "bullish" | "bearish";
+
+type ScoreSymbolThresholdKey = "strongPositive" | "positive" | "weakPositive" | "weakNegative" | "negative" | "strongNegative";
+
+export type ScoreMatrixFormulaConfig = {
+  detailedRationaleMultipliers: Record<string, number>;
+  detailedRationaleDenominator: number | null;
+  actionScores: Record<ActionCategory, number>;
+  technicalScanMultipliers: Record<TechnicalScanMultiplierKey, number>;
+  scoreSymbolThresholds: Record<ScoreSymbolThresholdKey, number>;
+};
+
+export type ActionablesCalculationFocusTarget = {
+  stockKey: string;
+  header: ActionablesCalculationHeader;
 };
 
 type ActionablesCalculationRowGroup = {
@@ -131,9 +244,11 @@ type ScoreMatrixContext = {
   bearishMeanUnits: number | null;
 };
 
-type ScoreMatrixDetail = {
+export type ScoreMatrixDetail = {
+  calculationPolicy?: string;
   stockKey: string;
   stockSymbol: string;
+  stockName: string;
   stockExchange: string;
   currentUnits: number | null;
   modeAction: ActionCategory | null;
@@ -150,6 +265,13 @@ type ScoreMatrixDetail = {
   detailedRationaleRows: DetailedRationaleScoreRow[];
   detailedRationaleFinalScore: number | null;
   detailedRationaleDenominator: number;
+  rebalanceSourceLabel: string | null;
+  rebalanceSourceRunId: number | null;
+  technicalScanSourceLabel: string | null;
+  technicalScanSourceRunId: number | null;
+  technicalScanSourceJobId?: number | null;
+  historicalReadNotes?: string[];
+  historicalEvidence?: HistoricalScoreEvidenceResponse;
 };
 
 export type SetupStockDetail = {
@@ -217,6 +339,10 @@ export function getSetupStockActionClasses(action: ActionCategory) {
 }
 
 export type StockConsensus = {
+  usIdentity?: UsIdentity;
+  identityIssue?: string | null;
+  sourceRowLinks?: {runId:number;jobId:number;rowIndex:number;originalExchange:string;originalSymbol:string}[];
+  consensusRows?: LlmBreakupRow[];
   key: string;
   exchange: string;
   symbol: string;
@@ -225,17 +351,22 @@ export type StockConsensus = {
   actionAverages: Record<ActionCategory, ActionEstimate>;
   totalSuggestions: number;
   representative: CanonicalRow;
+  positionContext: PositionContext;
   rows: LlmBreakupRow[];
   breakupEntries: ConsensusBreakupEntry[];
+  swingScanEntries: SwingScanBreakupEntry[];
 };
 
-type TechnicalScanResult = {
+export type TechnicalScanResult = {
+  market?: SwingTradeMarket | null;
   stockSymbol: string;
   exchangeSymbol: string;
   primarySetup: string;
   secondarySetups: string;
   confidenceScore: string;
   bias: "bullish" | "bearish" | "neutral";
+  premarketTrend: string;
+  last5CandlesTrend: string;
   triggerLevel: string;
   invalidationLevel: string;
   runId: number;
@@ -243,16 +374,125 @@ type TechnicalScanResult = {
   provider: string;
   model: string;
   createdAt: string;
+  runLabel: string;
 };
 
-type TechnicalScanMap = Record<string, TechnicalScanResult>;
+export type TechnicalScanMap = Record<string, TechnicalScanResult>;
 
-type StockDetailsData = {
+type TechnicalScanParseCache = Map<NonNullable<RunResponse["run_jobs"]>[number], {
+  response: string;
+  metadataKey: string;
+  rows: TechnicalScanResult[];
+}>;
+
+export type StockDetailsData = {
   portfolioSnapshot: ZerodhaPortfolioSnapshotDetail | IndMoneyUsPortfolioSnapshotDetail | null;
   eventsAnalysis: ZerodhaEventsAnalysis | IndMoneyUsEventsAnalysis | null;
   threatsAnalysis: ZerodhaThreatAnalysis | IndMoneyUsThreatAnalysis | null;
   error: string | null;
 };
+
+
+
+type ZerodhaBuyTransaction = {
+  orderId: string;
+  units: number;
+  price: number;
+  timestamp: string | null;
+};
+
+function isZerodhaPortfolioSnapshot(
+  snapshot: ZerodhaPortfolioSnapshotDetail | IndMoneyUsPortfolioSnapshotDetail | null,
+): snapshot is ZerodhaPortfolioSnapshotDetail {
+  return Boolean(snapshot && Array.isArray((snapshot as ZerodhaPortfolioSnapshotDetail).holdings) && (snapshot as ZerodhaPortfolioSnapshotDetail).positions);
+}
+
+function getZerodhaHoldingForStock(
+  snapshot: ZerodhaPortfolioSnapshotDetail | IndMoneyUsPortfolioSnapshotDetail | null,
+  stock: StockConsensus,
+) {
+  if (!isZerodhaPortfolioSnapshot(snapshot)) return null;
+  const symbol = stock.symbol.trim().toUpperCase();
+  return snapshot.holdings.find((holding) => holding.tradingsymbol.trim().toUpperCase() === symbol
+    && holding.exchange.trim().toUpperCase() === stock.exchange.trim().toUpperCase()) ?? null;
+}
+
+function getZerodhaBuyTransactionsForStock(orders: ZerodhaOrder[], stock: StockConsensus): ZerodhaBuyTransaction[] {
+  const symbol = stock.symbol.trim().toUpperCase();
+  return orders
+    .filter((order) => {
+      const isCompletedBuy = order.status?.toUpperCase() === "COMPLETE" && order.transaction_type?.toUpperCase() === "BUY";
+      return isCompletedBuy && order.tradingsymbol?.trim().toUpperCase() === symbol
+        && order.exchange?.trim().toUpperCase() === stock.exchange.trim().toUpperCase()
+        && (order.filled_quantity || order.quantity) > 0;
+    })
+    .map((order) => ({
+      orderId: order.order_id,
+      units: order.filled_quantity || order.quantity,
+      price: Number(order.average_price || order.price || 0),
+      timestamp: order.order_timestamp || order.exchange_timestamp || order.exchange_update_timestamp || null,
+    }))
+    .sort((a, b) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime());
+}
+
+function ZerodhaBuyTransactionValue({
+  transactions,
+  fallbackAveragePrice,
+}: {
+  transactions: ZerodhaBuyTransaction[];
+  fallbackAveragePrice: number | null;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const latest = transactions[0];
+  if (!latest) {
+    return fallbackAveragePrice != null && Number.isFinite(fallbackAveragePrice) && fallbackAveragePrice >= 0 ? <span>{formatDisplayAmount(fallbackAveragePrice, "india")} avg holding price</span> : <span>—</span>;
+  }
+
+  const renderTransaction = (transaction: ZerodhaBuyTransaction) => {
+    const timestampLabel = transaction.timestamp ? formatDateTime(transaction.timestamp) : "time not provided by Zerodha";
+    return (
+      <span className="whitespace-nowrap">
+        {formatDisplayAmount(transaction.price, "india")} · {transaction.units.toLocaleString("en-IN")} units · {timestampLabel}
+      </span>
+    );
+  };
+
+  const olderTransactions = transactions.slice(1);
+
+  return (
+    <span className="relative inline-flex max-w-full items-center gap-1">
+      {renderTransaction(latest)}
+      {olderTransactions.length > 0 ? (
+        <>
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              setExpanded((current) => !current);
+            }}
+            className="inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-full border border-blue-200 bg-white text-blue-700 transition hover:border-blue-400 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            aria-label="Show older Zerodha buy transactions"
+            title="Show older buy transactions"
+          >
+            <ChevronDown className={cn("size-4 transition-transform", expanded ? "rotate-180" : "")} />
+          </button>
+          {expanded ? (
+            <div className="absolute left-0 top-8 z-20 min-w-max rounded-lg border border-blue-100 bg-white p-2 text-xs text-gray-700 shadow-xl">
+              <p className="mb-1 font-semibold text-blue-950">Older buy transactions</p>
+              <div className="space-y-1">
+                {olderTransactions.map((transaction) => (
+                  <div key={transaction.orderId} className="rounded-md bg-blue-50/70 px-2 py-1">
+                    {renderTransaction(transaction)}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </>
+      ) : null}
+    </span>
+  );
+}
 
 const TECHNICAL_SCAN_MARKER = "## Technical Scan Input Bundle";
 const TECHNICAL_SCAN_TABLE_COLUMNS = [
@@ -261,6 +501,8 @@ const TECHNICAL_SCAN_TABLE_COLUMNS = [
   "Primary Setup",
   "Secondary Setups",
   "Bias",
+  "Premarket trend",
+  "Last 5 candles trend",
   "Confidence Score",
   "Trigger Level",
   "Invalidation Level",
@@ -273,7 +515,12 @@ const TECHNICAL_SCAN_ACTIVE_STATUSES = new Set([
 const TECHNICAL_SCAN_POLL_INTERVAL_MS = 5000;
 
 
-const FINAL_ACTIONABLES_RUN_CACHE_VERSION = 1;
+const FINAL_ACTIONABLES_RUN_CACHE_VERSION = 2;
+const DASHBOARD_FINAL_ACTIONABLES_CACHE_VERSION = 2;
+const DASHBOARD_FINAL_ACTIONABLES_CACHE_MAX_AGE_MS = 12 * 60 * 60 * 1000;
+const HISTORICAL_ACTION_ROWS_CACHE_VERSION = 4;
+const HISTORICAL_ACTION_ROWS_CACHE_LIMIT = 400;
+const DASHBOARD_FINAL_ACTIONABLES_CACHE_KEY = `investment-engine:dashboard:final-actionables:v${DASHBOARD_FINAL_ACTIONABLES_CACHE_VERSION}`;
 
 type CachedFinalActionablesRuns = {
   version: number;
@@ -281,8 +528,18 @@ type CachedFinalActionablesRuns = {
   runs: RunResponse[];
 };
 
+type CachedDashboardFinalActionables = {
+  version: number;
+  cachedAt: number;
+  runs: RunResponse[];
+  portfolioSnapshots: {
+    india: ZerodhaPortfolioSnapshotDetail | null;
+    us: IndMoneyUsPortfolioSnapshotDetail | null;
+  };
+};
+
 function buildFinalActionablesCacheKey(portfolio: RebalancePortfolioKey, market: SwingTradeMarket) {
-  return `investor:final-actionables:runs:${portfolio}:${market}:v${FINAL_ACTIONABLES_RUN_CACHE_VERSION}`;
+  return `investment-engine:final-actionables:runs:${portfolio}:${market}:v${FINAL_ACTIONABLES_RUN_CACHE_VERSION}`;
 }
 
 function readFinalActionablesRunCache(cacheKey: string) {
@@ -308,12 +565,11 @@ function writeFinalActionablesRunCache(cacheKey: string, runs: RunResponse[]) {
   if (typeof window === "undefined") return;
 
   try {
-    const payload: CachedFinalActionablesRuns = {
+    writeOptionalBrowserCache(cacheKey, (): CachedFinalActionablesRuns => ({
       version: FINAL_ACTIONABLES_RUN_CACHE_VERSION,
       cachedAt: Date.now(),
       runs,
-    };
-    window.localStorage.setItem(cacheKey, JSON.stringify(payload));
+    }));
   } catch (error) {
     console.warn("Failed to cache final actionables runs:", error);
   }
@@ -334,7 +590,7 @@ function selectCacheableFinalActionablesRuns(runs: RunResponse[], market: SwingT
   }
 
   runs
-    .filter((run) => run.prompt?.includes(TECHNICAL_SCAN_MARKER))
+    .filter((run) => isAnalysisRunForStage(run, "technical"))
     .forEach((run) => cacheableRuns.set(run.id, run));
 
   return Array.from(cacheableRuns.values()).sort((a, b) => b.id - a.id);
@@ -342,6 +598,133 @@ function selectCacheableFinalActionablesRuns(runs: RunResponse[], market: SwingT
 
 function cacheFinalActionablesRuns(cacheKey: string, runs: RunResponse[], market: SwingTradeMarket) {
   writeFinalActionablesRunCache(cacheKey, selectCacheableFinalActionablesRuns(runs, market));
+}
+
+function getHistoricalActionRowsCacheKey(market: SwingTradeMarket) {
+  return `investment-engine:final-actionables:historical-rows:${market}:v${HISTORICAL_ACTION_ROWS_CACHE_VERSION}`;
+}
+
+function readHistoricalActionRowsCache(market: SwingTradeMarket) {
+  if (typeof window === "undefined") return [] as HistoricalDashboardActionRow[];
+
+  try {
+    const raw = window.localStorage.getItem(getHistoricalActionRowsCacheKey(market));
+    if (!raw) return [] as HistoricalDashboardActionRow[];
+
+    const parsed = JSON.parse(raw) as { version?: number; rows?: HistoricalDashboardActionRow[] };
+    if (parsed.version !== HISTORICAL_ACTION_ROWS_CACHE_VERSION || !Array.isArray(parsed.rows)) {
+      return [] as HistoricalDashboardActionRow[];
+    }
+
+    return parsed.rows;
+  } catch (error) {
+    console.warn("Failed to restore cached final actionables history rows:", error);
+    return [] as HistoricalDashboardActionRow[];
+  }
+}
+
+function getHistoricalActionRowCacheId(row: HistoricalDashboardActionRow) {
+  return `${row.market}:${row.runId}:${normalizeStockSymbol(row.stock.symbol || row.stock.key)}`;
+}
+
+function mergeHistoricalActionRows(
+  ...rowGroups: HistoricalDashboardActionRow[][]
+) {
+  const merged = new Map<string, HistoricalDashboardActionRow>();
+  rowGroups.flat().forEach((row) => {
+    const key = getHistoricalActionRowCacheId(row);
+    const existing = merged.get(key);
+    if (!existing || parseTimestampMs(row.coveredAt) > parseTimestampMs(existing.coveredAt)) {
+      merged.set(key, row);
+    }
+  });
+  return Array.from(merged.values()).sort(
+    (left, right) => parseTimestampMs(right.coveredAt) - parseTimestampMs(left.coveredAt),
+  );
+}
+
+function writeHistoricalActionRowsCache(market: SwingTradeMarket, rows: HistoricalDashboardActionRow[]) {
+  if (typeof window === "undefined") return;
+
+  try {
+    writeOptionalBrowserCache(getHistoricalActionRowsCacheKey(market), () => {
+      const cacheableRows = mergeHistoricalActionRows(
+        rows,
+        readHistoricalActionRowsCache(market),
+      ).slice(0, HISTORICAL_ACTION_ROWS_CACHE_LIMIT);
+      return {
+        version: HISTORICAL_ACTION_ROWS_CACHE_VERSION,
+        cachedAt: Date.now(),
+        rows: cacheableRows,
+      };
+    });
+  } catch (error) {
+    console.warn("Failed to cache final actionables history rows:", error);
+  }
+}
+
+
+function readDashboardFinalActionablesCache() {
+  if (typeof window === "undefined") return null;
+
+  try {
+    const raw = window.localStorage.getItem(DASHBOARD_FINAL_ACTIONABLES_CACHE_KEY);
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw) as Partial<CachedDashboardFinalActionables>;
+    if (
+      parsed.version !== DASHBOARD_FINAL_ACTIONABLES_CACHE_VERSION ||
+      !Number.isFinite(parsed.cachedAt) ||
+      Date.now() - (parsed.cachedAt ?? 0) >
+        DASHBOARD_FINAL_ACTIONABLES_CACHE_MAX_AGE_MS ||
+      !Array.isArray(parsed.runs) ||
+      !parsed.runs.every(
+        (run) =>
+          run &&
+          typeof run === "object" &&
+          typeof run.id === "number" &&
+          Array.isArray(run.run_jobs),
+      ) ||
+      !parsed.portfolioSnapshots
+    ) {
+      return null;
+    }
+
+    return {
+      cachedAt: parsed.cachedAt as number,
+      runs: parsed.runs,
+      portfolioSnapshots: {
+        india: parsed.portfolioSnapshots.india ?? null,
+        us: parsed.portfolioSnapshots.us ?? null,
+      },
+    };
+  } catch (error) {
+    console.warn("Failed to restore cached dashboard final actionables:", error);
+    return null;
+  }
+}
+
+function writeDashboardFinalActionablesCache(
+  runs: RunResponse[],
+  portfolioSnapshots: CachedDashboardFinalActionables["portfolioSnapshots"],
+) {
+  if (typeof window === "undefined") return;
+
+  try {
+    writeOptionalBrowserCache(DASHBOARD_FINAL_ACTIONABLES_CACHE_KEY, (): CachedDashboardFinalActionables => {
+      const cacheableRuns = new Map<number, RunResponse>();
+      selectCacheableFinalActionablesRuns(runs, "india").forEach((run) => cacheableRuns.set(run.id, run));
+      selectCacheableFinalActionablesRuns(runs, "us").forEach((run) => cacheableRuns.set(run.id, run));
+      return {
+        version: DASHBOARD_FINAL_ACTIONABLES_CACHE_VERSION,
+        cachedAt: Date.now(),
+        runs: Array.from(cacheableRuns.values()).sort((a, b) => b.id - a.id),
+        portfolioSnapshots,
+      };
+    });
+  } catch (error) {
+    console.warn("Failed to cache dashboard final actionables:", error);
+  }
 }
 
 function getTechnicalSetupsHref(setup?: string | null) {
@@ -387,7 +770,7 @@ function TechnicalSetupLink({
     return (
       <button
         type="button"
-        className={cn("text-left underline-offset-4 transition hover:text-blue-700 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500", className)}
+        className={cn("cursor-pointer text-left underline-offset-4 transition hover:text-blue-700 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500", className)}
         onClick={(event) => {
           event.stopPropagation();
           onSetupClick(setupGroup);
@@ -401,7 +784,7 @@ function TechnicalSetupLink({
   return (
     <Link
       href={getTechnicalSetupsHref(setup)}
-      className={cn("underline-offset-4 transition hover:text-blue-700 hover:underline", className)}
+      className={cn("cursor-pointer underline-offset-4 transition hover:text-blue-700 hover:underline", className)}
       onClick={stopRowToggle}
     >
       {label}
@@ -433,6 +816,40 @@ const REBALANCE_DISPLAY_HEADERS = [
   ...REBALANCE_HEADER_ORDER.slice(3),
 ] as const;
 
+const SWING_SCAN_BREAKUP_HEADERS: CanonicalHeader[] = [
+  "LLM Name + Model",
+  "Exchange Symbol",
+  "Stock Symbol",
+  "Stock Name",
+  "Technical Setup",
+  "Entry Range",
+  "Stop Loss",
+  "Target",
+  "Analyst Source",
+  "Units to Buy",
+  "Price per Unit",
+  "Total Buy Amount",
+  "Upside Horizon (%)",
+  "Weeks",
+  "Confidence Score (0-100)",
+  "Rationale Cruxx",
+  "Score Rationale Cruxx",
+  "Rationale Technical Setup Short Term 1–3 Months",
+  "Score Rationale Technical Setup Short Term 1–3 Months",
+  "Rationale - Technical Setup (Medium Term)",
+  "Score Rationale - Technical Setup (Medium Term)",
+  "Rationale - Technical Setup (Long Term)",
+  "Score Rationale - Technical Setup (Long Term)",
+  "Rationale - Fundamentals Short Term",
+  "Score Rationale - Fundamentals Short Term",
+  "Rationale - Fundamentals Medium/Long Term",
+  "Score Rationale - Fundamentals Medium/Long Term",
+  "Run #",
+  "Run Date",
+  "Run Time",
+  "LLM",
+];
+
 const CONSOLIDATED_DISPLAY_HEADERS = [
   "Current Units",
   CURRENT_INVESTMENT_AMOUNT_HEADER,
@@ -440,6 +857,8 @@ const CONSOLIDATED_DISPLAY_HEADERS = [
   "Units to Sell/Buy",
   "Amount",
   "Technical Setup",
+  "Premarket trend",
+  "Last 5 candles trend",
   "Confidence Score",
   ...REBALANCE_HEADER_ORDER.filter(
     (header) =>
@@ -499,15 +918,15 @@ const ACTION_SCORE_BY_CATEGORY: Record<ActionCategory, number> = {
   "Buy New": 2,
 };
 
-const ACTION_SCORE_TABLE_ROWS: Array<{ label: string; score: number }> = [
-  { label: "Sell All", score: -2.5 },
-  { label: "Trim", score: -1.5 },
-  { label: "Hold", score: 0 },
-  { label: "Buy / Buy New", score: 1.5 },
-  { label: "Add/Add more", score: 2.5 },
+const ACTION_SCORE_TABLE_ROWS: Array<{ label: string; category: ActionCategory }> = [
+  { label: "Sell All", category: "Sell All" },
+  { label: "Trim", category: "Trim" },
+  { label: "Hold", category: "Hold" },
+  { label: "Buy / Buy New", category: "Buy New" },
+  { label: "Add/Add more", category: "Add more" },
 ];
 
-const DETAILED_RATIONALE_ACTION_SCORE_BY_CATEGORY: Record<ActionCategory, number> = {
+const DEFAULT_DETAILED_RATIONALE_ACTION_SCORE_BY_CATEGORY: Record<ActionCategory, number> = {
   "Sell All": -2.5,
   Trim: -1.5,
   Hold: 0,
@@ -515,10 +934,169 @@ const DETAILED_RATIONALE_ACTION_SCORE_BY_CATEGORY: Record<ActionCategory, number
   "Add more": 2.5,
 };
 
-const TECHNICAL_SCAN_MULTIPLIER_ROWS: Array<{ label: string; multiplier: number }> = [
-  { label: "Bullish", multiplier: 1 },
-  { label: "Bearish", multiplier: -1 },
+const SCORE_GUARDRAIL_MIN = -3;
+const SCORE_GUARDRAIL_MAX = 3;
+const TECHNICAL_SCAN_CONFIDENCE_MIN = 0;
+const TECHNICAL_SCAN_CONFIDENCE_MAX = 10;
+
+const TECHNICAL_SCAN_MULTIPLIER_ROWS: Array<{ label: string; key: TechnicalScanMultiplierKey }> = [
+  { label: "Bullish", key: "bullish" },
+  { label: "Bearish", key: "bearish" },
 ];
+
+const DEFAULT_SCORE_SYMBOL_THRESHOLDS: Record<ScoreSymbolThresholdKey, number> = {
+  strongPositive: 2,
+  positive: 1,
+  weakPositive: 0,
+  weakNegative: -1,
+  negative: -2,
+  strongNegative: -3,
+};
+
+const SCORE_SYMBOL_THRESHOLD_ROWS: Array<{ key: ScoreSymbolThresholdKey; label: string }> = [
+  { key: "strongPositive", label: "Green up minimum" },
+  { key: "positive", label: "Light green up minimum" },
+  { key: "weakPositive", label: "Yellow up minimum" },
+  { key: "weakNegative", label: "Yellow down minimum" },
+  { key: "negative", label: "Light red down minimum" },
+  { key: "strongNegative", label: "Red down minimum" },
+];
+
+export const DEFAULT_SCORE_MATRIX_FORMULA_CONFIG: ScoreMatrixFormulaConfig = {
+  detailedRationaleMultipliers: {
+    cruxx: 3,
+    "technical-short": 3,
+    "technical-medium": 2,
+    "technical-long": 1,
+    "fundamentals-short": 3,
+    "fundamentals-medium-long": 1,
+    "technical-scan-confidence": 1,
+    "premarket-trend": 0,
+    "last-5-candles-trend": 5,
+    "mean-mode-action": 4,
+  },
+  detailedRationaleDenominator: null,
+  actionScores: DEFAULT_DETAILED_RATIONALE_ACTION_SCORE_BY_CATEGORY,
+  technicalScanMultipliers: {
+    bullish: 1,
+    bearish: -1,
+  },
+  scoreSymbolThresholds: DEFAULT_SCORE_SYMBOL_THRESHOLDS,
+};
+
+const SCORE_MATRIX_FORMULA_CONFIG_STORAGE_KEY = "investment-engine:final-actionables:score-matrix-formula-config:v1";
+
+const DASHBOARD_WORKFLOW_STORAGE_KEY = "investment-engine:rebalance-workflow-state:v1";
+
+type DashboardActionablesRefreshDetail = {
+  market?: SwingTradeMarket;
+  completedAt?: string | null;
+};
+
+function readDashboardActionablesCompletedAt(market: SwingTradeMarket) {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(DASHBOARD_WORKFLOW_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as {
+      states?: Partial<Record<"zerodha" | "indmoneyUs", {
+        actionables?: { completedAt?: string | null; endedAt?: string | null };
+      }>>;
+    };
+    const portfolio = market === "us" ? "indmoneyUs" : "zerodha";
+    const actionables = parsed.states?.[portfolio]?.actionables;
+    return actionables?.completedAt ?? actionables?.endedAt ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function readDashboardActionablesCompletedAtByMarket() {
+  return {
+    india: readDashboardActionablesCompletedAt("india"),
+    us: readDashboardActionablesCompletedAt("us"),
+  } satisfies Record<SwingTradeMarket, string | null>;
+}
+
+export function normalizeScoreMatrixFormulaConfig(
+  config?: Partial<ScoreMatrixFormulaConfig> | null,
+): ScoreMatrixFormulaConfig {
+  const detailedRationaleMultipliers = {
+    ...DEFAULT_SCORE_MATRIX_FORMULA_CONFIG.detailedRationaleMultipliers,
+  };
+  if (config?.detailedRationaleMultipliers) {
+    Object.entries(config.detailedRationaleMultipliers).forEach(([key, value]) => {
+      if (Number.isFinite(value)) detailedRationaleMultipliers[key] = value;
+    });
+  }
+
+  const actionScores = { ...DEFAULT_SCORE_MATRIX_FORMULA_CONFIG.actionScores };
+  if (config?.actionScores) {
+    ACTION_CATEGORIES.forEach((action) => {
+      const value = config.actionScores?.[action];
+      if (Number.isFinite(value)) actionScores[action] = value as number;
+    });
+  }
+
+  const technicalScanMultipliers = { ...DEFAULT_SCORE_MATRIX_FORMULA_CONFIG.technicalScanMultipliers };
+  if (config?.technicalScanMultipliers) {
+    TECHNICAL_SCAN_MULTIPLIER_ROWS.forEach((row) => {
+      const value = config.technicalScanMultipliers?.[row.key];
+      if (Number.isFinite(value)) technicalScanMultipliers[row.key] = value as number;
+    });
+  }
+
+  const scoreSymbolThresholds = { ...DEFAULT_SCORE_SYMBOL_THRESHOLDS };
+  if (config?.scoreSymbolThresholds) {
+    SCORE_SYMBOL_THRESHOLD_ROWS.forEach((row) => {
+      const value = config.scoreSymbolThresholds?.[row.key];
+      if (Number.isFinite(value)) scoreSymbolThresholds[row.key] = value as number;
+    });
+  }
+
+  const denominator = config?.detailedRationaleDenominator;
+
+  return {
+    detailedRationaleMultipliers,
+    detailedRationaleDenominator:
+      typeof denominator === "number" && Number.isFinite(denominator) ? denominator : null,
+    actionScores,
+    technicalScanMultipliers,
+    scoreSymbolThresholds,
+  };
+}
+
+export function loadScoreMatrixFormulaConfig() {
+  if (typeof window === "undefined") return DEFAULT_SCORE_MATRIX_FORMULA_CONFIG;
+
+  try {
+    const raw = window.localStorage.getItem(SCORE_MATRIX_FORMULA_CONFIG_STORAGE_KEY);
+    if (!raw) return DEFAULT_SCORE_MATRIX_FORMULA_CONFIG;
+    return normalizeScoreMatrixFormulaConfig(JSON.parse(raw));
+  } catch (error) {
+    console.warn("Failed to restore score matrix formula config:", error);
+    return DEFAULT_SCORE_MATRIX_FORMULA_CONFIG;
+  }
+}
+
+export function saveScoreMatrixFormulaConfig(config: ScoreMatrixFormulaConfig) {
+  if (typeof window === "undefined") return;
+
+  try {
+    window.localStorage.setItem(
+      SCORE_MATRIX_FORMULA_CONFIG_STORAGE_KEY,
+      JSON.stringify(normalizeScoreMatrixFormulaConfig(config)),
+    );
+  } catch (error) {
+    console.warn("Failed to save score matrix formula config:", error);
+  }
+}
+
+function parseFiniteDraft(value: string) {
+  if (value.trim() === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
 
 
 function ActionablesCalculationsIcon({ className }: { className?: string }) {
@@ -608,6 +1186,44 @@ function formatJobRunTimestamp(meta: LlmMeta) {
   return `#${meta.jobId} / #${meta.runId} (${formatDateTime(meta.createdAt)})`;
 }
 
+function RunJobLink({
+  runId,
+  children,
+  className,
+}: {
+  runId: number;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <Link
+      href={URLs.routes.console.runDetail(runId)}
+      className={cn("cursor-pointer underline-offset-4 transition hover:text-blue-700 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500", className)}
+      onClick={stopRowToggle}
+    >
+      {children}
+    </Link>
+  );
+}
+
+
+function getInputStatusBadgeClass(status?: string | null) {
+  const normalized = (status || "").toLowerCase();
+  if (["reserved", "queued", "pending"].includes(normalized)) {
+    return "bg-blue-50 text-blue-700 ring-blue-200";
+  }
+  if (normalized === "partial") {
+    return "bg-amber-50 text-amber-700 ring-amber-200";
+  }
+  if (normalized === "completed" || normalized === "synced" || normalized === "parsed") {
+    return "bg-emerald-50 text-emerald-700 ring-emerald-200";
+  }
+  if (normalized === "failed" || normalized === "error") {
+    return "bg-red-50 text-red-700 ring-red-200";
+  }
+  return "bg-slate-100 text-slate-700 ring-slate-200";
+}
+
 function normalizeAction(value: string): ActionCategory | null {
   const action = value
     .toLowerCase()
@@ -630,6 +1246,21 @@ function parseNumericCell(value?: string | null) {
   if (!match) return null;
   const parsed = Number(match[0]);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function parseStrictNumericCell(value?: string | null) {
+  const normalized = String(value || "")
+    .replace(/,/g, "")
+    .trim();
+  if (!/^-?\d+(?:\.\d+)?$/.test(normalized)) return null;
+
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function parseRationaleScoreCell(value?: string | null) {
+  const parsed = parseStrictNumericCell(value);
+  return parsed !== null && parsed >= -3 && parsed <= 3 ? parsed : null;
 }
 
 function average(values: number[]) {
@@ -695,6 +1326,7 @@ function buildCurrentValueSnapshotMap(
       };
       indexCurrentValueSnapshot(map, holding.tradingsymbol, value);
       indexCurrentValueSnapshot(map, `${holding.exchange}:${holding.tradingsymbol}`, value);
+      map.set(`@VENUE:${holding.exchange.trim().toUpperCase()}:${holding.tradingsymbol.trim().toUpperCase()}`, value);
     });
     return map;
   }
@@ -717,6 +1349,8 @@ function getCurrentValueSnapshotForRow(
 ) {
   if (!snapshotMap?.size) return null;
   const symbol = normalizeStockSymbol(row["Stock Symbol"] || row["Stock Name"]);
+  const exchange = row["Exchange Symbol"]?.trim().toUpperCase();
+  if (exchange === "NSE" || exchange === "BSE") return snapshotMap.get(`@VENUE:${exchange}:${symbol}`) ?? null;
   const exchangeSymbol = normalizeStockSymbol(row["Exchange Symbol"]);
   return snapshotMap.get(symbol) ?? snapshotMap.get(exchangeSymbol) ?? null;
 }
@@ -730,6 +1364,64 @@ function getCurrentValueAmount(row: CanonicalRow, snapshotMap?: CurrentValueSnap
   return snapshotValue !== null && snapshotValue !== undefined
     ? Math.abs(snapshotValue)
     : getCurrentInvestmentAmount(row);
+}
+
+function buildPositionContext(
+  rows: LlmBreakupRow[],
+  snapshotMap?: CurrentValueSnapshotMap,
+  hasPortfolioSnapshot = false,
+): PositionContext {
+  const snapshot = rows.map((row) => getCurrentValueSnapshotForRow(row.cells, snapshotMap)).find(Boolean);
+  if (hasPortfolioSnapshot) {
+    // A complete holdings snapshot also captures stocks that are no longer held.
+    return {
+      source: "portfolio-snapshot",
+      holdingMatch: snapshot ? "matched" : "absent",
+      currentUnits: snapshot ? snapshot.units : 0,
+      currentInvestmentAmount: snapshot ? snapshot.currentValue : 0,
+    };
+  }
+  return {
+    source: "captured-model-rows",
+    currentUnits: average(rows.map((row) => parseNumericCell(row.cells["Current Units"]))
+      .filter((value): value is number => value !== null)),
+    currentInvestmentAmount: average(rows.map((row) => getCurrentValueAmount(row.cells))
+      .filter((value): value is number => value !== null)),
+  };
+}
+
+function getStockPositionContext(stock: StockConsensus): PositionContext {
+  return stock.positionContext ?? buildPositionContext(stock.rows);
+}
+
+function getPositionContextLabel(stock: StockConsensus) {
+  const position = getStockPositionContext(stock);
+  if (position.holdingMatch === "unresolved") return "Verified US listing/holding identity unresolved; holdings unavailable";
+  return position.source === "portfolio-snapshot"
+    ? position.holdingMatch === "absent"
+      ? "Latest portfolio snapshot · no matching instrument; zero inferred from snapshot absence, not a verified holding quantity"
+      : position.holdingMatch === "matched"
+        ? "Latest portfolio snapshot · matched holding"
+        : "Latest portfolio snapshot · instrument match not recorded in cached context"
+    : "Captured model holdings (snapshot unavailable)";
+}
+
+function buildConsolidatedPositionCells(
+  position: PositionContext,
+  unitsChange: number | null,
+  amount: number | null,
+): CanonicalRow {
+  const value = (number: number | null) => number === null ? "" : String(number);
+  return {
+    "Current Units": value(position.currentUnits),
+    [CURRENT_INVESTMENT_AMOUNT_HEADER]: value(position.currentInvestmentAmount),
+    "Units Change": value(unitsChange),
+    "Final Units": value(position.currentUnits === null || unitsChange === null ? null : position.currentUnits + unitsChange),
+    "Units to Sell/Buy": value(unitsChange === null ? null : Math.abs(unitsChange)),
+    "Units to Buy": value(unitsChange === null ? null : Math.max(0, unitsChange)),
+    "Total Buy Amount": value(unitsChange === null ? null : unitsChange > 0 ? amount : 0),
+    "Amount": value(amount),
+  };
 }
 
 function getActionAmount(
@@ -808,52 +1500,317 @@ function formatSignedQuantity(value: number | null) {
   return `${value > 0 ? "+" : "-"}${formatted}`;
 }
 
+function getBuyActionAmountTotal(rows: DashboardActionRow[]) {
+  return rows.reduce((sum, row) => sum + (row.formulaEstimate.amount ?? 0), 0);
+}
+
 function formatActionScore(value: number | null) {
   return value === null ? "—" : value.toFixed(2);
 }
 
-type ScoreSymbolMeta = {
-  symbol: "▲" | "▼";
-  label: string;
-  className: string;
-};
-
-function getScoreSymbolMeta(score: number | null): ScoreSymbolMeta | null {
-  if (score === null) return null;
-  if (score > 2) {
-    return { symbol: "▲", label: "Up triangle (Green)", className: "border-emerald-300 bg-emerald-50 text-emerald-700" };
-  }
-  if (score >= 1) {
-    return { symbol: "▲", label: "Up triangle (Light Green)", className: "border-emerald-200 bg-emerald-50/70 text-emerald-600" };
-  }
-  if (score >= 0) {
-    return { symbol: "▲", label: "Up triangle (Yellow)", className: "border-yellow-300 bg-yellow-50 text-yellow-700" };
-  }
-  if (score >= -1) {
-    return { symbol: "▼", label: "Down triangle (Yellow)", className: "border-yellow-300 bg-yellow-50 text-yellow-700" };
-  }
-  if (score >= -2) {
-    return { symbol: "▼", label: "Down triangle (Light red)", className: "border-rose-200 bg-rose-50 text-rose-600" };
-  }
-  return { symbol: "▼", label: "Down triangle (Red)", className: "border-red-300 bg-red-50 text-red-700" };
+function clampScoreToGuardrail(value: number | null) {
+  if (value === null || !Number.isFinite(value)) return null;
+  return Math.max(SCORE_GUARDRAIL_MIN, Math.min(SCORE_GUARDRAIL_MAX, value));
 }
 
-function ScoreSymbolBadge({ score, compact = false }: { score: number | null; compact?: boolean }) {
-  const meta = getScoreSymbolMeta(score);
-  if (!meta) return <span className="text-slate-400">—</span>;
+function formatScoreExpectation(rule: NonNullable<DetailedRationaleScoreRow["validationRule"]>) {
+  const integerPrefix = rule.integerOnly ? "an integer " : "";
+  if (rule.min !== undefined && rule.max !== undefined) {
+    return `${integerPrefix}from ${formatScoreValue(rule.min)} to ${formatScoreValue(rule.max)}`;
+  }
+  if (rule.min !== undefined) {
+    return `${integerPrefix}of at least ${formatScoreValue(rule.min)}`;
+  }
+  if (rule.max !== undefined) {
+    return `${integerPrefix}of at most ${formatScoreValue(rule.max)}`;
+  }
+  return rule.integerOnly ? "an integer" : "a valid number";
+}
+
+function getDetailedRationaleRowRangeIssue(row: DetailedRationaleScoreRow): ScoreMatrixValidationIssue | null {
+  const rule = row.validationRule;
+  if (!rule) return null;
+
+  const actualValue = rule.actualValue ?? row.score;
+  if (actualValue === null || !Number.isFinite(actualValue)) return null;
+
+  const belowMin = rule.min !== undefined && actualValue < rule.min;
+  const aboveMax = rule.max !== undefined && actualValue > rule.max;
+  const invalidInteger = Boolean(rule.integerOnly && !Number.isInteger(actualValue));
+
+  if (!belowMin && !aboveMax && !invalidInteger) return null;
+
+  const expected = formatScoreExpectation(rule);
+  let message = `Expected ${expected}, received ${formatScoreValue(actualValue)}.`;
+  if (row.score !== null && Math.abs(actualValue - row.score) > 1e-9) {
+    message += ` Display is capped to ${formatScoreValue(row.score)}.`;
+  }
+
+  return {
+    id: row.id,
+    parameter: row.parameter,
+    message,
+  };
+}
+
+function getDetailedRationaleIgnoredCalculationMessage(row: DetailedRationaleScoreRow) {
+  if (!isScoreMatrixRowOutOfBounds(row) || row.multiplier === 0) return "";
+
+  const denominatorReduction = getScoreMatrixRowOutOfBoundsDenominatorWeight(row);
+  if (denominatorReduction > 0) {
+    return ` Ignored in final score calculation; multiplier treated as 0 and denominator reduced by ${formatScoreValue(denominatorReduction)}.`;
+  }
+
+  return " Ignored in final score calculation; multiplier treated as 0 and denominator is unchanged.";
+}
+
+function getDetailedRationaleRowIssue(row: DetailedRationaleScoreRow): ScoreMatrixValidationIssue | null {
+  const rangeIssue = getDetailedRationaleRowRangeIssue(row);
+  if (rangeIssue) {
+    return {
+      ...rangeIssue,
+      message: `${rangeIssue.message}${getDetailedRationaleIgnoredCalculationMessage(row)}`.trim(),
+    };
+  }
+
   return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1 rounded-full border font-bold tabular-nums",
-        compact ? "px-1.5 py-0.5 text-[11px]" : "px-2 py-1 text-xs",
-        meta.className,
-      )}
-      title={`${meta.label}: ${formatActionScore(score)}`}
-      aria-label={`${meta.label}: ${formatActionScore(score)}`}
-    >
-      <span aria-hidden="true">{meta.symbol}</span>
+    row.missingReason
+      ? {
+        id: row.id,
+        parameter: row.parameter,
+        message: row.missingReason,
+      }
+      : null
+  );
+}
+
+export function getScoreMatrixValidationSummary(detail: ScoreMatrixDetail): ScoreMatrixValidationSummary {
+  const rawScore = detail.detailedRationaleFinalScore ?? detail.calculatedScore;
+  const displayScore = rawScore;
+  const finalScoreOutOfRange = rawScore !== null
+    && (rawScore < SCORE_GUARDRAIL_MIN || rawScore > SCORE_GUARDRAIL_MAX);
+  const rangeIssues = detail.detailedRationaleRows
+    .flatMap((row) => {
+      const rangeIssue = getDetailedRationaleRowRangeIssue(row);
+      if (!rangeIssue) return [];
+      return [getDetailedRationaleRowIssue(row) ?? rangeIssue];
+    });
+  const parameterIssues = detail.detailedRationaleRows
+    .map(getDetailedRationaleRowIssue)
+    .filter((issue): issue is ScoreMatrixValidationIssue => issue !== null);
+
+  return {
+    rawScore,
+    displayScore,
+    finalScoreOutOfRange,
+    finalScoreMessage: finalScoreOutOfRange
+      ? `Raw formula score ${formatActionScore(rawScore)} is outside ${formatActionScore(SCORE_GUARDRAIL_MIN)} to ${formatActionScore(SCORE_GUARDRAIL_MAX)}. Action mapping uses the bounded rule range. New allocation calculations show a separate effective score; original saved history keeps its existing eligibility.`
+      : null,
+    rangeIssues,
+    parameterIssues,
+    hasIssues: finalScoreOutOfRange || parameterIssues.length > 0,
+  };
+}
+
+type ScoreSymbolDefinition = {
+  id: string;
+  rangeLabel: string;
+  symbolLabel: string;
+  direction: "up" | "down";
+  className: string;
+  matches: (score: number, thresholds: Record<ScoreSymbolThresholdKey, number>) => boolean;
+};
+
+function formatScoreSymbolRangeLabel(id: string, thresholds: Record<ScoreSymbolThresholdKey, number>) {
+  const { strongPositive, positive, weakPositive, weakNegative, negative, strongNegative } = thresholds;
+  switch (id) {
+    case "greater-than-2":
+      return `>${formatScoreValue(strongPositive)}`;
+    case "1-to-2":
+      return `${formatScoreValue(positive)}-${formatScoreValue(strongPositive)}`;
+    case "0-to-1":
+      return `${formatScoreValue(weakPositive)}-${formatScoreValue(positive)}`;
+    case "minus-1-to-0":
+      return `${formatScoreValue(weakNegative)} - ${formatScoreValue(weakPositive)}`;
+    case "minus-2-to-minus-1":
+      return `${formatScoreValue(negative)} - ${formatScoreValue(weakNegative)}`;
+    case "minus-3-to-minus-2":
+      return `${formatScoreValue(strongNegative)} - ${formatScoreValue(negative)}`;
+    default:
+      return "—";
+  }
+}
+
+const SCORE_SYMBOL_MATRIX_ROWS: ScoreSymbolDefinition[] = [
+  {
+    id: "greater-than-2",
+    rangeLabel: ">2",
+    symbolLabel: "Up triangle (Green)",
+    direction: "up",
+    className: "text-emerald-600",
+    matches: (score, thresholds) => score > thresholds.strongPositive,
+  },
+  {
+    id: "1-to-2",
+    rangeLabel: "1-2",
+    symbolLabel: "Up triangle (Light Green)",
+    direction: "up",
+    className: "text-lime-500",
+    matches: (score, thresholds) => score >= thresholds.positive && score <= thresholds.strongPositive,
+  },
+  {
+    id: "0-to-1",
+    rangeLabel: "0-1",
+    symbolLabel: "Up triangle (Yellow)",
+    direction: "up",
+    className: "text-amber-400",
+    matches: (score, thresholds) => score >= thresholds.weakPositive && score < thresholds.positive,
+  },
+  {
+    id: "minus-1-to-0",
+    rangeLabel: "(-1) - 0",
+    symbolLabel: "Down triangle (Yellow)",
+    direction: "down",
+    className: "text-amber-400",
+    matches: (score, thresholds) => score >= thresholds.weakNegative && score < thresholds.weakPositive,
+  },
+  {
+    id: "minus-2-to-minus-1",
+    rangeLabel: "(-2) -(-1)",
+    symbolLabel: "Down triangle (Light red)",
+    direction: "down",
+    className: "text-rose-400",
+    matches: (score, thresholds) => score >= thresholds.negative && score < thresholds.weakNegative,
+  },
+  {
+    id: "minus-3-to-minus-2",
+    rangeLabel: "(-3) -(-2)",
+    symbolLabel: "Down triangle (Red)",
+    direction: "down",
+    className: "text-red-600",
+    matches: (score, thresholds) => score >= thresholds.strongNegative && score < thresholds.negative,
+  },
+];
+
+function getScoreSymbolDefinition(score: number | null, formulaConfig: ScoreMatrixFormulaConfig = DEFAULT_SCORE_MATRIX_FORMULA_CONFIG) {
+  if (score === null || !Number.isFinite(score)) return null;
+  const thresholds = formulaConfig.scoreSymbolThresholds;
+  const boundedScore = Math.max(thresholds.strongNegative, Math.min(SCORE_GUARDRAIL_MAX, score));
+  return SCORE_SYMBOL_MATRIX_ROWS.find((row) => row.matches(boundedScore, thresholds)) ?? null;
+}
+
+function ScoreSymbol({ score, formulaConfig = DEFAULT_SCORE_MATRIX_FORMULA_CONFIG, className }: { score: number | null; formulaConfig?: ScoreMatrixFormulaConfig; className?: string }) {
+  const symbol = getScoreSymbolDefinition(score, formulaConfig);
+
+  if (!symbol) {
+    return <span className={cn("whitespace-nowrap text-slate-400", className)}>—</span>;
+  }
+
+  return (
+    <span className={cn("inline-flex items-center gap-1.5 whitespace-nowrap font-semibold text-slate-900", className)}>
+      <Triangle
+        className={cn("size-3.5 fill-current", symbol.className, symbol.direction === "down" ? "rotate-180" : "")}
+        aria-hidden="true"
+      />
       <span>{formatActionScore(score)}</span>
     </span>
+  );
+}
+
+function ScoreTriangleIcon({ score, formulaConfig = DEFAULT_SCORE_MATRIX_FORMULA_CONFIG, className }: { score: number | null; formulaConfig?: ScoreMatrixFormulaConfig; className?: string }) {
+  const symbol = getScoreSymbolDefinition(score, formulaConfig);
+  if (!symbol) return null;
+
+  return (
+    <Triangle
+      className={cn("mt-0.5 size-3.5 shrink-0 fill-current", symbol.className, symbol.direction === "down" ? "rotate-180" : "", className)}
+      aria-hidden="true"
+    />
+  );
+}
+
+function SelectInputsIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 64 64"
+      aria-hidden="true"
+      className={className}
+      fill="none"
+    >
+      <path
+        d="M11 10h31v44H11z"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="5"
+      />
+      <path
+        d="M7 32h32"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="5"
+      />
+      <path
+        d="M29 22l10 10-10 10"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="5"
+      />
+    </svg>
+  );
+}
+
+export function ScoreMatrixButton({
+  detail,
+  formulaConfig = DEFAULT_SCORE_MATRIX_FORMULA_CONFIG,
+  onOpenDetail,
+  className,
+}: {
+  detail: ScoreMatrixDetail;
+  formulaConfig?: ScoreMatrixFormulaConfig;
+  onOpenDetail: (detail: ScoreMatrixDetail) => void;
+  className?: string;
+}) {
+  const configuredDetail = applyScoreMatrixFormulaConfig(detail, formulaConfig);
+  const validationSummary = getScoreMatrixValidationSummary(configuredDetail);
+  const displayScore = validationSummary.displayScore;
+  const warningTitle = validationSummary.finalScoreOutOfRange
+    ? validationSummary.finalScoreMessage
+    : validationSummary.parameterIssues.length
+      ? `${validationSummary.parameterIssues.length} score input ${validationSummary.parameterIssues.length === 1 ? "inconsistency" : "inconsistencies"} detected.`
+      : null;
+
+  return (
+    <button
+      type="button"
+      onClick={(event) => {
+        event.stopPropagation();
+        onOpenDetail(configuredDetail);
+      }}
+      className={cn(
+        "cursor-pointer rounded px-1.5 py-0.5 transition focus:outline-none focus:ring-2",
+        validationSummary.hasIssues
+          ? "border border-rose-200 bg-rose-50/80 hover:bg-rose-100 focus:ring-rose-300"
+          : "hover:bg-blue-50 focus:ring-blue-500",
+        className,
+      )}
+      aria-label={`Open consolidated score matrix for ${detail.stockSymbol}`}
+      title={warningTitle
+        ? `Open consolidated score matrix for ${detail.stockSymbol}. Warning: ${warningTitle}`
+        : `Open consolidated score matrix for ${detail.stockSymbol}`}
+    >
+      {validationSummary.hasIssues ? (
+        <span className="inline-flex items-center gap-1.5 whitespace-nowrap font-semibold text-rose-700">
+          <AlertTriangle className="size-3.5 shrink-0" />
+          <ScoreTriangleIcon score={displayScore} className="text-rose-700" />
+          <span>{formatActionScore(displayScore)}</span>
+        </span>
+      ) : (
+        <ScoreSymbol score={configuredDetail.calculatedScore} formulaConfig={formulaConfig} />
+      )}
+    </button>
   );
 }
 
@@ -863,115 +1820,200 @@ function formatScoreValue(value: number | null) {
   return value.toFixed(2);
 }
 
-function getAverageNumericCell(rows: LlmBreakupRow[], header: RebalanceHeader) {
+function getAverageRationaleScoreCell(rows: LlmBreakupRow[], header: RebalanceHeader) {
   return average(
     rows
-      .map((row) => parseNumericCell(row.cells[header]))
+      .map((row) => parseRationaleScoreCell(row.cells[header]))
       .filter((value): value is number => value !== null),
   );
-}
-
-function calculateWeightedRationaleScore(
-  rows: DetailedRationaleScoreRow[],
-  denominatorOverride?: number | null,
-) {
-  const weightedRows = rows.filter((row) => row.multiplier !== 0);
-  const defaultDenominator = weightedRows.reduce(
-    (sum, row) => sum + (row.denominatorWeight ?? Math.abs(row.multiplier)),
-    0,
-  );
-  const denominator = denominatorOverride !== undefined && denominatorOverride !== null
-    ? denominatorOverride
-    : defaultDenominator;
-  if (!denominator) return { finalScore: null, denominator };
-  const numerator = weightedRows.reduce(
-    (sum, row) => sum + (row.score ?? 0) * row.multiplier,
-    0,
-  );
-  return { finalScore: numerator / denominator, denominator };
 }
 
 function getTechnicalScanScoreMultiplier(
   technicalScan: TechnicalScanResult | null,
   row: CanonicalRow,
   score: number | null,
+  config: ScoreMatrixFormulaConfig = DEFAULT_SCORE_MATRIX_FORMULA_CONFIG,
 ) {
   if (score === null) return 0;
 
   const approvedSetup = resolveApprovedTechnicalSetup(technicalScan, row);
-  if (approvedSetup?.direction === "bearish") return -1;
-  if (approvedSetup?.direction === "bullish") return 1;
-  if (technicalScan?.bias === "bearish") return -1;
-  if (technicalScan?.bias === "bullish") return 1;
+  if (approvedSetup?.direction === "bearish") return config.technicalScanMultipliers.bearish;
+  if (approvedSetup?.direction === "bullish") return config.technicalScanMultipliers.bullish;
+  if (technicalScan?.bias === "bearish") return config.technicalScanMultipliers.bearish;
+  if (technicalScan?.bias === "bullish") return config.technicalScanMultipliers.bullish;
   return 0;
+}
+
+function formatScanSourceLabel(runLabel: string | null | undefined, createdAt: string | null | undefined, scanType: "Rebalance Scan" | "Technical Scan") {
+  const fallbackLabel = scanType === "Rebalance Scan" ? "Selected rebalance run" : "Selected technical run";
+  const baseLabel = runLabel?.trim() || fallbackLabel;
+  const typedLabel = new RegExp(`\\(${scanType.replace(" Scan", "")} Scan\\)`, "i").test(baseLabel)
+    ? baseLabel
+    : `${baseLabel} (${scanType})`;
+  return createdAt ? `${typedLabel} · ${formatDateTime(createdAt)}` : typedLabel;
+}
+
+function formatTechnicalScanSourceLabel(scan: Pick<TechnicalScanResult, "runLabel" | "createdAt">) {
+  return formatScanSourceLabel(scan.runLabel, scan.createdAt, "Technical Scan");
+}
+
+function getLatestTechnicalScanSourceMeta(scanMap: TechnicalScanMap) {
+  const latestScan = Object.values(scanMap)
+    .filter((scan, index, scans) => scans.findIndex((candidate) => candidate.runId === scan.runId && candidate.jobId === scan.jobId) === index)
+    .sort((a, b) => parseTimestampMs(b.createdAt) - parseTimestampMs(a.createdAt))[0];
+  return latestScan
+    ? { label: formatTechnicalScanSourceLabel(latestScan), runId: latestScan.runId }
+    : { label: null, runId: null };
+}
+
+
+export function formatScoreParameterHeading(value: string) { return value.replace(/^Average of(?:\s*:)*\s*/i, "Average of: "); }
+export function formatScoreMissingReason(value: string) { return `Not updated: ${value.replace(/^(?:Not updated:\s*)+/i, "")}`; }
+export const RECONSTRUCTED_HISTORY_EXPLANATION = "This exact displayed row was reconstructed from its captured source jobs using current formula settings. It is not the original historical weighted policy or saved decision. Source run/job IDs are preserved for parameter drilldowns.";
+export function visibleHistoricalReadNotes(notes?: string[]) { return (notes ?? []).filter(note => note !== RECONSTRUCTED_HISTORY_EXPLANATION); }
+
+function buildMissingTechnicalScanReason(stock: StockConsensus, technicalScanSourceLabel?: string | null) {
+  const sourceClause = technicalScanSourceLabel ? ` (${technicalScanSourceLabel})` : "";
+  return `Not updated: No matching Technical Scan${sourceClause} row was found for ${stock.exchange || "UNKNOWN"}/${stock.symbol}. Check that the selected Technical Scan output contains this ticker and that its Stock Symbol matches the rebalance/actionables ticker.`;
 }
 
 function buildDetailedRationaleScoreRows(
   stock: StockConsensus,
   technicalScan: TechnicalScanResult | null,
   meanModeAction: ActionCategory | null,
+  config: ScoreMatrixFormulaConfig = DEFAULT_SCORE_MATRIX_FORMULA_CONFIG,
+  technicalScanSourceLabel?: string | null,
 ): DetailedRationaleScoreRow[] {
-  const technicalConfidenceScore = parseNumericCell(
-    formatTechnicalConfidence(technicalScan, stock.representative),
-  );
+  const missingTechnicalScanReason = technicalScan
+    ? null
+    : buildMissingTechnicalScanReason(stock, technicalScanSourceLabel);
+  const technicalConfidenceValue = getTechnicalScanConfidence(technicalScan, stock.representative);
+  const technicalConfidenceScore = parseNumericCell(technicalConfidenceValue);
+  const premarketTrendRawValue = technicalScan?.premarketTrend ?? null;
+  const premarketTrendActualValue = parseNumericCell(normalizeEmptyTechnicalValue(premarketTrendRawValue));
+  const last5CandlesTrendRawValue = technicalScan?.last5CandlesTrend ?? null;
+  const last5CandlesTrendActualValue = parseNumericCell(normalizeEmptyTechnicalValue(last5CandlesTrendRawValue));
   const technicalConfidenceMultiplier = getTechnicalScanScoreMultiplier(
     technicalScan,
     stock.representative,
     technicalConfidenceScore,
+    config,
   );
   const meanModeActionScore = meanModeAction
-    ? DETAILED_RATIONALE_ACTION_SCORE_BY_CATEGORY[meanModeAction]
+    ? config.actionScores[meanModeAction]
     : null;
+  const effectiveTechnicalConfidenceMultiplier = technicalScan ? technicalConfidenceMultiplier : 0;
 
   return [
     {
       id: "cruxx",
       parameter: "Average of Score Rationale Cruxx",
-      score: getAverageNumericCell(stock.rows, "Score Rationale Cruxx"),
-      multiplier: 3,
+      score: getAverageRationaleScoreCell(stock.consensusRows ?? stock.rows, "Score Rationale Cruxx"),
+      multiplier: config.detailedRationaleMultipliers.cruxx,
+      validationRule: {
+        min: SCORE_GUARDRAIL_MIN,
+        max: SCORE_GUARDRAIL_MAX,
+      },
     },
     {
       id: "technical-short",
       parameter: "Average of Score Rationale - Technical Setup (Short Term 1–3 Months)",
-      score: getAverageNumericCell(stock.rows, "Score Rationale Technical Setup Short Term 1–3 Months"),
-      multiplier: 3,
+      score: getAverageRationaleScoreCell(stock.consensusRows ?? stock.rows, "Score Rationale Technical Setup Short Term 1–3 Months"),
+      multiplier: config.detailedRationaleMultipliers["technical-short"],
+      validationRule: {
+        min: SCORE_GUARDRAIL_MIN,
+        max: SCORE_GUARDRAIL_MAX,
+      },
     },
     {
       id: "technical-medium",
       parameter: "Average of Score Rationale - Technical Setup (Medium Term)",
-      score: getAverageNumericCell(stock.rows, "Score Rationale - Technical Setup (Medium Term)"),
-      multiplier: 2,
+      score: getAverageRationaleScoreCell(stock.consensusRows ?? stock.rows, "Score Rationale - Technical Setup (Medium Term)"),
+      multiplier: config.detailedRationaleMultipliers["technical-medium"],
+      validationRule: {
+        min: SCORE_GUARDRAIL_MIN,
+        max: SCORE_GUARDRAIL_MAX,
+      },
     },
     {
       id: "technical-long",
       parameter: "Average of Score Rationale - Technical Setup (Long Term)",
-      score: getAverageNumericCell(stock.rows, "Score Rationale - Technical Setup (Long Term)"),
-      multiplier: 1,
+      score: getAverageRationaleScoreCell(stock.consensusRows ?? stock.rows, "Score Rationale - Technical Setup (Long Term)"),
+      multiplier: config.detailedRationaleMultipliers["technical-long"],
+      validationRule: {
+        min: SCORE_GUARDRAIL_MIN,
+        max: SCORE_GUARDRAIL_MAX,
+      },
     },
     {
       id: "fundamentals-short",
       parameter: "Average of Score Rationale - Fundamentals Short Term",
-      score: getAverageNumericCell(stock.rows, "Score Rationale - Fundamentals Short Term"),
-      multiplier: 3,
+      score: getAverageRationaleScoreCell(stock.consensusRows ?? stock.rows, "Score Rationale - Fundamentals Short Term"),
+      multiplier: config.detailedRationaleMultipliers["fundamentals-short"],
+      validationRule: {
+        min: SCORE_GUARDRAIL_MIN,
+        max: SCORE_GUARDRAIL_MAX,
+      },
     },
     {
       id: "fundamentals-medium-long",
       parameter: "Average of Score Rationale - Fundamentals Medium/Long Term",
-      score: getAverageNumericCell(stock.rows, "Score Rationale - Fundamentals Medium/Long Term"),
-      multiplier: 1,
+      score: getAverageRationaleScoreCell(stock.consensusRows ?? stock.rows, "Score Rationale - Fundamentals Medium/Long Term"),
+      multiplier: config.detailedRationaleMultipliers["fundamentals-medium-long"],
+      validationRule: {
+        min: SCORE_GUARDRAIL_MIN,
+        max: SCORE_GUARDRAIL_MAX,
+      },
     },
     {
       id: "technical-scan-confidence",
       parameter: "Technical Scan Confidence Score",
-      score: technicalConfidenceScore,
-      multiplier: technicalConfidenceMultiplier,
-      denominatorWeight: technicalConfidenceMultiplier === 0 ? 0 : 2,
+      score: technicalScan ? technicalConfidenceScore : null,
+      multiplier: effectiveTechnicalConfidenceMultiplier,
+      denominatorWeight: effectiveTechnicalConfidenceMultiplier === 0 ? 0 : 2,
+      outOfBoundsDenominatorWeight: effectiveTechnicalConfidenceMultiplier === 0 ? 0 : 3,
+      missingReason: missingTechnicalScanReason || (technicalConfidenceScore === null ? `Technical Scan row was matched, but Confidence Score was empty or non-numeric: ${technicalConfidenceValue || "blank"}.` : undefined),
+      validationRule: {
+        min: TECHNICAL_SCAN_CONFIDENCE_MIN,
+        max: TECHNICAL_SCAN_CONFIDENCE_MAX,
+        actualValue: technicalScan ? technicalConfidenceScore : null,
+      },
+    },
+    {
+      id: "premarket-trend",
+      parameter: "Technical Scan Premarket trend",
+      score: technicalScan ? getTechnicalTrendScore(technicalScan.premarketTrend) : null,
+      multiplier: technicalScan ? config.detailedRationaleMultipliers["premarket-trend"] : 0,
+      missingReason: missingTechnicalScanReason || (technicalScan && getTechnicalTrendScore(technicalScan.premarketTrend) === null ? `Technical Scan row was matched, but Premarket trend was empty or non-numeric: ${technicalScan.premarketTrend || "blank"}.` : undefined),
+      validationRule: {
+        min: SCORE_GUARDRAIL_MIN,
+        max: SCORE_GUARDRAIL_MAX,
+        integerOnly: true,
+        actualValue: premarketTrendActualValue,
+      },
+    },
+    {
+      id: "last-5-candles-trend",
+      parameter: "Technical Scan Last 5 candles trend",
+      score: technicalScan ? getTechnicalTrendScore(technicalScan.last5CandlesTrend) : null,
+      multiplier: technicalScan ? config.detailedRationaleMultipliers["last-5-candles-trend"] : 0,
+      missingReason: missingTechnicalScanReason || (technicalScan && getTechnicalTrendScore(technicalScan.last5CandlesTrend) === null ? `Technical Scan row was matched, but Last 5 candles trend was empty or non-numeric: ${technicalScan.last5CandlesTrend || "blank"}.` : undefined),
+      validationRule: {
+        min: SCORE_GUARDRAIL_MIN,
+        max: SCORE_GUARDRAIL_MAX,
+        integerOnly: true,
+        actualValue: last5CandlesTrendActualValue,
+      },
     },
     {
       id: "mean-mode-action",
-      parameter: "Action (Buy/Add/Sell All/Trim/Hold/Buy New) in final Consolidated (Mean and Mode) row",
+      parameter: "Action (Buy/Add/Sell All/Trim/Hold/Buy New) in Model consensus (Mean and Mode) row",
       score: meanModeActionScore,
-      multiplier: 4,
+      multiplier: config.detailedRationaleMultipliers["mean-mode-action"],
+      validationRule: {
+        min: SCORE_GUARDRAIL_MIN,
+        max: SCORE_GUARDRAIL_MAX,
+      },
     },
   ];
 }
@@ -1055,6 +2097,7 @@ function resolveMatrixUnitsForAction(
   action: ActionCategory,
   context: ScoreMatrixContext,
 ) {
+  if ((action === "Sell All" || action === "Trim") && context.currentUnits === 0) return 0;
   if (action === "Sell All") {
     if ((context.currentUnits ?? 0) > 0) return -Math.abs(context.currentUnits || 0);
     if (context.bearishMeanUnits !== null) return -Math.abs(context.bearishMeanUnits);
@@ -1076,7 +2119,7 @@ function resolveMatrixUnitsForAction(
 }
 
 function evaluateScoreMatrixRules(context: ScoreMatrixContext) {
-  const meanScore = Math.max(-3, Math.min(3, context.calculatedScore ?? context.meanScore ?? 0));
+  const meanScore = clampScoreToGuardrail(context.calculatedScore ?? context.meanScore ?? 0) ?? 0;
   const hasPosition = (context.currentUnits ?? 0) > 0;
   const positiveAction: ActionCategory = hasPosition ? "Add more" : "Buy New";
   const positiveUnitsStrategy = hasPosition
@@ -1086,8 +2129,8 @@ function evaluateScoreMatrixRules(context: ScoreMatrixContext) {
   const rules: Array<Omit<ScoreMatrixRuleEvaluation, "matched"> & { matches: boolean }> = [
     {
       id: "score-2-to-3",
-      label: "2–3",
-      when: "Calculated Score is from 2 up to 3.",
+      label: "[2, 3]",
+      when: "Exact bounded Calculated Score is at least 2 and at most 3.",
       action: positiveAction,
       unitsStrategy: positiveUnitsStrategy,
       summary: `Strong bullish score resolves to ${ACTION_CATEGORY_LABEL[positiveAction]}.`,
@@ -1095,8 +2138,8 @@ function evaluateScoreMatrixRules(context: ScoreMatrixContext) {
     },
     {
       id: "score-1-to-2",
-      label: "1–2",
-      when: "Calculated Score is from 1 up to 2.",
+      label: "[1, 2)",
+      when: "Exact bounded Calculated Score is at least 1 and less than 2.",
       action: positiveAction,
       unitsStrategy: positiveUnitsStrategy,
       summary: `Moderate bullish score resolves to ${ACTION_CATEGORY_LABEL[positiveAction]}.`,
@@ -1104,8 +2147,8 @@ function evaluateScoreMatrixRules(context: ScoreMatrixContext) {
     },
     {
       id: "score-0-to-1",
-      label: "0–1",
-      when: "Calculated Score is from 0 up to 1.",
+      label: "[0, 1)",
+      when: "Exact bounded Calculated Score is at least 0 and less than 1.",
       action: "Hold",
       unitsStrategy: "Keep Units Change at 0.",
       summary: "Mildly positive score stays at Hold.",
@@ -1113,8 +2156,8 @@ function evaluateScoreMatrixRules(context: ScoreMatrixContext) {
     },
     {
       id: "score-minus-1-to-0",
-      label: "(-1)–0",
-      when: "Calculated Score is from -1 up to 0.",
+      label: "[-1, 0)",
+      when: "Exact bounded Calculated Score is at least -1 and less than 0.",
       action: "Hold",
       unitsStrategy: "Keep Units Change at 0.",
       summary: "Mildly negative score stays at Hold.",
@@ -1122,8 +2165,8 @@ function evaluateScoreMatrixRules(context: ScoreMatrixContext) {
     },
     {
       id: "score-minus-2-to-minus-1",
-      label: "(-2)–(-1)",
-      when: "Calculated Score is from -2 up to -1.",
+      label: "[-2, -1)",
+      when: "Exact bounded Calculated Score is at least -2 and less than -1.",
       action: "Trim",
       unitsStrategy: "Trim 50% of current units.",
       summary: "Moderate bearish score trims half of the current position.",
@@ -1131,8 +2174,8 @@ function evaluateScoreMatrixRules(context: ScoreMatrixContext) {
     },
     {
       id: "score-minus-3-to-minus-2",
-      label: "(-3)–(-2)",
-      when: "Calculated Score is from -3 up to -2.",
+      label: "[-3, -2)",
+      when: "Exact bounded Calculated Score is at least -3 and less than -2.",
       action: "Sell All",
       unitsStrategy: "Sell 100% of current units.",
       summary: "Strong bearish score exits the full current position.",
@@ -1156,12 +2199,15 @@ function evaluateScoreMatrixRules(context: ScoreMatrixContext) {
 function buildScoreMatrixDetail(
   stock: StockConsensus,
   technicalScan: TechnicalScanResult | null = null,
+  formulaConfig: ScoreMatrixFormulaConfig = DEFAULT_SCORE_MATRIX_FORMULA_CONFIG,
+  technicalScanSourceLabel?: string | null,
+  technicalScanSourceRunId?: number | null,
 ): ScoreMatrixDetail {
-  const entries: ScoreMatrixEntry[] = stock.rows.map((row) => {
+  const entries: ScoreMatrixEntry[] = (stock.consensusRows ?? stock.rows).map((row) => {
     const action = normalizeAction(row.cells[ACTION_HEADER] || "");
     return {
       id: `${row.meta.runId}-${row.meta.jobId}-matrix`,
-      source: `Run #${row.meta.runId}`,
+      source: row.meta.runLabel,
       action,
       actionScore: action ? ACTION_SCORE_BY_CATEGORY[action] : null,
       unitsChange: getSignedUnitsChange(row.cells, action),
@@ -1169,11 +2215,7 @@ function buildScoreMatrixDetail(
     };
   });
 
-  const currentUnits = average(
-    stock.rows
-      .map((row) => parseNumericCell(row.cells["Current Units"]))
-      .filter((value): value is number => value !== null),
-  ) ?? parseNumericCell(stock.representative["Current Units"]);
+  const { currentUnits } = getStockPositionContext(stock);
 
   const meanScore = average(
     entries
@@ -1212,9 +2254,25 @@ function buildScoreMatrixDetail(
       .map((value) => Math.abs(value)),
   );
 
-  const detailedRationaleRows = buildDetailedRationaleScoreRows(stock, technicalScan, modeAction);
+  const rebalanceSourceMeta = [...stock.rows]
+    .map((row) => row.meta)
+    .sort((left, right) => parseTimestampMs(right.createdAt) - parseTimestampMs(left.createdAt))[0];
+  const rebalanceSourceLabel = rebalanceSourceMeta
+    ? formatScanSourceLabel(rebalanceSourceMeta.runLabel, rebalanceSourceMeta.createdAt, "Rebalance Scan")
+    : null;
+  const technicalScanSourceLabelForStock = technicalScan
+    ? formatTechnicalScanSourceLabel(technicalScan)
+    : (technicalScanSourceLabel ?? null);
+
+  const detailedRationaleRows = buildDetailedRationaleScoreRows(
+    stock,
+    technicalScan,
+    modeAction,
+    formulaConfig,
+    technicalScanSourceLabelForStock,
+  );
   const { finalScore: detailedRationaleFinalScore, denominator: detailedRationaleDenominator } =
-    calculateWeightedRationaleScore(detailedRationaleRows);
+    calculateWeightedRationaleScore(detailedRationaleRows, formulaConfig.detailedRationaleDenominator);
   const calculatedScore = detailedRationaleFinalScore ?? meanScore;
 
   const context: ScoreMatrixContext = {
@@ -1238,6 +2296,7 @@ function buildScoreMatrixDetail(
   return {
     stockKey: stock.key,
     stockSymbol: stock.symbol,
+    stockName: stock.representative["Stock Name"] || stock.symbol,
     stockExchange: stock.exchange,
     currentUnits,
     modeAction,
@@ -1253,24 +2312,30 @@ function buildScoreMatrixDetail(
     detailedRationaleRows,
     detailedRationaleFinalScore,
     detailedRationaleDenominator,
+    rebalanceSourceLabel,
+    rebalanceSourceRunId: rebalanceSourceMeta?.runId ?? null,
+    calculationPolicy: "missing-score-exclusion-v2",
+    technicalScanSourceLabel: technicalScanSourceLabelForStock,
+    technicalScanSourceRunId: technicalScan?.runId ?? technicalScanSourceRunId ?? null,
+    technicalScanSourceJobId: technicalScan?.jobId ?? null,
     rows: [
       ...entries,
       {
         id: `${stock.key}-matrix-mean-mode`,
-        source: "Consolidated (Mean and Mode)",
+        source: "Model consensus (Mean and Mode)",
         action: modeAction,
         actionScore: meanScore,
         unitsChange: meanUnitsChange,
-        note: "Action follows the mode. Units Change uses the signed mean across all LLM rows.",
+        note: "Model action follows the mode. Units Change uses the signed mean across all LLM rows.",
         isSummary: true,
       },
       {
         id: `${stock.key}-matrix-calculated`,
-        source: "Consolidated (Formula)",
+        source: "Current formula",
         action: calculatedAction,
         actionScore: calculatedScore,
         unitsChange: calculatedUnitsChange,
-        note: matchedRule.summary,
+        note: `${matchedRule.summary} Position: ${getPositionContextLabel(stock)}.`,
         isSummary: true,
         isCalculated: true,
       },
@@ -1301,31 +2366,14 @@ function applyScoreMatrixEdits(
     const multiplier = Number(draft);
     return Number.isFinite(multiplier) ? { ...row, multiplier } : row;
   });
-  const denominatorOverride = denominatorDraft.trim() === "" ? null : Number(denominatorDraft);
+  const denominatorOverride = denominatorDraft.trim() === "" ? detail.detailedRationaleDenominator : Number(denominatorDraft);
   const { finalScore: detailedRationaleFinalScore, denominator: detailedRationaleDenominator } =
     calculateWeightedRationaleScore(
       detailedRationaleRows,
       typeof denominatorOverride === "number" && Number.isFinite(denominatorOverride) ? denominatorOverride : null,
+      true, // The editor displays the effective denominator after missing-value exclusion.
     );
   const calculatedScore = detailedRationaleFinalScore ?? detail.meanScore;
-  const rules = detail.rules.map((rule) => {
-    const draft = ruleDrafts[rule.id];
-    const action = draft?.action ?? rule.action;
-    const manualUnits = draft?.unitsChange?.trim() ? Number(draft.unitsChange) : undefined;
-    return {
-      ...rule,
-      action,
-      unitsStrategy: manualUnits === undefined || !Number.isFinite(manualUnits)
-        ? rule.unitsStrategy
-        : `Manual Units Change ${formatSignedQuantity(manualUnits)}.`,
-      summary: getEditableRuleSummary(
-        rule,
-        action,
-        manualUnits !== undefined && Number.isFinite(manualUnits) ? manualUnits : undefined,
-      ),
-    };
-  });
-  const matchedRule = rules.find((rule) => rule.matched) ?? rules[rules.length - 1];
   const context: ScoreMatrixContext = {
     currentUnits: detail.currentUnits,
     meanScore: detail.meanScore,
@@ -1350,6 +2398,24 @@ function applyScoreMatrixEdits(
         .map((value) => Math.abs(value)),
     ),
   };
+  const rules = evaluateScoreMatrixRules(context).map((rule) => {
+    const draft = ruleDrafts[rule.id];
+    const action = draft?.action ?? rule.action;
+    const manualUnits = draft?.unitsChange?.trim() ? Number(draft.unitsChange) : undefined;
+    return {
+      ...rule,
+      action,
+      unitsStrategy: manualUnits === undefined || !Number.isFinite(manualUnits)
+        ? rule.unitsStrategy
+        : `Manual Units Change ${formatSignedQuantity(manualUnits)}.`,
+      summary: getEditableRuleSummary(
+        rule,
+        action,
+        manualUnits !== undefined && Number.isFinite(manualUnits) ? manualUnits : undefined,
+      ),
+    };
+  });
+  const matchedRule = rules.find((rule) => rule.matched) ?? rules[rules.length - 1];
   const matchedDraft = ruleDrafts[matchedRule.id];
   const manualUnits = matchedDraft?.unitsChange?.trim() ? Number(matchedDraft.unitsChange) : null;
   const calculatedUnitsChange = manualUnits !== null && Number.isFinite(manualUnits)
@@ -1376,6 +2442,46 @@ function applyScoreMatrixEdits(
     detailedRationaleFinalScore,
     detailedRationaleDenominator,
   };
+}
+
+function applyScoreMatrixFormulaConfig(
+  detail: ScoreMatrixDetail,
+  formulaConfig: ScoreMatrixFormulaConfig = DEFAULT_SCORE_MATRIX_FORMULA_CONFIG,
+) {
+  const configuredDetail: ScoreMatrixDetail = {
+    ...detail,
+    detailedRationaleRows: detail.detailedRationaleRows.map((row) => {
+      if (row.id === "mean-mode-action") {
+        return {
+          ...row,
+          score: detail.meanModeAction ? formulaConfig.actionScores[detail.meanModeAction] : null,
+          multiplier: formulaConfig.detailedRationaleMultipliers[row.id] ?? row.multiplier,
+        };
+      }
+      if (row.id === "technical-scan-confidence") {
+        const multiplier = row.multiplier === 0
+          ? 0
+          : row.multiplier > 0
+            ? formulaConfig.technicalScanMultipliers.bullish
+            : formulaConfig.technicalScanMultipliers.bearish;
+        return {
+          ...row,
+          multiplier,
+          denominatorWeight: multiplier === 0 ? 0 : 2,
+        };
+      }
+      return {
+        ...row,
+        multiplier: formulaConfig.detailedRationaleMultipliers[row.id] ?? row.multiplier,
+      };
+    }),
+    detailedRationaleDenominator: formulaConfig.detailedRationaleDenominator ?? detail.detailedRationaleDenominator,
+  };
+
+  configuredDetail.detailedRationaleDenominator = calculateWeightedRationaleScore(
+    configuredDetail.detailedRationaleRows, formulaConfig.detailedRationaleDenominator,
+  ).denominator;
+  return applyScoreMatrixEdits(configuredDetail, {}, "", {});
 }
 
 function getFormattedCurrentValueAmount(row: CanonicalRow, market: SwingTradeMarket) {
@@ -1417,7 +2523,9 @@ function getRepresentativeConsensusRow(rows: LlmBreakupRow[]) {
 }
 
 function getStockIdentityKey(exchange: string, symbol: string) {
-  return `${(exchange || "UNKNOWN").trim().toUpperCase()}:${(symbol || "UNKNOWN").trim().toUpperCase()}`;
+  const normalizedExchange = normalizeScanKey(exchange) || "UNKNOWN";
+  const normalizedSymbol = normalizeScanKey(symbol) || "UNKNOWN";
+  return `${normalizedExchange}:${normalizedSymbol}`;
 }
 
 function stripMarkdownLinks(value: string) {
@@ -1597,6 +2705,12 @@ function getScanSymbolCandidates(...values: Array<string | null | undefined>) {
     if (!cleaned) return;
 
     const pieces = [cleaned];
+    const whitespaceParts = cleaned.split(/\s+/).filter(Boolean);
+    if (whitespaceParts.length > 1) {
+      whitespaceParts.forEach((part) => pieces.push(part));
+      const uniqueParts = Array.from(new Set(whitespaceParts.map((part) => normalizeScanKey(part))));
+      if (uniqueParts.length === 1) pieces.push(whitespaceParts[0]);
+    }
     const colonPart = cleaned.split(":").pop();
     if (colonPart && colonPart !== cleaned) pieces.push(colonPart);
     const slashPart = cleaned.split("/").pop();
@@ -1628,7 +2742,7 @@ function isMarkdownSeparator(cells: string[]) {
 
 function parseTechnicalScanResponse(
   response: string,
-  meta: Pick<TechnicalScanResult, "runId" | "jobId" | "provider" | "model" | "createdAt">,
+  meta: Pick<TechnicalScanResult, "runId" | "jobId" | "provider" | "model" | "createdAt" | "runLabel">,
 ): TechnicalScanResult[] {
   const lines = response.split(/\r?\n/);
   const results: TechnicalScanResult[] = [];
@@ -1639,22 +2753,31 @@ function parseTechnicalScanResponse(
 
     const headers = splitMarkdownRow(line).map(normalizeScanHeader);
     const hasStockColumn = headers.some((header) =>
-      ["stock symbol", "symbol", "stock", "ticker"].includes(header),
+      ["stock symbol", "ticker symbol", "symbol", "stock", "ticker"].includes(header),
     );
     const hasSetupColumn = headers.some((header) =>
       header.includes("setup") || header.includes("pattern"),
     );
     if (!hasStockColumn || !hasSetupColumn) continue;
 
-    const getIndex = (names: string[]) =>
-      headers.findIndex((header) =>
-        names.some((name) => header === name || header.includes(name)),
-      );
+    const getIndex = (names: string[]) => {
+      for (const name of names) {
+        const exactIndex = headers.findIndex((header) => header === name);
+        if (exactIndex >= 0) return exactIndex;
+      }
+      for (const name of names) {
+        const partialIndex = headers.findIndex((header) => header.includes(name));
+        if (partialIndex >= 0) return partialIndex;
+      }
+      return -1;
+    };
     const exchangeIndex = getIndex(["exchange symbol", "exchange", "market"]);
     const symbolIndex = getIndex(["stock symbol", "ticker symbol", "symbol", "ticker", "stock"]);
     const primaryIndex = getIndex(["primary setup", "primary technical setup", "technical setup", "setup name", "setup", "pattern", "technical pattern"]);
     const secondaryIndex = getIndex(["secondary setups", "secondary setup", "other setups", "additional setups", "supporting setups"]);
     const biasIndex = getIndex(["bias", "sentiment", "direction", "view"]);
+    const premarketTrendIndex = getIndex(["premarket trend", "pre-market trend", "pre market trend", "premarket"]);
+    const last5CandlesTrendIndex = getIndex(["last 5 candles trend", "last five candles trend", "5 candles trend", "last 5 daily candles", "five daily candles trend"]);
     const confidenceIndex = getIndex(["confidence score", "confidence", "score", "conviction"]);
     const triggerIndex = getIndex(["trigger level", "trigger", "entry level", "entry range"]);
     const invalidationIndex = getIndex(["invalidation level", "invalidation", "stop loss", "stop"]);
@@ -1692,6 +2815,8 @@ function parseTechnicalScanResponse(
         secondarySetups,
         confidenceScore: confidenceIndex >= 0 ? normalizeScanCell(cells[confidenceIndex] || "") : "",
         bias,
+        premarketTrend: premarketTrendIndex >= 0 ? normalizeScanCell(cells[premarketTrendIndex] || "") : "",
+        last5CandlesTrend: last5CandlesTrendIndex >= 0 ? normalizeScanCell(cells[last5CandlesTrendIndex] || "") : "",
         triggerLevel: triggerIndex >= 0 ? normalizeScanCell(cells[triggerIndex] || "") : "",
         invalidationLevel: invalidationIndex >= 0 ? normalizeScanCell(cells[invalidationIndex] || "") : "",
         ...meta,
@@ -1704,20 +2829,28 @@ function parseTechnicalScanResponse(
   return results;
 }
 
-export function buildTechnicalScanMap(runs: RunResponse[]): TechnicalScanMap {
+export function buildTechnicalScanMap(runs: RunResponse[], parsedSources?: TechnicalScanParseCache): TechnicalScanMap {
   const scanRows = runs
-    .filter((run) => run.prompt?.includes(TECHNICAL_SCAN_MARKER))
+    .filter((run) => isAnalysisRunForStage(run, "technical"))
     .flatMap((run) =>
       (run.run_jobs ?? []).flatMap((link) => {
         const job = link.job;
         if (!job || job.status !== "completed" || !job.response) return [];
-        return parseTechnicalScanResponse(job.response, {
+        const meta = {
+          market: getAnalysisRunIdentity(run).market,
           runId: run.id,
           jobId: link.job_id,
           provider: job.provider,
           model: job.model,
-          createdAt: job.created_at,
-        });
+          createdAt: job.updated_at ?? job.created_at,
+          runLabel: getAutoRebalanceRunDisplayLabel(run),
+        };
+        const metadataKey = JSON.stringify(meta);
+        const cached = parsedSources?.get(link);
+        if (cached?.response === job.response && cached.metadataKey === metadataKey) return cached.rows;
+        const rows = parseTechnicalScanResponse(job.response, meta);
+        parsedSources?.set(link, { response: job.response, metadataKey, rows });
+        return rows;
       }),
     )
     .sort((a, b) => parseTimestampMs(a.createdAt) - parseTimestampMs(b.createdAt));
@@ -1733,7 +2866,7 @@ export function buildTechnicalScanMap(runs: RunResponse[]): TechnicalScanMap {
 
 function buildTechnicalScanHistory(runs: RunResponse[]): PortfolioAnalysisHistoryItem[] {
   return runs
-    .filter((run) => run.prompt?.includes(TECHNICAL_SCAN_MARKER))
+    .filter((run) => isAnalysisRunForStage(run, "technical"))
     .flatMap((run) =>
       (run.run_jobs ?? []).flatMap((link) => {
         const job = link.job;
@@ -1758,7 +2891,16 @@ function buildTechnicalScanHistory(runs: RunResponse[]): PortfolioAnalysisHistor
     .sort((a, b) => parseTimestampMs(b.created_at) - parseTimestampMs(a.created_at));
 }
 
-function getTechnicalScanForStock(scanMap: TechnicalScanMap, stock: StockConsensus) {
+export function getTechnicalScanForStock(scanMap: TechnicalScanMap, stock: StockConsensus) {
+  const expectedExchange = normalizeScanKey(stock.exchange);
+  const expectedMarket = ["NSE", "BSE"].includes(expectedExchange) ? "india" : ["NASDAQ", "NYSE", "NYSEARCA", "AMEX", "ARCA"].includes(expectedExchange) ? "us" : null;
+  const matchesContext = (scan: TechnicalScanResult) => {
+    const explicitExchange = normalizeScanKey(scan.exchangeSymbol);
+    const annotatedExchange = /^(NSE|BSE|NASDAQ|NYSE|NYSEARCA|AMEX|ARCA):/i.exec(scan.stockSymbol.trim())?.[1]?.toUpperCase()
+      ?? (/\.(NS|NSE)$/i.test(scan.stockSymbol) ? "NSE" : /\.(BO|BSE)$/i.test(scan.stockSymbol) ? "BSE" : null);
+    if (scan.market && expectedMarket && scan.market !== expectedMarket) return false;
+    return [explicitExchange, annotatedExchange].every(exchange => !exchange || exchange === "UNKNOWN" || !expectedExchange || expectedExchange === "UNKNOWN" || exchange === expectedExchange);
+  };
   const symbolCandidates = [
     stock.symbol,
     stock.representative["Stock Symbol"],
@@ -1768,11 +2910,11 @@ function getTechnicalScanForStock(scanMap: TechnicalScanMap, stock: StockConsens
   for (const symbol of symbolCandidates) {
     const exactScan = scanMap[getStockIdentityKey(stock.exchange, symbol)]
       ?? scanMap[getStockIdentityKey("UNKNOWN", symbol)];
-    if (exactScan) return exactScan;
+    if (exactScan && matchesContext(exactScan)) return exactScan;
 
     for (const candidate of getScanSymbolCandidates(symbol)) {
       const symbolScan = scanMap[`SYMBOL:${candidate}`];
-      if (symbolScan) return symbolScan;
+      if (symbolScan && matchesContext(symbolScan)) return symbolScan;
     }
   }
 
@@ -1781,7 +2923,7 @@ function getTechnicalScanForStock(scanMap: TechnicalScanMap, stock: StockConsens
 
 function hasActiveTechnicalScan(runs: RunResponse[]) {
   return runs.some((run) =>
-    run.prompt?.includes(TECHNICAL_SCAN_MARKER)
+    isAnalysisRunForStage(run, "technical")
     && (
       TECHNICAL_SCAN_ACTIVE_STATUSES.has(run.status)
       || (run.run_jobs ?? []).some((link) =>
@@ -1826,6 +2968,18 @@ function getFallbackTechnicalConfidence(row?: CanonicalRow | null) {
   );
 }
 
+function formatTechnicalScanConfidenceValue(value?: string | null) {
+  const normalized = normalizeEmptyTechnicalValue(value);
+  if (!normalized) return "";
+  const parsed = parseNumericCell(normalized);
+  if (parsed === null) return normalized;
+  return Number.isInteger(parsed) ? parsed.toFixed(0) : String(parsed);
+}
+
+function getTechnicalScanConfidence(scan: TechnicalScanResult | null, row?: CanonicalRow | null) {
+  return formatTechnicalScanConfidenceValue(scan?.confidenceScore) || formatTechnicalScanConfidenceValue(getFallbackTechnicalConfidence(row));
+}
+
 function formatTechnicalSetup(scan: TechnicalScanResult | null, row?: CanonicalRow | null) {
   return resolveApprovedTechnicalSetup(scan, row)?.setup || getFallbackTechnicalSetup(row);
 }
@@ -1838,8 +2992,28 @@ function getDisplayedSetupNameForStock(
 }
 
 function formatTechnicalConfidence(scan: TechnicalScanResult | null, row?: CanonicalRow | null) {
-  const approvedSetup = resolveApprovedTechnicalSetup(scan, row);
-  return approvedSetup ? approvedSetup.confidence.toFixed(1) : getFallbackTechnicalConfidence(row);
+  return getTechnicalScanConfidence(scan, row);
+}
+
+function formatTechnicalTrendValue(value?: string | null) {
+  const normalized = normalizeEmptyTechnicalValue(value);
+  if (!normalized) return "";
+  const parsed = parseNumericCell(normalized);
+  if (parsed === null) return normalized;
+  return String(Math.max(-3, Math.min(3, parsed)));
+}
+
+function getTechnicalTrendScore(value?: string | null) {
+  const parsed = parseNumericCell(formatTechnicalTrendValue(value));
+  return parsed === null ? null : Math.max(-3, Math.min(3, parsed));
+}
+
+function formatTechnicalPremarketTrend(scan: TechnicalScanResult | null, row?: CanonicalRow | null) {
+  return formatTechnicalTrendValue(scan?.premarketTrend || row?.["Premarket trend"]);
+}
+
+function formatTechnicalLast5CandlesTrend(scan: TechnicalScanResult | null, row?: CanonicalRow | null) {
+  return formatTechnicalTrendValue(scan?.last5CandlesTrend || row?.["Last 5 candles trend"]);
 }
 
 function getSortableConfidence(scan: TechnicalScanResult | null, row?: CanonicalRow | null) {
@@ -1938,11 +3112,11 @@ export function buildTechnicalScanPrompt(stocks: StockConsensus[], market: Swing
   const stockRows = stocks
     .map(
       (stock) =>
-        `| ${stock.exchange || (market === "us" ? "US" : "NSE")} | ${stock.symbol} | ${stock.consensusAction} | ${stock.totalSuggestions} |`,
+        `| ${market === "us" && (!stock.exchange || stock.exchange.toUpperCase() === "US") ? "Venue unresolved" : stock.exchange || "NSE"} | ${stock.symbol} | ${stock.consensusAction} | ${stock.totalSuggestions} |`,
     )
     .join("\n");
 
-  return `${TECHNICAL_SCAN_MARKER}\nMarket: ${market === "us" ? "US equities" : "India equities"}\n\nStock list:\n| Exchange Symbol | Stock Symbol | Consensus Action | Suggestions Count |\n|---|---|---|---:|\n${stockRows}\n\nApproved Technical Setups list from sidebar:\n${setupListMarkdown()}\n\nAct as a top-tier technical analyst and swing-trading strategist.\n\nObjective:\nFor the stock list given above, search the internet for the latest available technical data, price action, chart structure, moving averages, volume behaviour, RSI/divergence, support-resistance, breakout/breakdown levels, 52-week high/low position, and recent trend strength. Then tag each stock with the most relevant Bullish and/or Bearish setup names from the approved Technical Setups list above.\n\nImportant rules:\n- Use current fresh internet data only. Do not rely on stale memory.\n- Prefer sources such as TradingView, StockCharts, Yahoo Finance, MarketWatch, Investing.com, Screener, NSE/BSE, Nasdaq, Trendlyne, Chartink, StockEdge, or other reliable chart/technical sources.\n- Check at least daily chart data. If possible, also consider weekly chart for broader trend.\n- Tag only from the approved setup names above. Do not invent, paraphrase, or abbreviate setup names.\n- Every stock must receive a Primary Setup that exactly matches one Setup value from the approved Technical Setups list above.\n- A stock can have more than one tag, but choose one Primary Setup and optionally 1-3 Secondary Setups; every setup name must exactly match an approved Setup value.\n- For bearish setups, treat them as sell/trim/avoid fresh buying/exit weak holdings — not short-selling.\n- For Confidence Score, copy the numeric Confidence value from the approved Technical Setups list for the same Primary Setup. Return only the number, without /10, %, avg text, or LLM counts.\n- Always mention the exact trigger level and invalidation level wherever possible.\n- Do not give generic advice. Make the tagging specific to the latest chart structure.\n\nReturn ONLY this markdown table and no extra prose:\n| ${TECHNICAL_SCAN_TABLE_COLUMNS.join(" | ")} |\n| ${TECHNICAL_SCAN_TABLE_COLUMNS.map(() => "---").join(" | ")} |\n| EXCHANGE | SYMBOL | Exact approved primary setup name | Optional exact approved setup names | Bullish/Bearish/Neutral | approved confidence number only | exact price/level | exact price/level |`;
+  return `${TECHNICAL_SCAN_MARKER}\nMarket: ${market === "us" ? "US equities" : "India equities"}\n\nStock list:\n| Exchange Symbol | Stock Symbol | Consensus Action | Suggestions Count |\n|---|---|---|---:|\n${stockRows}\n\nApproved Technical Setups list from sidebar:\n${setupListMarkdown()}\n\nAct as a top-tier technical analyst and swing-trading strategist.\n\nObjective:\nFor the stock list given above, search the internet for the latest available technical data, price action, chart structure, moving averages, volume behaviour, RSI/divergence, support-resistance, breakout/breakdown levels, 52-week high/low position, and recent trend strength. Then tag each stock with the most relevant Bullish and/or Bearish setup names from the approved Technical Setups list above.\n\nImportant rules:\n${market === "us" ? "- Carry forward the listing exchange from the selected rebalance output. For unresolved venues verify the exact listing before reporting it. Never emit US as an exchange.\n" : ""}- Use current fresh internet data only. Do not rely on stale memory.\n- Prefer sources such as TradingView, StockCharts, Yahoo Finance, MarketWatch, Investing.com, Screener, NSE/BSE, Nasdaq, Trendlyne, Chartink, StockEdge, or other reliable chart/technical sources.\n- Check at least daily chart data. If possible, also consider weekly chart for broader trend.\n- For Premarket trend: if current scan time is before market opening and the relevant premarket session is open, return only one integer from this exact scale: -3 = very bearish, -2 = bearish, -1 = slightly bearish, 0 = neutral, 1 = slightly bullish, 2 = bullish, 3 = very bullish. If premarket is not applicable, closed, unavailable, or current scan time is not before market opening, return 0.\n- For Last 5 candles trend: analyse the trend of the last 5 daily candles and return only one integer from this exact scale: -3 = very bearish, -2 = bearish, -1 = slightly bearish, 0 = neutral, 1 = slightly bullish, 2 = bullish, 3 = very bullish.\n- Tag only from the approved setup names above. Do not invent, paraphrase, or abbreviate setup names.\n- Every stock must receive a Primary Setup that exactly matches one Setup value from the approved Technical Setups list above.\n- A stock can have more than one tag, but choose one Primary Setup and optionally 1-3 Secondary Setups; every setup name must exactly match an approved Setup value.\n- For bearish setups, treat them as sell/trim/avoid fresh buying/exit weak holdings — not short-selling.\n- For Premarket trend and Last 5 candles trend, return the integer only; do not include words, symbols, explanations, or ranges.\n- For Confidence Score, copy the numeric Confidence value from the approved Technical Setups list for the same Primary Setup. Return only the number, without /10, %, avg text, or LLM counts.\n- Always mention the exact trigger level and invalidation level wherever possible.\n- Do not give generic advice. Make the tagging specific to the latest chart structure.\n\nReturn ONLY this markdown table and no extra prose:\n| ${TECHNICAL_SCAN_TABLE_COLUMNS.join(" | ")} |\n| ${TECHNICAL_SCAN_TABLE_COLUMNS.map(() => "---").join(" | ")} |\n| EXCHANGE | SYMBOL | Exact approved primary setup name | Optional exact approved setup names | Bullish/Bearish/Neutral | -3 to 3 integer only | -3 to 3 integer only | approved confidence number only | exact price/level | exact price/level |`;
 }
 
 function isUsableModelOutputStatus(status?: string | null) {
@@ -1959,36 +3133,257 @@ export function hasUsableRebalanceLlmOutput(run: RunResponse) {
 
 export function isCompletedRebalanceRun(run: RunResponse, market: SwingTradeMarket) {
   return (
-    inferRebalanceMarketFromPrompt(run.prompt) === market &&
+    isAnalysisRunForStage(run, "rebalance", market) &&
     (isUsableModelOutputStatus(run.status) || hasUsableRebalanceLlmOutput(run))
   );
 }
 
-export async function fetchAllFullRuns() {
-  const firstPage = await apiService.getFullRuns({ page: 1, limit: 100 });
-  if (firstPage.pages <= 1) return firstPage.items;
+function hasUsableTechnicalScanLlmOutput(run: RunResponse) {
+  return (run.run_jobs ?? []).some(
+    (link) =>
+      isUsableModelOutputStatus(link.job?.status) &&
+      Boolean(link.job?.response?.trim()),
+  );
+}
 
-  const remainingPages = Array.from(
-    { length: firstPage.pages - 1 },
-    (_, index) => index + 2,
+function isCompletedTechnicalScanRun(run: RunResponse, market: SwingTradeMarket) {
+  return (
+    isAnalysisRunForStage(run, "technical", market) &&
+    (isUsableModelOutputStatus(run.status) || hasUsableTechnicalScanLlmOutput(run))
   );
-  const remainingResults = await Promise.all(
-    remainingPages.map((page) => apiService.getFullRuns({ page, limit: 100 })),
-  );
+}
+
+function getRunJobCandidateId(kind: ActionablesInputSelectionKind, runId: number, jobId: number) {
+  return `${kind}:${runId}:${jobId}`;
+}
+
+function buildActionablesInputCandidates(runs: RunResponse[], market: SwingTradeMarket) {
+  const buildCandidatesForKind = (
+    kind: ActionablesInputSelectionKind,
+    label: string,
+    matchingRuns: RunResponse[],
+  ): ActionablesInputCandidate[] =>
+    matchingRuns.flatMap((run) =>
+      (run.run_jobs ?? []).flatMap((link) => {
+        const job = link.job;
+        if (!job) return [];
+        return [{
+          id: getRunJobCandidateId(kind, run.id, link.job_id),
+          kind,
+          label: `${label} · ${job.provider}/${job.model}`,
+          jobNo: `#${run.id} / #${link.job_id}`,
+          timestamp: job.created_at || run.created_at || null,
+          status: job.status || run.status || "unknown",
+          costUsd: job.estimated_cost ?? null,
+          error: job.error_message ?? null,
+          runId: run.id,
+          jobId: link.job_id,
+          runLabel: getAutoRebalanceRunDisplayLabel(run),
+          market,
+        }];
+      }),
+    );
 
   return [
-    ...firstPage.items,
-    ...remainingResults.flatMap((page) => page.items),
-  ];
+    ...buildCandidatesForKind(
+      "rebalance",
+      "Rebalance Scan",
+      runs.filter((run) => isCompletedRebalanceRun(run, market)),
+    ),
+    ...buildCandidatesForKind(
+      "technical",
+      "Technical Scan",
+      runs.filter((run) => isCompletedTechnicalScanRun(run, market)),
+    ),
+  ].sort((a, b) => parseTimestampMs(b.timestamp) - parseTimestampMs(a.timestamp));
+}
+
+function getDefaultActionablesInputIds(candidates: ActionablesInputCandidate[], runs: RunResponse[], market: SwingTradeMarket) {
+  const latestRebalanceRuns = getLatestMatchingRuns(runs, market);
+  const latestRebalanceRunIds = new Set(latestRebalanceRuns.map((run) => run.id));
+  const latestTechnicalRunId = runs
+    .filter((run) => isCompletedTechnicalScanRun(run, market))
+    .sort((a, b) => parseTimestampMs(b.created_at) - parseTimestampMs(a.created_at))[0]?.id;
+
+  const ids = candidates
+    .filter((candidate) => {
+      if (candidate.kind === "rebalance") return latestRebalanceRunIds.has(candidate.runId);
+      return candidate.runId === latestTechnicalRunId;
+    })
+    .map((candidate) => candidate.id);
+
+  if (ids.length) return ids;
+  const latestRebalance = candidates.find((candidate) => candidate.kind === "rebalance")?.id;
+  const latestTechnical = candidates.find((candidate) => candidate.kind === "technical")?.id;
+  return [latestRebalance, latestTechnical].filter(Boolean) as string[];
+}
+
+function filterRunsBySelectedActionablesInputs(
+  runs: RunResponse[],
+  kind: ActionablesInputSelectionKind,
+  selectedIds: Set<string>,
+) {
+  return runs.flatMap((run) => {
+    const runJobs = (run.run_jobs ?? []).filter((link) =>
+      selectedIds.has(getRunJobCandidateId(kind, run.id, link.job_id)),
+    );
+    return runJobs.length ? [{ ...run, run_jobs: runJobs }] : [];
+  });
+}
+
+export async function fetchAllFullRuns() {
+  return apiService.getAllFullRuns();
+}
+
+type DashboardRecentRunStage = "swing" | "rebalance" | "technical";
+
+const DASHBOARD_RECENT_RUN_SUMMARY_LIMIT = 100;
+const DASHBOARD_RECENT_RUN_DETAIL_LIMIT = 24;
+const DASHBOARD_RECENT_RUN_GROUP_LIMIT = 6;
+const DASHBOARD_RECENT_RUN_GROUP_WINDOW_MS = 30 * 60 * 1000;
+const DASHBOARD_RECENT_RUN_DETAIL_CONCURRENCY = 6;
+
+function getDashboardSummaryMarket(run: RunListItem): SwingTradeMarket | null {
+  return getAnalysisRunIdentity(run).market;
+}
+
+function getDashboardSummaryStage(run: RunListItem): DashboardRecentRunStage | null {
+  const stage = getAnalysisRunIdentity(run).stage;
+  return stage === "threats" ? null : stage;
+}
+
+function selectLatestDashboardSummaryGroup(
+  summaries: RunListItem[],
+  stage: DashboardRecentRunStage,
+  market: SwingTradeMarket,
+) {
+  const matching = summaries
+    .filter(
+      (run) =>
+        getDashboardSummaryStage(run) === stage &&
+        getDashboardSummaryMarket(run) === market,
+    )
+    .sort(
+      (a, b) =>
+        parseTimestampMs(b.created_at) - parseTimestampMs(a.created_at),
+    );
+  const latest = matching[0];
+  if (!latest) return [];
+
+  if (
+    latest.auto_rebalance_portfolio &&
+    typeof latest.auto_rebalance_sequence === "number"
+  ) {
+    return matching
+      .filter(
+        (run) =>
+          run.auto_rebalance_portfolio === latest.auto_rebalance_portfolio &&
+          run.auto_rebalance_sequence === latest.auto_rebalance_sequence,
+      )
+      .slice(0, DASHBOARD_RECENT_RUN_GROUP_LIMIT);
+  }
+
+  const latestCreatedAt = parseTimestampMs(latest.created_at);
+  return matching
+    .filter(
+      (run) =>
+        latestCreatedAt - parseTimestampMs(run.created_at) <=
+        DASHBOARD_RECENT_RUN_GROUP_WINDOW_MS,
+    )
+    .slice(0, DASHBOARD_RECENT_RUN_GROUP_LIMIT);
+}
+
+/**
+ * Load only the recent detailed runs required by the dashboard.
+ *
+ * The dashboard previously downloaded every full Run and embedded Job payload
+ * on mount. That made response size and latency grow forever with run history.
+ * A compact summary page now selects the latest stage groups, then bounded
+ * detail reads preserve the existing rendering contract for those runs.
+ */
+export type DashboardRunCoverage = { selected_run_ids: number[]; failed_run_ids: number[]; history_has_more: boolean };
+
+export async function fetchDashboardRecentFullRuns(onCoverage?: (coverage: DashboardRunCoverage) => void) {
+  const summaryPage = await apiService.getRuns({
+    page: 1,
+    limit: DASHBOARD_RECENT_RUN_SUMMARY_LIMIT,
+    summary: true,
+  });
+  const groups = (["india", "us"] as SwingTradeMarket[]).flatMap((market) =>
+    (["swing", "rebalance", "technical"] as DashboardRecentRunStage[]).map(
+      (stage) =>
+        selectLatestDashboardSummaryGroup(summaryPage.items, stage, market),
+    ),
+  );
+  const selectedIds: number[] = [];
+  const seenIds = new Set<number>();
+  for (
+    let groupIndex = 0;
+    groupIndex < DASHBOARD_RECENT_RUN_GROUP_LIMIT;
+    groupIndex += 1
+  ) {
+    groups.forEach((group) => {
+      const id = group[groupIndex]?.id;
+      if (
+        typeof id === "number" &&
+        !seenIds.has(id) &&
+        selectedIds.length < DASHBOARD_RECENT_RUN_DETAIL_LIMIT
+      ) {
+        seenIds.add(id);
+        selectedIds.push(id);
+      }
+    });
+  }
+
+  const detailedRuns: RunResponse[] = [];
+  const errors: unknown[] = [];
+  const failedRunIds: number[] = [];
+  for (
+    let start = 0;
+    start < selectedIds.length;
+    start += DASHBOARD_RECENT_RUN_DETAIL_CONCURRENCY
+  ) {
+    const batch = selectedIds.slice(
+      start,
+      start + DASHBOARD_RECENT_RUN_DETAIL_CONCURRENCY,
+    );
+    const results = await Promise.allSettled(
+      batch.map((runId) => apiService.getRun(runId)),
+    );
+    results.forEach((result, index) => {
+      if (result.status === "fulfilled") detailedRuns.push(result.value);
+      else { errors.push(result.reason); failedRunIds.push(batch[index]); }
+    });
+  }
+
+  if (selectedIds.length > 0 && detailedRuns.length === 0) {
+    const firstError = errors[0];
+    throw firstError instanceof Error
+      ? firstError
+      : new Error("Unable to load recent dashboard run details.");
+  }
+  onCoverage?.({ selected_run_ids: selectedIds, failed_run_ids: failedRunIds, history_has_more: summaryPage.pages > 1 || groups.some(group => group.length >= DASHBOARD_RECENT_RUN_GROUP_LIMIT) });
+  return detailedRuns.sort(
+    (a, b) => parseTimestampMs(b.created_at) - parseTimestampMs(a.created_at),
+  );
+}
+
+function getRunDisplayLabelForBreakup(run: RunResponse) {
+  if (run.auto_rebalance_label?.trim() || (typeof run.auto_rebalance_sequence === "number" && run.auto_rebalance_sequence > 0)) {
+    return getAutoRebalanceRunDisplayLabel(run);
+  }
+  return `Run #${run.id}`;
 }
 
 function getRunJobMetas(run: RunResponse): LlmMeta[] {
+  const runLabel = getRunDisplayLabelForBreakup(run);
   return (run.run_jobs ?? []).flatMap((link) => {
     const job = link.job;
     if (!job) return [];
     return [{
       runId: run.id,
       jobId: link.job_id,
+      runLabel,
       provider: job.provider,
       model: job.model,
       createdAt: job.created_at,
@@ -2020,6 +3415,7 @@ function parseRunRows(run: RunResponse): LlmBreakupRow[] {
       meta: {
         runId: run.id,
         jobId: link.job_id,
+        runLabel: getRunDisplayLabelForBreakup(run),
         provider: job.provider,
         model: job.model,
         createdAt: job.created_at,
@@ -2030,25 +3426,126 @@ function parseRunRows(run: RunResponse): LlmBreakupRow[] {
   });
 }
 
+
+
+function isSwingScanRunForMarket(run: RunResponse, market: SwingTradeMarket) {
+  return isAnalysisRunForStage(run, "swing", market);
+}
+
+function getSwingScanBreakupEntriesForStock(
+  runs: RunResponse[],
+  market: SwingTradeMarket,
+  stockRow: CanonicalRow,
+  parsedSources: SwingScanParseCache,
+): SwingScanBreakupEntry[] {
+  const stockSymbols = new Set(
+    [stockRow["Stock Symbol"], stockRow["Stock Name"]]
+      .map((value) => normalizeStockSymbol(value))
+      .filter((value) => value !== "UNKNOWN"),
+  );
+  if (!stockSymbols.size) return [];
+
+  return runs
+    .filter((run) => isSwingScanRunForMarket(run, market))
+    .flatMap((run) =>
+      (run.run_jobs ?? []).flatMap((link) => {
+        const job = link.job;
+        if (!job || !isUsableModelOutputStatus(job.status) || !job.response) return [];
+        let parsedRun = parsedSources.get(run);
+        if (!parsedRun) {
+          parsedRun = new Map();
+          parsedSources.set(run, parsedRun);
+        }
+        if (!parsedRun.has(link)) {
+          parsedRun.set(link, parseInvestmentRecommendationContent(job.response, {
+            provider: job.provider,
+            model: job.model,
+            runNumber: run.id,
+            runCreatedAt: run.created_at,
+          }));
+        }
+        const parsed = parsedRun.get(link);
+        if (!parsed) return [];
+
+        const meta: LlmMeta = {
+          runId: run.id,
+          jobId: link.job_id,
+          runLabel: getRunDisplayLabelForBreakup(run),
+          provider: job.provider,
+          model: job.model,
+          createdAt: job.created_at,
+          status: job.status || "completed",
+          error: job.error_message ?? null,
+        };
+
+        return parsed.rows
+          .filter((row) => {
+            const rowCandidates = [row["Stock Symbol"], row["Stock Name"]].map((value) => normalizeStockSymbol(value));
+            return rowCandidates.some((candidate) => stockSymbols.has(candidate));
+          })
+          .map((row) => ({ meta, row }));
+      }),
+    )
+    .sort((a, b) => parseTimestampMs(b.meta.createdAt) - parseTimestampMs(a.meta.createdAt));
+}
+
+function uniqueRunJobSources(runs: RunResponse[]): RunResponse[] {
+  const seen = new Set<string>();
+  return runs.flatMap((run) => {
+    const runJobs = (run.run_jobs ?? []).filter((link) => {
+      const key = `${run.id}:${link.job_id}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    return runJobs.length ? [{ ...run, run_jobs: runJobs }] : [];
+  });
+}
+
 export function buildConsensusRows(
   runs: RunResponse[],
   market: SwingTradeMarket,
   portfolioSnapshot?: ZerodhaPortfolioSnapshotDetail | IndMoneyUsPortfolioSnapshotDetail | null,
+  allRuns: RunResponse[] = runs,
+  verifiedUsListings: readonly VerifiedUsListing[] = [],
 ): StockConsensus[] {
+  const sourceRuns = uniqueRunJobSources(runs);
+  const sourceHistoryRuns = allRuns === runs ? sourceRuns : uniqueRunJobSources(allRuns);
+  // Keep parsing local to this calculation, while retaining every independent job's rows.
+  const parsedSwingSources: SwingScanParseCache = new Map();
   const grouped = new Map<string, LlmBreakupRow[]>();
   const currentValueSnapshots = buildCurrentValueSnapshotMap(portfolioSnapshot, market);
-  const llmMetas = runs.flatMap(getRunJobMetas);
+  const llmMetas = sourceRuns.flatMap(getRunJobMetas);
+  const parsedRows = sourceRuns
+    .flatMap(parseRunRows)
+    .filter((row) => Object.values(row.cells).some((value) => value.trim()));
+  const outputMetaKeys = new Set(parsedRows.map((row) => getMetaKey(row.meta)));
+  const outputLlmMetas = llmMetas.filter((meta) => outputMetaKeys.has(getMetaKey(meta)));
+  const consensusDenominator = outputMetaKeys.size || parsedRows.length;
 
-  runs.flatMap(parseRunRows).forEach((row) => {
-    if (!Object.values(row.cells).some((value) => value.trim())) return;
-    const key = getStockKey(row.cells);
-    const rows = grouped.get(key) ?? [];
-    rows.push(row);
-    grouped.set(key, rows);
-  });
+  const usGroups = market === "us" ? groupUsIdentityRows(parsedRows, verifiedUsListings, ACTION_HEADER, normalizeAction) : null;
+  if (usGroups) {
+    usGroups.forEach((group,key) => grouped.set(key,group.sourceRows));
+  } else {
+    const venuesBySymbol = new Map<string, Set<string>>();
+    parsedRows.forEach(row => { const symbol = getStockKey(row.cells); const venues = venuesBySymbol.get(symbol) ?? new Set<string>(); venues.add(row.cells["Exchange Symbol"]?.trim().toUpperCase() ?? ""); venuesBySymbol.set(symbol, venues); });
+    parsedRows.forEach((row) => {
+      const symbol = getStockKey(row.cells);
+      const key = (venuesBySymbol.get(symbol)?.size ?? 0) > 1 ? `${row.cells["Exchange Symbol"]?.trim().toUpperCase()}:${symbol}` : symbol;
+      const rows = grouped.get(key) ?? [];
+      rows.push(row);
+      grouped.set(key, rows);
+    });
+  }
 
   return Array.from(grouped.entries())
-    .map(([key, rows]) => {
+    .map(([key, sourceRows]) => {
+      const usGroup = usGroups?.get(key);
+      const rows = usGroup?.decisionRows ?? sourceRows;
+      const positionContext: PositionContext = usGroup && portfolioSnapshot
+        ? {source:"portfolio-snapshot", ...usIdentityHolding(usGroup.identity, portfolioSnapshot as IndMoneyUsPortfolioSnapshotDetail)}
+        : buildPositionContext(rows, currentValueSnapshots, Boolean(portfolioSnapshot));
+      const identityIssue = usGroup?.issue ?? (usGroup && positionContext.holdingMatch === "unresolved" ? "US snapshot cannot be attached to a single verified listing and share class." : null);
       const actionCounts = ACTION_CATEGORIES.reduce(
         (acc, action) => {
           acc[action] = 0;
@@ -2058,7 +3555,11 @@ export function buildConsensusRows(
       );
       const actionAverages = ACTION_CATEGORIES.reduce(
         (acc, action) => {
-          acc[action] = summarizeActionEstimate(rows, action, currentValueSnapshots);
+          acc[action] = {
+            ...summarizeActionEstimate(rows, action),
+            currentUnits: positionContext.currentUnits,
+            currentInvestmentAmount: positionContext.currentInvestmentAmount,
+          };
           return acc;
         },
         {} as Record<ActionCategory, ActionEstimate>,
@@ -2075,16 +3576,18 @@ export function buildConsensusRows(
       }, "Hold" as ActionCategory);
 
       const rowByMeta = new Map(rows.map((row) => [getMetaKey(row.meta), row]));
-      const breakupEntries = (llmMetas.length ? llmMetas : rows.map((row) => row.meta))
+      const breakupEntries = (outputLlmMetas.length ? outputLlmMetas : rows.map((row) => row.meta))
         .map((meta) => ({
           meta,
           row: rowByMeta.get(getMetaKey(meta)) ?? null,
+          ...(usGroup ? {sourceRows:sourceRows.filter(row => getMetaKey(row.meta) === getMetaKey(meta))} : {}),
         }))
         .sort(compareConsensusBreakupEntries);
-      const totalSuggestions = llmMetas.length || rows.length;
+      const totalSuggestions = consensusDenominator || rows.length;
 
-      const first = getRepresentativeConsensusRow(rows);
-      const representative = { ...first };
+      const first: CanonicalRow = {...getRepresentativeConsensusRow(rows.length ? rows : sourceRows), ...(usGroup?.identity.listing ? {"Exchange Symbol":usGroup.identity.exchange,"Stock Symbol":usGroup.identity.symbol} : {})};
+      const swingScanEntries = getSwingScanBreakupEntriesForStock(sourceHistoryRuns, market, first, parsedSwingSources);
+      const representative: CanonicalRow = { ...first };
       representative[ACTION_HEADER] =
         ACTION_CATEGORIES.filter((action) => actionCounts[action] > 0)
           .map((action) => `${action} (${actionCounts[action]}/${totalSuggestions})`)
@@ -2095,13 +3598,11 @@ export function buildConsensusRows(
       );
       representative["Rationale Cruxx"] = summarizeRationales(rows);
       const consensusEstimate = actionAverages[consensusAction];
-      representative["Current Units"] = formatQuantity(
-        consensusEstimate.currentUnits ?? getCurrentUnits(first, currentValueSnapshots),
-      );
-      representative[CURRENT_INVESTMENT_AMOUNT_HEADER] = formatDisplayAmount(
-        consensusEstimate.currentInvestmentAmount ?? getCurrentValueAmount(first, currentValueSnapshots),
-        market,
-      );
+      const consensusUnitsChange = consensusAction === "Hold" ? 0
+        : consensusEstimate.units === null ? null
+          : (consensusAction === "Trim" || consensusAction === "Sell All" ? -1 : 1) * consensusEstimate.units;
+      Object.assign(representative, buildConsolidatedPositionCells(positionContext, consensusUnitsChange, consensusEstimate.amount));
+      representative[CURRENT_INVESTMENT_AMOUNT_HEADER] = formatDisplayAmount(positionContext.currentInvestmentAmount, market);
       representative["Units to Sell/Buy"] = ACTION_ESTIMATE_CATEGORIES.has(
         consensusAction,
       )
@@ -2113,15 +3614,18 @@ export function buildConsensusRows(
 
       return {
         key,
-        exchange: first["Exchange Symbol"] || "",
-        symbol: first["Stock Symbol"] || first["Stock Name"] || key,
+        exchange: usGroup?.identity.listing ? usGroup.identity.exchange : first["Exchange Symbol"] || "",
+        symbol: usGroup?.identity.symbol || first["Stock Symbol"] || first["Stock Name"] || key,
+        ...(usGroup ? {usIdentity:usGroup.identity,identityIssue,sourceRowLinks:usGroup.sourceLinks,consensusRows:rows} : {}),
         consensusAction,
         actionCounts,
         actionAverages,
         totalSuggestions,
         representative,
-        rows,
+        positionContext,
+        rows: sourceRows,
         breakupEntries,
+        swingScanEntries,
       };
     })
     .sort((a, b) => a.symbol.localeCompare(b.symbol));
@@ -2151,6 +3655,52 @@ function summarizeRationales(rows: LlmBreakupRow[]) {
 function stockSymbolMatches(value: string | null | undefined, stock: StockConsensus) {
   const normalized = normalizeStockSymbol(value || "");
   return normalized !== "UNKNOWN" && normalized === normalizeStockSymbol(stock.symbol);
+}
+
+function addNormalizedStockAlias(aliases: Set<string>, value?: string | null) {
+  const rawValue = value?.trim();
+  if (!rawValue) return;
+
+  const candidates = [rawValue];
+  const parentheticalMatches = rawValue.matchAll(/\(([A-Z][A-Z0-9._-]{0,9})\)/gi);
+  for (const match of parentheticalMatches) {
+    candidates.push(match[1]);
+  }
+
+  const delimitedTickerMatch = rawValue.match(/[-–—:]\s*([A-Z][A-Z0-9._-]{0,9})\s*$/i);
+  if (delimitedTickerMatch) {
+    candidates.push(delimitedTickerMatch[1]);
+  }
+
+  candidates
+    .map((candidate) => normalizeStockSymbol(candidate))
+    .filter((candidate) => candidate !== "UNKNOWN")
+    .forEach((candidate) => aliases.add(candidate));
+}
+
+function getStockMatchAliases(stock: StockConsensus) {
+  const aliases = new Set<string>();
+  [
+    stock.key,
+    stock.symbol,
+    stock.representative["Stock Symbol"],
+    stock.representative["Stock Name"],
+  ].forEach((value) => addNormalizedStockAlias(aliases, value));
+
+  stock.rows.forEach((row) => {
+    addNormalizedStockAlias(aliases, row.cells["Stock Symbol"]);
+    addNormalizedStockAlias(aliases, row.cells["Stock Name"]);
+  });
+
+  return aliases;
+}
+
+function stockConsensusMatches(left: StockConsensus, right: StockConsensus) {
+  const leftAliases = getStockMatchAliases(left);
+  const rightAliases = getStockMatchAliases(right);
+  if (!leftAliases.size || !rightAliases.size) return false;
+
+  return Array.from(leftAliases).some((alias) => rightAliases.has(alias));
 }
 
 function getAnalysisTableRowsForStock(
@@ -2188,37 +3738,12 @@ function formatRecommendationLabel(value: string) {
   return action ? ACTION_CATEGORY_LABEL[action] : value || "No recommendation";
 }
 
-const RATIONALE_SCORE_HEADER_BY_RATIONALE_HEADER: Record<
-  (typeof LLM_BREAKUP_RATIONALE_HEADERS)[number],
-  RebalanceHeader
-> = {
-  "Rationale Cruxx": "Score Rationale Cruxx",
-  "Rationale Technical Setup Short Term 1–3 Months": "Score Rationale Technical Setup Short Term 1–3 Months",
-  "Rationale - Technical Setup (Medium Term)": "Score Rationale - Technical Setup (Medium Term)",
-  "Rationale - Technical Setup (Long Term)": "Score Rationale - Technical Setup (Long Term)",
-  "Rationale - Fundamentals Short Term": "Score Rationale - Fundamentals Short Term",
-  "Rationale - Fundamentals Medium/Long Term": "Score Rationale - Fundamentals Medium/Long Term",
-};
-
-type RationaleSectionItem = {
-  header: (typeof LLM_BREAKUP_RATIONALE_HEADERS)[number];
-  label: string | null;
-};
-
-type CapturedRationaleGroup = {
-  title: string;
-  subtitle?: string;
-  className: string;
-  titleClassName: string;
-  items: Array<RationaleSectionItem & { value: string; score: number | null }>;
-};
-
 const RATIONALE_SECTION_GROUPS: Array<{
   title: string;
   subtitle?: string;
   className: string;
   titleClassName: string;
-  items: RationaleSectionItem[];
+  items: Array<{ header: (typeof LLM_BREAKUP_RATIONALE_HEADERS)[number]; label: string | null }>;
 }> = [
   {
     title: "Cruxx",
@@ -2232,7 +3757,9 @@ const RATIONALE_SECTION_GROUPS: Array<{
     titleClassName: "text-blue-800",
     items: [
       { header: "Rationale Technical Setup Short Term 1–3 Months", label: "Short" },
+      { header: "Rationale Technical Setup Short Term 1–3 Months", label: "Short" },
       { header: "Rationale - Technical Setup (Medium Term)", label: "Medium" },
+      { header: "Rationale - Technical Setup (Long Term)", label: "Long" },
       { header: "Rationale - Technical Setup (Long Term)", label: "Long" },
     ],
   },
@@ -2247,14 +3774,53 @@ const RATIONALE_SECTION_GROUPS: Array<{
   },
 ];
 
-function getCapturedRationaleGroups(row: CanonicalRow): CapturedRationaleGroup[] {
-  return RATIONALE_SECTION_GROUPS.map((group) => {
+const RATIONALE_TEXT_HEADERS: RebalanceHeader[] = [
+  "Rationale Cruxx",
+  "Rationale Technical Setup Short Term 1–3 Months",
+  "Rationale - Technical Setup (Medium Term)",
+  "Rationale - Technical Setup (Long Term)",
+  "Rationale - Fundamentals Short Term",
+  "Rationale - Fundamentals Medium/Long Term",
+];
+
+const RATIONALE_SCORE_HEADERS: RebalanceHeader[] = [
+  "Score Rationale Cruxx",
+  "Score Rationale Technical Setup Short Term 1–3 Months",
+  "Score Rationale - Technical Setup (Medium Term)",
+  "Score Rationale - Technical Setup (Long Term)",
+  "Score Rationale - Fundamentals Short Term",
+  "Score Rationale - Fundamentals Medium/Long Term",
+];
+
+const RATIONALE_SCORE_HEADER_BY_RATIONALE_HEADER: Partial<Record<RebalanceHeader, RebalanceHeader>> = {
+  "Rationale Cruxx": "Score Rationale Cruxx",
+  "Rationale Technical Setup Short Term 1–3 Months": "Score Rationale Technical Setup Short Term 1–3 Months",
+  "Rationale - Technical Setup (Medium Term)": "Score Rationale - Technical Setup (Medium Term)",
+  "Rationale - Technical Setup (Long Term)": "Score Rationale - Technical Setup (Long Term)",
+  "Rationale - Fundamentals Short Term": "Score Rationale - Fundamentals Short Term",
+  "Rationale - Fundamentals Medium/Long Term": "Score Rationale - Fundamentals Medium/Long Term",
+};
+
+function getRowRationaleDisplayScore(row: CanonicalRow) {
+  return average(
+    RATIONALE_SCORE_HEADERS.map((header) => parseNumericCell(row[header])).filter(
+      (value): value is number => value !== null,
+    ),
+  );
+}
+
+function CapturedRationaleScoreCell({ row }: { row: CanonicalRow }) {
+  return <ScoreSymbol score={getRowRationaleDisplayScore(row)} />;
+}
+
+function CapturedRationalesCell({ row }: { row: CanonicalRow }) {
+  const groups = RATIONALE_SECTION_GROUPS.map((group) => {
     const seenLabels = new Set<string>();
     const items = group.items
       .map((item) => ({
         ...item,
+        score: parseNumericCell(row[RATIONALE_SCORE_HEADER_BY_RATIONALE_HEADER[item.header] ?? item.header]),
         value: row[item.header] || "",
-        score: parseNumericCell(row[RATIONALE_SCORE_HEADER_BY_RATIONALE_HEADER[item.header]]),
       }))
       .filter((item) => item.value.trim())
       .filter((item) => {
@@ -2265,33 +3831,6 @@ function getCapturedRationaleGroups(row: CanonicalRow): CapturedRationaleGroup[]
       });
     return { ...group, items };
   }).filter((group) => group.items.length > 0);
-}
-
-function CapturedRationaleScoresCell({ row }: { row: CanonicalRow }) {
-  const groups = getCapturedRationaleGroups(row);
-  if (!groups.length) return <span className="text-slate-400">—</span>;
-
-  return (
-    <div className="space-y-2">
-      {groups.map((group) => (
-        <section key={`${group.title}-scores`} className="rounded-lg border border-slate-200 bg-white/80 px-2 py-1.5">
-          <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{group.title}</div>
-          <div className="mt-1 space-y-1">
-            {group.items.map(({ header, label, score }) => (
-              <div key={`${header}-${label ?? "plain"}-score`} className="flex items-center justify-between gap-2">
-                {label ? <span className="text-[10px] font-semibold text-slate-500">{label}</span> : null}
-                <ScoreSymbolBadge score={score} compact />
-              </div>
-            ))}
-          </div>
-        </section>
-      ))}
-    </div>
-  );
-}
-
-function CapturedRationalesCell({ row }: { row: CanonicalRow }) {
-  const groups = getCapturedRationaleGroups(row);
 
   if (!groups.length) {
     return <span>{row["Technical Setup"] || "—"}</span>;
@@ -2306,10 +3845,13 @@ function CapturedRationalesCell({ row }: { row: CanonicalRow }) {
           </div>
           {group.subtitle ? <div className="mt-0.5 text-[10px] font-medium opacity-80">{group.subtitle}</div> : null}
           <div className="mt-1.5 space-y-1 text-xs leading-5">
-            {group.items.map(({ header, label, value }) => (
-              <p key={`${header}-${label ?? "plain"}`} className="whitespace-pre-wrap break-words">
-                {label ? <span className="font-semibold">{label}: </span> : null}
-                {value}
+            {group.items.map(({ header, label, score, value }) => (
+              <p key={`${header}-${label ?? "plain"}`} className="flex items-start gap-1.5 whitespace-pre-wrap break-words">
+                <ScoreSymbol score={score} className="shrink-0 tabular-nums" />
+                <span>
+                  {label ? <span className="font-semibold">{label}: </span> : null}
+                  {value}
+                </span>
               </p>
             ))}
           </div>
@@ -2339,7 +3881,7 @@ function compareConsensusBreakupEntries(a: ConsensusBreakupEntry, b: ConsensusBr
   return (a.meta.model || "").localeCompare(b.meta.model || "", undefined, { sensitivity: "base" });
 }
 
-function ConsensusBreakupButton({
+export function ConsensusBreakupButton({
   stock,
   action,
 }: {
@@ -2347,6 +3889,8 @@ function ConsensusBreakupButton({
   action: ActionCategory;
 }) {
   const [open, setOpen] = useState(false);
+  const reviewDialog = useReviewDialog<HTMLDivElement>(open, () => setOpen(false));
+  const { dragHandleProps, draggableStyle } = useDraggablePopup();
   const consensusText = `${stock.actionCounts[action]}/${stock.totalSuggestions}`;
 
   return (
@@ -2357,7 +3901,7 @@ function ConsensusBreakupButton({
           event.stopPropagation();
           setOpen(true);
         }}
-        className="rounded px-1.5 py-0.5 font-semibold text-blue-700 underline underline-offset-2 transition hover:bg-blue-50 hover:text-blue-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+        className="cursor-pointer rounded px-1.5 py-0.5 font-semibold text-blue-700 underline underline-offset-2 transition hover:bg-blue-50 hover:text-blue-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
         aria-label={`Show ${stock.symbol} LLM recommendation breakup`}
         title={`Show ${stock.symbol} LLM recommendation breakup`}
       >
@@ -2365,15 +3909,16 @@ function ConsensusBreakupButton({
       </button>
       {open ? (
         <div
+          {...reviewDialog}
           className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 px-4 py-10"
           role="dialog"
           aria-modal="true"
           aria-label={`${stock.symbol} consensus breakup`}
           onClick={() => setOpen(false)}
         >
-          <div className="w-full max-w-3xl rounded-2xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
-            <div className="sticky top-0 z-10 flex items-start justify-between gap-4 rounded-t-2xl border-b bg-white px-5 py-4">
-              <div>
+          <div className="w-full max-w-7xl rounded-2xl bg-white shadow-2xl" style={draggableStyle} onClick={(event) => event.stopPropagation()}>
+            <div className="sticky top-0 z-10 flex cursor-move touch-none select-none items-start justify-between gap-4 rounded-t-2xl border-b bg-white px-5 py-4" {...dragHandleProps}>
+              <div className="min-w-0 flex-1">
                 <p className="text-xs font-semibold uppercase tracking-[0.22em] text-blue-600">Consensus breakup</p>
                 <h2 className="mt-1 flex flex-wrap items-baseline gap-2 text-2xl font-bold text-gray-900">
                   <span>{stock.symbol} · {consensusText}</span>
@@ -2382,18 +3927,70 @@ function ConsensusBreakupButton({
                   </span>
                 </h2>
                 <p className="mt-2 text-sm text-gray-500">
-                  Recommendation from every LLM included in the consolidated actionables run; missing stock mentions are marked as Not mentioned.
+                  Recommendation denominator includes only LLMs with completed or partial output in the consolidated actionables run; missing stock mentions from those outputs are marked as Not mentioned.
                 </p>
+                <PopupDragHint />
               </div>
-              <button type="button" onClick={() => setOpen(false)} className="rounded-full p-2 text-gray-500 transition hover:bg-gray-100 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500" aria-label="Close consensus breakup">
+              <button type="button" onClick={() => setOpen(false)} className="shrink-0 rounded-full p-2 text-gray-500 transition hover:bg-gray-100 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500" aria-label="Close consensus breakup">
                 <X className="h-5 w-5" />
               </button>
             </div>
             <div className="max-h-[75vh] overflow-y-auto px-5 py-4">
+              <section className="mb-6 rounded-2xl border border-slate-200 bg-white shadow-sm">
+                <div className="border-b border-slate-200 px-4 py-3">
+                  <h3 className="text-sm font-bold uppercase tracking-[0.18em] text-slate-700">Swing Scan captures</h3>
+                  <p className="mt-1 text-sm text-slate-500">
+                    Matching rows captured for this stock in Swing Scan stage LLM outputs, with timestamp and the same columns shown in the Swing Opportunities Output popup.
+                  </p>
+                </div>
+                {stock.swingScanEntries.length ? (
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-slate-200 text-left text-xs">
+                      <thead className="bg-slate-950 text-white">
+                        <tr>
+                          <th className="whitespace-nowrap px-3 py-3 font-bold uppercase tracking-wider">Timestamp</th>
+                          <th className="whitespace-nowrap px-3 py-3 font-bold uppercase tracking-wider">Job / Run</th>
+                          {SWING_SCAN_BREAKUP_HEADERS.map((header) => (
+                            <th key={header} className="whitespace-nowrap px-3 py-3 font-bold uppercase tracking-wider">
+                              {header}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 bg-white text-slate-700">
+                        {stock.swingScanEntries.map((entry, index) => (
+                          <tr key={`${entry.meta.runId}-${entry.meta.jobId}-${index}`} className={index % 2 ? "bg-slate-50/70" : "bg-white"}>
+                            <td className="whitespace-nowrap px-3 py-3 font-medium text-slate-700">{formatDateTime(entry.meta.createdAt)}</td>
+                            <td className="whitespace-nowrap px-3 py-3">
+                              <Link
+                                href={`/console/runs/${entry.meta.runId}#llm-output-job-${entry.meta.jobId}`}
+                                onClick={() => setOpen(false)}
+                                className="font-semibold text-blue-700 underline-offset-4 hover:underline"
+                              >
+                                {entry.meta.runLabel} · Job #{entry.meta.jobId}
+                              </Link>
+                            </td>
+                            {SWING_SCAN_BREAKUP_HEADERS.map((header) => (
+                              <td key={header} className="min-w-[10rem] px-3 py-3 align-top">
+                                {entry.row[header] || "—"}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="px-4 py-5 text-sm text-slate-500">
+                    No matching Swing Scan stage LLM rows were found for this stock.
+                  </div>
+                )}
+              </section>
+
               <div className="space-y-3">
                 {stock.breakupEntries.map((entry, index) => {
                   const rowAction = getConsensusBreakupAction(entry);
-                  const recommendationLabel = rowAction ? formatRecommendationLabel(rowAction) : "Not mentioned";
+                  const recommendationLabel = rowAction ? formatRecommendationLabel(rowAction) : entry.sourceRows?.length ? "Conflicting source observations" : "Not mentioned";
                   return (
                     <div
                       key={`${entry.meta.runId}-${entry.meta.jobId}-${index}`}
@@ -2410,13 +4007,13 @@ function ConsensusBreakupButton({
                               event.stopPropagation();
                               setOpen(false);
                             }}
-                            className="block truncate text-base font-bold text-slate-900 underline-offset-4 transition hover:text-blue-700 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            className="block cursor-pointer truncate text-base font-bold text-slate-900 underline-offset-4 transition hover:text-blue-700 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500"
                             title={`Open ${entry.meta.provider || "Unknown provider"} ${entry.meta.model || "Unknown model"} output`}
                           >
                             {index + 1}. {entry.meta.provider || "Unknown provider"} {entry.meta.model || "Unknown model"}
                           </Link>
                           <div className="mt-0.5 text-sm text-slate-500">
-                            Run #{entry.meta.runId} · Job #{entry.meta.jobId}
+                            {entry.meta.runLabel} · Job #{entry.meta.jobId}
                           </div>
                         </div>
                         <div className="whitespace-nowrap text-sm text-slate-500">
@@ -2443,23 +4040,458 @@ function ConsensusBreakupButton({
   );
 }
 
-function StockDetailsButton({
+function getRejectedResultMessage(result: PromiseSettledResult<unknown>, label: string) {
+  if (result.status === "fulfilled") return null;
+  const message = result.reason instanceof Error ? result.reason.message : String(result.reason);
+  return `${label}: ${normalizeOperationalErrorMessage(message)}`;
+}
+
+function combineOperationalErrors(messages: Array<string | null>) {
+  const present = messages.filter((message): message is string => Boolean(message));
+  return present.length ? Array.from(new Set(present)).join("; ") : null;
+}
+
+async function fetchNativeHistoricalMatrix(item: FinalActionableHistoryItem | null, market: SwingTradeMarket, symbol: string, exchange: string, source?: { runId: number; coveredAt: string; reconstructedDetail?: ScoreMatrixDetail }): Promise<ScoreMatrixDetail | null> {
+  if (item && (item.market !== market || normalizeStockSymbol(item.stock_symbol) !== normalizeStockSymbol(symbol))) return null;
+  const target = item ? { runId: item.rebalance_run_id, coveredAt: item.covered_at } : source;
+  if (!target) return null;
+  const decode = (saved: FinalActionableHistoryItem): ScoreMatrixDetail | null => {
+      if (saved.market !== market || normalizeStockSymbol(saved.stock_symbol) !== normalizeStockSymbol(symbol) || saved.covered_at !== target.coveredAt
+          || saved.rebalance_run_id !== target.runId || (item && saved.workflow_id !== item.workflow_id)
+          || saved.formula_version !== "score-matrix-v1") return null;
+      const detail = saved.formula_inputs_json;
+      if (!detail || normalizeStockSymbol(String(detail.stockSymbol ?? "")) !== normalizeStockSymbol(symbol)
+          || detail.rebalanceSourceRunId !== saved.rebalance_run_id
+          || typeof detail.stockKey !== "string" || detail.stockExchange !== exchange
+          || typeof detail.stockName !== "string"
+          || !Array.isArray(detail.rows) || !Array.isArray(detail.rules) || !Array.isArray(detail.detailedRationaleRows)
+          || typeof detail.detailedRationaleDenominator !== "number"
+          || detail.calculatedScore !== saved.score
+          || !detail.rows.every((row) => row && typeof row === "object")
+          || !detail.rules.every((row) => row && typeof row === "object")
+          || !detail.detailedRationaleRows.every((row) => row && typeof row === "object")) return null;
+      return detail as unknown as ScoreMatrixDetail;
+  };
+  let cursor: string | null = null;
+  const cursors = new Set<string>();
+  const matches: FinalActionableHistoryItem[] = [];
+  for (let page = 0; page < 100; page += 1) {
+    const response = await apiService.getFinalActionableHistory({ market, symbol, limit: 50, cursor });
+    if (item) {
+      const saved = response.items.find((row) => row.id === item.id);
+      if (saved) return decode(saved);
+    } else {
+      matches.push(...response.items.filter((row) => row.rebalance_run_id === target.runId && row.covered_at === target.coveredAt));
+      if (matches.length > 1) return null; // Unknown workflow cannot be guessed.
+    }
+    if (!response.has_more || !response.next_cursor) return matches.length === 1 ? decode(matches[0]) : null;
+    if (cursors.has(response.next_cursor)) throw new Error("Historical pagination did not advance.");
+    cursor = response.next_cursor;
+    cursors.add(cursor);
+  }
+  throw new Error("Historical lookup limit reached. Please try again.");
+}
+
+export function savedLegacyParameterEvidence(item: FinalActionableHistoryItem | null, market: SwingTradeMarket, symbol: string, exchange: string): HistoricalScoreEvidenceResponse | null {
+  if (!item || item.market !== market || normalizeStockSymbol(item.stock_symbol) !== normalizeStockSymbol(symbol) || item.formula_version !== "legacy-backfill-v1" || !Array.isArray(item.snapshot_json?.rows)) return null;
+  const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const fields: Record<string, [string, string]> = { cruxx: ["Score Rationale Cruxx", "Rationale Cruxx"], "technical-short": ["Score Rationale Technical Setup Short Term 1–3 Months", "Rationale Technical Setup Short Term 1–3 Months"], "technical-medium": ["Score Rationale - Technical Setup (Medium Term)", "Rationale - Technical Setup (Medium Term)"], "technical-long": ["Score Rationale - Technical Setup (Long Term)", "Rationale - Technical Setup (Long Term)"], "fundamentals-short": ["Score Rationale - Fundamentals Short Term", "Rationale - Fundamentals Short Term"], "fundamentals-medium-long": ["Score Rationale - Fundamentals Medium/Long Term", "Rationale - Fundamentals Medium/Long Term"] };
+  const candidates = item.snapshot_json.rows.flatMap(value => {
+    if (!value || typeof value !== "object") return [];
+    const source = value as Record<string, unknown>;
+    if (typeof source.job_id !== "number" || !Number.isSafeInteger(source.job_id) || !source.raw || typeof source.raw !== "object") return [];
+    const mapped = new Map<string, unknown>();
+    for (const [header, cell] of Object.entries(source.raw)) { const key = normalize(header); if (mapped.has(key)) return []; mapped.set(key, cell); }
+    if (normalizeStockSymbol(String(mapped.get("stocksymbol") ?? "")) !== normalizeStockSymbol(symbol) || String(mapped.get("exchangesymbol") ?? "").toUpperCase() !== exchange.toUpperCase()) return [];
+    return [{ source, mapped }];
+  });
+  const parameters: HistoricalScoreEvidenceResponse["parameters"] = {};
+  for (const { source, mapped } of candidates) {
+    if (candidates.filter(candidate => candidate.source.job_id === source.job_id).length !== 1) continue;
+    for (const [key, [scoreHeader, rationaleHeader]] of Object.entries(fields)) {
+      const rawScore = mapped.get(normalize(scoreHeader)), rawRationale = mapped.get(normalize(rationaleHeader));
+      if (rawScore === undefined && rawRationale === undefined) continue;
+      (parameters[key] ??= []).push({ id: `saved:${item.id}:${source.job_id}:${key}`, runId: item.rebalance_run_id, jobId: source.job_id as number, label: `Run #${item.rebalance_run_id} (Rebalance Scan) · Job #${source.job_id} · ${source.provider ?? "Provider unavailable"} ${source.model ?? "Model unavailable"} · original job timestamp unavailable`, score: parseStrictNumericCell(String(rawScore ?? "")), rationale: rawRationale == null || !String(rawRationale).trim() ? "Original parameter rationale unavailable." : String(rawRationale), rawScore, rawRationale, representation: "saved_legacy_source_row" });
+    }
+  }
+  if (!Object.values(parameters).some(rows => rows.length)) return null;
+  return { scope: { run_id: item.rebalance_run_id, market, symbol, exchange, covered_at: item.covered_at, history_id: item.id }, status: "partial", matrix: null, parameters, parameter_labels: Object.fromEntries(Object.entries(fields).map(([key, [header]]) => [key, header.replace(/^Score Rationale[ -]*/, "") || "Rationale Cruxx"])), notes: ["Original per-job parameter cells are retained in this saved history row. Its original weighted formula was not captured; no current matrix has been substituted."], coverage: { parameter_observations: Object.values(parameters).reduce((sum, rows) => sum + rows.length, 0) }, candidates: [], source: "saved_legacy_source_rows" };
+}
+
+export async function fetchFrozenHistoricalMatrix(item: FinalActionableHistoryItem | null, market: SwingTradeMarket, symbol: string, exchange: string, source?: { runId: number; coveredAt: string; reconstructedDetail?: ScoreMatrixDetail }): Promise<ScoreMatrixDetail | null> {
+  return (await fetchHistoricalScoreSelection(item, market, symbol, exchange, source)).detail;
+}
+
+async function fetchHistoricalScoreSelection(item: FinalActionableHistoryItem | null, market: SwingTradeMarket, symbol: string, exchange: string, source?: { runId: number; coveredAt: string; reconstructedDetail?: ScoreMatrixDetail }) {
+  const target = item ? { runId: item.rebalance_run_id, coveredAt: item.covered_at } : source;
+  if (!target || item && (item.market !== market || normalizeStockSymbol(item.stock_symbol) !== normalizeStockSymbol(symbol))) return { detail: null, evidence: null };
+  if (source?.reconstructedDetail && !item) {
+    const detail = source.reconstructedDetail;
+    if (normalizeStockSymbol(detail.stockSymbol) !== normalizeStockSymbol(symbol) || detail.stockExchange !== exchange || detail.rebalanceSourceRunId !== source.runId) throw new Error("Reconstructed matrix source identity does not match the selected row.");
+    return { detail: { ...detail, historicalReadNotes: ["This exact displayed row was reconstructed from its captured source jobs using current formula settings. It is not the original historical weighted policy or saved decision. Source run/job IDs are preserved for parameter drilldowns."] }, evidence: null };
+  }
+  const savedParameters = savedLegacyParameterEvidence(item, market, symbol, exchange);
+  if (typeof apiService.getHistoricalScoreEvidence === "function") {
+    let view: HistoricalScoreEvidenceResponse | null = null;
+    try {
+      view = await apiService.getHistoricalScoreEvidence({ run_id: target.runId, market, symbol, exchange, covered_at: target.coveredAt, ...(item ? { history_id: item.id } : {}) });
+    } catch (error) {
+      // Preserve native history support when audit reads are disabled or not deployed.
+      if (!(error && typeof error === "object" && "status" in error && error.status === 404)) throw error;
+    }
+    if (view) {
+      if (!Number.isFinite(Date.parse(view.scope.covered_at)) || !Number.isFinite(Date.parse(target.coveredAt)) || view.scope.run_id !== target.runId || view.scope.market !== market || normalizeStockSymbol(view.scope.symbol) !== normalizeStockSymbol(symbol) || view.scope.exchange !== exchange || parseTimestampMs(view.scope.covered_at) !== parseTimestampMs(target.coveredAt) || (item && view.scope.history_id !== item.id)) throw new Error("Historical evidence scope does not match the selected stock, run and timestamp.");
+      if (!Object.values(view.parameters).some(rows => rows.length) && savedParameters && view.status !== "ambiguous") view = { ...view, parameters: savedParameters.parameters, notes: [...view.notes, ...savedParameters.notes] };
+      const matrix = view.matrix;
+      if (matrix && (matrix.stockSymbol !== symbol || matrix.stockExchange !== exchange || matrix.rebalanceSourceRunId !== target.runId || !Array.isArray(matrix.rows) || !Array.isArray(matrix.rules) || !Array.isArray(matrix.detailedRationaleRows))) throw new Error("Stored matrix identity or shape is invalid.");
+      return { detail: matrix ? { ...matrix, historicalReadNotes: [...(Array.isArray(matrix.historicalReadNotes) ? matrix.historicalReadNotes.filter((note): note is string => typeof note === "string") : []), ...view.notes], historicalEvidence: view } as ScoreMatrixDetail : null, evidence: view };
+    }
+  }
+  return { detail: await fetchNativeHistoricalMatrix(item, market, symbol, exchange, source), evidence: savedParameters };
+}
+
+function HistoricalScoreMatrixPopup({ item, coveredAt, runId, reconstructedDetail, market, symbol, exchange, onClose }: {
+  item: FinalActionableHistoryItem | null; coveredAt: string; runId: number; reconstructedDetail?: ScoreMatrixDetail; market: SwingTradeMarket; symbol: string; exchange: string; onClose: () => void;
+}) {
+  const [result, setResult] = useState<{ detail: ScoreMatrixDetail | null; evidence: HistoricalScoreEvidenceResponse | null; error: string | null; loading: boolean }>({ detail: null, evidence: null, error: null, loading: true });
+  const [selectedEvidence, setSelectedEvidence] = useState<{ id: string; parameter: string } | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    let active = true;
+    const opener = document.activeElement as HTMLElement | null;
+    panelRef.current?.focus();
+    void fetchHistoricalScoreSelection(item, market, symbol, exchange, { runId, coveredAt, reconstructedDetail }).then(
+      (selection) => { if (active) setResult({ ...selection, error: null, loading: false }); },
+      (error: unknown) => { if (active) setResult({ detail: null, evidence: null, error: error instanceof Error ? error.message : "Unable to load historical matrix.", loading: false }); },
+    );
+    return () => { active = false; opener?.focus(); };
+  }, [item, market, symbol, exchange, runId, coveredAt, reconstructedDetail]);
+  return (
+    <div ref={panelRef} tabIndex={-1} className="fixed inset-0 z-[70]" onClick={(event) => { event.stopPropagation(); onClose(); }}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); onClose(); }
+        if (event.key === "Tab") {
+          const nodes = Array.from(panelRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), [tabindex="0"]') ?? []);
+          const first = nodes[0]; const last = nodes[nodes.length - 1];
+          if (!first) { event.preventDefault(); return; }
+          if (event.shiftKey && (document.activeElement === first || document.activeElement === panelRef.current)) { event.preventDefault(); last.focus(); }
+          else if (!event.shiftKey && (document.activeElement === last || document.activeElement === panelRef.current)) { event.preventDefault(); first.focus(); }
+        }
+      }}>
+      {result.detail ? <ScoreMatrixModal detail={result.detail} frozen historicalLabel={`${symbol} · ${formatDateTime(coveredAt)} · Run #${runId}`} onClose={onClose} /> : (
+        <div inert={selectedEvidence ? true : undefined} role="dialog" aria-modal={!selectedEvidence} aria-label={`Historical score matrix for ${symbol}`} className="flex h-full items-start justify-center overflow-auto bg-slate-950/55 px-4 py-10">
+          <div className="w-full max-w-xl rounded-2xl bg-white p-6 shadow-xl" onClick={(event) => event.stopPropagation()}>
+            <h2 className="font-bold">{symbol} · {formatDateTime(coveredAt)}</h2>
+            {result.loading ? <p role="status" className="mt-4 flex items-center gap-2"><RefreshCw aria-hidden="true" className="size-4 animate-spin" />Loading historical score matrix…</p>
+              : result.error ? <p role="alert" className="mt-4 text-red-700">Unable to load historical score matrix: {result.error}</p>
+              : <div className="mt-4 space-y-2"><p>{result.evidence?.status === "ambiguous" ? "Multiple saved revisions match this selection. An exact captured revision is required." : "No original weighted score matrix is available for this stock and timestamp."}</p>{result.evidence?.notes.map((note, index) => <p key={index}>{note}</p>)}<p>Latest data has not been substituted.</p></div>}
+            {!result.loading && !result.error && result.evidence ? <div className="mt-4 flex flex-wrap gap-2">{Object.entries(result.evidence.parameters).filter(([, rows]) => rows.length > 0).map(([id]) => <button key={id} type="button" className="rounded border border-blue-200 px-3 py-2 text-sm text-blue-700" onClick={() => setSelectedEvidence({ id, parameter: result.evidence?.parameter_labels?.[id] ?? id })}>View original {result.evidence?.parameter_labels?.[id] ?? id}</button>)}</div> : null}
+            <button type="button" onClick={onClose} className="mt-4 rounded border px-3 py-2">Back to captured stock details</button>
+          </div>
+        </div>
+      )}
+      {selectedEvidence && result.evidence ? <ParameterScoreEvidencePopup key={selectedEvidence.id} detail={{ stockKey: symbol, stockSymbol: symbol }} parameter={selectedEvidence} observations={result.evidence.parameters[selectedEvidence.id] ?? []} onClose={() => setSelectedEvidence(null)} /> : null}
+    </div>
+  );
+}
+
+export async function scanStockSourceObservations(market: SwingTradeMarket, symbol: string, onPage: (rows: StockSourceObservation[], examined: number, note: string) => void, active: () => boolean, startCursor: string | null = null) {
+  let cursor = startCursor, examined = 0, note = "", hasMore = true;
+  const cursors = new Set<string>(startCursor ? [startCursor] : []), rows = new Map<string, StockSourceObservation>();
+  // Bound each interaction. Continuation is explicit and retains all accessible pages.
+  for (let pages = 0; pages < 4 && active(); pages++) {
+    const page = await apiService.getStockSourceObservations({ market, symbol, cursor });
+    if (!active()) return;
+    if (page.market !== market || normalizeStockSymbol(page.symbol) !== normalizeStockSymbol(symbol)) throw new Error("Stock source response does not match this selection.");
+    for (const row of page.items) if (!rows.has(row.id)) rows.set(row.id, row);
+    examined += page.examined_sources; note = page.coverage_note; hasMore = page.has_more;
+    if (!hasMore) { cursor = null; break; }
+    if (!page.next_cursor || cursors.has(page.next_cursor)) throw new Error("Source pagination stopped because the cursor did not advance. Coverage is incomplete.");
+    cursor = page.next_cursor; cursors.add(cursor);
+  }
+  if (!active()) return;
+  // Publish once per bounded batch rather than sorting/cloning the growing history per response.
+  onPage([...rows.values()], examined, note);
+  return { cursor, hasMore };
+}
+
+export function RetainedSourceFields({ cells }: { cells: Record<string, unknown> }) {
+  const [open, setOpen] = useState(false);
+  return <details onToggle={event => setOpen(event.currentTarget.open)}><summary className="cursor-pointer text-blue-700">View original scores, rationale and fields</summary>{open ? <dl className="mt-2 space-y-2">{Object.entries(cells).map(([key, value]) => <div key={key}><dt className="font-semibold">{key}</dt><dd className="max-w-xl whitespace-pre-wrap break-words">{value !== null && typeof value === "object" ? JSON.stringify(value, null, 2) : String(value ?? "Unavailable")}</dd></div>)}</dl> : null}</details>;
+}
+
+export function retainedSourceCoverageDisplayNote(note?: string | null) {
+  if (!note) return "Deleted uncaptured history cannot be reconstructed. No model rerun or historical write is performed.";
+  return note.replace("All retained owned sources are scanned across pages. Deleted uncaptured outputs and sources with unknown market identity cannot be reconstructed. No provider call or history write is performed.", "").trim();
+}
+
+type RetainedSourceRead = { rows: StockSourceObservation[]; loading: boolean; error: string | null; hasMore?: boolean; loadMore: () => void; retry: () => void };
+
+export function RetainedStockObservations({ market, symbol, saved, reconstructed, onScoreOpen, onReadChange }: { onReadChange?: (read: RetainedSourceRead) => void; market: SwingTradeMarket; symbol: string; saved: FinalActionableHistoryItem[]; reconstructed: HistoricalDashboardActionRow[]; onScoreOpen?: (selection: { item: FinalActionableHistoryItem | null; coveredAt: string; runId: number; reconstructedDetail?: ScoreMatrixDetail }) => void }) {
+  const [state, setState] = useState<{ rows: StockSourceObservation[]; examined: number; note: string; loading: boolean; error: string | null; nextCursor?: string | null; hasMore?: boolean }>({ rows: [], examined: 0, note: "", loading: true, error: null });
+  const [attempt, setAttempt] = useState(0);
+  const [scanCursor, setScanCursor] = useState<string | null>(null);
+  const [page, setPage] = useState(0);
+  useEffect(() => {
+    if (typeof apiService.getStockSourceObservations !== "function") return;
+    let active = true;
+    void scanStockSourceObservations(market, symbol, (rows, examined, note) => { if (active) setState(current => ({ ...current, rows: [...new Map([...current.rows, ...rows].map(row => [row.id, row])).values()], examined: current.examined + examined, note, loading: true, error: null })); }, () => active, scanCursor).then(result => { if (active && result) setState(current => ({ ...current, loading: false, nextCursor: result.cursor, hasMore: result.hasMore })); }, (error: unknown) => { if (active) setState(current => ({ ...current, loading: false, error: error instanceof Error ? error.message : "Retained sources could not be read." })); });
+    return () => { active = false; };
+  }, [market, symbol, attempt, scanCursor]);
+  useEffect(() => { onReadChange?.({ rows: state.rows, loading: state.loading, error: state.error, hasMore: state.hasMore,
+    loadMore: () => { if (state.hasMore && !state.loading && !state.error) { setState(current => ({ ...current, loading: true })); setScanCursor(state.nextCursor ?? null); } },
+    retry: () => { setState({ rows: [], examined: 0, note: "", loading: true, error: null }); setPage(0); setScanCursor(null); setAttempt(value => value + 1); },
+  }); }, [state, onReadChange]);
+  const rows = useMemo(() => {
+    const numeric = (value: unknown) => value !== null && value !== undefined && String(value).trim() && Number.isFinite(Number(value)) ? Number(value) : null;
+    const savedRuns = new Set(saved.map(item => item.rebalance_run_id));
+    return [
+    ...saved.map(item => ({ id: `saved:${item.id}`, run_id: item.rebalance_run_id, job_id: null, provider: null, model: null, created_at: item.covered_at, stage: "Saved summary", run_status: item.coverage_status, job_status: "", source: `Original saved summary · ${item.formula_version}`, cells: { "original action": item.action, "recorded score": item.score, "historical units": item.historical_current_units, "original amount": item.amount }, score: item.score, action: item.action, derived: historyScoreDerivedAction(item), selection: { item, coveredAt: item.covered_at, runId: item.rebalance_run_id } })),
+    ...reconstructed.filter(row => !savedRuns.has(row.runId)).map(row => ({ id: `reconstructed:${row.runId}:${row.id}`, run_id: row.runId, job_id: null, provider: null, model: null, created_at: row.coveredAt, stage: "Rebalance reconstruction", run_status: "Original completion unavailable", job_status: "", source: "Reconstructed · current formula, not original saved decision", cells: { "current formula action": row.formulaAction, "current formula score": row.formulaScore, "captured units": row.detail.currentUnits }, score: row.formulaScore, action: null, derived: historyScoreDerivedAction({ score: row.formulaScore, historical_current_units: row.detail.currentUnits, coverage_status: "suggested" }), selection: { item: null, coveredAt: row.coveredAt, runId: row.runId, reconstructedDetail: row.detail } })),
+    ...state.rows.map(row => { const score = numeric(row.cells["recorded score"] ?? row.cells["final score"] ?? row.cells["calculated score"] ?? row.cells.score); const actionKey = Object.keys(row.cells).find(key => key === "action" || key.startsWith("action buy")); const action = actionKey === undefined ? undefined : row.cells[actionKey]; return { ...row, score, action: action == null ? null : String(action), derived: historyScoreDerivedAction({ score, historical_current_units: numeric(row.cells["current units"] ?? row.cells.current_units), coverage_status: ["completed", "partial"].includes(row.job_status) ? "suggested" : "run_failed" }), selection: null }; }),
+  ].sort((a, b) => parseTimestampMs(b.created_at ?? "") - parseTimestampMs(a.created_at ?? "") || b.run_id - a.run_id || (b.job_id ?? 0) - (a.job_id ?? 0)); }, [saved, reconstructed, state.rows]);
+  const pageCount = Math.max(1, Math.ceil(rows.length / 25));
+  const currentPage = Math.min(page, pageCount - 1);
+  const visibleRows = rows.slice(currentPage * 25, (currentPage + 1) * 25);
+  return <CollapsedSection className="mt-4 rounded-xl border border-blue-200 bg-blue-50/40 p-4" title={`All retained runs containing ${symbol} · original source observations`}> <p className="mt-2 text-xs text-slate-600">Unified chronology of saved summaries, clearly labeled current-formula reconstructions and retained original run/model observations. All stages and statuses with saved output are included. Distinct source contexts stay separate; no missing overall score is invented from a parameter score.</p>{state.loading ? <p role="status" className="mt-3 flex items-center gap-2 text-sm"><RefreshCw aria-hidden="true" className="size-4 animate-spin" />Scanning retained sources… {state.examined} examined; {state.rows.length} matching observations.</p> : <p className="mt-2 text-xs">{state.error || state.hasMore ? "Scan incomplete:" : "Scan complete:"} {state.examined} retained sources examined; {state.rows.length} matching observations.</p>}{state.error ? <p role="alert" className="mt-2 text-red-700">Incomplete coverage: {state.error} <button type="button" className="underline" onClick={() => { setState({ rows: [], examined: 0, note: "", loading: true, error: null }); setPage(0); setScanCursor(null); setAttempt(value => value + 1); }}>Retry all retained sources</button></p> : null}{state.hasMore && !state.loading && !state.error ? <button type="button" className="mt-2 rounded border px-3 py-2" onClick={() => { setState(current => ({ ...current, loading: true, error: null })); setScanCursor(state.nextCursor ?? null); }}>Load more retained sources</button> : null}<nav aria-label="Retained source history pages" className="mt-3 flex flex-wrap items-center gap-3 text-sm"><button type="button" className="rounded border px-3 py-1 disabled:opacity-40" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>Previous observations</button><span role="status">Showing {rows.length ? currentPage * 25 + 1 : 0}–{Math.min((currentPage + 1) * 25, rows.length)} of {rows.length} observations · Page {currentPage + 1} of {pageCount}</span><button type="button" className="rounded border px-3 py-1 disabled:opacity-40" disabled={currentPage + 1 >= pageCount} onClick={() => setPage(currentPage + 1)}>Next observations</button></nav><div className="mt-3 overflow-x-auto"><table className="min-w-[65rem] w-full text-left text-xs"><thead><tr><th className="p-2">Run / LLM</th><th className="p-2">Timestamp</th><th className="p-2">Stage / status</th><th className="p-2">Score-based action · current rules</th><th className="p-2">Original recorded action</th><th className="p-2">Score · see source context</th><th className="p-2">Original rationale / cells</th><th className="p-2">Source</th></tr></thead><tbody>{visibleRows.map(row => <tr key={row.id} className="border-t border-slate-200"><td className="p-2">Run #{row.run_id}{row.job_id !== null ? ` · Job #${row.job_id}` : ""}<br />{row.provider ?? "Provider unavailable"} · {row.model ?? "Model unavailable"}</td><td className="p-2">{row.created_at ? formatDateTime(row.created_at) : "Original timestamp unavailable"}</td><td className="p-2">{row.stage}<br />Run: {row.run_status}<br />Job: {row.job_status}</td><td className="p-2" title={row.derived.note}>{row.derived.action ? <FinalActionValue value={row.derived.action} /> : row.derived.note}</td><td className="p-2">{row.action ?? "Not recorded in this context"}</td><td className="p-2" title={`Exact score: ${row.score}`}>{row.score === null ? "No overall score recorded" : row.selection && onScoreOpen ? <button type="button" className="text-blue-700 underline" onClick={() => onScoreOpen(row.selection!)}>{formatScoreValue(row.score)}</button> : formatScoreValue(row.score)}</td><td className="p-2"><RetainedSourceFields cells={row.cells} /></td><td className="p-2">{row.source.replaceAll("_", " ")}</td></tr>)}</tbody></table></div>{!state.loading && !state.error && !state.rows.length ? <p className="mt-2">No matching retained source rows were found.</p> : null}{retainedSourceCoverageDisplayNote(state.note) ? <p className="mt-3 text-xs text-slate-600">{retainedSourceCoverageDisplayNote(state.note)}</p> : null}</CollapsedSection>;
+}
+
+export function historyScoreDerivedAction(item: Pick<FinalActionableHistoryItem, "score" | "historical_current_units" | "coverage_status">): { action: ActionCategory | null; note: string } {
+  if (item.coverage_status !== "suggested" || item.score === null || !Number.isFinite(item.score) || item.score < -3 || item.score > 3) return { action: null, note: "A valid saved score in [−3, 3] is required." };
+  const units = item.historical_current_units;
+  const knownUnits = units !== null && Number.isFinite(units) && units >= 0;
+  const rule = evaluateScoreMatrixRules({ currentUnits: knownUnits ? units : null, calculatedScore: item.score, meanScore: null, meanUnitsChange: null, modeAction: null, bullishVotes: 0, bearishVotes: 0, holdVotes: 0, totalVotes: 0, bullishMeanUnits: null, bearishMeanUnits: null }).find(rule => rule.matched);
+  if (!rule) return { action: null, note: "No current score rule matches this saved score." };
+  if (!knownUnits && (rule.action === "Buy New" || rule.action === "Add more")) return { action: null, note: "Bullish score: Buy New / Add more cannot be distinguished because historical holdings are unavailable." };
+  return { action: rule.action, note: `Current score-range rule ${rule.label}, applied to exact saved score ${item.score}. Display only; original action and historical policy are preserved.` };
+}
+
+function historyRationaleInputsPresent(item: FinalActionableHistoryItem): boolean | undefined {
+  const rows = item.snapshot_json?.rows;
+  if (!Array.isArray(rows) || !rows.length || !rows.every(row => row && typeof row === "object" && "score" in row && (row.score === null || (typeof row.score === "number" && Number.isFinite(row.score))))) return undefined;
+  return rows.some(row => typeof row.score === "number");
+}
+
+export function StockDetailsButton(props: Parameters<typeof ScopedStockDetailsButton>[0]) {
+  return <ScopedStockDetailsButton key={`${props.market}:${props.stock.key}`} {...props} />;
+}
+
+const EMPTY_STOCK_DETAIL_HISTORY: HistoricalDashboardActionRow[] = [];
+
+function ScopedStockDetailsButton({
   stock,
   market,
   technicalScan,
   detailsData,
+  onFocusCalculation,
+  historicalRows = EMPTY_STOCK_DETAIL_HISTORY,
+  formulaConfig = DEFAULT_SCORE_MATRIX_FORMULA_CONFIG,
+  onMatrixDetailOpen,
 }: {
   stock: StockConsensus;
   market: SwingTradeMarket;
   technicalScan: TechnicalScanResult | null;
   detailsData: StockDetailsData;
+  onFocusCalculation?: (target: ActionablesCalculationFocusTarget) => void;
+  historicalRows?: HistoricalDashboardActionRow[];
+  formulaConfig?: ScoreMatrixFormulaConfig;
+  onMatrixDetailOpen?: (detail: ScoreMatrixDetail) => void;
 }) {
+  const detailPanelRef = useRef<HTMLDivElement | null>(null);
   const [open, setOpen] = useState(false);
-  const eventRows = getAnalysisTableRowsForStock(
-    detailsData.eventsAnalysis?.table ? [{ title: "Events Calendar", ...detailsData.eventsAnalysis.table }] : [],
-    stock,
+  const [historicalMatrix, setHistoricalMatrix] = useState<{ item: FinalActionableHistoryItem | null; coveredAt: string; runId: number; reconstructedDetail?: ScoreMatrixDetail } | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    const opener = document.activeElement as HTMLElement | null;
+    detailPanelRef.current?.focus();
+    return () => { opener?.focus(); };
+  }, [open]);
+  const [zerodhaOrders, setZerodhaOrders] = useState<ZerodhaOrder[]>([]);
+  const [zerodhaOrdersError, setZerodhaOrdersError] = useState<string | null>(null);
+  const [persistedHistory, setPersistedHistory] = useState<FinalActionableHistoryItem[]>([]);
+  const [showUncoveredHistory, setShowUncoveredHistory] = useState(false);
+  const [historyCursor, setHistoryCursor] = useState<string | null>(null);
+  const [historyHasMore, setHistoryHasMore] = useState(false);
+  const [retainedSourceRead, setRetainedSourceRead] = useState<RetainedSourceRead | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [resolvedDetailsData, setResolvedDetailsData] = useState<StockDetailsData | null>(null);
+  const effectiveDetailsData = resolvedDetailsData ?? detailsData;
+  const { dragHandleProps, draggableStyle } = useDraggablePopup();
+  const zerodhaHolding = open && market === "india" ? getZerodhaHoldingForStock(effectiveDetailsData.portfolioSnapshot, stock) : null;
+  const zerodhaBuyTransactions = useMemo(
+    () => (zerodhaHolding ? getZerodhaBuyTransactionsForStock(zerodhaOrders, stock) : []),
+    [stock, zerodhaHolding, zerodhaOrders],
   );
-  const threatRows = getAnalysisTableRowsForStock(detailsData.threatsAnalysis?.report?.tables, stock);
+  const auditDetail = useMemo(() => open ? buildScoreMatrixDetail(stock, technicalScan, formulaConfig) : null, [open, stock, technicalScan, formulaConfig]);
+  const auditRunCount = useMemo(() => open ? new Set(stock.rows.map(row => row.meta.runId)).size : 0, [open, stock.rows]);
+  const eventRows = open ? getAnalysisTableRowsForStock(
+    effectiveDetailsData.eventsAnalysis?.table ? [{ title: "Events Calendar", ...effectiveDetailsData.eventsAnalysis.table }] : [],
+    stock,
+  ) : [];
+  const threatRows = open ? getAnalysisTableRowsForStock(effectiveDetailsData.threatsAnalysis?.report?.tables, stock) : [];
+  const effectiveHistoricalRows = useMemo(
+    () => open ? mergeHistoricalActionRows(historicalRows, readHistoricalActionRowsCache(market)) : [],
+    [historicalRows, market, open],
+  );
+  // Persisted evidence is authoritative; today's holdings/formula must never overwrite it.
+  const displayedPersistedHistory = useMemo(
+    () => showUncoveredHistory
+      ? persistedHistory
+      : persistedHistory.filter((item) => item.coverage_status !== "run_failed" && item.coverage_status !== "not_mentioned"),
+    [persistedHistory, showUncoveredHistory],
+  );
+  const persistedRunIds = useMemo(
+    () => new Set(persistedHistory.filter((item) => item.coverage_status === "suggested").map((item) => item.rebalance_run_id)),
+    [persistedHistory],
+  );
+  const matchingHistoricalRows = useMemo(
+    () => effectiveHistoricalRows.filter(
+      (row) => row.market === market && row.stock.exchange.toUpperCase() === stock.exchange.toUpperCase() && stockConsensusMatches(row.stock, stock) && !persistedRunIds.has(row.runId),
+    ),
+    [effectiveHistoricalRows, persistedRunIds, stock, market],
+  );
+  const summarySourceRows = useMemo(() => mergeSummarySourceRows(displayedPersistedHistory, matchingHistoricalRows, originalRebalanceSources(retainedSourceRead?.rows ?? [], stock.symbol, stock.exchange)), [displayedPersistedHistory, matchingHistoricalRows, retainedSourceRead, stock.symbol, stock.exchange]);
+  const [summaryPage, setSummaryPage] = useState(0);
+  const [rawHistoryPage, setRawHistoryPage] = useState(0);
+  const summaryPageCount = Math.max(1, Math.ceil(summarySourceRows.length / 25));
+  const visibleSummaryPage = Math.min(summaryPage, summaryPageCount - 1);
+  const historyLoadGeneration = useRef(0);
+  const detailSessionGeneration = useRef(0);
+  const closeDetails = useCallback(() => {
+    // Invalidate before scheduling a render, rather than waiting for passive cleanup.
+    historyLoadGeneration.current += 1;
+    detailSessionGeneration.current += 1;
+    setHistoricalMatrix(null);
+    setOpen(false);
+  }, []);
+  useEffect(() => {
+    if (!open) return;
+    const session = detailSessionGeneration.current;
+    return () => {
+      // A previous commit's cleanup must not cancel a newly reopened session.
+      if (detailSessionGeneration.current === session) {
+        historyLoadGeneration.current += 1;
+        detailSessionGeneration.current += 1;
+      }
+    };
+  }, [open]);
+  const loadPersistedHistory = useCallback(async (cursor: string | null, append: boolean) => {
+    const generation = ++historyLoadGeneration.current;
+    setHistoryLoading(true);
+    setHistoryError(null);
+    try {
+      const response = await apiService.getFinalActionableHistory({ market, symbol: stock.symbol, limit: 50, cursor });
+      if (generation !== historyLoadGeneration.current) return;
+      if (response.items.some(item => item.market !== market || normalizeStockSymbol(item.stock_symbol) !== normalizeStockSymbol(stock.symbol))) throw new Error("Saved-history scope does not match this stock.");
+      if (response.has_more && (!response.next_cursor || response.next_cursor === cursor)) throw new Error("Saved-history pagination did not advance; coverage is incomplete.");
+      setPersistedHistory(current => { const merged = new Map((append ? current : []).map(item => [item.id, item])); for (const item of response.items) merged.set(item.id, item); return [...merged.values()].sort((a, b) => parseTimestampMs(b.covered_at) - parseTimestampMs(a.covered_at) || b.id - a.id); });
+      setHistoryCursor(response.next_cursor); setHistoryHasMore(response.has_more);
+    } catch (error) {
+      if (generation !== historyLoadGeneration.current) return;
+      setHistoryError(normalizeOperationalErrorMessage(error instanceof Error ? error.message : "Unable to load complete stock history."));
+    } finally {
+      if (generation === historyLoadGeneration.current) setHistoryLoading(false);
+    }
+  }, [market, stock.symbol]);
+
+  const retryCapturedDetails = useCallback(async () => {
+    const generation = detailSessionGeneration.current;
+    const [portfolioResult, eventsResult, threatsResult] = await Promise.allSettled([
+      market === "india" ? apiService.zerodhaPortfolioOverview() : apiService.indmoneyUsPortfolioOverview(),
+      market === "india" ? apiService.zerodhaEventsLatest() : apiService.indmoneyUsEventsLatest(),
+      market === "india" ? apiService.zerodhaThreatsLatest() : apiService.indmoneyUsThreatsLatest(),
+    ]);
+    if (generation !== detailSessionGeneration.current) return;
+    const nextError = combineOperationalErrors([
+      getRejectedResultMessage(portfolioResult, "Portfolio"),
+      getRejectedResultMessage(eventsResult, "Events"),
+      getRejectedResultMessage(threatsResult, "Threats"),
+    ]);
+    setResolvedDetailsData((current) => ({
+      portfolioSnapshot: portfolioResult.status === "fulfilled" ? portfolioResult.value.latest : (current ?? detailsData).portfolioSnapshot,
+      eventsAnalysis: eventsResult.status === "fulfilled" ? eventsResult.value.analysis : (current ?? detailsData).eventsAnalysis,
+      threatsAnalysis: threatsResult.status === "fulfilled" ? threatsResult.value.analysis : (current ?? detailsData).threatsAnalysis,
+      error: nextError,
+    }));
+    if (nextError) throw new Error(nextError);
+  }, [detailsData, market]);
+
+  const directHistoricalEvidenceRows = useMemo(() => {
+    if (!open) return [];
+    const seen = new Set<string>();
+    const rows: Array<{
+      id: string;
+      source: string;
+      action: string;
+      units: string;
+      amount: string;
+      score: string;
+      rationale: ReactNode;
+      createdAt: string;
+      runId: number;
+      jobId: number;
+    }> = [];
+
+    const addEvidenceRow = (
+      idPrefix: string,
+      meta: LlmMeta,
+      row: CanonicalRow,
+      sourceSuffix: string,
+      rationale: ReactNode,
+    ) => {
+      const key = `${idPrefix}:${meta.runId}:${meta.jobId}:${normalizeStockSymbol(row["Stock Symbol"] || row["Stock Name"])}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      rows.push({
+        id: key,
+        source: `${meta.runLabel} · ${meta.provider} ${meta.model}${sourceSuffix}`,
+        action: row[ACTION_HEADER] || "—",
+        units: getSignedUnitsChange(row)?.toString() ?? "—",
+        amount: row["Total Buy Amount"] || row["Amount"] || "—",
+        score: row["Score"] || row["Final Score"] || row["Confidence Score (0-100)"] || "—",
+        rationale,
+        createdAt: meta.createdAt,
+        runId: meta.runId,
+        jobId: meta.jobId,
+      });
+    };
+
+    stock.rows.forEach((row) => {
+      addEvidenceRow("rebalance", row.meta, row.cells, "", <CapturedRationalesCell row={row.cells} />);
+    });
+    stock.swingScanEntries.forEach((entry) => {
+      addEvidenceRow("swing", entry.meta, entry.row, " · direct scan fallback", <CapturedRationalesCell row={entry.row} />);
+    });
+
+    return rows.sort((a, b) => parseTimestampMs(b.createdAt) - parseTimestampMs(a.createdAt));
+  }, [open, stock]);
+  const rawPageCount = Math.max(1, Math.ceil(Math.max(directHistoricalEvidenceRows.length, stock.rows.length) / 25));
+  const rawPage = Math.min(rawHistoryPage, rawPageCount - 1);
+
+  useEffect(() => {
+    if (!open || market !== "india" || !zerodhaHolding) return;
+    let cancelled = false;
+    const generation = detailSessionGeneration.current;
+    apiService
+      .zerodhaOrders()
+      .then((response) => {
+        if (!cancelled && generation === detailSessionGeneration.current) {
+          setZerodhaOrders(response.data ?? []);
+          setZerodhaOrdersError(null);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled && generation === detailSessionGeneration.current) {
+          setZerodhaOrders([]);
+          setZerodhaOrdersError(error instanceof Error ? error.message : "Unable to load Zerodha orders");
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [market, open, zerodhaHolding]);
 
   return (
     <>
@@ -2467,28 +4499,49 @@ function StockDetailsButton({
         type="button"
         onClick={(event) => {
           event.stopPropagation();
+          detailSessionGeneration.current += 1;
+          setResolvedDetailsData(null);
+          setPersistedHistory([]);
+          setShowUncoveredHistory(false);
+          setHistoryCursor(null);
+          setHistoryHasMore(false);
           setOpen(true);
+          void loadPersistedHistory(null, false);
         }}
-        className="mr-2 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-gray-300 bg-white text-gray-500 transition hover:border-blue-400 hover:text-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+        className="mr-2 inline-flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-full border border-gray-300 bg-white text-gray-500 transition hover:border-blue-400 hover:text-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
         aria-label={`Open ${stock.symbol} captured details`}
         title={`Open ${stock.symbol} captured details`}
       >
-        <Info className="h-3 w-3" />
+        <Info className="h-[18px] w-[18px]" />
       </button>
 
-      {open ? (
+      {open && auditDetail ? (
         <div
           className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 px-4 py-10"
+          ref={detailPanelRef}
+          tabIndex={-1}
+          inert={historicalMatrix ? true : undefined}
           role="dialog"
-          aria-modal="true"
+          aria-modal={!historicalMatrix}
+          onKeyDown={(event) => {
+            if (historicalMatrix) return;
+            if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closeDetails(); }
+            if (event.key === "Tab") {
+              const nodes = Array.from(detailPanelRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], [tabindex="0"]') ?? []);
+              const first = nodes[0]; const last = nodes[nodes.length - 1];
+              if (event.shiftKey && (document.activeElement === first || document.activeElement === detailPanelRef.current)) { event.preventDefault(); last?.focus(); }
+              else if (!event.shiftKey && (document.activeElement === last || document.activeElement === detailPanelRef.current)) { event.preventDefault(); first?.focus(); }
+            }
+          }}
           aria-labelledby={`stock-details-${stock.key}`}
-          onClick={() => setOpen(false)}
+          onClick={(event) => { event.stopPropagation(); if (!historicalMatrix) closeDetails(); }}
         >
           <div
-            className="w-full max-w-5xl rounded-2xl bg-white shadow-2xl"
+            className="min-w-0 w-full max-w-5xl rounded-2xl bg-white shadow-2xl [overflow-wrap:anywhere]"
+            style={draggableStyle}
             onClick={(event) => event.stopPropagation()}
           >
-            <div className="sticky top-0 z-10 flex items-start justify-between gap-4 rounded-t-2xl border-b bg-white px-5 py-4">
+            <div className="sticky top-0 z-10 flex cursor-move touch-none select-none items-start justify-between gap-4 rounded-t-2xl border-b bg-white px-5 py-4" {...dragHandleProps}>
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">Captured stock details</p>
                 <h2 id={`stock-details-${stock.key}`} className="mt-1 text-xl font-bold text-gray-900">
@@ -2505,25 +4558,61 @@ function StockDetailsButton({
                   Swing/all LLM runs, technical scan, threats, and events context captured in prior flows.
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={() => setOpen(false)}
-                className="rounded-full p-2 text-gray-500 transition hover:bg-gray-100 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                aria-label="Close stock details"
-              >
-                <X className="h-5 w-5" />
-              </button>
+              <div className="flex items-center gap-2">
+                {onFocusCalculation ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onFocusCalculation({ stockKey: stock.key, header: "Stock Info" });
+                      closeDetails();
+                    }}
+                    className="inline-flex size-9 cursor-pointer items-center justify-center rounded-full border border-blue-200 bg-blue-50 text-blue-700 shadow-sm transition hover:border-blue-400 hover:bg-blue-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    aria-label={`Open Actionables Calculations for ${stock.symbol}`}
+                    title="Actionables Calculations"
+                  >
+                    <ActionablesCalculationsIcon className="size-4" />
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={(event) => { event.stopPropagation(); if (!historicalMatrix) closeDetails(); }}
+                  className="rounded-full p-2 text-gray-500 transition hover:bg-gray-100 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  aria-label="Close stock details"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
             </div>
 
-            <div className="max-h-[75vh] space-y-5 overflow-y-auto px-5 py-5 text-sm">
-              {detailsData.error ? (
-                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-800">
-                  Some latest captured details could not be loaded: {detailsData.error}
-                </div>
+            <div className="min-w-0 max-h-[75vh] space-y-5 overflow-y-auto px-3 py-5 text-sm sm:px-5">
+              {effectiveDetailsData.error ? (
+                <OperationalErrorNotice
+                  title="Some latest captured details could not be loaded:"
+                  error={effectiveDetailsData.error}
+                  context="captured-details"
+                  onRetry={retryCapturedDetails}
+                />
               ) : null}
 
-              <section className="rounded-xl border border-blue-100 bg-blue-50/70 p-4">
-                <h3 className="mb-3 font-semibold text-blue-950">Final action & technical scan</h3>
+              <RecommendationAuditPanel
+                key={`${market}:${stock.exchange}:${stock.symbol}:${auditDetail.rebalanceSourceRunId}`}
+                runId={auditDetail.rebalanceSourceRunId}
+                runIds={[...new Set(stock.rows.map(row => row.meta.runId))]}
+                runCount={auditRunCount}
+                formula={formulaConfig}
+                technicalRunId={auditDetail.technicalScanSourceRunId}
+                market={market} symbol={stock.symbol} exchange={stock.exchange}
+                currentScore={auditDetail.calculatedScore} currentAction={auditDetail.calculatedAction}
+                currentUnits={auditDetail.currentUnits} currentFormulaUnits={auditDetail.calculatedUnitsChange}
+                scoreInputs={auditDetail.detailedRationaleRows} scoreDenominator={auditDetail.detailedRationaleDenominator}
+                legacyHistory={[
+                  ...persistedHistory.map(item => ({ run_id: item.rebalance_run_id, timestamp: item.covered_at, action: item.action, score: item.score, coverage: item.coverage_status, formula_version: item.formula_version, rationale_scores_present: historyRationaleInputsPresent(item), origin: "saved_suggestion" as const })),
+                  ...matchingHistoricalRows.map(item => ({ run_id: item.runId, timestamp: item.coveredAt, action: item.formulaAction, score: item.formulaScore, coverage: "reconstructed", origin: "current_reconstruction" as const })),
+                ]}
+                legacyHistoryHasMore={historyHasMore} legacyHistoryError={historyError}
+              />
+
+              <CollapsedSection key={`${market}:${stock.key}:consensus`} title="Provider consensus & technical scan" className="rounded-xl border border-blue-100 bg-blue-50/70 p-4" headingClassName="font-semibold text-blue-950">
                 <KeyValueGrid
                   itemClassName="border-blue-100 bg-white/75"
                   values={[
@@ -2531,14 +4620,179 @@ function StockDetailsButton({
                     ["Consensus", `${stock.actionCounts[stock.consensusAction]}/${stock.totalSuggestions}`],
                     ["Technical setup", formatTechnicalSetup(technicalScan, stock.representative)],
                     ["Confidence score", formatTechnicalConfidence(technicalScan, stock.representative)],
+                    ...(zerodhaHolding
+                      ? [[
+                          "Buy price / date time",
+                          <span key="zerodha-buy-transaction" className="inline-flex flex-col gap-1">
+                            <ZerodhaBuyTransactionValue
+                              transactions={zerodhaBuyTransactions}
+                              fallbackAveragePrice={zerodhaHolding.average_price}
+                            />
+                            {zerodhaOrdersError ? (
+                              <span className="text-xs text-amber-700">Zerodha order history unavailable: {zerodhaOrdersError}</span>
+                            ) : null}
+                          </span>,
+                        ] as [string, ReactNode]]
+                      : []),
                     ["Trigger level", technicalScan?.triggerLevel || "—"],
                     ["Invalidation level", technicalScan?.invalidationLevel || "—"],
                   ]}
                 />
+              </CollapsedSection>
+
+
+
+              <section className="rounded-xl border border-slate-200 bg-slate-50/80 p-4">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                  <h3 className="font-semibold text-slate-950">Recommendation history · legacy context</h3>
+                  <button
+                    type="button"
+                    aria-pressed={showUncoveredHistory}
+                    onClick={() => setShowUncoveredHistory((show) => !show)}
+                    className="ml-auto inline-flex cursor-pointer items-center gap-2 rounded text-xs font-medium text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <span aria-hidden="true" className={cn("flex h-4 w-4 shrink-0 items-center justify-center rounded-full border", showUncoveredHistory ? "border-blue-600" : "border-slate-400")}>
+                      {showUncoveredHistory ? <span className="h-2 w-2 rounded-full bg-blue-600" /> : null}
+                    </span>
+                    Show Run Failed / Not Mentioned
+                  </button>
+                </div>
+                {historyError ? (
+                  <div className="mb-3">
+                    <OperationalErrorNotice
+                      title="Complete server history could not be loaded:"
+                      error={`${historyError}. Recent locally reconstructed rows remain below.`}
+                      context="server-history"
+                      onRetry={() => loadPersistedHistory(null, false)}
+                    />
+                  </div>
+                ) : null}
+                {historyLoading && persistedHistory.length === 0 ? (
+                  <div className="mb-3 rounded-lg border border-slate-200 bg-white p-3 text-slate-500">
+                    Loading available historical suggestions…
+                  </div>
+                ) : null}
+                <RetainedStockObservations key={`${market}:${stock.symbol}`} market={market} symbol={stock.symbol} saved={persistedHistory} reconstructed={matchingHistoricalRows} onScoreOpen={setHistoricalMatrix} onReadChange={setRetainedSourceRead} />
+                <StockScanHistory
+                  rows={summarySourceRows.slice(visibleSummaryPage * 25, (visibleSummaryPage + 1) * 25)}
+                  controls={<nav aria-label="Saved summary history pages" className="flex gap-3 text-sm"><button type="button" disabled={visibleSummaryPage === 0} onClick={() => setSummaryPage(visibleSummaryPage - 1)}>Previous summaries</button><span>Page {visibleSummaryPage + 1} of {summaryPageCount}</span><button type="button" disabled={visibleSummaryPage + 1 >= summaryPageCount} onClick={() => setSummaryPage(visibleSummaryPage + 1)}>Next summaries</button></nav>}
+                  emptyState={persistedHistory.length > 0 ? <p className="mb-3 text-sm text-slate-500">No visible suggestions in the loaded history. Use the control above to show Run Failed / Not Mentioned rows.</p> : null}
+                  renderRow={(source) => {
+                          if (source.kind === "observation") {
+                            const item = source.item, cell = (names: string[]) => originalSourceCell(item.cells, names) ?? "Not recorded";
+                            return <tr key={`original:${item.id}`} className="bg-blue-50/30">
+                              <td className="px-3 py-2">{stock.symbol}<RetainedSourceFields cells={item.cells} /></td>
+                              <td className="px-3 py-2"><RunJobLink runId={item.run_id}>#{item.run_id} · {item.created_at ? formatDateTime(item.created_at) : "Original timestamp unavailable"}</RunJobLink></td>
+                              <td className="px-3 py-2" title={`${item.source} · Source ${item.id}`}>Original retained Rebalance source · saved summary unavailable<br />Job #{item.job_id} · {item.provider ?? "Provider unavailable"} · {item.model ?? "Model unavailable"}<br />{item.run_status} / {item.job_status}</td>
+                              <td className="px-3 py-2">No aggregate recorded score available</td>
+                              <td className="px-3 py-2">{cell(["action", "action buy add sell all trim hold buy new", "original action"])}</td>
+                              <td className="px-3 py-2" title="Only an explicitly recorded overall weighted score is shown; parameter scores are kept in original fields.">{cell(["recorded score", "overall weighted score"])}</td>
+                              <td className="px-3 py-2">Not reconstructed</td><td className="px-3 py-2">Not aggregated</td>
+                              <td className="px-3 py-2">{cell(["current investment amount", "current value"])}</td>
+                              <td className="px-3 py-2">{cell(["units change"])}/{cell(["current units"])}</td>
+                              <td className="px-3 py-2">{cell(["amount", "total buy amount", "total sell amount"])}</td>
+                            </tr>;
+                          }
+                          if (source.kind === "retained") {
+                            const item = source.item;
+                            return <tr key={`retained:${item.runId}:${item.stock.key}`} className="bg-amber-50/50">
+                              <td className="px-3 py-2">{item.stock.exchange}:{item.stock.symbol}</td>
+                              <td className="whitespace-nowrap px-3 py-2"><RunJobLink runId={item.runId}>#{item.runId} · {formatDateTime(item.coveredAt)}</RunJobLink></td>
+                              <td className="px-3 py-2">Retained output · original summary not saved</td>
+                              <td className="px-3 py-2"><FinalActionValue value={item.formulaAction} /><span className="block text-slate-500">Current-formula reconstruction</span></td>
+                              <td className="px-3 py-2">—</td>
+                              <td className="px-3 py-2" title="No original overall score was saved. Raw parameter scores are not an overall recorded score.">—</td>
+                              <td className="px-3 py-2"><button type="button" className="font-semibold text-blue-700 underline" onClick={() => setHistoricalMatrix({ item: null, coveredAt: item.coveredAt, runId: item.runId, reconstructedDetail: item.detail })}>{formatScoreValue(item.formulaScore)}</button></td>
+                              <td className="px-3 py-2"><ConsensusBreakupButton stock={item.stock} action={item.formulaAction} /></td>
+                              <td className="px-3 py-2">{formatDisplayAmount(item.formulaEstimate.currentInvestmentAmount, market)}</td>
+                              <td className="px-3 py-2">{formatQuantity(item.formulaEstimate.units)}/{formatQuantity(item.formulaEstimate.currentUnits)}</td>
+                              <td className="px-3 py-2">{formatDisplayAmount(item.formulaEstimate.amount, market)}</td>
+                            </tr>;
+                          }
+                          const item = source.item;
+                          return (
+                          <tr key={item.id} className={item.coverage_status === "suggested" ? "bg-white" : "bg-slate-50/70"}>
+                            <td className="whitespace-nowrap px-3 py-2 font-medium text-slate-900">{item.stock_symbol}</td>
+                            <td className="whitespace-nowrap px-3 py-2 text-gray-700">
+                              <RunJobLink runId={item.rebalance_run_id}>#{item.rebalance_run_id} · {formatDateTime(item.covered_at)}</RunJobLink>
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-2 capitalize text-gray-600">{item.coverage_status.replaceAll("_", " ")}</td>
+                            <td className="px-3 py-2" title={historyScoreDerivedAction(item).note}>{historyScoreDerivedAction(item).action ? <FinalActionValue value={historyScoreDerivedAction(item).action} /> : <span className="text-slate-500">{historyScoreDerivedAction(item).note}</span>}</td>
+                            <td className="px-3 py-2"><FinalActionValue value={item.action} /></td>
+                            <td className="whitespace-nowrap px-3 py-2 text-gray-700">{item.score === null ? "—" : <button type="button" className="font-semibold text-blue-700 underline underline-offset-2" onClick={() => setHistoricalMatrix({ item, coveredAt: item.covered_at, runId: item.rebalance_run_id })} title={`Exact saved score: ${item.score}; action uses this value before display rounding.`} aria-label={`Open ${item.stock_symbol} score matrix for ${formatDateTime(item.covered_at)}`}>{formatScoreValue(item.score)}</button>}</td>
+                            <td className="px-3 py-2">—</td>
+                            <td className="whitespace-nowrap px-3 py-2 text-gray-700">
+                              {item.consensus_numerator !== null && item.consensus_denominator !== null
+                                ? `${item.consensus_numerator}/${item.consensus_denominator}`
+                                : "—"}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-2 text-gray-700">{formatDisplayAmount(item.historical_current_value, market)}</td>
+                            <td className="whitespace-nowrap px-3 py-2 text-gray-700">
+                              {`${formatQuantity(item.action_units)}/${formatQuantity(item.historical_current_units)}`}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-2 text-gray-700">{formatDisplayAmount(item.amount, market)}</td>
+                          </tr>
+                        ); }}
+                />
+                {retainedSourceRead?.loading ? <p role="status" className="text-xs text-slate-500">Reading original retained Rebalance sources…</p> : null}
+                {retainedSourceRead?.error ? <p role="alert">Original source coverage incomplete: {retainedSourceRead.error} <button type="button" onClick={retainedSourceRead.retry}>Retry original sources</button></p> : null}
+                {retainedSourceRead?.hasMore ? <button type="button" disabled={retainedSourceRead.loading || Boolean(retainedSourceRead.error)} onClick={retainedSourceRead.loadMore} className="my-3 rounded border px-3 py-2">Load older original Rebalance sources</button> : null}
+                {historyHasMore ? (
+                  <div className="mb-3 p-3 text-center">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={historyLoading || !historyCursor}
+                      onClick={() => void loadPersistedHistory(historyCursor, true)}
+                    >
+                      {historyLoading ? "Loading…" : "Load older suggestions"}
+                    </Button>
+                  </div>
+                ) : null}
+                {!summarySourceRows.length && directHistoricalEvidenceRows.length ? (
+                  <div className="space-y-3">
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-800">
+                      Final Actionables history table rows were not available for this symbol, so the popup double-checked the captured LLM rows directly and recovered the prior recommendation evidence below.
+                    </div>
+                    <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white/80">
+                      <table className="min-w-[64rem] text-xs">
+                        <thead>
+                          <tr className="border-b border-gray-200 bg-white/70 text-left text-[11px] uppercase tracking-wide text-gray-500">
+                            <th className="px-3 py-2 font-semibold">Run / LLM</th>
+                            <th className="px-3 py-2 font-semibold">Action</th>
+                            <th className="px-3 py-2 font-semibold">Units</th>
+                            <th className="px-3 py-2 font-semibold">Amount</th>
+                            <th className="px-3 py-2 font-semibold">Score</th>
+                            <th className="px-3 py-2 font-semibold">Rationale</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                          {directHistoricalEvidenceRows.slice(rawPage * 25, (rawPage + 1) * 25).map((row) => (
+                            <tr key={row.id} className="bg-white/40">
+                              <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">
+                                <RunJobLink runId={row.runId}>{row.source}</RunJobLink><br />
+                                <span className="text-gray-400">{formatDateTime(row.createdAt)} · Job #{row.jobId}</span>
+                              </td>
+                              <td className="px-3 py-2 align-top"><FinalActionValue value={row.action} /></td>
+                              <td className="px-3 py-2 align-top text-gray-700">{row.units}</td>
+                              <td className="px-3 py-2 align-top text-gray-700">{row.amount}</td>
+                              <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700"><button type="button" className="text-blue-700 underline" onClick={() => setHistoricalMatrix({ item: null, coveredAt: row.createdAt, runId: row.runId })}>{row.score}</button></td>
+                              <td className="min-w-80 px-3 py-2 align-top text-gray-700">{row.rationale}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ) : !summarySourceRows.length && !historyLoading ? (
+                  <p className="rounded-lg border border-slate-200 bg-white/75 p-3 text-slate-600">
+                    No prior Final Actionables suggestions were found for this stock after checking both the Final Actionables history rows and the captured LLM output rows.
+                  </p>
+                ) : null}
               </section>
 
               <section className="rounded-xl border border-violet-100 bg-violet-50/70 p-4">
-                <h3 className="mb-3 font-semibold text-violet-950">Swing / rebalance all-runs LLM breakup</h3>
+                <h3 className="mb-3 font-semibold text-violet-950">Swing / rebalance all-runs LLM breakup</h3><nav aria-label="Original model history pages" className="mb-2 flex gap-3 text-sm"><button type="button" disabled={rawPage === 0} onClick={() => setRawHistoryPage(rawPage - 1)}>Previous model rows</button><span>Page {rawPage + 1} of {rawPageCount}</span><button type="button" disabled={rawPage + 1 >= rawPageCount} onClick={() => setRawHistoryPage(rawPage + 1)}>Next model rows</button></nav>
                 <div className="overflow-x-auto rounded-lg border border-violet-100 bg-white/75">
                   <table className="min-w-full text-xs">
                     <thead className="bg-violet-100/70 text-left text-violet-900">
@@ -2552,18 +4806,18 @@ function StockDetailsButton({
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-violet-100">
-                      {stock.rows.map((row) => (
-                        <tr key={`${row.meta.runId}-${row.meta.jobId}-details`}>
+                      {stock.rows.slice(rawPage * 25, (rawPage + 1) * 25).map((row, sourceIndex) => (
+                        <tr key={`${row.meta.runId}-${row.meta.jobId}-details${stock.usIdentity ? `-raw-${rawPage * 25 + sourceIndex}` : ""}`}>
                           <td className="whitespace-nowrap px-3 py-2 align-top">
-                            Run #{row.meta.runId}<br />{row.meta.provider} {row.meta.model}<br />
+                            {row.meta.runLabel}<br />{row.meta.provider} {row.meta.model}<br />
                             <span className="text-gray-400">{formatDateTime(row.meta.createdAt)}</span>
                           </td>
                           <td className="px-3 py-2 align-top">
                             <FinalActionValue value={row.cells[ACTION_HEADER]} />
                           </td>
-                          <td className="px-3 py-2 align-top">{row.cells["Units to Buy"] || row.cells["Units Change"] || "—"}</td>
+                          <td className="px-3 py-2 align-top">{getSignedUnitsChange(row.cells) ?? "—"}</td>
                           <td className="px-3 py-2 align-top">{row.cells["Total Buy Amount"] || "—"}</td>
-                          <td className="min-w-40 px-3 py-2 align-top"><CapturedRationaleScoresCell row={row.cells} /></td>
+                          <td className="whitespace-nowrap px-3 py-2 align-top"><CapturedRationaleScoreCell row={row.cells} /></td>
                           <td className="min-w-80 px-3 py-2 align-top"><CapturedRationalesCell row={row.cells} /></td>
                         </tr>
                       ))}
@@ -2616,6 +4870,7 @@ function StockDetailsButton({
           </div>
         </div>
       ) : null}
+      {open && historicalMatrix ? <HistoricalScoreMatrixPopup key={`${historicalMatrix.runId}:${historicalMatrix.coveredAt}`} {...historicalMatrix} market={market} symbol={stock.symbol} exchange={stock.exchange} onClose={() => setHistoricalMatrix(null)} /> : null}
     </>
   );
 }
@@ -2623,17 +4878,23 @@ function StockDetailsButton({
 function ActionSummarySections({
   consensus,
   market,
+  formulaConfig,
   technicalScans,
   setupGroups,
   detailsData,
+  historicalRows,
   onSetupClick,
+  onFocusCalculation,
 }: {
   consensus: StockConsensus[];
   market: SwingTradeMarket;
+  formulaConfig: ScoreMatrixFormulaConfig;
   technicalScans: TechnicalScanMap;
   setupGroups: Record<string, SetupStockGroup>;
   detailsData: StockDetailsData;
+  historicalRows: HistoricalDashboardActionRow[];
   onSetupClick: (group: SetupStockGroup) => void;
+  onFocusCalculation?: (target: ActionablesCalculationFocusTarget) => void;
 }) {
   return (
     <div className="space-y-4">
@@ -2650,7 +4911,7 @@ function ActionSummarySections({
           >
             <CardHeader className="pb-3">
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <CardTitle className="text-sm">{ACTION_CATEGORY_LABEL[action]}</CardTitle>
+                <CardTitle className="text-sm">Model consensus: {ACTION_CATEGORY_LABEL[action]}</CardTitle>
                 <span className="text-xs font-semibold text-slate-600">
                   {stocks.length} stock{stocks.length === 1 ? "" : "s"}
                 </span>
@@ -2665,10 +4926,13 @@ function ActionSummarySections({
                       action={action}
                       stock={stock}
                       market={market}
+                      formulaConfig={formulaConfig}
                       technicalScan={getTechnicalScanForStock(technicalScans, stock)}
                       setupGroups={setupGroups}
                       detailsData={detailsData}
+                      historicalRows={historicalRows}
                       onSetupClick={onSetupClick}
+                      onFocusCalculation={onFocusCalculation}
                     />
                   ))}
                 </div>
@@ -2687,18 +4951,24 @@ function ActionSummaryStockTile({
   action,
   stock,
   market,
+  formulaConfig,
   technicalScan,
   setupGroups,
   detailsData,
+  historicalRows,
   onSetupClick,
+  onFocusCalculation,
 }: {
   action: ActionCategory;
   stock: StockConsensus;
   market: SwingTradeMarket;
+  formulaConfig: ScoreMatrixFormulaConfig;
   technicalScan: TechnicalScanResult | null;
   setupGroups: Record<string, SetupStockGroup>;
   detailsData: StockDetailsData;
+  historicalRows: HistoricalDashboardActionRow[];
   onSetupClick: (group: SetupStockGroup) => void;
+  onFocusCalculation?: (target: ActionablesCalculationFocusTarget) => void;
 }) {
   const estimate = stock.actionAverages[action];
   const showActionColumns = ACTION_ESTIMATE_CATEGORIES.has(action);
@@ -2713,8 +4983,11 @@ function ActionSummaryStockTile({
             <StockDetailsButton
               stock={stock}
               market={market}
+              formulaConfig={formulaConfig}
               technicalScan={technicalScan}
               detailsData={detailsData}
+              historicalRows={historicalRows}
+              onFocusCalculation={onFocusCalculation}
             />
             <TradingViewSymbolLink
               symbol={stock.symbol}
@@ -2734,6 +5007,7 @@ function ActionSummaryStockTile({
         </span>
       </div>
 
+      <p className="mt-2 text-[11px] text-slate-500">Position: {getPositionContextLabel(stock)}. Quantities are model estimates before market rounding.</p>
       <dl className="mt-4 grid gap-3 sm:grid-cols-2">
         <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3">
           <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
@@ -2804,6 +5078,7 @@ function RebalanceCell({
   setupGroups,
   onSetupClick,
   preferActionTag,
+  isConsolidated = false,
 }: {
   row: CanonicalRow;
   header: ConsolidatedDisplayHeader;
@@ -2812,6 +5087,7 @@ function RebalanceCell({
   setupGroups?: Record<string, SetupStockGroup>;
   onSetupClick?: (group: SetupStockGroup) => void;
   preferActionTag?: boolean;
+  isConsolidated?: boolean;
 }) {
   if (header === "Technical Setup") {
     const setup = formatTechnicalSetup(technicalScan || null, row);
@@ -2824,6 +5100,12 @@ function RebalanceCell({
         />
       </span>
     );
+  }
+  if (header === "Premarket trend") {
+    return formatTechnicalPremarketTrend(technicalScan || null, row);
+  }
+  if (header === "Last 5 candles trend") {
+    return formatTechnicalLast5CandlesTrend(technicalScan || null, row);
   }
   if (header === "Confidence Score") {
     return (
@@ -2860,23 +5142,29 @@ function RebalanceCell({
       </TradingViewSymbolLink>
     );
   }
-  return cellValue || "";
+  const quantity = isConsolidated ? formatConsolidatedQuantityCell(row, header) : null;
+  return quantity !== null && quantity !== cellValue
+    ? <span title={cellValue}>{quantity}</span>
+    : cellValue || "";
 }
 
 function ScoreMatrixSection({
   stock,
   technicalScan,
+  formulaConfig,
   onOpenDetail,
 }: {
   stock: StockConsensus;
   technicalScan: TechnicalScanResult | null;
+  formulaConfig: ScoreMatrixFormulaConfig;
   onOpenDetail: (detail: ScoreMatrixDetail) => void;
 }) {
   const detail = useMemo(
-    () => buildScoreMatrixDetail(stock, technicalScan),
-    [stock, technicalScan],
+    () => buildScoreMatrixDetail(stock, technicalScan, formulaConfig),
+    [formulaConfig, stock, technicalScan],
   );
   const matchedRule = detail.rules.find((rule) => rule.matched);
+  const validationSummary = useMemo(() => getScoreMatrixValidationSummary(detail), [detail]);
 
   return (
     <section className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
@@ -2885,14 +5173,30 @@ function ScoreMatrixSection({
           Consolidated score matrix
         </div>
         <p className="mt-1 text-xs leading-5 text-slate-600">
-          The Mean and Mode row keeps the mode action and the signed mean units change. The
-          Formula row applies the Calculated Score matrix to fill the final Action and Units
-          Change. Click the formula action to inspect the matched score range.
+          Model consensus keeps the mode action and signed mean units change. Current formula
+          uses the Calculated Score matrix and {getPositionContextLabel(stock).toLowerCase()}.
+          Quantities here precede market rounding; India action tables use whole units.
         </p>
         {matchedRule ? (
           <div className="mt-2 text-xs font-medium text-blue-700">
             Matched rule: {matchedRule.label}
           </div>
+        ) : null}
+        {validationSummary.hasIssues ? (
+          <Alert className="mt-3 border-rose-200 bg-rose-50 text-rose-950">
+            <AlertTriangle className="size-4" />
+            <AlertTitle>
+              {validationSummary.finalScoreOutOfRange ? "Final score warning" : "Score input inconsistency"}
+            </AlertTitle>
+            <AlertDescription className="space-y-1 text-rose-900">
+              {validationSummary.finalScoreMessage ? <p>{validationSummary.finalScoreMessage}</p> : null}
+              {validationSummary.parameterIssues.slice(0, 2).map((issue) => (
+                <p key={issue.id}>
+                  <span className="font-semibold">{issue.parameter}:</span> {issue.message}
+                </p>
+              ))}
+            </AlertDescription>
+          </Alert>
         ) : null}
       </div>
 
@@ -2926,7 +5230,7 @@ function ScoreMatrixSection({
                   {row.isCalculated && row.action ? (
                     <button
                       type="button"
-                      className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-white px-2 py-1 transition hover:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-blue-200 bg-white px-2 py-1 transition hover:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
                       onClick={() => onOpenDetail(detail)}
                     >
                       <FinalActionTag action={row.action} />
@@ -2939,7 +5243,9 @@ function ScoreMatrixSection({
                   )}
                 </td>
                 <td className="whitespace-nowrap px-3 py-2 align-top text-slate-700">
-                  {formatActionScore(row.actionScore)}
+                  {row.isCalculated
+                    ? formatActionScore(validationSummary.displayScore)
+                    : formatActionScore(row.actionScore)}
                 </td>
                 <td className="whitespace-nowrap px-3 py-2 align-top font-medium text-slate-700">
                   {formatSignedQuantity(row.unitsChange)}
@@ -2962,21 +5268,143 @@ function DetailedRationaleScoreSection({
   denominatorDraft,
   onMultiplierChange,
   onDenominatorChange,
+  onFocusCalculation,
+  onParameterScoreOpen,
+  readOnly = false,
 }: {
   detail: ScoreMatrixDetail;
+  onParameterScoreOpen?: (row: DetailedRationaleScoreRow) => void;
+  readOnly?: boolean;
   multiplierDrafts?: Record<string, string>;
   denominatorDraft?: string;
   onMultiplierChange?: (rowId: string, value: string) => void;
   onDenominatorChange?: (value: string) => void;
+  onFocusCalculation?: (target: ActionablesCalculationFocusTarget) => void;
 }) {
-  return (
+  const validationSummary = useMemo(() => getScoreMatrixValidationSummary(detail), [detail]);
+  const openCalculationColumn = (row: DetailedRationaleScoreRow) => {
+    const header = getDetailedRationaleCalculationHeader(row);
+    if (!header) return;
+    onFocusCalculation?.({ stockKey: detail.stockKey, header });
+  };
+
+  const rebalanceRows = detail.detailedRationaleRows.filter((row) =>
+    [
+      "cruxx",
+      "technical-short",
+      "technical-medium",
+      "technical-long",
+      "fundamentals-short",
+      "fundamentals-medium-long",
+    ].includes(row.id),
+  );
+  const technicalScanRows = detail.detailedRationaleRows.filter((row) =>
+    ["technical-scan-confidence", "premarket-trend", "last-5-candles-trend"].includes(row.id),
+  );
+  const remainingRows = detail.detailedRationaleRows.filter(
+    (row) => !rebalanceRows.includes(row) && !technicalScanRows.includes(row),
+  );
+
+  const renderRow = (row: DetailedRationaleScoreRow) => {
+    const rangeIssue = getDetailedRationaleRowRangeIssue(row);
+    const rowIssue = getDetailedRationaleRowIssue(row);
+
+    return (
+      <tr key={row.id} className={cn(rangeIssue ? "bg-rose-50/60" : "")}>
+        <td className="min-w-[24rem] px-4 py-2 text-slate-900">
+          {onFocusCalculation && getDetailedRationaleCalculationHeader(row) ? (
+            <button
+              type="button"
+              className="cursor-pointer rounded px-1 py-0.5 text-left underline-offset-4 transition hover:bg-blue-50 hover:text-blue-700 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500"
+              onClick={() => openCalculationColumn(row)}
+              title={`Open ${getActionablesCalculationColumnLabel(getDetailedRationaleCalculationHeader(row) ?? "")} for ${detail.stockSymbol}`}
+            >
+              {formatScoreParameterHeading(row.parameter)}
+            </button>
+          ) : formatScoreParameterHeading(row.parameter)}
+          {row.missingReason ? (
+            <p className="mt-1 max-w-2xl text-xs leading-5 text-amber-700">
+              {formatScoreMissingReason(row.missingReason)}
+            </p>
+          ) : null}
+          {rangeIssue ? (
+            <p className="mt-1 max-w-2xl text-xs leading-5 text-rose-700">
+              Inconsistency: {rowIssue?.message ?? rangeIssue.message}
+            </p>
+          ) : null}
+        </td>
+        <td className="whitespace-nowrap px-4 py-2 text-right font-medium text-slate-900">
+          {onParameterScoreOpen ? (
+            <button type="button" className="cursor-pointer rounded px-1.5 py-0.5 font-semibold text-blue-700 underline underline-offset-2 focus:ring-2 focus:ring-blue-500" onClick={() => onParameterScoreOpen(row)} aria-label={`Show original scores and rationale for ${formatScoreParameterHeading(row.parameter)}`}>{formatScoreValue(row.score)}</button>
+          ) : onFocusCalculation && getDetailedRationaleCalculationHeader(row) ? (
+            <button
+              type="button"
+              className="cursor-pointer rounded px-1.5 py-0.5 font-semibold underline-offset-4 transition hover:bg-blue-50 hover:text-blue-700 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500"
+              onClick={() => openCalculationColumn(row)}
+              title={`Open ${getActionablesCalculationColumnLabel(getDetailedRationaleCalculationHeader(row) ?? "")} for ${detail.stockSymbol}`}
+            >
+              {formatScoreValue(row.score)}
+            </button>
+          ) : formatScoreValue(row.score)}
+        </td>
+        <td className="whitespace-nowrap px-4 py-2 text-right font-medium text-slate-900">
+          {onMultiplierChange ? (
+            <input
+              disabled={readOnly}
+              type="number"
+              step="0.1"
+              value={multiplierDrafts?.[row.id] ?? String(row.multiplier)}
+              onChange={(event) => onMultiplierChange(row.id, event.target.value)}
+              className="w-20 rounded-md border border-blue-200 bg-blue-50/40 px-2 py-1 text-right font-semibold text-slate-950 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+              aria-label={`Multiplier for ${formatScoreParameterHeading(row.parameter)}`}
+            />
+          ) : row.multiplier}
+        </td>
+      </tr>
+    );
+  };
+
+  const renderSourceTag = (label: string | null, runId: number | null, stage: "rebalance" | "technical") => {
+    if (!label) return null;
+    const className = "inline-flex max-w-full items-center rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[11px] font-semibold text-blue-700 shadow-sm transition hover:border-blue-400 hover:bg-blue-100 focus:outline-none focus:ring-2 focus:ring-blue-500";
+    return runId ? (
+      <button
+        type="button"
+        className={className}
+        title={`Open ${label} output`}
+        onClick={() => {
+          const portfolio = detail.stockExchange.toUpperCase().includes("NSE") || detail.stockExchange.toUpperCase().includes("BSE") ? "zerodha" : "indmoneyUs";
+          const eventHandled = !window.dispatchEvent(new CustomEvent("final-actionables:open-stage-output", {
+            cancelable: true,
+            detail: { runId, stage, portfolio },
+          }));
+          if (eventHandled) return;
+
+          const popup = window.open(
+            URLs.routes.console.runDetail(runId),
+            `final-actionables-${stage}-run-${runId}`,
+            "popup=yes,width=1280,height=840,noopener,noreferrer",
+          );
+          popup?.focus();
+        }}
+      >
+        <span className="truncate">{label}</span>
+      </button>
+    ) : (
+      <span className={cn(className, "text-slate-600")} title={label}>
+        <span className="truncate">{label}</span>
+      </span>
+    );
+  };
+
+  const renderGroup = (title: string, description: string, rows: DetailedRationaleScoreRow[], sourceLabel?: string | null, sourceRunId?: number | null, sourceStage?: "rebalance" | "technical") => rows.length ? (
     <section className="rounded-xl border border-slate-200 bg-white">
       <div className="border-b border-slate-200 px-4 py-3">
-        <h3 className="font-semibold text-slate-950">Detailed Calculated Rationale Score</h3>
-        <p className="mt-1 text-xs text-slate-500">
-          Weighted score-rationale averages, technical scan confidence, and the Mean and Mode final action score.
-          {onMultiplierChange ? " Multiplier and denominator cells are editable for what-if formula recalculation." : ""}
-        </p>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="font-semibold text-slate-950">{title}</h3>
+          {sourceStage ? renderSourceTag(sourceLabel ?? null, sourceRunId ?? null, sourceStage) : null}
+        </div>
+        <p className="mt-1 text-xs text-slate-500">{description}</p>
       </div>
       <div className="overflow-x-auto">
         <table className="min-w-full text-xs sm:text-sm">
@@ -2987,70 +5415,127 @@ function DetailedRationaleScoreSection({
               <th className="whitespace-nowrap px-4 py-2 text-right font-semibold">Multiplier</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-100">
-            {detail.detailedRationaleRows.map((row) => (
-              <tr key={row.id}>
-                <td className="min-w-[24rem] px-4 py-2 text-slate-900">{row.parameter}</td>
-                <td className="whitespace-nowrap px-4 py-2 text-right font-medium text-slate-900">
-                  {formatScoreValue(row.score)}
-                </td>
-                <td className="whitespace-nowrap px-4 py-2 text-right font-medium text-slate-900">
-                  {onMultiplierChange ? (
-                    <input
-                      type="number"
-                      step="0.1"
-                      value={multiplierDrafts?.[row.id] ?? String(row.multiplier)}
-                      onChange={(event) => onMultiplierChange(row.id, event.target.value)}
-                      className="w-20 rounded-md border border-blue-200 bg-blue-50/40 px-2 py-1 text-right font-semibold text-slate-950 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-                      aria-label={`Multiplier for ${row.parameter}`}
-                    />
-                  ) : row.multiplier}
-                </td>
-              </tr>
-            ))}
-            <tr className="bg-slate-50 font-semibold text-slate-950">
-              <td className="px-4 py-3 text-right">Final score</td>
-              <td className="whitespace-nowrap px-4 py-3 text-right">
-                {formatActionScore(detail.detailedRationaleFinalScore)}
-              </td>
-              <td className="whitespace-nowrap px-4 py-3 text-right">
-                {onDenominatorChange ? (
-                  <div className="inline-flex items-center justify-end gap-1">
-                    <span>/</span>
-                    <input
-                      type="number"
-                      step="0.1"
-                      value={denominatorDraft ?? String(detail.detailedRationaleDenominator)}
-                      onChange={(event) => onDenominatorChange(event.target.value)}
-                      className="w-20 rounded-md border border-blue-200 bg-blue-50/40 px-2 py-1 text-right font-semibold text-slate-950 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-                      aria-label="Detailed rationale score denominator"
-                    />
-                  </div>
-                ) : (
-                  `/ ${detail.detailedRationaleDenominator || "—"}`
-                )}
-              </td>
-            </tr>
-          </tbody>
+          <tbody className="divide-y divide-slate-100">{rows.map(renderRow)}</tbody>
         </table>
       </div>
     </section>
+  ) : null;
+
+  return (
+    <div className="space-y-4">
+      {renderGroup(
+        "Rebalance Scan",
+        `Values drawn from the Rebalance Scan for ${detail.stockSymbol}. Click a parameter or score to open the Actionables Calculations Excel layout at this stock and column.`,
+        rebalanceRows,
+        detail.rebalanceSourceLabel,
+        detail.rebalanceSourceRunId,
+        "rebalance",
+      )}
+      {renderGroup(
+        "Technical Scan",
+        `Values drawn from the Technical Scan for ${detail.stockSymbol}. Click a parameter or score to open the technical scan columns at this stock.`,
+        technicalScanRows,
+        detail.technicalScanSourceLabel,
+        detail.technicalScanSourceRunId,
+        "technical",
+      )}
+      {renderGroup(
+        "Consolidated action",
+        "Final consolidated action score used by the weighted formula.",
+        remainingRows,
+      )}
+      <section className={cn(
+        "rounded-xl border",
+        validationSummary.finalScoreOutOfRange
+          ? "border-rose-300 bg-rose-50/80"
+          : "border-slate-200 bg-slate-50",
+      )}>
+        <div className="grid grid-cols-[1fr_auto_auto] items-center gap-4 px-4 py-3 text-sm font-semibold text-slate-950">
+          <div className="text-right">Final score</div>
+          <div className={cn(
+            "whitespace-nowrap text-right",
+            validationSummary.finalScoreOutOfRange ? "text-rose-700" : "",
+          )}
+          >
+            {formatActionScore(validationSummary.displayScore)}
+          </div>
+          <div className="whitespace-nowrap text-right">
+            {onDenominatorChange ? (
+              <div className="inline-flex items-center justify-end gap-1">
+                <span>/</span>
+                <input
+              disabled={readOnly}
+                  type="number"
+                  step="0.1"
+                  value={denominatorDraft ?? String(detail.detailedRationaleDenominator)}
+                  onChange={(event) => onDenominatorChange(event.target.value)}
+                  className="w-20 rounded-md border border-blue-200 bg-blue-50/40 px-2 py-1 text-right font-semibold text-slate-950 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                  aria-label="Detailed rationale score denominator"
+                />
+              </div>
+            ) : (`/ ${detail.detailedRationaleDenominator || "—"}`)}
+          </div>
+        </div>
+        {!readOnly ? <div className="border-t border-slate-200 px-4 py-3"><AllocationScoreContext rawScore={detail.calculatedScore} /></div> : null}
+        {validationSummary.finalScoreMessage ? (
+          <div className="border-t border-rose-200 px-4 py-3 text-sm font-semibold text-rose-800">
+            {validationSummary.finalScoreMessage}
+          </div>
+        ) : null}
+      </section>
+    </div>
   );
 }
 
-function ScoreReferenceTables() {
+function ScoreReferenceTables({
+  formulaConfig,
+  onFormulaConfigChange,
+  readableLayout = false,
+}: {
+  formulaConfig: ScoreMatrixFormulaConfig;
+  readableLayout?: boolean;
+  onFormulaConfigChange?: (updater: (current: ScoreMatrixFormulaConfig) => ScoreMatrixFormulaConfig) => void;
+}) {
+  const updateActionScore = (action: ActionCategory, value: string) => {
+    const parsed = parseFiniteDraft(value);
+    if (parsed === null) return;
+    onFormulaConfigChange?.((current) => normalizeScoreMatrixFormulaConfig({
+      ...current,
+      actionScores: { ...current.actionScores, [action]: parsed },
+    }));
+  };
+
+  const updateTechnicalMultiplier = (key: TechnicalScanMultiplierKey, value: string) => {
+    const parsed = parseFiniteDraft(value);
+    if (parsed === null) return;
+    onFormulaConfigChange?.((current) => normalizeScoreMatrixFormulaConfig({
+      ...current,
+      technicalScanMultipliers: { ...current.technicalScanMultipliers, [key]: parsed },
+    }));
+  };
+
+  const updateScoreSymbolThreshold = (key: ScoreSymbolThresholdKey, value: string) => {
+    const parsed = parseFiniteDraft(value);
+    if (parsed === null) return;
+    onFormulaConfigChange?.((current) => normalizeScoreMatrixFormulaConfig({
+      ...current,
+      scoreSymbolThresholds: { ...current.scoreSymbolThresholds, [key]: parsed },
+    }));
+  };
+
   return (
-    <section className="grid gap-4 lg:grid-cols-2">
+    <section className={readableLayout ? "grid gap-4" : "grid gap-4 lg:grid-cols-3"}>
       <div className="rounded-xl border border-slate-200 bg-white">
         <div className="border-b border-slate-200 px-4 py-3">
-          <h3 className="font-semibold text-slate-950">Action (Buy/Add/Sell All/Trim/Hold/Buy New) &amp; Score</h3>
+          <h3 className="font-semibold text-slate-950">Model-action input weights</h3>
+          <p className="mt-1 text-xs text-slate-600">Action → score inputs for the weighted formula. Final actions follow the calculated-score ranges and holdings context. Legacy average rationale scores are a separate measure.</p>
         </div>
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto" tabIndex={readableLayout ? 0 : undefined} role={readableLayout ? "region" : undefined} aria-label={readableLayout ? "Model-action input weights table" : undefined}>
           <table className="min-w-full text-sm">
             <thead className="bg-slate-50 text-left text-slate-700">
               <tr>
-                <th className="px-4 py-2 font-semibold">Action (Buy/Add/Sell All/Trim/Hold/Buy New)</th>
-                <th className="px-4 py-2 text-right font-semibold">Score</th>
+                <th className="px-4 py-2 font-semibold">Model action</th>
+                <th className="px-4 py-2 text-right font-semibold">Formula input weight</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -3058,7 +5543,16 @@ function ScoreReferenceTables() {
                 <tr key={row.label}>
                   <td className="px-4 py-2 text-slate-900">{row.label}</td>
                   <td className="px-4 py-2 text-right font-medium text-slate-900">
-                    {formatScoreValue(row.score)}
+                    {onFormulaConfigChange ? (
+                      <input
+                        type="number"
+                        step="0.1"
+                        value={formulaConfig.actionScores[row.category]}
+                        onChange={(event) => updateActionScore(row.category, event.target.value)}
+                        className="w-20 rounded-md border border-blue-200 bg-blue-50/40 px-2 py-1 text-right font-semibold text-slate-950 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                        aria-label={`Score for ${row.label}`}
+                      />
+                    ) : formatScoreValue(formulaConfig.actionScores[row.category])}
                   </td>
                 </tr>
               ))}
@@ -3071,7 +5565,7 @@ function ScoreReferenceTables() {
         <div className="border-b border-slate-200 px-4 py-3">
           <h3 className="font-semibold text-slate-950">Technical Scan Confidence Score</h3>
         </div>
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto" tabIndex={readableLayout ? 0 : undefined} role={readableLayout ? "region" : undefined} aria-label={readableLayout ? "Technical Scan Confidence Score table" : undefined}>
           <table className="min-w-full text-sm">
             <thead className="bg-slate-50 text-left text-slate-700">
               <tr>
@@ -3084,10 +5578,69 @@ function ScoreReferenceTables() {
                 <tr key={row.label}>
                   <td className="px-4 py-2 text-slate-900">{row.label}</td>
                   <td className="px-4 py-2 text-right font-medium text-slate-900">
-                    {row.multiplier}
+                    {onFormulaConfigChange ? (
+                      <input
+                        type="number"
+                        step="0.1"
+                        value={formulaConfig.technicalScanMultipliers[row.key]}
+                        onChange={(event) => updateTechnicalMultiplier(row.key, event.target.value)}
+                        className="w-20 rounded-md border border-blue-200 bg-blue-50/40 px-2 py-1 text-right font-semibold text-slate-950 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                        aria-label={`Multiplier for ${row.label} technical scan`}
+                      />
+                    ) : formulaConfig.technicalScanMultipliers[row.key]}
                   </td>
                 </tr>
               ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-slate-200 bg-white">
+        <div className="border-b border-slate-200 px-4 py-3">
+          <h3 className="font-semibold text-slate-950">Score Symbol matrix</h3>
+        </div>
+        <div className="overflow-x-auto" tabIndex={readableLayout ? 0 : undefined} role={readableLayout ? "region" : undefined} aria-label={readableLayout ? "Score Symbol matrix table" : undefined}>
+          <table className="min-w-full text-sm">
+            <thead className="bg-slate-50 text-left text-slate-700">
+              <tr>
+                <th className="px-4 py-2 font-semibold">Score range</th>
+                <th className="px-4 py-2 font-semibold">Symbol</th>
+                {onFormulaConfigChange ? <th className="px-4 py-2 text-right font-semibold">Minimum</th> : null}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {SCORE_SYMBOL_MATRIX_ROWS.map((row, index) => {
+                const thresholdRow = SCORE_SYMBOL_THRESHOLD_ROWS[index];
+                return (
+                  <tr key={row.id}>
+                    <td className="whitespace-nowrap px-4 py-2 text-slate-900">
+                      {formatScoreSymbolRangeLabel(row.id, formulaConfig.scoreSymbolThresholds)}
+                    </td>
+                    <td className="px-4 py-2 font-medium text-slate-900">
+                      <span className="inline-flex items-center gap-2">
+                        <Triangle
+                          className={cn("size-3.5 fill-current", row.className, row.direction === "down" ? "rotate-180" : "")}
+                          aria-hidden="true"
+                        />
+                        {row.symbolLabel}
+                      </span>
+                    </td>
+                    {onFormulaConfigChange && thresholdRow ? (
+                      <td className="px-4 py-2 text-right">
+                        <input
+                          type="number"
+                          step="0.1"
+                          value={formulaConfig.scoreSymbolThresholds[thresholdRow.key]}
+                          onChange={(event) => updateScoreSymbolThreshold(thresholdRow.key, event.target.value)}
+                          className="w-20 rounded-md border border-blue-200 bg-blue-50/40 px-2 py-1 text-right font-semibold text-slate-950 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                          aria-label={thresholdRow.label}
+                        />
+                      </td>
+                    ) : null}
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -3096,13 +5649,175 @@ function ScoreReferenceTables() {
   );
 }
 
-function ScoreMatrixModal({
+
+function useDraggablePopup() {
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const dragStartRef = useRef<{ pointerId: number; startX: number; startY: number; originX: number; originY: number } | null>(null);
+
+  const beginDrag = useCallback((event: ReactPointerEvent<HTMLElement>) => {
+    const target = event.target as HTMLElement;
+    if (target.closest("button, a, input, textarea, select, [data-no-popup-drag]")) return;
+
+    event.preventDefault();
+    dragStartRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: offset.x,
+      originY: offset.y,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }, [offset.x, offset.y]);
+
+  const moveDrag = useCallback((event: ReactPointerEvent<HTMLElement>) => {
+    const dragStart = dragStartRef.current;
+    if (!dragStart || dragStart.pointerId !== event.pointerId) return;
+
+    setOffset({
+      x: dragStart.originX + event.clientX - dragStart.startX,
+      y: dragStart.originY + event.clientY - dragStart.startY,
+    });
+  }, []);
+
+  const endDrag = useCallback((event: ReactPointerEvent<HTMLElement>) => {
+    const dragStart = dragStartRef.current;
+    if (!dragStart || dragStart.pointerId !== event.pointerId) return;
+
+    dragStartRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }, []);
+
+  const dragHandleProps = {
+    onPointerDown: beginDrag,
+    onPointerMove: moveDrag,
+    onPointerUp: endDrag,
+    onPointerCancel: endDrag,
+  };
+  const draggableStyle = { transform: `translate3d(${offset.x}px, ${offset.y}px, 0)` } satisfies CSSProperties;
+
+  return { dragHandleProps, draggableStyle };
+}
+
+function PopupDragHint() {
+  return (
+    <span className="mt-2 inline-flex w-fit items-center rounded-full border border-blue-100 bg-blue-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-blue-600">
+      Drag header to move
+    </span>
+  );
+}
+
+type ParameterScoreObservation = {
+  id: string; runId: number; jobId: number; label: string; score: number | null; rationale: string;
+};
+
+export async function fetchParameterScoreObservations(detail: ScoreMatrixDetail, parameter: Pick<DetailedRationaleScoreRow, "id" | "parameter">): Promise<ParameterScoreObservation[]> {
+  if (detail.historicalEvidence) return detail.historicalEvidence.parameters[parameter.id] ?? [];
+  const headers: Record<string, [RebalanceHeader, RebalanceHeader]> = {
+    cruxx: ["Score Rationale Cruxx", "Rationale Cruxx"],
+    "technical-short": ["Score Rationale Technical Setup Short Term 1–3 Months", "Rationale Technical Setup Short Term 1–3 Months"],
+    "technical-medium": ["Score Rationale - Technical Setup (Medium Term)", "Rationale - Technical Setup (Medium Term)"],
+    "technical-long": ["Score Rationale - Technical Setup (Long Term)", "Rationale - Technical Setup (Long Term)"],
+    "fundamentals-short": ["Score Rationale - Fundamentals Short Term", "Rationale - Fundamentals Short Term"],
+    "fundamentals-medium-long": ["Score Rationale - Fundamentals Medium/Long Term", "Rationale - Fundamentals Medium/Long Term"],
+  };
+  const technical = ["technical-scan-confidence", "premarket-trend", "last-5-candles-trend"].includes(parameter.id);
+  if (!headers[parameter.id] && !technical) return [];
+  const exchange = detail.stockExchange.toUpperCase();
+  const market: SwingTradeMarket | null = ["NSE", "BSE"].includes(exchange) ? "india" : ["US", "NASDAQ", "NYSE", "AMEX", "NYSEARCA", "NYSEAMERICAN"].includes(exchange) ? "us" : null;
+  if (!market) return [];
+  const sources = technical
+    ? (detail.technicalScanSourceRunId && detail.technicalScanSourceJobId ? [{ runId: detail.technicalScanSourceRunId, jobId: detail.technicalScanSourceJobId, source: detail.technicalScanSourceLabel ?? "Technical Scan", note: null }] : [])
+    : detail.rows.filter(row => !row.isSummary).flatMap(row => {
+      const match = /^(\d+)-(\d+)-matrix$/.exec(row.id);
+      return match ? [{ runId: Number(match[1]), jobId: Number(match[2]), source: row.source, note: row.note }] : [];
+    });
+  // Only explicit contributing run/job IDs are fetched. Never query latest/all runs.
+  const runs = new Map<number, RunResponse>();
+  for (const runId of new Set(sources.map(source => source.runId))) {
+    const run = await apiService.getRun(runId);
+    if (run.id !== runId || !isAnalysisRunForStage(run, technical ? "technical" : "rebalance", market)) throw new Error("Source run identity does not match the selected matrix.");
+    runs.set(runId, run);
+  }
+  return sources.map(source => {
+    const run = runs.get(source.runId)!;
+    const job = run.run_jobs?.find(link => link.job_id === source.jobId)?.job;
+    const missing = (reason: string): ParameterScoreObservation => ({ id: `${source.runId}:${source.jobId}`, runId: source.runId, jobId: source.jobId, label: `${source.source} · Run #${source.runId} · Job #${source.jobId}`, score: null, rationale: reason });
+    if (!job?.response || !isUsableModelOutputStatus(job.status)) return missing("Original contributing job output is unavailable.");
+    const label = `${getRunDisplayLabelForBreakup(run)} · Run #${run.id} · Job #${source.jobId} · ${job.provider} ${job.model} · ${formatDateTime(job.created_at)}`;
+    if (source.note && source.note !== `${job.provider} ${job.model} · ${formatDateTime(job.created_at)}`) return missing("Saved contributor identity no longer matches the source job; provenance cannot be verified.");
+    if (technical) {
+      const meta = { runId: run.id, jobId: source.jobId, runLabel: getAutoRebalanceRunDisplayLabel(run), provider: job.provider, model: job.model, createdAt: job.updated_at ?? job.created_at };
+      const rows = parseTechnicalScanResponse(job.response, meta).filter(row => getStockIdentityKey(row.exchangeSymbol, row.stockSymbol) === getStockIdentityKey(detail.stockExchange, detail.stockSymbol));
+      if (rows.length !== 1 || formatTechnicalScanSourceLabel(rows[0]) !== detail.technicalScanSourceLabel) return missing("Original technical stock/job/timestamp provenance could not be verified.");
+      const raw = parameter.id === "technical-scan-confidence" ? rows[0].confidenceScore : parameter.id === "premarket-trend" ? rows[0].premarketTrend : rows[0].last5CandlesTrend;
+      return { id: `${run.id}:${source.jobId}`, runId: run.id, jobId: source.jobId, label, score: parseStrictNumericCell(raw), rationale: "A parameter-specific rationale was not captured in this technical output." };
+    }
+    const parsed = parseInvestmentRecommendationContent(job.response, { provider: job.provider, model: job.model, runNumber: run.id, runCreatedAt: run.created_at });
+    const rows = parsed?.rows.filter(row => getStockIdentityKey(row["Exchange Symbol"], row["Stock Symbol"]) === getStockIdentityKey(detail.stockExchange, detail.stockSymbol)) ?? [];
+    if (rows.length !== 1) return missing("The exact original stock row is missing or ambiguous in this contributing job.");
+    const [scoreHeader, rationaleHeader] = headers[parameter.id];
+    return { id: `${run.id}:${source.jobId}`, runId: run.id, jobId: source.jobId, label, score: parseStrictNumericCell(rows[0][scoreHeader]), rationale: !rows[0][rationaleHeader]?.trim() || ["—", "-", "n/a", "na", "null"].includes(rows[0][rationaleHeader].trim().toLowerCase()) ? "The original rationale for this parameter was not captured." : rows[0][rationaleHeader] };
+  });
+}
+
+function ParameterScoreEvidencePopup({ detail, parameter, observations, onClose }: { detail: ScoreMatrixDetail | Pick<ScoreMatrixDetail, "stockKey" | "stockSymbol">; parameter: Pick<DetailedRationaleScoreRow, "id" | "parameter">; observations?: HistoricalScoreObservation[]; onClose: () => void }) {
+  const [result, setResult] = useState<{ rows: ParameterScoreObservation[]; loading: boolean; error: string | null }>({ rows: [], loading: true, error: null });
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    let active = true;
+    const opener = document.activeElement as HTMLElement | null;
+    panelRef.current?.focus();
+    void (observations ? Promise.resolve(observations) : "rows" in detail ? fetchParameterScoreObservations(detail, parameter) : Promise.resolve([])).then(
+      rows => { if (active) setResult({ rows, loading: false, error: null }); },
+      (error: unknown) => { if (active) setResult({ rows: [], loading: false, error: error instanceof Error ? error.message : "Unable to load source evidence." }); },
+    );
+    return () => { active = false; opener?.focus(); };
+  }, [detail, parameter, observations]);
+  return (
+    <div ref={panelRef} tabIndex={-1} className="fixed inset-0 z-[90] flex items-start justify-center overflow-auto bg-slate-950/55 px-4 py-12" role="dialog" aria-modal="true" aria-labelledby="parameter-evidence-title"
+      onClick={event => { event.stopPropagation(); onClose(); }}
+      onKeyDown={event => {
+        event.stopPropagation();
+        if (event.key === "Escape") { event.preventDefault(); onClose(); }
+        if (event.key === "Tab") {
+          const nodes = Array.from(panelRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], [tabindex="0"]') ?? []);
+          const first = nodes[0]; const last = nodes[nodes.length - 1];
+          if (!first) { event.preventDefault(); return; }
+          if (event.shiftKey && (document.activeElement === first || document.activeElement === panelRef.current)) { event.preventDefault(); last.focus(); }
+          else if (!event.shiftKey && (document.activeElement === last || document.activeElement === panelRef.current)) { event.preventDefault(); first.focus(); }
+        }
+      }}>
+      <div className="w-full max-w-5xl rounded-2xl bg-white p-6 shadow-2xl" onClick={event => event.stopPropagation()}>
+        <div className="flex items-start justify-between gap-4"><h2 id="parameter-evidence-title" className="font-bold">{detail.stockSymbol} · {formatScoreParameterHeading(parameter.parameter)}</h2><button type="button" onClick={onClose} aria-label="Close parameter score details" className="rounded border px-3 py-2">Close</button></div>
+        {result.loading ? <p role="status" className="mt-4 flex items-center gap-2"><RefreshCw aria-hidden="true" className="size-4 animate-spin" />Loading original scores and rationale…</p>
+          : result.error ? <p role="alert" className="mt-4 text-red-700">Unable to load parameter evidence: {result.error}</p>
+          : !result.rows.length ? <p className="mt-4">Original per-run score/rationale provenance was not captured for this parameter. No aggregate or latest-source value has been substituted.</p>
+          : <div className="mt-4 overflow-auto"><table className="w-full text-left text-sm"><thead><tr><th className="p-3">Run / LLM</th><th className="p-3">Score</th><th className="p-3">Rationale</th></tr></thead><tbody>{result.rows.map(row => <tr key={row.id} className="border-t"><td className="p-3">{row.label}</td><td className="p-3">{formatScoreValue(row.score)}</td><td className="whitespace-pre-wrap p-3">{row.rationale}</td></tr>)}</tbody></table></div>}
+      </div>
+    </div>
+  );
+}
+
+export function ScoreMatrixModal({
   detail,
+  formulaConfig = DEFAULT_SCORE_MATRIX_FORMULA_CONFIG,
+  onFormulaConfigChange,
   onClose,
+  onFocusCalculation,
+  frozen = false,
+  historicalLabel,
 }: {
   detail: ScoreMatrixDetail | null;
+  frozen?: boolean;
+  historicalLabel?: string;
+  formulaConfig?: ScoreMatrixFormulaConfig;
+  onFormulaConfigChange?: (updater: (current: ScoreMatrixFormulaConfig) => ScoreMatrixFormulaConfig) => void;
   onClose: () => void;
+  onFocusCalculation?: (target: ActionablesCalculationFocusTarget) => void;
 }) {
+  const [selectedParameter, setSelectedParameter] = useState<DetailedRationaleScoreRow | null>(null);
   const [editState, setEditState] = useState<{
     stockKey: string;
     multiplierDrafts: Record<string, string>;
@@ -3122,75 +5837,172 @@ function ScoreMatrixModal({
     [detail, editState],
   );
 
+  const configuredDetail = useMemo(() => {
+    if (!detail) return null;
+    return frozen ? detail : applyScoreMatrixFormulaConfig(detail, formulaConfig);
+  }, [detail, formulaConfig, frozen]);
+
   const editedDetail = useMemo(
-    () => (detail ? applyScoreMatrixEdits(detail, multiplierDrafts, denominatorDraft, ruleDrafts) : null),
-    [detail, multiplierDrafts, denominatorDraft, ruleDrafts],
+    () => (configuredDetail ? (frozen ? configuredDetail : applyScoreMatrixEdits(configuredDetail, multiplierDrafts, denominatorDraft, ruleDrafts)) : null),
+    [configuredDetail, multiplierDrafts, denominatorDraft, ruleDrafts, frozen],
+  );
+  const validationSummary = useMemo(
+    () => (editedDetail ? getScoreMatrixValidationSummary(editedDetail) : null),
+    [editedDetail],
   );
 
-  if (!editedDetail) return null;
+  const { dragHandleProps, draggableStyle } = useDraggablePopup();
 
+  const reviewDialog = useReviewDialog<HTMLDivElement>(Boolean(editedDetail && validationSummary), onClose);
+
+  if (!editedDetail || !validationSummary) return null;
   const matchedRule = editedDetail.rules.find((rule) => rule.matched) ?? null;
   const sourceRows = editedDetail.rows.filter((row) => !row.isSummary);
 
   return (
+    <>
     <div
+      {...reviewDialog}
+      inert={selectedParameter ? true : undefined}
       className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/55 px-4 py-10"
       role="dialog"
-      aria-modal="true"
-      aria-labelledby="score-matrix-modal-title"
-      onClick={onClose}
+      aria-modal={!selectedParameter}
+      aria-labelledby={frozen ? "historical-score-matrix-title" : "score-matrix-modal-title"}
+      onClick={(event) => { event.stopPropagation(); if (!selectedParameter) onClose(); }}
     >
       <div
         className="w-full max-w-5xl rounded-2xl bg-white shadow-2xl"
+        style={draggableStyle}
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="sticky top-0 z-10 flex items-start justify-between gap-4 rounded-t-2xl border-b border-slate-200 bg-white px-5 py-4">
+        <div className="sticky top-0 z-10 flex cursor-move touch-none select-none items-start justify-between gap-4 rounded-t-2xl border-b border-slate-200 bg-white px-5 py-4"
+          {...dragHandleProps}
+        >
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">
               Consolidated score matrix
             </p>
-            <h2 id="score-matrix-modal-title" className="mt-1 text-xl font-bold text-slate-950">
-              Final Action Rule
+            <h2 id={frozen ? "historical-score-matrix-title" : "score-matrix-modal-title"} className="mt-1 text-xl font-bold text-slate-950">
+              {historicalLabel ?? "Final Action Rule"}
             </h2>
+            <div className="mt-2 flex flex-wrap items-baseline gap-2 text-slate-950">
+              <span className="text-2xl font-extrabold tracking-tight">{editedDetail.stockSymbol}</span>
+              <span className="text-lg font-bold text-slate-800">{editedDetail.stockName}</span>
+            </div>
             <p className="mt-1 text-sm text-slate-500">
-              {editedDetail.stockExchange || "Unknown exchange"} · {editedDetail.stockSymbol} · calculated score {formatActionScore(editedDetail.detailedRationaleFinalScore)} maps to{" "}
+              {editedDetail.stockExchange || "Unknown exchange"} · {editedDetail.stockSymbol} · {frozen ? "saved calculated score" : "calculated score"} <span title={`Unrounded score: ${validationSummary.displayScore ?? "unavailable"}`}>{formatActionScore(validationSummary.displayScore)}</span> · {frozen ? "saved action" : "formula action"}{" "}
               <FinalActionTag action={editedDetail.calculatedAction} />
               {" "}with units change {formatSignedQuantity(editedDetail.calculatedUnitsChange)}.
             </p>
+            <PopupDragHint />
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-full p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            aria-label="Close score matrix popup"
-          >
-            <X className="h-5 w-5" />
-          </button>
+          <div className="flex items-center gap-2">
+            {onFocusCalculation ? (
+              <button
+                type="button"
+                onClick={() => onFocusCalculation({ stockKey: editedDetail.stockKey, header: "Stock Info" })}
+                className="inline-flex size-9 cursor-pointer items-center justify-center rounded-full border border-blue-200 bg-blue-50 text-blue-700 shadow-sm transition hover:border-blue-400 hover:bg-blue-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                aria-label={`Open Actionables Calculations for ${editedDetail.stockSymbol}`}
+                title="Actionables Calculations"
+              >
+                <ActionablesCalculationsIcon className="size-4" />
+              </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-full p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              aria-label="Close score matrix popup"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
         </div>
 
         <div className="max-h-[78vh] space-y-5 overflow-y-auto px-5 py-5 text-sm">
+          {editedDetail.historicalReadNotes?.includes(RECONSTRUCTED_HISTORY_EXPLANATION) ? <span className="rounded bg-amber-50 px-2 py-1 text-xs text-amber-900">Current-formula reconstruction</span> : null}
+          {visibleHistoricalReadNotes(editedDetail.historicalReadNotes).map((note, index) => <p key={`historical-note-${index}`} className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">{note}</p>)}
+          {validationSummary.hasIssues ? (
+            <Alert className="border-rose-300 bg-rose-50 text-rose-950">
+              <AlertTriangle className="size-4" />
+              <AlertTitle>
+                {validationSummary.finalScoreOutOfRange ? "Final score guardrail breached" : "Score matrix inconsistency detected"}
+              </AlertTitle>
+              <AlertDescription className="space-y-1 text-rose-900">
+                {validationSummary.finalScoreMessage ? (
+                  <p>{validationSummary.finalScoreMessage}</p>
+                ) : (
+                  <p>One or more score inputs are outside the allowed range for this matrix.</p>
+                )}
+                {validationSummary.parameterIssues.map((issue) => (
+                  <p key={issue.id}>
+                    <span className="font-semibold">{issue.parameter}:</span> {issue.message}
+                  </p>
+                ))}
+              </AlertDescription>
+            </Alert>
+          ) : null}
           <DetailedRationaleScoreSection
+            readOnly={frozen}
+            onParameterScoreOpen={setSelectedParameter}
             detail={editedDetail}
             multiplierDrafts={multiplierDrafts}
             denominatorDraft={denominatorDraft || String(editedDetail.detailedRationaleDenominator)}
-            onMultiplierChange={(rowId, value) => setEditState((current) => ({
-              stockKey: editedDetail.stockKey,
-              multiplierDrafts: {
-                ...(current.stockKey === editedDetail.stockKey ? current.multiplierDrafts : {}),
-                [rowId]: value,
-              },
-              denominatorDraft: current.stockKey === editedDetail.stockKey ? current.denominatorDraft : "",
-              ruleDrafts: current.stockKey === editedDetail.stockKey ? current.ruleDrafts : {},
-            }))}
-            onDenominatorChange={(value) => setEditState((current) => ({
-              stockKey: editedDetail.stockKey,
-              multiplierDrafts: current.stockKey === editedDetail.stockKey ? current.multiplierDrafts : {},
-              denominatorDraft: value,
-              ruleDrafts: current.stockKey === editedDetail.stockKey ? current.ruleDrafts : {},
-            }))}
+            onMultiplierChange={(rowId, value) => {
+              const parsed = parseFiniteDraft(value);
+              if (parsed !== null) {
+                const editedRow = editedDetail.detailedRationaleRows.find((row) => row.id === rowId);
+                onFormulaConfigChange?.((current) => {
+                  if (rowId === "technical-scan-confidence") {
+                    if (!editedRow || editedRow.multiplier === 0) return current;
+                    const multiplierKey: TechnicalScanMultiplierKey = editedRow.multiplier > 0 ? "bullish" : "bearish";
+                    return normalizeScoreMatrixFormulaConfig({
+                      ...current,
+                      technicalScanMultipliers: {
+                        ...current.technicalScanMultipliers,
+                        [multiplierKey]: parsed,
+                      },
+                    });
+                  }
+
+                  return normalizeScoreMatrixFormulaConfig({
+                    ...current,
+                    detailedRationaleMultipliers: {
+                      ...current.detailedRationaleMultipliers,
+                      [rowId]: parsed,
+                    },
+                  });
+                });
+              }
+              setEditState((current) => ({
+                stockKey: editedDetail.stockKey,
+                multiplierDrafts: {
+                  ...(current.stockKey === editedDetail.stockKey ? current.multiplierDrafts : {}),
+                  [rowId]: value,
+                },
+                denominatorDraft: current.stockKey === editedDetail.stockKey ? current.denominatorDraft : "",
+                ruleDrafts: current.stockKey === editedDetail.stockKey ? current.ruleDrafts : {},
+              }));
+            }}
+            onDenominatorChange={(value) => {
+              const parsed = parseFiniteDraft(value);
+              onFormulaConfigChange?.((current) => normalizeScoreMatrixFormulaConfig({
+                ...current,
+                detailedRationaleDenominator: parsed === null ? null : parsed + getMissingScoreDenominatorWeight(editedDetail.detailedRationaleRows),
+              }));
+              setEditState((current) => ({
+                stockKey: editedDetail.stockKey,
+                multiplierDrafts: current.stockKey === editedDetail.stockKey ? current.multiplierDrafts : {},
+                denominatorDraft: value,
+                ruleDrafts: current.stockKey === editedDetail.stockKey ? current.ruleDrafts : {},
+              }));
+            }}
+            onFocusCalculation={onFocusCalculation}
           />
 
-          <ScoreReferenceTables />
+          {frozen ? <p className="text-sm text-slate-600">Saved historical matrix. Values are read-only; live formula reference settings are not applied to this snapshot.</p> : (
+            <ScoreReferenceTables formulaConfig={formulaConfig} onFormulaConfigChange={onFormulaConfigChange} />
+          )}
 
           {matchedRule ? (
             <section className="rounded-xl border border-blue-100 bg-blue-50/70 p-4">
@@ -3251,6 +6063,7 @@ function ScoreMatrixModal({
                         <div className="flex items-center gap-2">
                           <FinalActionTag action={rule.action} />
                           <select
+                            disabled={frozen}
                             value={ruleDrafts[rule.id]?.action ?? rule.action}
                             onChange={(event) =>
                               setEditState((current) => {
@@ -3280,6 +6093,7 @@ function ScoreMatrixModal({
                       </td>
                       <td className="whitespace-nowrap px-3 py-2 text-right font-medium text-slate-800">
                         <input
+                          disabled={frozen}
                           type="number"
                           step="0.01"
                           placeholder={rule.action === "Hold"
@@ -3317,7 +6131,7 @@ function ScoreMatrixModal({
               </table>
             </div>
             <p className="mt-3 text-xs leading-5 text-slate-600">
-              The highlighted score range drives the Consolidated (Formula) action and units change.
+              The highlighted score range drives the Current formula action and units change.
               Actions and manual Units Change values are editable here for what-if formula changes; blank units use the default auto sizing.
             </p>
           </section>
@@ -3362,6 +6176,8 @@ function ScoreMatrixModal({
         </div>
       </div>
     </div>
+    {selectedParameter ? <ParameterScoreEvidencePopup key={`${detail?.stockKey}:${historicalLabel ?? "current"}:${selectedParameter.id}`} detail={detail!} parameter={selectedParameter} onClose={() => setSelectedParameter(null)} /> : null}
+    </>
   );
 }
 
@@ -3557,12 +6373,116 @@ const ACTIONABLES_CALCULATION_HEADERS = [
     (header) => !["Exchange Symbol", "Stock Symbol", "Stock Name"].includes(header),
   ),
   "Technical Setup",
+  "Premarket trend",
+  "Last 5 candles trend",
   "Confidence Score",
 ] as const;
+
+type ActionablesCalculationHeader = (typeof ACTIONABLES_CALCULATION_HEADERS)[number];
+type ActionablesCalculationColumnLayout = {
+  order: ActionablesCalculationHeader[];
+  widths: Partial<Record<ActionablesCalculationHeader, number>>;
+};
+
+const ACTIONABLES_CALCULATION_LAYOUT_VERSION = 1;
+const ACTIONABLES_CALCULATION_MIN_COLUMN_WIDTH = 140;
+const ACTIONABLES_CALCULATION_MAX_COLUMN_WIDTH = 760;
+const ACTIONABLES_CALCULATION_DEFAULT_WIDTHS: Record<ActionablesCalculationHeader, number> =
+  ACTIONABLES_CALCULATION_HEADERS.reduce((acc, header) => {
+    acc[header] = header === "Stock Info" ? 272 : 416;
+    return acc;
+  }, {} as Record<ActionablesCalculationHeader, number>);
+
+function getActionablesCalculationLayoutStorageKey(market: SwingTradeMarket) {
+  return `investment-engine:final-actionables:calculation-layout:${market}:v${ACTIONABLES_CALCULATION_LAYOUT_VERSION}`;
+}
+
+function isActionablesCalculationHeader(value: string): value is ActionablesCalculationHeader {
+  return (ACTIONABLES_CALCULATION_HEADERS as readonly string[]).includes(value);
+}
+
+function clampActionablesCalculationColumnWidth(width: number) {
+  if (!Number.isFinite(width)) return ACTIONABLES_CALCULATION_DEFAULT_WIDTHS["Stock Info"];
+  return Math.min(
+    ACTIONABLES_CALCULATION_MAX_COLUMN_WIDTH,
+    Math.max(ACTIONABLES_CALCULATION_MIN_COLUMN_WIDTH, Math.round(width)),
+  );
+}
+
+function createDefaultActionablesCalculationLayout(): ActionablesCalculationColumnLayout {
+  return {
+    order: [...ACTIONABLES_CALCULATION_HEADERS],
+    widths: { ...ACTIONABLES_CALCULATION_DEFAULT_WIDTHS },
+  };
+}
+
+function normalizeActionablesCalculationLayout(
+  layout?: Partial<ActionablesCalculationColumnLayout> | null,
+): ActionablesCalculationColumnLayout {
+  const seen = new Set<ActionablesCalculationHeader>();
+  const order = [
+    ...(layout?.order ?? []).filter((header): header is ActionablesCalculationHeader => {
+      if (!isActionablesCalculationHeader(header) || seen.has(header)) return false;
+      seen.add(header);
+      return true;
+    }),
+    ...ACTIONABLES_CALCULATION_HEADERS.filter((header) => !seen.has(header)),
+  ];
+
+  const widths = ACTIONABLES_CALCULATION_HEADERS.reduce((acc, header) => {
+    acc[header] = clampActionablesCalculationColumnWidth(
+      layout?.widths?.[header] ?? ACTIONABLES_CALCULATION_DEFAULT_WIDTHS[header],
+    );
+    return acc;
+  }, {} as Record<ActionablesCalculationHeader, number>);
+
+  return { order, widths };
+}
+
+function loadActionablesCalculationLayout(market: SwingTradeMarket) {
+  if (typeof window === "undefined") return createDefaultActionablesCalculationLayout();
+  try {
+    const raw = window.localStorage.getItem(getActionablesCalculationLayoutStorageKey(market));
+    if (!raw) return createDefaultActionablesCalculationLayout();
+    return normalizeActionablesCalculationLayout(JSON.parse(raw));
+  } catch {
+    return createDefaultActionablesCalculationLayout();
+  }
+}
+
+function reorderActionablesCalculationHeaders(
+  order: ActionablesCalculationHeader[],
+  from: ActionablesCalculationHeader,
+  to: ActionablesCalculationHeader,
+) {
+  if (from === to) return order;
+  const next = order.filter((header) => header !== from);
+  const targetIndex = next.indexOf(to);
+  if (targetIndex === -1) return order;
+  next.splice(targetIndex, 0, from);
+  return next;
+}
 
 function getActionablesCalculationColumnLabel(header: string) {
   if (header === ACTION_HEADER) return "Action (Buy/Add/Sell All/Trim/Hold/Buy New)";
   return header;
+}
+
+function getDetailedRationaleCalculationHeader(row: DetailedRationaleScoreRow): ActionablesCalculationHeader | null {
+  const rowHeaderMap: Record<string, ActionablesCalculationHeader> = {
+    cruxx: "Score Rationale Cruxx",
+    "technical-short": "Score Rationale Technical Setup Short Term 1–3 Months",
+    "technical-medium": "Score Rationale - Technical Setup (Medium Term)",
+    "technical-long": "Score Rationale - Technical Setup (Long Term)",
+    "fundamentals-short": "Score Rationale - Fundamentals Short Term",
+    "fundamentals-medium-long": "Score Rationale - Fundamentals Medium/Long Term",
+    "technical-scan-confidence": "Confidence Score",
+    "premarket-trend": "Premarket trend",
+    "last-5-candles-trend": "Last 5 candles trend",
+    "mean-mode-action": ACTION_HEADER,
+  };
+
+  return rowHeaderMap[row.id] ?? null;
 }
 
 function buildSummaryRowCells(
@@ -3571,13 +6491,22 @@ function buildSummaryRowCells(
   action: ActionCategory | null,
   unitsChange: number | null,
 ): CanonicalRow {
-  return {
+  const price = parseNumericCell(stock.representative["Price Per Unit"]);
+  const summaryCells = {
     ...stock.representative,
+    ...buildConsolidatedPositionCells(
+      { ...getStockPositionContext(stock), currentUnits: detail.currentUnits },
+      unitsChange,
+      unitsChange !== null && price !== null ? Math.abs(unitsChange * price) : null,
+    ),
     [ACTION_HEADER]: action ? ACTION_CATEGORY_LABEL[action] : "",
-    "Units Change": unitsChange === null ? "" : String(unitsChange),
-    "Final Units": unitsChange === null || detail.currentUnits === null ? "" : String(detail.currentUnits + unitsChange),
-    "Units to Buy": unitsChange !== null && unitsChange > 0 ? String(unitsChange) : stock.representative["Units to Buy"] || "",
   };
+
+  RATIONALE_TEXT_HEADERS.forEach((header) => {
+    summaryCells[header] = "";
+  });
+
+  return summaryCells;
 }
 
 function getCalculationCellSortValue(value: ReactNode) {
@@ -3598,16 +6527,27 @@ function getStockSummaryJobRunLabel(stock: StockConsensus) {
   return newestMeta ? formatJobRunTimestamp(newestMeta) : "—";
 }
 
-function renderStockInfoBlock(stock: StockConsensus, detailsData?: StockDetailsData, market?: SwingTradeMarket, technicalScan?: TechnicalScanResult | null) {
+function renderStockInfoBlock(
+  stock: StockConsensus,
+  detailsData?: StockDetailsData,
+  market?: SwingTradeMarket,
+  technicalScan?: TechnicalScanResult | null,
+  historicalRows?: HistoricalDashboardActionRow[],
+  onFocusCalculation?: (target: ActionablesCalculationFocusTarget) => void,
+  formulaConfig?: ScoreMatrixFormulaConfig,
+) {
   const stockName = stock.representative["Stock Name"] || stock.symbol;
   return (
     <div className="flex min-w-[16rem] items-start gap-2 py-1">
       {detailsData && market ? (
         <StockDetailsButton
           stock={stock}
+          formulaConfig={formulaConfig}
           market={market}
           technicalScan={technicalScan ?? null}
           detailsData={detailsData}
+          historicalRows={historicalRows}
+          onFocusCalculation={onFocusCalculation}
         />
       ) : null}
       <div className="space-y-2 whitespace-normal text-slate-950">
@@ -3616,6 +6556,7 @@ function renderStockInfoBlock(stock: StockConsensus, detailsData?: StockDetailsD
           <div className="text-sm font-medium leading-5 text-slate-900">{stockName}</div>
         </div>
         <div className="text-sm font-semibold uppercase tracking-wide text-slate-800">{stock.exchange || "—"}</div>
+        {stock.identityIssue ? <p role="status" className="text-sm text-amber-800">{stock.identityIssue}</p> : null}
       </div>
     </div>
   );
@@ -3625,13 +6566,22 @@ function buildActionablesCalculationRows(
   stocks: StockConsensus[],
   market: SwingTradeMarket,
   technicalScans: TechnicalScanMap,
+  formulaConfig: ScoreMatrixFormulaConfig,
   setupGroups?: Record<string, SetupStockGroup>,
   onSetupClick?: (group: SetupStockGroup) => void,
   onMatrixOpen?: (detail: ScoreMatrixDetail) => void,
 ): ActionablesCalculationRow[] {
+  const technicalScanSourceMeta = getLatestTechnicalScanSourceMeta(technicalScans);
+
   return stocks.flatMap((stock) => {
     const technicalScan = getTechnicalScanForStock(technicalScans, stock);
-    const detail = buildScoreMatrixDetail(stock, technicalScan);
+    const detail = buildScoreMatrixDetail(
+      stock,
+      technicalScan,
+      formulaConfig,
+      technicalScanSourceMeta.label,
+      technicalScanSourceMeta.runId,
+    );
     const meanModeCells = buildSummaryRowCells(stock, detail, detail.meanModeAction, detail.meanModeUnitsChange);
     const formulaCells = buildSummaryRowCells(stock, detail, detail.calculatedAction, detail.calculatedUnitsChange);
     const stockLabel = `${stock.exchange || "—"} · ${stock.symbol} · ${stock.representative["Stock Name"] || stock.symbol}`;
@@ -3643,61 +6593,82 @@ function buildActionablesCalculationRows(
       cells: CanonicalRow;
       rowClassName: string;
       detail?: ScoreMatrixDetail;
+      runId?: number;
+      isConsolidated?: boolean;
       isFormula?: boolean;
     }> = [
-      ...stock.rows.map((row) => ({
-        id: `${stock.key}-${row.meta.runId}-${row.meta.jobId}`,
+      ...stock.rows.map((row, sourceIndex) => ({
+        id: `${stock.key}-${row.meta.runId}-${row.meta.jobId}${stock.usIdentity ? `-raw-${sourceIndex}` : ""}`,
         jobRun: formatJobRunTimestamp(row.meta),
         llmName: `${row.meta.provider} ${row.meta.model}`.trim(),
         cells: row.cells,
         rowClassName: "bg-white",
+        runId: row.meta.runId,
       })),
       {
         id: `${stock.key}-mean-mode`,
         jobRun: getStockSummaryJobRunLabel(stock),
-        llmName: "Consolidated (Mean and Mode)",
+        llmName: "Model consensus (Mean and Mode)",
         cells: meanModeCells,
         rowClassName: "bg-amber-100/70 font-semibold",
+        isConsolidated: true,
       },
       {
         id: `${stock.key}-formula`,
         jobRun: getStockSummaryJobRunLabel(stock),
-        llmName: "Consolidated (Formula)",
+        llmName: "Current formula",
         cells: formulaCells,
         rowClassName: "bg-rose-100/75 font-semibold",
         detail,
+        isConsolidated: true,
         isFormula: true,
       },
     ];
 
     return sourceRows.map((source) => {
+      const jobRunValue = source.isConsolidated
+        ? source.llmName
+        : source.runId
+          ? <RunJobLink runId={source.runId}>{source.jobRun}</RunJobLink>
+          : source.jobRun;
       const values: Record<string, ReactNode> = {
         "Stock Info": stockLabel,
-        "Job / Run No (Timestamp)": source.jobRun,
-        LLMs: source.llmName,
+        "Job / Run No (Timestamp)": jobRunValue,
+        LLMs: source.isConsolidated ? "" : source.llmName,
       };
       const sortValues: Record<string, string | number> = {
         "Stock Info": stockLabel,
-        "Job / Run No (Timestamp)": source.jobRun,
-        LLMs: source.llmName,
+        "Job / Run No (Timestamp)": source.isConsolidated ? source.llmName : source.jobRun,
+        LLMs: source.isConsolidated ? "" : source.llmName,
       };
 
       ACTIONABLES_CALCULATION_HEADERS.forEach((header) => {
         if (header === "Stock Info" || header === "Job / Run No (Timestamp)" || header === "LLMs") return;
         if (header === ACTION_HEADER && source.isFormula && source.detail) {
+          const validationSummary = getScoreMatrixValidationSummary(source.detail);
           values[header] = (
             <div className="flex flex-wrap items-center gap-3">
               <button
                 type="button"
-                className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-white px-2 py-1 transition hover:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-blue-200 bg-white px-2 py-1 transition hover:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 onClick={() => onMatrixOpen?.(source.detail!)}
               >
                 <FinalActionTag action={source.detail.calculatedAction} />
                 <span className="text-[11px] font-semibold text-blue-700">Matrix</span>
               </button>
-              <span className="whitespace-nowrap text-xs font-bold text-blue-700">
-                Final Score = {formatActionScore(source.detail.calculatedScore)}
+              <span className={cn(
+                "whitespace-nowrap text-xs font-bold",
+                validationSummary.hasIssues ? "text-rose-700" : "text-blue-700",
+              )}
+              >
+                Final Score = {formatActionScore(validationSummary.displayScore)}
               </span>
+              {validationSummary.hasIssues ? (
+                <span className="inline-flex items-center gap-1 rounded-full border border-rose-200 bg-rose-50 px-2 py-1 text-[11px] font-semibold text-rose-700">
+                  <AlertTriangle className="size-3 shrink-0" />
+                  {validationSummary.finalScoreOutOfRange ? "Outside -3 to 3" : "Input inconsistency"}
+                </span>
+              ) : null}
             </div>
           );
           sortValues[header] = ACTION_CATEGORY_LABEL[source.detail.calculatedAction];
@@ -3710,6 +6681,11 @@ function buildActionablesCalculationRows(
           return;
         }
         if (header === "Technical Setup") {
+          if (source.isConsolidated) {
+            values[header] = "";
+            sortValues[header] = "";
+            return;
+          }
           const setup = formatTechnicalSetup(technicalScan, stock.representative);
           values[header] = (
             <span className={cn("font-medium", getTechnicalScanClass(technicalScan, stock.representative))}>
@@ -3723,6 +6699,18 @@ function buildActionablesCalculationRows(
           sortValues[header] = setup;
           return;
         }
+        if (header === "Premarket trend") {
+          const premarketTrend = formatTechnicalPremarketTrend(technicalScan, stock.representative);
+          values[header] = premarketTrend;
+          sortValues[header] = parseNumericCell(premarketTrend) ?? premarketTrend;
+          return;
+        }
+        if (header === "Last 5 candles trend") {
+          const last5CandlesTrend = formatTechnicalLast5CandlesTrend(technicalScan, stock.representative);
+          values[header] = last5CandlesTrend;
+          sortValues[header] = parseNumericCell(last5CandlesTrend) ?? last5CandlesTrend;
+          return;
+        }
         if (header === "Confidence Score") {
           const confidence = formatTechnicalConfidence(technicalScan, stock.representative);
           values[header] = (
@@ -3733,8 +6721,12 @@ function buildActionablesCalculationRows(
           sortValues[header] = parseNumericCell(confidence) ?? confidence;
           return;
         }
-        const cellValue = source.cells[header as RebalanceHeader] || "";
-        values[header] = cellValue;
+        const shouldClearConsolidatedCell = source.isConsolidated && header === "Analyst/Source";
+        const cellValue = shouldClearConsolidatedCell ? "" : source.cells[header as RebalanceHeader] || "";
+        const quantity = source.isConsolidated ? formatConsolidatedQuantityCell(source.cells, header) : null;
+        values[header] = quantity !== null && quantity !== cellValue
+          ? <span title={cellValue}>{quantity}</span>
+          : cellValue;
         sortValues[header] = getCalculationCellSortValue(cellValue);
       });
 
@@ -3779,6 +6771,9 @@ function buildActionablesCalculationRowGroups(
   market: SwingTradeMarket,
   technicalScans: TechnicalScanMap,
   detailsData?: StockDetailsData,
+  historicalRows?: HistoricalDashboardActionRow[],
+  onFocusCalculation?: (target: ActionablesCalculationFocusTarget) => void,
+  formulaConfig?: ScoreMatrixFormulaConfig,
 ): ActionablesCalculationRowGroup[] {
   const groupMap = new Map<string, ActionablesCalculationRowGroup>();
 
@@ -3797,6 +6792,9 @@ function buildActionablesCalculationRowGroups(
         detailsData,
         market,
         getTechnicalScanForStock(technicalScans, row.stock),
+        historicalRows,
+        onFocusCalculation,
+        formulaConfig,
       ),
       sortValues: row.sortValues,
       rows: [row],
@@ -3808,6 +6806,25 @@ function buildActionablesCalculationRowGroups(
     const representativeRight = { ...right.rows[0], sortValues: right.sortValues };
     return compareActionablesCalculationRows(representativeLeft, representativeRight, sortState);
   });
+}
+
+function ScrollableCalculationCell({
+  children,
+  className,
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div
+      className={cn(
+        "max-h-24 max-w-full overflow-auto whitespace-normal break-words pr-1",
+        className,
+      )}
+    >
+      {children}
+    </div>
+  );
 }
 
 function SortableCalculationHeader({
@@ -3837,22 +6854,62 @@ function SortableCalculationHeader({
   );
 }
 
-function ActionablesFormulaModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+/** Keep keyboard ownership local to nested review dialogs, outside the outer output shell. */
+function useNestedReviewModal(open: boolean, onClose: () => void) {
+  const panel = useRef<HTMLDivElement | null>(null);
+  const close = useRef(onClose);
+  useEffect(() => { close.current = onClose; }, [onClose]);
+  useEffect(() => {
+    if (!open) return;
+    const opener = document.activeElement;
+    panel.current?.focus();
+    return () => { if (opener instanceof HTMLElement && opener.isConnected) opener.focus(); };
+  }, [open]);
+  const onKeyDown = useCallback((event: import("react").KeyboardEvent<HTMLDivElement>) => {
+    if (!(event.target instanceof Element) || event.target.closest('[role="dialog"],dialog') !== panel.current) return;
+    if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); close.current(); return; }
+    if (event.key !== "Tab") return;
+    event.stopPropagation();
+    const controls = Array.from(panel.current?.querySelectorAll<HTMLElement>('button:not(:disabled),a[href],input:not(:disabled),select:not(:disabled),textarea:not(:disabled),[tabindex="0"]') ?? []).filter(node => node.getClientRects().length > 0);
+    const first = controls[0], last = controls.at(-1);
+    if (!first) { event.preventDefault(); panel.current?.focus(); }
+    else if (event.shiftKey && (document.activeElement === first || document.activeElement === panel.current)) { event.preventDefault(); last?.focus(); }
+    else if (!event.shiftKey && (document.activeElement === last || document.activeElement === panel.current)) { event.preventDefault(); first.focus(); }
+  }, []);
+  return { ref: panel, tabIndex: -1, onKeyDown };
+}
+
+function ActionablesFormulaModal({
+  open,
+  formulaConfig,
+  onFormulaConfigChange,
+  onClose,
+}: {
+  open: boolean;
+  formulaConfig: ScoreMatrixFormulaConfig;
+  onFormulaConfigChange: (updater: (current: ScoreMatrixFormulaConfig) => ScoreMatrixFormulaConfig) => void;
+  onClose: () => void;
+}) {
+  const reviewModal = useNestedReviewModal(open, onClose);
+  const { dragHandleProps, draggableStyle } = useDraggablePopup();
+
   if (!open) return null;
 
   return (
     <div
+      {...reviewModal}
       className="fixed inset-0 z-[60] flex items-start justify-center overflow-y-auto bg-slate-950/55 px-4 py-10"
       role="dialog"
       aria-modal="true"
       aria-labelledby="actionables-formula-modal-title"
       onClick={onClose}
     >
-      <div className="w-full max-w-4xl rounded-2xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
-        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
+      <div className="w-full max-w-4xl rounded-2xl bg-white shadow-2xl" style={draggableStyle} onClick={(event) => event.stopPropagation()}>
+        <div className="flex cursor-move touch-none select-none items-start justify-between gap-4 border-b border-slate-200 px-5 py-4" {...dragHandleProps}>
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">Actionables calculations</p>
             <h2 id="actionables-formula-modal-title" className="mt-1 text-xl font-bold text-slate-950">Logics and formulas</h2>
+            <PopupDragHint />
           </div>
           <button type="button" onClick={onClose} className="rounded-full p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500" aria-label="Close formulas popup">
             <X className="h-5 w-5" />
@@ -3862,6 +6919,7 @@ function ActionablesFormulaModal({ open, onClose }: { open: boolean; onClose: ()
           <DetailedRationaleScoreSection detail={{
             stockKey: "formula-reference",
             stockSymbol: "Reference",
+            stockName: "Reference",
             stockExchange: "",
             currentUnits: null,
             modeAction: null,
@@ -3885,14 +6943,23 @@ function ActionablesFormulaModal({ open, onClose }: { open: boolean; onClose: ()
             ],
             detailedRationaleFinalScore: null,
             detailedRationaleDenominator: 13,
+            rebalanceSourceLabel: null,
+            rebalanceSourceRunId: null,
+            technicalScanSourceLabel: null,
+            technicalScanSourceRunId: null,
           }} />
-          <ScoreReferenceTables />
+          <ScoreReferenceTables
+            readableLayout
+            formulaConfig={formulaConfig}
+            onFormulaConfigChange={onFormulaConfigChange}
+          />
           <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
             <h3 className="font-semibold text-slate-950">Consolidation rules</h3>
             <ul className="mt-2 list-disc space-y-1 pl-5">
-              <li>Consolidated (Mean and Mode) uses the mode action across LLM rows and averages numeric sizing/rationale columns.</li>
-              <li>Consolidated (Formula) uses the weighted Calculated Score and the Calculated Score matrix to set Action and Units Change.</li>
-              <li>Technical Setup and Confidence Score are appended from the latest Technical Scan for the stock.</li>
+              <li>Model consensus (Mean and Mode) retains the model actions and signed mean units change. Raw model rows retain their captured holdings.</li>
+              <li>Current formula uses the weighted Calculated Score and latest portfolio holdings when available; otherwise it uses captured model holdings. Consolidated Final Units equals the displayed Current Units plus Units Change.</li>
+              <li>Calculation quantities precede market rounding. India action tables use whole units; US quantities retain fractions.</li>
+              <li>Technical Setup, Premarket trend, Last 5 candles trend, and Confidence Score are appended from the latest Technical Scan for the stock.</li>
               <li>Rows with no stocks for Sell All, Add More, Buy New, Trim, or Hold are hidden.</li>
             </ul>
           </div>
@@ -3902,16 +6969,298 @@ function ActionablesFormulaModal({ open, onClose }: { open: boolean; onClose: ()
   );
 }
 
-function ActionablesCalculationsModal({
+function ActionablesInputSelectionDialog({
+  open,
+  candidates,
+  selectedIds,
+  usdInrRate,
+  onToggle,
+  onToggleAll,
+  onResetDefaults,
+  onClose,
+}: {
+  open: boolean;
+  candidates: ActionablesInputCandidate[];
+  selectedIds: Set<string>;
+  usdInrRate: number;
+  onToggle: (id: string) => void;
+  onToggleAll: () => void;
+  onResetDefaults: () => void;
+  onClose: () => void;
+}) {
+  const selectAllRef = useRef<HTMLInputElement | null>(null);
+  const [expandedRunKeys, setExpandedRunKeys] = useState<Set<string>>(() => new Set());
+  const allSelected = candidates.length > 0 && candidates.every((candidate) => selectedIds.has(candidate.id));
+  const someSelected = candidates.some((candidate) => selectedIds.has(candidate.id));
+  const selectedCount = candidates.filter((candidate) => selectedIds.has(candidate.id)).length;
+
+  const runGroups = useMemo(() => {
+    const groups = new Map<
+      string,
+      {
+        key: string;
+        runId: number;
+        title: string;
+        timestamp: string | null;
+        market: SwingTradeMarket;
+        candidates: ActionablesInputCandidate[];
+      }
+    >();
+
+    candidates.forEach((candidate) => {
+      const key = `run:${candidate.runId}`;
+      const existing = groups.get(key);
+      if (existing) {
+        existing.candidates.push(candidate);
+        if (
+          candidate.timestamp &&
+          (!existing.timestamp || parseTimestampMs(candidate.timestamp) > parseTimestampMs(existing.timestamp))
+        ) {
+          existing.timestamp = candidate.timestamp;
+        }
+        return;
+      }
+
+      groups.set(key, {
+        key,
+        runId: candidate.runId,
+        title: candidate.runLabel,
+        timestamp: candidate.timestamp,
+        market: candidate.market,
+        candidates: [candidate],
+      });
+    });
+
+    return Array.from(groups.values()).sort(
+      (left, right) => parseTimestampMs(right.timestamp) - parseTimestampMs(left.timestamp),
+    );
+  }, [candidates]);
+
+  useEffect(() => {
+    if (selectAllRef.current) {
+      selectAllRef.current.indeterminate = someSelected && !allSelected;
+    }
+  }, [allSelected, someSelected]);
+
+  if (!open) return null;
+
+  const toggleRunGroup = (groupCandidates: ActionablesInputCandidate[]) => {
+    const groupAllSelected = groupCandidates.every((candidate) => selectedIds.has(candidate.id));
+    groupCandidates.forEach((candidate) => {
+      if (groupAllSelected ? selectedIds.has(candidate.id) : !selectedIds.has(candidate.id)) {
+        onToggle(candidate.id);
+      }
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm" onClick={onClose}>
+      <div className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-[28px] bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
+        <div className="flex shrink-0 items-start justify-between gap-4 px-6 pb-4 pt-6">
+          <div>
+            <h3 className="text-2xl font-extrabold tracking-tight text-slate-950">Select Actionables inputs</h3>
+            <p className="mt-2 text-base text-slate-500">
+              Choose which previous-stage outputs should be included in the calculations table.
+            </p>
+            <div className="mt-3 max-w-3xl rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium leading-6 text-amber-800">
+              <span className="font-extrabold">Input selection rationale:</span>{" "}
+              Use selected Rebalance Scan outputs and Technical Scan outputs so final actionables combine portfolio rebalance intent with chart validation.
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+            aria-label="Close input selection"
+          >
+            <X className="size-5" />
+          </button>
+        </div>
+        <div className="mx-6 mb-4 flex shrink-0 items-center justify-between gap-3 rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-950">
+          <span>{selectedCount} output{selectedCount === 1 ? "" : "s"} selected.</span>
+          <div className="flex items-center gap-3">
+            <label className="flex items-center gap-2 text-xs font-extrabold uppercase tracking-[0.18em] text-blue-950">
+              <input
+                ref={selectAllRef}
+                type="checkbox"
+                checked={allSelected}
+                onChange={onToggleAll}
+                aria-label="Select or deselect all inputs"
+              />
+              Select all
+            </label>
+            <button
+              type="button"
+              onClick={onResetDefaults}
+              className="rounded-full border border-slate-300 bg-white px-5 py-2 text-xs font-extrabold uppercase tracking-[0.18em] text-slate-900 shadow-sm hover:bg-slate-50"
+            >
+              Reset defaults
+            </button>
+          </div>
+        </div>
+        <div className="mx-6 min-h-0 flex-1 overflow-auto rounded-2xl border border-slate-200 bg-slate-50/60 p-3">
+          {candidates.length === 0 ? (
+            <div className="rounded-2xl border border-slate-200 bg-white p-8 text-sm text-slate-500">
+              No eligible Rebalance Scan or Technical Scan outputs are available yet.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {runGroups.map((group) => {
+                const groupSelectedCount = group.candidates.filter((candidate) => selectedIds.has(candidate.id)).length;
+                const groupAllSelected = groupSelectedCount === group.candidates.length;
+                const expanded = expandedRunKeys.has(group.key);
+                const statusSummary = Array.from(new Set(group.candidates.map((candidate) => candidate.status || "unknown"))).join(", ");
+                const stageSummary = Array.from(new Set(group.candidates.map((candidate) => candidate.kind === "rebalance" ? "Rebalance Scan" : "Technical Scan"))).join(" + ");
+                const totalCostUsd = group.candidates.reduce(
+                  (total, candidate) => total + (typeof candidate.costUsd === "number" ? candidate.costUsd : 0),
+                  0,
+                );
+
+                return (
+                  <div key={group.key} className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+                    <div className="flex flex-wrap items-center gap-3 px-4 py-3">
+                      <input
+                        type="checkbox"
+                        checked={groupAllSelected}
+                        onChange={() => toggleRunGroup(group.candidates)}
+                        aria-label={`Select all LLM jobs in ${group.title}`}
+                      />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setExpandedRunKeys((current) => {
+                            const next = new Set(current);
+                            if (next.has(group.key)) next.delete(group.key);
+                            else next.add(group.key);
+                            return next;
+                          })
+                        }
+                        className="flex items-center gap-2 rounded-full px-2 py-1 text-left font-extrabold text-slate-950 hover:bg-slate-100"
+                        aria-expanded={expanded}
+                      >
+                        {expanded ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
+                        {group.title}
+                      </button>
+                      <span
+                        className={cn(
+                          "rounded-full border px-3 py-1 text-xs font-extrabold uppercase tracking-[0.14em]",
+                          getInputMarketBadgeClass(group.market),
+                        )}
+                        title={`Scan market: ${getInputMarketLabel(group.market)}`}
+                      >
+                        {getInputMarketLabel(group.market)}
+                      </span>
+                      <RunJobLink runId={group.runId}>{stageSummary}</RunJobLink>
+                      <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-800">
+                        {groupSelectedCount}/{group.candidates.length} LLM job{group.candidates.length === 1 ? "" : "s"} selected
+                      </span>
+                      <span className="text-sm text-slate-500">{group.timestamp ? formatDateTime(group.timestamp) : "—"}</span>
+                      <span className="text-sm capitalize text-slate-500">{statusSummary}</span>
+                      <span className="ml-auto text-sm font-semibold text-slate-600">
+                        {totalCostUsd > 0 ? formatUsdAsVerifiedInr(totalCostUsd, usdInrRate) : "Cost n/a"}
+                      </span>
+                    </div>
+                    {expanded ? (
+                      <div className="border-t border-slate-100 px-4 pb-4 pt-2">
+                        <table className="w-full min-w-[760px] text-left text-sm">
+                          <thead className="text-xs font-extrabold uppercase tracking-wide text-slate-500">
+                            <tr>
+                              <th className="w-10 py-2 pr-3">Select</th>
+                              <th className="px-3 py-2">Job</th>
+                              <th className="px-3 py-2">Timestamp</th>
+                              <th className="px-3 py-2">Status</th>
+                              <th className="px-3 py-2">Market</th>
+                              <th className="px-3 py-2">LLM / Source</th>
+                              <th className="px-3 py-2">Cost (INR)</th>
+                              <th className="px-3 py-2">Error</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {group.candidates.map((candidate) => (
+                              <tr key={candidate.id} className={candidate.kind === "technical" ? "bg-blue-50/60" : "bg-white"}>
+                                <td className="py-3 pr-3 align-top">
+                                  <input
+                                    type="checkbox"
+                                    checked={selectedIds.has(candidate.id)}
+                                    onChange={() => onToggle(candidate.id)}
+                                    aria-label={`Select ${candidate.label}`}
+                                  />
+                                </td>
+                                <td className="px-3 py-3 align-top font-semibold text-slate-900">
+                                  <RunJobLink runId={candidate.runId}>{candidate.jobNo}</RunJobLink>
+                                </td>
+                                <td className="px-3 py-3 align-top text-slate-600">{candidate.timestamp ? formatDateTime(candidate.timestamp) : "—"}</td>
+                                <td className="px-3 py-3 align-top">
+                                  <span className={cn("rounded-full px-2 py-1 text-xs font-semibold capitalize ring-1", getInputStatusBadgeClass(candidate.status))}>{candidate.status}</span>
+                                </td>
+                                <td className="px-3 py-3 align-top">
+                                  <span className={cn("rounded-full border px-2 py-1 text-xs font-bold", getInputMarketBadgeClass(candidate.market))}>
+                                    {getInputMarketLabel(candidate.market)}
+                                  </span>
+                                </td>
+                                <td className="px-3 py-3 align-top text-slate-700">{candidate.label}</td>
+                                <td className="px-3 py-3 align-top text-slate-600">
+                                  {typeof candidate.costUsd === "number"
+                                    ? formatUsdAsVerifiedInr(candidate.costUsd, usdInrRate)
+                                    : "n/a"}
+                                </td>
+                                <td className="max-w-xs px-3 py-3 align-top text-xs text-red-700">{candidate.error || "—"}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+        <div className="flex shrink-0 justify-end px-6 py-5">
+          <Button
+            type="button"
+            onClick={onClose}
+            className="rounded-full bg-slate-950 px-7 font-extrabold uppercase tracking-[0.18em] text-white hover:bg-slate-800"
+          >
+            Done
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function calculationsCountSummary(stocks: { rows: unknown[]; usIdentity?: unknown; totalSuggestions?: number }[], loading: boolean, error?: string | null): string {
+  if (!stocks.length && (loading || error)) {
+    return loading ? "LLMs consolidated in this view: Loading… Stocks: Loading…" : "LLMs consolidated in this view: Unknown. Stocks: Unknown.";
+  }
+  const counts = `LLMs consolidated in this view: ${Math.max(...stocks.map(stock => stock.usIdentity && typeof stock.totalSuggestions === "number" ? stock.totalSuggestions : stock.rows.length), 0)}. Stocks: ${stocks.length}.`;
+  return loading || error ? `${counts} Previously available results; ${loading ? "refresh in progress" : "refresh failed"}.` : counts;
+}
+
+function ActionablesCalculationsModal(props: Parameters<typeof OpenActionablesCalculationsModal>[0]) {
+  if (!props.open) return null;
+  return <OpenActionablesCalculationsModal {...props} />;
+}
+
+function OpenActionablesCalculationsModal({
   open,
   onClose,
   title,
   market,
   stocks,
   technicalScans,
+  formulaConfig,
+  onFormulaConfigChange,
   setupGroups,
+  runs,
   detailsData,
   onSetupClick,
+  focusTarget,
+  loading = false,
+  loadError = null,
+  onRetry,
 }: {
   open: boolean;
   onClose: () => void;
@@ -3919,23 +7268,167 @@ function ActionablesCalculationsModal({
   market: SwingTradeMarket;
   stocks: StockConsensus[];
   technicalScans: TechnicalScanMap;
+  formulaConfig: ScoreMatrixFormulaConfig;
+  onFormulaConfigChange: (updater: (current: ScoreMatrixFormulaConfig) => ScoreMatrixFormulaConfig) => void;
   setupGroups?: Record<string, SetupStockGroup>;
+  runs?: RunResponse[];
   detailsData?: StockDetailsData;
   onSetupClick?: (group: SetupStockGroup) => void;
+  focusTarget?: ActionablesCalculationFocusTarget | null;
+  loading?: boolean;
+  loadError?: string | null;
+  onRetry?: () => void;
 }) {
+  const reviewModal = useNestedReviewModal(open, onClose);
   const [sortState, setSortState] = useState<ActionablesCalculationSortState>({ key: "Stock Info", direction: "asc" });
+  const [columnLayout, setColumnLayout] = useState<ActionablesCalculationColumnLayout>(() => loadActionablesCalculationLayout(market));
+  const [draggedHeader, setDraggedHeader] = useState<ActionablesCalculationHeader | null>(null);
+  const resizeStateRef = useRef<{ header: ActionablesCalculationHeader; startX: number; startWidth: number } | null>(null);
+  const targetCellRef = useRef<HTMLTableCellElement | null>(null);
   const [formulaOpen, setFormulaOpen] = useState(false);
+  const [inputSelectionOpen, setInputSelectionOpen] = useState(false);
+  const [selectedInputIds, setSelectedInputIds] = useState<Set<string> | null>(null);
   const [selectedMatrixDetail, setSelectedMatrixDetail] = useState<ScoreMatrixDetail | null>(null);
-  const rows = useMemo(
-    () => buildActionablesCalculationRows(stocks, market, technicalScans, setupGroups, onSetupClick, setSelectedMatrixDetail),
-    [market, onSetupClick, setupGroups, stocks, technicalScans],
+  const [internalFocusTarget, setInternalFocusTarget] = useState<ActionablesCalculationFocusTarget | null>(null);
+  const activeFocusTarget = focusTarget ?? internalFocusTarget;
+  const usdInrRate = useUsdInrRate();
+  const allRuns = useMemo(() => runs ?? [], [runs]);
+  const inputCandidates = useMemo(
+    () => buildActionablesInputCandidates(allRuns, market),
+    [allRuns, market],
   );
-  const rowGroups = useMemo(
-    () => buildActionablesCalculationRowGroups(rows, sortState, market, technicalScans, detailsData),
-    [detailsData, market, rows, sortState, technicalScans],
+  const defaultInputIds = useMemo(
+    () => getDefaultActionablesInputIds(inputCandidates, allRuns, market),
+    [allRuns, inputCandidates, market],
   );
 
+  const effectiveSelectedInputIds = useMemo(
+    () => selectedInputIds ?? new Set(defaultInputIds),
+    [defaultInputIds, selectedInputIds],
+  );
+
+  const selectedRebalanceRuns = useMemo(
+    () => filterRunsBySelectedActionablesInputs(allRuns, "rebalance", effectiveSelectedInputIds),
+    [allRuns, effectiveSelectedInputIds],
+  );
+  const selectedTechnicalRuns = useMemo(
+    () => filterRunsBySelectedActionablesInputs(allRuns, "technical", effectiveSelectedInputIds),
+    [allRuns, effectiveSelectedInputIds],
+  );
+  const hasSelectableRebalanceInputs = inputCandidates.some((candidate) => candidate.kind === "rebalance");
+  const hasSelectableTechnicalInputs = inputCandidates.some((candidate) => candidate.kind === "technical");
+  const displayedStocks = useMemo(
+    () => hasSelectableRebalanceInputs
+      ? buildConsensusRows(selectedRebalanceRuns, market, detailsData?.portfolioSnapshot, allRuns)
+      : stocks,
+    [allRuns, detailsData?.portfolioSnapshot, hasSelectableRebalanceInputs, market, selectedRebalanceRuns, stocks],
+  );
+  const displayedTechnicalScans = useMemo(
+    () => hasSelectableTechnicalInputs ? buildTechnicalScanMap(selectedTechnicalRuns) : technicalScans,
+    [hasSelectableTechnicalInputs, selectedTechnicalRuns, technicalScans],
+  );
+  const historicalActionRows = useMemo(
+    () => buildHistoricalDashboardActionRows(
+      allRuns,
+      market,
+      detailsData?.portfolioSnapshot ?? null,
+      buildTechnicalScanMap(allRuns),
+      formulaConfig,
+    ),
+    [allRuns, detailsData?.portfolioSnapshot, formulaConfig, market],
+  );
+  const displayedSetupGroups = useMemo(
+    () => getSetupStockGroups(displayedStocks, displayedTechnicalScans, market),
+    [displayedStocks, displayedTechnicalScans, market],
+  );
+  const rows = useMemo(
+    () => buildActionablesCalculationRows(displayedStocks, market, displayedTechnicalScans, formulaConfig, displayedSetupGroups ?? setupGroups, onSetupClick, setSelectedMatrixDetail),
+    [displayedSetupGroups, displayedStocks, displayedTechnicalScans, formulaConfig, market, onSetupClick, setupGroups],
+  );
+  const rowGroups = useMemo(
+    () => buildActionablesCalculationRowGroups(rows, sortState, market, displayedTechnicalScans, detailsData, historicalActionRows, setInternalFocusTarget, formulaConfig),
+    [detailsData, displayedTechnicalScans, historicalActionRows, formulaConfig, market, rows, sortState],
+  );
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(
+      getActionablesCalculationLayoutStorageKey(market),
+      JSON.stringify(normalizeActionablesCalculationLayout(columnLayout)),
+    );
+  }, [columnLayout, market]);
+
+  useEffect(() => {
+    return () => {
+      resizeStateRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!open || !activeFocusTarget) return;
+
+    targetCellRef.current = null;
+    const frameId = window.requestAnimationFrame(() => {
+      targetCellRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+        inline: "center",
+      });
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
+  }, [activeFocusTarget, open, rowGroups]);
+
+  const { dragHandleProps, draggableStyle } = useDraggablePopup();
+
   if (!open) return null;
+
+  const orderedHeaders = columnLayout.order;
+
+  const updateColumnWidth = (header: ActionablesCalculationHeader, width: number) => {
+    setColumnLayout((current) => ({
+      ...current,
+      widths: {
+        ...current.widths,
+        [header]: clampActionablesCalculationColumnWidth(width),
+      },
+    }));
+  };
+
+  const handleResizeStart = (header: ActionablesCalculationHeader, event: MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    resizeStateRef.current = {
+      header,
+      startX: event.clientX,
+      startWidth: columnLayout.widths[header] ?? ACTIONABLES_CALCULATION_DEFAULT_WIDTHS[header],
+    };
+
+    const handleMouseMove = (moveEvent: globalThis.MouseEvent) => {
+      const state = resizeStateRef.current;
+      if (!state) return;
+      updateColumnWidth(state.header, state.startWidth + moveEvent.clientX - state.startX);
+    };
+    const handleMouseUp = () => {
+      resizeStateRef.current = null;
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+  };
+
+  const handleHeaderDrop = (targetHeader: ActionablesCalculationHeader, event: ReactDragEvent<HTMLTableCellElement>) => {
+    event.preventDefault();
+    const sourceHeader = draggedHeader;
+    setDraggedHeader(null);
+    if (!sourceHeader || sourceHeader === targetHeader) return;
+    setColumnLayout((current) => ({
+      ...current,
+      order: reorderActionablesCalculationHeaders(current.order, sourceHeader, targetHeader),
+    }));
+  };
 
   const toggleSort = (header: string) => {
     setSortState((current) => current.key === header
@@ -3946,21 +7439,34 @@ function ActionablesCalculationsModal({
   return (
     <>
       <div
+        {...reviewModal}
         className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/55 px-4 py-10"
         role="dialog"
         aria-modal="true"
         aria-labelledby="actionables-calculations-modal-title"
         onClick={onClose}
       >
-        <div className="w-full max-w-[96vw] rounded-2xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
-          <div className="sticky top-0 z-10 flex items-start justify-between gap-4 rounded-t-2xl border-b border-slate-200 bg-white px-5 py-4">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">Actionables Calculations</p>
-              <h2 id="actionables-calculations-modal-title" className="mt-1 text-2xl font-bold text-slate-950">{title} Excel layout</h2>
-              <p className="mt-1 text-sm text-slate-500">Grouped in the same rebalance export column order with sortable Excel-style headers.</p>
+        <div className="w-full max-w-[96vw] rounded-2xl bg-white shadow-2xl" style={draggableStyle} onClick={(event) => event.stopPropagation()}>
+          <div className="sticky top-0 z-10 flex cursor-move touch-none select-none items-start justify-between gap-4 rounded-t-2xl border-b border-slate-200 bg-white px-5 py-4" {...dragHandleProps}>
+            <div className="flex items-start gap-3">
+              <button
+                type="button"
+                onClick={() => setInputSelectionOpen(true)}
+                className="mt-1 inline-flex size-10 shrink-0 cursor-pointer items-center justify-center rounded-full border border-blue-200 bg-white text-blue-700 shadow-sm transition hover:border-blue-400 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                aria-label="Select inputs for Actionables Calculations"
+                title="Select Inputs"
+              >
+                <SelectInputsIcon className="size-6" />
+              </button>
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">Actionables Calculations</p>
+                <h2 id="actionables-calculations-modal-title" className="mt-1 text-2xl font-bold text-slate-950">{title} Excel layout</h2>
+                <p className="mt-1 text-sm text-slate-500">Grouped in the same rebalance export column order with sortable Excel-style headers.</p>
+                <PopupDragHint />
+              </div>
             </div>
             <div className="flex items-center gap-2">
-              <button type="button" onClick={() => setFormulaOpen(true)} className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700 transition hover:border-blue-400 hover:bg-blue-100 focus:outline-none focus:ring-2 focus:ring-blue-500" title="Show logics and formulas">
+              <button type="button" onClick={() => setFormulaOpen(true)} className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700 transition hover:border-blue-400 hover:bg-blue-100 focus:outline-none focus:ring-2 focus:ring-blue-500" title="Show logics and formulas">
                 <FunctionSquare className="size-4" />
                 Logics & formulas
               </button>
@@ -3970,18 +7476,60 @@ function ActionablesCalculationsModal({
             </div>
           </div>
           <div className="border-b border-blue-100 bg-blue-50/50 px-5 py-3 text-sm text-blue-900">
-            LLMs consolidated in this view: {Math.max(...stocks.map((stock) => stock.rows.length), 0)}. Stocks: {stocks.length}.
+            {calculationsCountSummary(displayedStocks, loading, loadError)}
           </div>
-          <div className="max-h-[76vh] overflow-auto p-5">
+          <div className="max-h-[76vh] overflow-auto p-5" aria-busy={loading}>
+            {loading ? (
+              <div role="status" aria-live="polite" className="flex items-center justify-center gap-3 rounded-xl border border-blue-200 bg-blue-50 p-8 text-sm text-blue-800">
+                <RefreshCw aria-hidden="true" className="size-5 animate-spin motion-reduce:animate-none" />
+                Loading actionable calculations…
+              </div>
+            ) : loadError ? (
+              <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-6 text-sm text-red-800">
+                <p>Unable to load actionable calculations. {loadError}</p>
+                {onRetry ? <button type="button" onClick={onRetry} className="mt-3 rounded border border-red-300 px-3 py-2 font-semibold focus:outline-none focus:ring-2 focus:ring-red-500">Try again</button> : null}
+              </div>
+            ) : null}
             {rowGroups.length ? (
-              <table className="min-w-max border-collapse text-sm">
+              <table className="w-max table-fixed border-collapse text-sm">
                 <thead className="sticky top-0 z-10 bg-slate-100 text-left">
                   <tr>
-                    {ACTIONABLES_CALCULATION_HEADERS.map((header) => (
-                      <th key={header} className="min-w-36 border border-slate-300 px-3 py-3 align-bottom">
-                        <SortableCalculationHeader header={header} sortState={sortState} onSort={toggleSort} />
-                      </th>
-                    ))}
+                    {orderedHeaders.map((header) => {
+                      const width = columnLayout.widths[header] ?? ACTIONABLES_CALCULATION_DEFAULT_WIDTHS[header];
+                      return (
+                        <th
+                          key={header}
+                          draggable
+                          onDragStart={(event) => {
+                            setDraggedHeader(header);
+                            event.dataTransfer.effectAllowed = "move";
+                            event.dataTransfer.setData("text/plain", header);
+                          }}
+                          onDragOver={(event) => {
+                            event.preventDefault();
+                            event.dataTransfer.dropEffect = "move";
+                          }}
+                          onDrop={(event) => handleHeaderDrop(header, event)}
+                          onDragEnd={() => setDraggedHeader(null)}
+                          className={cn(
+                            "group relative border border-slate-300 px-3 py-3 align-bottom transition",
+                            draggedHeader === header ? "bg-blue-100" : "",
+                          )}
+                          style={{ width, minWidth: width, maxWidth: width }}
+                          title="Drag left/right to reorder. Use the right edge to resize."
+                        >
+                          <ScrollableCalculationCell className="max-h-16 pr-3">
+                            <SortableCalculationHeader header={header} sortState={sortState} onSort={toggleSort} />
+                          </ScrollableCalculationCell>
+                          <button
+                            type="button"
+                            className="absolute right-0 top-0 h-full w-2 cursor-col-resize border-r-2 border-transparent transition hover:border-blue-500 focus:border-blue-500 focus:outline-none"
+                            aria-label={`Resize ${getActionablesCalculationColumnLabel(header)} column`}
+                            onMouseDown={(event) => handleResizeStart(header, event)}
+                          />
+                        </th>
+                      );
+                    })}
                   </tr>
                 </thead>
                 <tbody>
@@ -3989,19 +7537,58 @@ function ActionablesCalculationsModal({
                     <Fragment key={group.stockKey}>
                       {group.rows.map((row, rowIndex) => (
                         <tr key={row.id} className={cn(row.rowClassName, rowIndex === 0 ? "border-t-2 border-slate-900" : "border-t border-slate-900")}>
-                          {rowIndex === 0 ? (
-                            <td
-                              rowSpan={group.rows.length}
-                              className="sticky left-0 z-[1] min-w-[17rem] border border-slate-900 bg-white px-2 py-3 align-middle text-slate-900 shadow-[2px_0_0_rgba(15,23,42,0.08)]"
-                            >
-                              {group.stockInfo}
-                            </td>
-                          ) : null}
-                          {ACTIONABLES_CALCULATION_HEADERS.filter((header) => header !== "Stock Info").map((header) => (
-                            <td key={`${row.id}-${header}`} className="max-w-[26rem] whitespace-nowrap border border-slate-900 px-3 py-1.5 align-top text-slate-900">
-                              {row.values[header]}
-                            </td>
-                          ))}
+                          {orderedHeaders.map((header) => {
+                            const width = columnLayout.widths[header] ?? ACTIONABLES_CALCULATION_DEFAULT_WIDTHS[header];
+                            if (header === "Stock Info") {
+                              return rowIndex === 0 ? (
+                                <td
+                                  key={`${group.stockKey}-stock-info`}
+                                  ref={(node) => {
+                                    if (activeFocusTarget?.stockKey === group.stockKey && activeFocusTarget.header === "Stock Info") {
+                                      targetCellRef.current = node;
+                                    }
+                                  }}
+                                  rowSpan={group.rows.length}
+                                  className="sticky left-0 z-[1] overflow-hidden border border-slate-900 bg-white px-2 py-3 align-middle text-slate-900 shadow-[2px_0_0_rgba(15,23,42,0.08)]"
+                                  style={{ width, minWidth: width, maxWidth: width }}
+                                >
+                                  <ScrollableCalculationCell
+                                    className={cn(
+                                      "max-h-36",
+                                      activeFocusTarget?.stockKey === group.stockKey && activeFocusTarget.header === "Stock Info"
+                                        ? "rounded bg-blue-100 p-1 ring-2 ring-blue-400"
+                                        : "",
+                                    )}
+                                  >
+                                    {group.stockInfo}
+                                  </ScrollableCalculationCell>
+                                </td>
+                              ) : null;
+                            }
+
+                            return (
+                              <td
+                                key={`${row.id}-${header}`}
+                                ref={(node) => {
+                                  if (activeFocusTarget?.stockKey === group.stockKey && activeFocusTarget.header === header && rowIndex === 0) {
+                                    targetCellRef.current = node;
+                                  }
+                                }}
+                                className="overflow-hidden border border-slate-900 px-3 py-1.5 align-top text-slate-900"
+                                style={{ width, minWidth: width, maxWidth: width }}
+                              >
+                                <ScrollableCalculationCell
+                                  className={cn(
+                                    activeFocusTarget?.stockKey === group.stockKey && activeFocusTarget.header === header
+                                      ? "rounded bg-blue-100 p-1 ring-2 ring-blue-400"
+                                      : "",
+                                  )}
+                                >
+                                  {row.values[header]}
+                                </ScrollableCalculationCell>
+                              </td>
+                            );
+                          })}
                         </tr>
                       ))}
                       {groupIndex < rowGroups.length - 1 ? (
@@ -4013,14 +7600,51 @@ function ActionablesCalculationsModal({
                   ))}
                 </tbody>
               </table>
-            ) : (
+            ) : !loading && !loadError ? (
               <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm text-slate-500">No actionable calculation rows available.</div>
-            )}
+            ) : null}
           </div>
         </div>
       </div>
-      <ActionablesFormulaModal open={formulaOpen} onClose={() => setFormulaOpen(false)} />
-      <ScoreMatrixModal detail={selectedMatrixDetail} onClose={() => setSelectedMatrixDetail(null)} />
+      <ActionablesInputSelectionDialog
+        open={inputSelectionOpen}
+        candidates={inputCandidates}
+        selectedIds={effectiveSelectedInputIds}
+        usdInrRate={usdInrRate}
+        onToggle={(id) => {
+          setSelectedInputIds((current) => {
+            const next = new Set(current ?? effectiveSelectedInputIds);
+            if (next.has(id)) next.delete(id);
+            else next.add(id);
+            return next;
+          });
+        }}
+        onToggleAll={() => {
+          setSelectedInputIds((current) => {
+            const currentIds = current ?? effectiveSelectedInputIds;
+            const allSelected = inputCandidates.every((candidate) => currentIds.has(candidate.id));
+            return allSelected ? new Set() : new Set(inputCandidates.map((candidate) => candidate.id));
+          });
+        }}
+        onResetDefaults={() => setSelectedInputIds(null)}
+        onClose={() => setInputSelectionOpen(false)}
+      />
+      <ActionablesFormulaModal
+        open={formulaOpen}
+        formulaConfig={formulaConfig}
+        onFormulaConfigChange={onFormulaConfigChange}
+        onClose={() => setFormulaOpen(false)}
+      />
+      <ScoreMatrixModal
+        detail={selectedMatrixDetail}
+        formulaConfig={formulaConfig}
+        onFormulaConfigChange={onFormulaConfigChange}
+        onClose={() => setSelectedMatrixDetail(null)}
+        onFocusCalculation={(target) => {
+          setInternalFocusTarget(target);
+          setSelectedMatrixDetail(null);
+        }}
+      />
     </>
   );
 }
@@ -4028,7 +7652,7 @@ function ActionablesCalculationsModal({
 
 
 
-type DashboardActionRow = {
+export type DashboardActionRow = {
   id: string;
   market: SwingTradeMarket;
   stock: StockConsensus;
@@ -4036,6 +7660,11 @@ type DashboardActionRow = {
   formulaScore: number | null;
   formulaEstimate: ActionEstimate;
   detail: ScoreMatrixDetail;
+};
+
+export type HistoricalDashboardActionRow = DashboardActionRow & {
+  coveredAt: string;
+  runId: number;
 };
 
 type DashboardActionSortKey =
@@ -4046,14 +7675,188 @@ type DashboardActionSortKey =
   | "currentUnits"
   | "currentValue"
   | "units"
+  | "actionCurrentUnits"
   | "amount"
   | "technicalSetup"
   | "confidence";
+
+type FinalActionableColumnKey = "stock" | "score" | "consensus" | "currentValue" | "actionCurrentUnits" | "amount";
+
+type FinalActionableColumnLayout = {
+  order: FinalActionableColumnKey[];
+  widths: Partial<Record<FinalActionableColumnKey, number>>;
+};
+
+const FINAL_ACTIONABLE_COLUMN_LAYOUT_VERSION = 1;
+const FINAL_ACTIONABLE_COLUMNS: FinalActionableColumnKey[] = ["stock", "score", "consensus", "currentValue", "actionCurrentUnits", "amount"];
+const FINAL_ACTIONABLE_COLUMN_LABELS: Record<FinalActionableColumnKey, string> = {
+  stock: "Stock",
+  score: "Score",
+  consensus: "Consensus",
+  currentValue: "Current Value",
+  actionCurrentUnits: "Action/Current Units",
+  amount: "Amount",
+};
+const FINAL_ACTIONABLE_COLUMN_SORT_KEYS: Record<FinalActionableColumnKey, DashboardActionSortKey> = {
+  stock: "stock",
+  score: "score",
+  consensus: "consensus",
+  currentValue: "currentValue",
+  actionCurrentUnits: "actionCurrentUnits",
+  amount: "amount",
+};
+const FINAL_ACTIONABLE_DEFAULT_WIDTHS: Record<FinalActionableColumnKey, number> = {
+  stock: 168,
+  score: 112,
+  consensus: 132,
+  currentValue: 148,
+  actionCurrentUnits: 168,
+  amount: 148,
+};
+const FINAL_ACTIONABLE_MIN_COLUMN_WIDTH = 96;
+const FINAL_ACTIONABLE_MAX_COLUMN_WIDTH = 420;
+
+function getFinalActionableLayoutStorageKey() {
+  return `investment-engine:final-actionable-table-layout:v${FINAL_ACTIONABLE_COLUMN_LAYOUT_VERSION}`;
+}
+
+function clampFinalActionableColumnWidth(width: number) {
+  if (!Number.isFinite(width)) return FINAL_ACTIONABLE_DEFAULT_WIDTHS.stock;
+  return Math.min(FINAL_ACTIONABLE_MAX_COLUMN_WIDTH, Math.max(FINAL_ACTIONABLE_MIN_COLUMN_WIDTH, Math.round(width)));
+}
+
+function normalizeFinalActionableLayout(layout?: Partial<FinalActionableColumnLayout> | null): FinalActionableColumnLayout {
+  const seen = new Set<FinalActionableColumnKey>();
+  const order = [
+    ...(layout?.order ?? []).filter((column): column is FinalActionableColumnKey => {
+      if (!FINAL_ACTIONABLE_COLUMNS.includes(column as FinalActionableColumnKey) || seen.has(column as FinalActionableColumnKey)) return false;
+      seen.add(column as FinalActionableColumnKey);
+      return true;
+    }),
+    ...FINAL_ACTIONABLE_COLUMNS.filter((column) => !seen.has(column)),
+  ];
+  const widths = FINAL_ACTIONABLE_COLUMNS.reduce((acc, column) => {
+    acc[column] = clampFinalActionableColumnWidth(layout?.widths?.[column] ?? FINAL_ACTIONABLE_DEFAULT_WIDTHS[column]);
+    return acc;
+  }, {} as Record<FinalActionableColumnKey, number>);
+  return { order, widths };
+}
+
+function loadFinalActionableLayout() {
+  if (typeof window === "undefined") return normalizeFinalActionableLayout();
+  try {
+    const raw = window.localStorage.getItem(getFinalActionableLayoutStorageKey());
+    return raw ? normalizeFinalActionableLayout(JSON.parse(raw)) : normalizeFinalActionableLayout();
+  } catch {
+    return normalizeFinalActionableLayout();
+  }
+}
+
+function reorderFinalActionableColumns(order: FinalActionableColumnKey[], from: FinalActionableColumnKey, to: FinalActionableColumnKey) {
+  if (from === to) return order;
+  const next = order.filter((column) => column !== from);
+  const targetIndex = next.indexOf(to);
+  if (targetIndex === -1) return order;
+  next.splice(targetIndex, 0, from);
+  return next;
+}
 
 type DashboardActionSortState = {
   key: DashboardActionSortKey;
   direction: "asc" | "desc";
 };
+
+export function buildHistoricalDashboardActionRows(
+  runs: RunResponse[],
+  market: SwingTradeMarket,
+  _portfolioSnapshot: ZerodhaPortfolioSnapshotDetail | IndMoneyUsPortfolioSnapshotDetail | null,
+  _technicalScans: TechnicalScanMap,
+  formulaConfig: ScoreMatrixFormulaConfig,
+): HistoricalDashboardActionRow[] {
+  // Historical cutoffs reuse only the exact source link, response and parsing metadata.
+  // This cache lives for one reconstruction and cannot retain another account's data.
+  const parsedTechnicalSources: TechnicalScanParseCache = new Map();
+  return runs
+    .filter((run) => isCompletedRebalanceRun(run, market))
+    .sort((a, b) => parseTimestampMs(b.created_at) - parseTimestampMs(a.created_at))
+    .flatMap((run) => {
+      // Run.updated_at also changes on export. No immutable completion time is exposed,
+      // so never advance the historical cutoff beyond this run's creation time.
+      const cutoff = parseTimestampMs(run.created_at);
+      const historicalTechnicalRuns = runs
+        .filter((source) => isAnalysisRunForStage(source, "technical", market)
+          && parseTimestampMs(source.created_at) > 0
+          && parseTimestampMs(source.created_at) <= cutoff)
+        .map((source) => ({
+          ...source,
+          run_jobs: (source.run_jobs ?? []).filter(({ job }) => {
+            const createdAt = parseTimestampMs(job?.created_at);
+            const updatedAt = parseTimestampMs(job?.updated_at);
+            // Missing or later output timestamps cannot establish historical availability.
+            return createdAt > 0 && updatedAt >= createdAt && updatedAt <= cutoff;
+          }),
+        }));
+      return buildDashboardActionRows(
+        buildConsensusRows([run], market),
+        market,
+        buildTechnicalScanMap(historicalTechnicalRuns, parsedTechnicalSources),
+        formulaConfig,
+      ).map((row) => ({ ...row, coveredAt: run.created_at, runId: run.id }));
+    });
+}
+
+export function buildFinalActionableHistoryItems(
+  rows: HistoricalDashboardActionRow[],
+  runs: RunResponse[],
+): FinalActionableHistoryCreateItem[] {
+  const runsById = new Map(runs.map((run) => [run.id, run]));
+  return rows.map((row) => {
+    const sourceRun = runsById.get(row.runId);
+    const action = row.formulaAction;
+    const estimate = row.formulaEstimate;
+    const sourceRunIds = Array.from(new Set([
+      row.runId,
+      ...row.stock.rows.map((stockRow) => stockRow.meta.runId),
+      ...(row.detail.technicalScanSourceRunId ? [row.detail.technicalScanSourceRunId] : []),
+    ]));
+    return {
+      workflow_id: null,
+      auto_rebalance_sequence: sourceRun?.auto_rebalance_sequence ?? null,
+      rebalance_run_id: row.runId,
+      market: row.market,
+      stock_symbol: normalizeStockSymbol(row.stock.symbol || row.stock.key),
+      stock_name: row.stock.representative["Stock Name"] || row.stock.symbol || null,
+      covered_at: row.coveredAt,
+      action,
+      score: row.formulaScore,
+      consensus_numerator: row.stock.actionCounts[action],
+      consensus_denominator: row.stock.totalSuggestions,
+      historical_current_units: estimate.currentUnits,
+      historical_current_value: estimate.currentInvestmentAmount,
+      action_units: estimate.units,
+      amount: estimate.amount,
+      technical_scan_run_id: row.detail.technicalScanSourceRunId,
+      formula_version: "score-matrix-v1",
+      formula_inputs_json: row.detail as unknown as Record<string, unknown>,
+      source_run_ids_json: sourceRunIds,
+      snapshot_json: {
+        representative: row.stock.representative,
+        action_counts: row.stock.actionCounts,
+        formula_action: row.formulaAction,
+        formula_score: row.formulaScore,
+        formula_estimate: row.formulaEstimate,
+      },
+      coverage_status: "suggested",
+    };
+  });
+}
+
+function getDefaultDashboardActionSortState(action: ActionCategory): DashboardActionSortState {
+  return {
+    key: "score",
+    direction: action === "Add more" || action === "Buy New" ? "desc" : "asc",
+  };
+}
 
 const EMPTY_SELECTED_DASHBOARD_ACTION_IDS = new Set<string>();
 
@@ -4061,16 +7864,24 @@ function getDashboardActionRowId(market: SwingTradeMarket, stock: StockConsensus
   return `${market}:${stock.key}`;
 }
 
+function getMarketActionUnits(
+  unitsChange: number | null,
+  action: ActionCategory,
+  market: SwingTradeMarket,
+) {
+  if (!ACTION_ESTIMATE_CATEGORIES.has(action) || unitsChange === null) return null;
+  const absoluteUnits = Math.abs(unitsChange);
+  return market === "india" ? Math.floor(absoluteUnits) : absoluteUnits;
+}
+
 function buildFormulaActionEstimate(
   stock: StockConsensus,
   action: ActionCategory,
   unitsChange: number | null,
+  market: SwingTradeMarket,
 ): ActionEstimate {
-  const currentUnits = parseNumericCell(stock.representative["Current Units"]);
-  const currentInvestmentAmount = getCurrentValueAmount(stock.representative);
-  const units = ACTION_ESTIMATE_CATEGORIES.has(action) && unitsChange !== null
-    ? Math.abs(unitsChange)
-    : null;
+  const { currentUnits, currentInvestmentAmount } = getStockPositionContext(stock);
+  const units = getMarketActionUnits(unitsChange, action, market);
   const price = parseNumericCell(stock.representative["Price Per Unit"]);
   let amount: number | null = null;
 
@@ -4086,6 +7897,13 @@ function buildFormulaActionEstimate(
       amount = Math.abs(units / currentUnits) * currentInvestmentAmount;
     } else if (price !== null) {
       amount = Math.abs(units * price);
+    } else if (
+      action === "Add more" &&
+      currentUnits !== null &&
+      currentUnits > 0 &&
+      currentInvestmentAmount !== null
+    ) {
+      amount = Math.abs(units / currentUnits) * currentInvestmentAmount;
     } else {
       amount = getActionAmount(stock.representative, units, action);
     }
@@ -4099,13 +7917,24 @@ function buildFormulaActionEstimate(
   };
 }
 
-function buildDashboardActionRows(
+export function buildDashboardActionRows(
   stocks: StockConsensus[],
   market: SwingTradeMarket,
   technicalScans: TechnicalScanMap,
+  formulaConfig: ScoreMatrixFormulaConfig = DEFAULT_SCORE_MATRIX_FORMULA_CONFIG,
 ): DashboardActionRow[] {
+  const technicalScanSourceMeta = getLatestTechnicalScanSourceMeta(technicalScans);
+
+  // Score every analysed listing, including zero-position Hold decisions.
+  // Order eligibility is enforced separately by the basket builder.
   return stocks.map((stock) => {
-    const detail = buildScoreMatrixDetail(stock, getTechnicalScanForStock(technicalScans, stock));
+    const detail = buildScoreMatrixDetail(
+      stock,
+      getTechnicalScanForStock(technicalScans, stock),
+      formulaConfig,
+      technicalScanSourceMeta.label,
+      technicalScanSourceMeta.runId,
+    );
     const formulaAction = detail.calculatedAction;
     return {
       id: getDashboardActionRowId(market, stock),
@@ -4113,7 +7942,7 @@ function buildDashboardActionRows(
       stock,
       formulaAction,
       formulaScore: detail.calculatedScore,
-      formulaEstimate: buildFormulaActionEstimate(stock, formulaAction, detail.calculatedUnitsChange),
+      formulaEstimate: buildFormulaActionEstimate(stock, formulaAction, detail.calculatedUnitsChange, market),
       detail,
     };
   });
@@ -4142,6 +7971,8 @@ function getDashboardActionSortValue(
       return row.formulaEstimate.currentInvestmentAmount ?? getCurrentValueAmount(row.stock.representative) ?? Number.NEGATIVE_INFINITY;
     case "units":
       return row.formulaEstimate.units ?? Number.NEGATIVE_INFINITY;
+    case "actionCurrentUnits":
+      return row.formulaEstimate.units ?? 0;
     case "amount":
       return row.formulaEstimate.amount ?? Number.NEGATIVE_INFINITY;
     case "technicalSetup":
@@ -4161,6 +7992,12 @@ function compareDashboardActionRows(
   technicalScans: TechnicalScanMap,
   selectedIds: Set<string> = EMPTY_SELECTED_DASHBOARD_ACTION_IDS,
 ) {
+  if (sortState.key === "score") {
+    const leftMissingScore = left.formulaScore === null;
+    const rightMissingScore = right.formulaScore === null;
+    if (leftMissingScore !== rightMissingScore) return leftMissingScore ? 1 : -1;
+  }
+
   const leftValue = getDashboardActionSortValue(left, action, sortState.key, technicalScans, selectedIds);
   const rightValue = getDashboardActionSortValue(right, action, sortState.key, technicalScans, selectedIds);
   let comparison = 0;
@@ -4180,18 +8017,20 @@ function SortableActionHeader({
   sortKey,
   currentSort,
   onSort,
+  className,
 }: {
   label: string;
   sortKey: DashboardActionSortKey;
   currentSort: DashboardActionSortState;
   onSort: (key: DashboardActionSortKey) => void;
+  className?: string;
 }) {
   const isActive = currentSort.key === sortKey;
   return (
     <button
       type="button"
       onClick={() => onSort(sortKey)}
-      className="inline-flex items-center gap-1 whitespace-nowrap font-semibold text-gray-500 transition hover:text-gray-900"
+      className={cn("inline-flex cursor-pointer items-center gap-1 whitespace-nowrap font-semibold text-gray-500 transition hover:text-gray-900", className)}
       title={`Sort by ${label}`}
     >
       {label}
@@ -4217,44 +8056,116 @@ function getLatestMatchingRuns(runs: RunResponse[], market: SwingTradeMarket) {
 }
 
 export function DashboardFinalActionablesTables() {
-  const [runs, setRuns] = useState<RunResponse[]>([]);
+  const cachedDashboardFinalActionablesOnFirstRender = useMemo(
+    () => readDashboardFinalActionablesCache(),
+    [],
+  );
+  const [runs, setRuns] = useState<RunResponse[]>(() => cachedDashboardFinalActionablesOnFirstRender?.runs ?? []);
   const [portfolioSnapshots, setPortfolioSnapshots] = useState<{
     india: ZerodhaPortfolioSnapshotDetail | null;
     us: IndMoneyUsPortfolioSnapshotDetail | null;
-  }>({ india: null, us: null });
+  }>(() => cachedDashboardFinalActionablesOnFirstRender?.portfolioSnapshots ?? { india: null, us: null });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [fallbackNotice, setFallbackNotice] = useState<string | null>(null);
+  const loadRunsPromiseRef = useRef<Promise<void> | null>(null);
   const [sortStates, setSortStates] = useState<Record<string, DashboardActionSortState>>({});
+  const [finalActionableLayout, setFinalActionableLayout] = useState<FinalActionableColumnLayout>(() => loadFinalActionableLayout());
+  const [draggedFinalActionableColumn, setDraggedFinalActionableColumn] = useState<FinalActionableColumnKey | null>(null);
+  const finalActionableResizeStateRef = useRef<{ column: FinalActionableColumnKey; startX: number; startWidth: number } | null>(null);
   const [calculationsMarket, setCalculationsMarket] = useState<SwingTradeMarket | null>(null);
+  const [calculationFocusTarget, setCalculationFocusTarget] = useState<ActionablesCalculationFocusTarget | null>(null);
   const [selectedMatrixDetail, setSelectedMatrixDetail] = useState<ScoreMatrixDetail | null>(null);
-  const [detailsDataByMarket, setDetailsDataByMarket] = useState<Record<SwingTradeMarket, StockDetailsData>>({
-    india: { portfolioSnapshot: null, eventsAnalysis: null, threatsAnalysis: null, error: null },
-    us: { portfolioSnapshot: null, eventsAnalysis: null, threatsAnalysis: null, error: null },
-  });
+  const [scoreMatrixFormulaConfig, setScoreMatrixFormulaConfig] = useState<ScoreMatrixFormulaConfig>(() => loadScoreMatrixFormulaConfig());
+  const [detailsDataByMarket, setDetailsDataByMarket] = useState<Record<SwingTradeMarket, StockDetailsData>>(() => ({
+    india: { portfolioSnapshot: cachedDashboardFinalActionablesOnFirstRender?.portfolioSnapshots.india ?? null, eventsAnalysis: null, threatsAnalysis: null, error: null },
+    us: { portfolioSnapshot: cachedDashboardFinalActionablesOnFirstRender?.portfolioSnapshots.us ?? null, eventsAnalysis: null, threatsAnalysis: null, error: null },
+  }));
+  const [actionablesCompletedAtByMarket, setActionablesCompletedAtByMarket] = useState<Record<SwingTradeMarket, string | null>>(
+    () => readDashboardActionablesCompletedAtByMarket(),
+  );
 
-  const loadRuns = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const [allRuns, zerodhaOverview, indmoneyOverview] = await Promise.all([
-        fetchAllFullRuns(),
-        apiService.zerodhaPortfolioOverview(),
-        apiService.indmoneyUsPortfolioOverview(),
-      ]);
-      setRuns(allRuns);
-      setPortfolioSnapshots({
-        india: zerodhaOverview.latest,
-        us: indmoneyOverview.latest,
-      });
-      setDetailsDataByMarket((current) => ({
-        india: { ...current.india, portfolioSnapshot: zerodhaOverview.latest },
-        us: { ...current.us, portfolioSnapshot: indmoneyOverview.latest },
-      }));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load final actionables.");
-    } finally {
-      setLoading(false);
+  const loadRuns = useCallback(() => {
+    if (loadRunsPromiseRef.current) {
+      console.info(
+        JSON.stringify({
+          event: "final_actionables_refresh_deduplicated",
+          reason: "refresh_already_in_flight",
+        }),
+      );
+      return loadRunsPromiseRef.current;
     }
+
+    const loadPromise = (async () => {
+      setLoading(true);
+      setError(null);
+      setFallbackNotice(null);
+      try {
+        const [allRuns, zerodhaOverview, indmoneyOverview] = await Promise.all([
+          fetchDashboardRecentFullRuns(),
+          apiService.zerodhaPortfolioOverview(),
+          apiService.indmoneyUsPortfolioOverview(),
+        ]);
+        const nextPortfolioSnapshots = {
+          india: zerodhaOverview.latest,
+          us: indmoneyOverview.latest,
+        };
+        setRuns(allRuns);
+        setPortfolioSnapshots(nextPortfolioSnapshots);
+        writeDashboardFinalActionablesCache(allRuns, nextPortfolioSnapshots);
+        setDetailsDataByMarket((current) => ({
+          india: { ...current.india, portfolioSnapshot: zerodhaOverview.latest },
+          us: { ...current.us, portfolioSnapshot: indmoneyOverview.latest },
+        }));
+      } catch (err) {
+        const cachedFallback = readDashboardFinalActionablesCache();
+        if (cachedFallback) {
+          console.warn(
+            JSON.stringify({
+              event: "final_actionables_fallback_triggered",
+              from_stage: "secondary",
+              to_stage: "tertiary",
+              to_transport: "last-known-good-cache",
+              reason:
+                err instanceof Error
+                  ? err.name || "error"
+                  : "unknown_error",
+            }),
+          );
+          setRuns(cachedFallback.runs);
+          setPortfolioSnapshots(cachedFallback.portfolioSnapshots);
+          setDetailsDataByMarket((current) => ({
+            india: {
+              ...current.india,
+              portfolioSnapshot: cachedFallback.portfolioSnapshots.india,
+            },
+            us: {
+              ...current.us,
+              portfolioSnapshot: cachedFallback.portfolioSnapshots.us,
+            },
+          }));
+          setFallbackNotice(
+            `Live refresh failed; showing saved actionables from ${new Date(
+              cachedFallback.cachedAt,
+            ).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}.`,
+          );
+        } else {
+          setError(
+            err instanceof Error
+              ? err.message
+              : "Failed to load final actionables.",
+          );
+        }
+      } finally {
+        setLoading(false);
+      }
+    })().finally(() => {
+      if (loadRunsPromiseRef.current === loadPromise) {
+        loadRunsPromiseRef.current = null;
+      }
+    });
+    loadRunsPromiseRef.current = loadPromise;
+    return loadPromise;
   }, []);
 
   useEffect(() => {
@@ -4267,6 +8178,34 @@ export function DashboardFinalActionablesTables() {
 
   useEffect(() => {
     const handler = (event: Event) => {
+      const detail = (event as CustomEvent<DashboardActionablesRefreshDetail>).detail;
+      if (detail?.market === "india" || detail?.market === "us") {
+        setActionablesCompletedAtByMarket((current) => ({
+          ...current,
+          [detail.market as SwingTradeMarket]: detail.completedAt ?? new Date().toISOString(),
+        }));
+      } else {
+        setActionablesCompletedAtByMarket(readDashboardActionablesCompletedAtByMarket());
+      }
+      void loadRuns();
+    };
+    window.addEventListener("final-actionables-refresh", handler);
+    return () => window.removeEventListener("final-actionables-refresh", handler);
+  }, [loadRuns]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(getFinalActionableLayoutStorageKey(), JSON.stringify(normalizeFinalActionableLayout(finalActionableLayout)));
+  }, [finalActionableLayout]);
+
+  useEffect(() => {
+    return () => {
+      finalActionableResizeStateRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    const handler = (event: Event) => {
       const detail = (event as CustomEvent<{ market?: SwingTradeMarket }>).detail;
       setCalculationsMarket(detail?.market === "us" ? "us" : "india");
     };
@@ -4275,43 +8214,70 @@ export function DashboardFinalActionablesTables() {
   }, []);
 
   const technicalScans = useMemo(() => buildTechnicalScanMap(runs), [runs]);
+  const historicalActionRowsByMarket = useMemo(() => ({
+    india: buildHistoricalDashboardActionRows(
+      runs,
+      "india",
+      portfolioSnapshots.india,
+      technicalScans,
+      scoreMatrixFormulaConfig,
+    ),
+    us: buildHistoricalDashboardActionRows(
+      runs,
+      "us",
+      portfolioSnapshots.us,
+      technicalScans,
+      scoreMatrixFormulaConfig,
+    ),
+  }), [portfolioSnapshots.india, portfolioSnapshots.us, runs, scoreMatrixFormulaConfig, technicalScans]);
+
+  const actionRowsByMarket = useMemo(() => ({
+    india: buildDashboardActionRows(
+      buildConsensusRows(getLatestMatchingRuns(runs, "india"), "india", portfolioSnapshots.india),
+      "india",
+      technicalScans,
+      scoreMatrixFormulaConfig,
+    ),
+    us: buildDashboardActionRows(
+      buildConsensusRows(getLatestMatchingRuns(runs, "us"), "us", portfolioSnapshots.us),
+      "us",
+      technicalScans,
+      scoreMatrixFormulaConfig,
+    ),
+  }), [portfolioSnapshots.india, portfolioSnapshots.us, runs, scoreMatrixFormulaConfig, technicalScans]);
 
   useEffect(() => {
     let ignore = false;
 
     async function loadCapturedDetails() {
-      try {
-        const [zerodhaEvents, zerodhaThreats, indmoneyEvents, indmoneyThreats] = await Promise.all([
+      const [zerodhaEvents, zerodhaThreats, indmoneyEvents, indmoneyThreats] = await Promise.allSettled([
           apiService.zerodhaEventsLatest(),
           apiService.zerodhaThreatsLatest(),
           apiService.indmoneyUsEventsLatest(),
           apiService.indmoneyUsThreatsLatest(),
-        ]);
+      ]);
 
-        if (!ignore) {
-          setDetailsDataByMarket((current) => ({
-            india: {
-              ...current.india,
-              eventsAnalysis: zerodhaEvents.analysis,
-              threatsAnalysis: zerodhaThreats.analysis,
-              error: null,
-            },
-            us: {
-              ...current.us,
-              eventsAnalysis: indmoneyEvents.analysis,
-              threatsAnalysis: indmoneyThreats.analysis,
-              error: null,
-            },
-          }));
-        }
-      } catch (err) {
-        if (!ignore) {
-          const message = err instanceof Error ? err.message : "Failed to load captured stock details.";
-          setDetailsDataByMarket((current) => ({
-            india: { ...current.india, error: message },
-            us: { ...current.us, error: message },
-          }));
-        }
+      if (!ignore) {
+        setDetailsDataByMarket((current) => ({
+          india: {
+            ...current.india,
+            eventsAnalysis: zerodhaEvents.status === "fulfilled" ? zerodhaEvents.value.analysis : current.india.eventsAnalysis,
+            threatsAnalysis: zerodhaThreats.status === "fulfilled" ? zerodhaThreats.value.analysis : current.india.threatsAnalysis,
+            error: combineOperationalErrors([
+              getRejectedResultMessage(zerodhaEvents, "Events"),
+              getRejectedResultMessage(zerodhaThreats, "Threats"),
+            ]),
+          },
+          us: {
+            ...current.us,
+            eventsAnalysis: indmoneyEvents.status === "fulfilled" ? indmoneyEvents.value.analysis : current.us.eventsAnalysis,
+            threatsAnalysis: indmoneyThreats.status === "fulfilled" ? indmoneyThreats.value.analysis : current.us.threatsAnalysis,
+            error: combineOperationalErrors([
+              getRejectedResultMessage(indmoneyEvents, "Events"),
+              getRejectedResultMessage(indmoneyThreats, "Threats"),
+            ]),
+          },
+        }));
       }
     }
 
@@ -4321,34 +8287,110 @@ export function DashboardFinalActionablesTables() {
       ignore = true;
     };
   }, []);
-  const actionRowsByMarket = useMemo(() => ({
-    india: buildDashboardActionRows(
-      buildConsensusRows(getLatestMatchingRuns(runs, "india"), "india", portfolioSnapshots.india),
-      "india",
-      technicalScans,
-    ),
-    us: buildDashboardActionRows(
-      buildConsensusRows(getLatestMatchingRuns(runs, "us"), "us", portfolioSnapshots.us),
-      "us",
-      technicalScans,
-    ),
-  }), [portfolioSnapshots.india, portfolioSnapshots.us, runs, technicalScans]);
+  useEffect(() => {
+    saveScoreMatrixFormulaConfig(scoreMatrixFormulaConfig);
+  }, [scoreMatrixFormulaConfig]);
 
-  const toggleActionSort = useCallback((tableKey: string, key: DashboardActionSortKey) => {
+  useEffect(() => {
+    if (!runs.length) return;
+    writeHistoricalActionRowsCache("india", historicalActionRowsByMarket.india);
+    writeHistoricalActionRowsCache("us", historicalActionRowsByMarket.us);
+    // Persisted history is reconstructed by the server's terminal-run hook.
+    // Display reads and Refresh must not write history or enqueue a backfill.
+  }, [historicalActionRowsByMarket, runs]);
+
+  const updateFinalActionableColumnWidth = useCallback((column: FinalActionableColumnKey, width: number) => {
+    setFinalActionableLayout((current) => ({
+      ...current,
+      widths: {
+        ...current.widths,
+        [column]: clampFinalActionableColumnWidth(width),
+      },
+    }));
+  }, []);
+
+  const handleFinalActionableResizeStart = useCallback((column: FinalActionableColumnKey, event: MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    finalActionableResizeStateRef.current = {
+      column,
+      startX: event.clientX,
+      startWidth: finalActionableLayout.widths[column] ?? FINAL_ACTIONABLE_DEFAULT_WIDTHS[column],
+    };
+
+    const handleMouseMove = (moveEvent: globalThis.MouseEvent) => {
+      const state = finalActionableResizeStateRef.current;
+      if (!state) return;
+      updateFinalActionableColumnWidth(state.column, state.startWidth + moveEvent.clientX - state.startX);
+    };
+    const handleMouseUp = () => {
+      finalActionableResizeStateRef.current = null;
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+  }, [finalActionableLayout.widths, updateFinalActionableColumnWidth]);
+
+  const handleFinalActionableColumnDrop = useCallback((targetColumn: FinalActionableColumnKey, event: ReactDragEvent<HTMLTableCellElement>) => {
+    event.preventDefault();
+    const sourceColumn = draggedFinalActionableColumn;
+    setDraggedFinalActionableColumn(null);
+    if (!sourceColumn || sourceColumn === targetColumn) return;
+    setFinalActionableLayout((current) => ({
+      ...current,
+      order: reorderFinalActionableColumns(current.order, sourceColumn, targetColumn),
+    }));
+  }, [draggedFinalActionableColumn]);
+
+  const toggleActionSort = useCallback((tableKey: string, action: ActionCategory, key: DashboardActionSortKey) => {
     setSortStates((current) => {
-      const existing = current[tableKey] ?? { key: "confidence" as DashboardActionSortKey, direction: "desc" as const };
+      const existing = current[tableKey] ?? getDefaultDashboardActionSortState(action);
       return {
         ...current,
         [tableKey]: existing.key === key
           ? { key, direction: existing.direction === "asc" ? "desc" : "asc" }
-          : { key, direction: key === "stock" || key === "score" || key === "technicalSetup" ? "asc" : "desc" },
+          : {
+            key,
+            direction: key === "score"
+              ? getDefaultDashboardActionSortState(action).direction
+              : key === "stock" || key === "technicalSetup" ? "asc" : "desc",
+          },
       };
     });
   }, []);
 
   const renderMarketPanel = (market: SwingTradeMarket, title: string, description: string) => {
     const actionRows = actionRowsByMarket[market];
+    const historicalActionRows = historicalActionRowsByMarket[market];
     const detailsData = detailsDataByMarket[market];
+    const matchingRuns = getLatestMatchingRuns(runs, market);
+    const latestRebalanceAt = matchingRuns[0]?.created_at ?? null;
+    const latestTechnicalAt = Object.values(technicalScans)
+      .filter((scan, index, scans) => scans.findIndex((candidate) => candidate.runId === scan.runId && candidate.jobId === scan.jobId) === index)
+      .filter((scan) => {
+        const run = runs.find((candidate) => candidate.id === scan.runId);
+        return run ? isCompletedTechnicalScanRun(run, market) : false;
+      })
+      .map((scan) => scan.createdAt)
+      .sort((a, b) => parseTimestampMs(b) - parseTimestampMs(a))[0] ?? null;
+    const latestActionablesCompletedAt = actionablesCompletedAtByMarket[market];
+    const lastUpdatedAt = [latestRebalanceAt, latestTechnicalAt, latestActionablesCompletedAt]
+      .filter(Boolean)
+      .sort((a, b) => parseTimestampMs(b) - parseTimestampMs(a))[0] ?? null;
+    const tradingViewItems = ACTION_CATEGORIES.flatMap((action) => {
+      const tableKey = `${market}:${action}`;
+      const sortState = sortStates[tableKey] ?? getDefaultDashboardActionSortState(action);
+      return actionRows
+        .filter((row) => row.formulaAction === action)
+        .sort((a, b) => compareDashboardActionRows(a, b, action, sortState, technicalScans))
+        .map((row) => ({
+          symbol: row.stock.symbol,
+          market,
+          exchange: row.stock.exchange,
+        }));
+    });
 
     return (
       <div id={market === "us" ? "final-actionable-us" : "final-actionable-zerodha"} className="scroll-mt-24 rounded-[28px] border border-slate-200 bg-white/80 p-4 shadow-sm">
@@ -4357,13 +8399,26 @@ export function DashboardFinalActionablesTables() {
             <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">
               {market === "us" ? "US" : "Zerodha India"}
             </div>
-            <h3 className="mt-1 font-serif text-xl tracking-tight text-slate-950">{title}</h3>
+            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+              <h3 className="font-serif text-xl tracking-tight text-slate-950">{title}</h3>
+              <span className="text-xs font-medium text-slate-500">
+                Last updated: {lastUpdatedAt ? formatDateTime(lastUpdatedAt) : "—"}
+              </span>
+              <TradingViewUrlListButton
+                items={tradingViewItems}
+                title={`${title} TradingView URLs`}
+                ariaLabel={`Open ${title} TradingView URL list`}
+              />
+            </div>
             <p className="mt-2 text-sm leading-6 text-slate-600">{description}</p>
           </div>
           <button
             type="button"
-            onClick={() => setCalculationsMarket(market)}
-            className="inline-flex size-10 shrink-0 items-center justify-center rounded-full border border-blue-200 bg-blue-50 text-blue-700 shadow-sm transition hover:border-blue-400 hover:bg-blue-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            onClick={() => {
+              setCalculationFocusTarget(null);
+              setCalculationsMarket(market);
+            }}
+            className="inline-flex size-10 shrink-0 cursor-pointer items-center justify-center rounded-full border border-blue-200 bg-blue-50 text-blue-700 shadow-sm transition hover:border-blue-400 hover:bg-blue-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
             aria-label={`Open ${title} Actionables Calculations`}
             title="Actionables Calculations"
           >
@@ -4372,17 +8427,24 @@ export function DashboardFinalActionablesTables() {
         </div>
 
         <div className="space-y-4">
-          {loading && actionRows.length === 0 ? (
+          <ActionablesRunGroup market={market} latestRun={matchingRuns[0] ?? null} runCount={matchingRuns.length} stockCount={actionRows.length} loading={loading} error={error ?? fallbackNotice} />
+          {actionRows.length === 0 ? (
             <div className="rounded-[20px] border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">
-              Loading final actionables…
+              <ActionablesEmptyState loading={loading} error={error ?? fallbackNotice} hasMatchingRun={Boolean(matchingRuns[0])} />
             </div>
           ) : (
             ACTION_CATEGORIES.map((action) => {
               const tableKey = `${market}:${action}`;
-              const sortState = sortStates[tableKey] ?? { key: "score", direction: "asc" as const };
+              const sortState = sortStates[tableKey] ?? getDefaultDashboardActionSortState(action);
               const rows = actionRows
                 .filter((row) => row.formulaAction === action)
                 .sort((a, b) => compareDashboardActionRows(a, b, action, sortState, technicalScans));
+              const showBuyAmountTotal = action === "Add more" || action === "Buy New";
+              const buyAmountTotal = showBuyAmountTotal ? getBuyActionAmountTotal(rows) : null;
+              const currentValueTotal = rows.reduce((total, row) => {
+                const currentValue = row.formulaEstimate.currentInvestmentAmount ?? getCurrentValueAmount(row.stock.representative);
+                return total + (currentValue ?? 0);
+              }, 0);
               if (!rows.length) return null;
               return (
                 <Card
@@ -4403,16 +8465,68 @@ export function DashboardFinalActionablesTables() {
                       <div className="overflow-x-auto">
                         <table className="min-w-[64rem] text-xs">
                           <thead>
+                            <tr className="bg-white/70 text-left text-[11px] uppercase tracking-wide text-gray-500">
+                              {finalActionableLayout.order.map((column) => {
+                                const width = finalActionableLayout.widths[column] ?? FINAL_ACTIONABLE_DEFAULT_WIDTHS[column];
+                                return (
+                                  <th
+                                    key={`${column}-section-current-value-total`}
+                                    className={cn(
+                                      "px-3 pb-1 pt-2 align-bottom font-semibold",
+                                      column === "currentValue" ? "bg-blue-50 text-blue-950" : "",
+                                    )}
+                                    style={{ width, minWidth: width, maxWidth: width }}
+                                  >
+                                    {column === "currentValue" ? (
+                                      <div className="space-y-0.5 whitespace-nowrap">
+                                        <div className="text-sm font-black text-blue-950">{formatDisplayAmount(currentValueTotal, market)}</div>
+                                      </div>
+                                    ) : null}
+                                  </th>
+                                );
+                              })}
+                            </tr>
                             <tr className="border-b border-gray-200 bg-white/60 text-left text-[11px] uppercase tracking-wide text-gray-500">
-                              <th className="px-3 py-2 font-semibold"><SortableActionHeader label="Stock" sortKey="stock" currentSort={sortState} onSort={(key) => toggleActionSort(tableKey, key)} /></th>
-                              <th className="px-3 py-2 font-semibold"><SortableActionHeader label="Score" sortKey="score" currentSort={sortState} onSort={(key) => toggleActionSort(tableKey, key)} /></th>
-                              <th className="px-3 py-2 font-semibold"><SortableActionHeader label="Consensus" sortKey="consensus" currentSort={sortState} onSort={(key) => toggleActionSort(tableKey, key)} /></th>
-                              <th className="px-3 py-2 font-semibold"><SortableActionHeader label="Current Units" sortKey="currentUnits" currentSort={sortState} onSort={(key) => toggleActionSort(tableKey, key)} /></th>
-                              <th className="px-3 py-2 font-semibold"><SortableActionHeader label="Current Value" sortKey="currentValue" currentSort={sortState} onSort={(key) => toggleActionSort(tableKey, key)} /></th>
-                              <th className="px-3 py-2 font-semibold"><SortableActionHeader label={`Units to ${getActionVerb(action)}`} sortKey="units" currentSort={sortState} onSort={(key) => toggleActionSort(tableKey, key)} /></th>
-                              <th className="px-3 py-2 font-semibold"><SortableActionHeader label="Amount" sortKey="amount" currentSort={sortState} onSort={(key) => toggleActionSort(tableKey, key)} /></th>
-                              <th className="px-3 py-2 font-semibold"><SortableActionHeader label="Technical Setup" sortKey="technicalSetup" currentSort={sortState} onSort={(key) => toggleActionSort(tableKey, key)} /></th>
-                              <th className="px-3 py-2 font-semibold"><SortableActionHeader label="Confidence Score" sortKey="confidence" currentSort={sortState} onSort={(key) => toggleActionSort(tableKey, key)} /></th>
+                              {finalActionableLayout.order.map((column) => {
+                                const width = finalActionableLayout.widths[column] ?? FINAL_ACTIONABLE_DEFAULT_WIDTHS[column];
+                                return (
+                                  <th
+                                    key={column}
+                                    draggable
+                                    onDragStart={(event) => {
+                                      setDraggedFinalActionableColumn(column);
+                                      event.dataTransfer.effectAllowed = "move";
+                                      event.dataTransfer.setData("text/plain", column);
+                                    }}
+                                    onDragOver={(event) => {
+                                      event.preventDefault();
+                                      event.dataTransfer.dropEffect = "move";
+                                    }}
+                                    onDrop={(event) => handleFinalActionableColumnDrop(column, event)}
+                                    onDragEnd={() => setDraggedFinalActionableColumn(null)}
+                                    className={cn(
+                                      "group relative px-3 py-2 font-semibold transition",
+                                      draggedFinalActionableColumn === column ? "bg-blue-100" : "",
+                                    )}
+                                    style={{ width, minWidth: width, maxWidth: width }}
+                                    title="Drag left/right to reorder. Use the right edge to resize."
+                                  >
+                                    <SortableActionHeader
+                                      label={FINAL_ACTIONABLE_COLUMN_LABELS[column]}
+                                      sortKey={FINAL_ACTIONABLE_COLUMN_SORT_KEYS[column]}
+                                      currentSort={sortState}
+                                      onSort={(key) => toggleActionSort(tableKey, action, key)}
+                                      className="pr-3"
+                                    />
+                                    <button
+                                      type="button"
+                                      className="absolute right-0 top-0 h-full w-2 cursor-col-resize border-r-2 border-transparent transition hover:border-blue-500 focus:border-blue-500 focus:outline-none"
+                                      aria-label={`Resize ${FINAL_ACTIONABLE_COLUMN_LABELS[column]} column`}
+                                      onMouseDown={(event) => handleFinalActionableResizeStart(column, event)}
+                                    />
+                                  </th>
+                                );
+                              })}
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-gray-100">
@@ -4421,16 +8535,22 @@ export function DashboardFinalActionablesTables() {
                               const estimate = row.formulaEstimate;
                               const showActionColumns = ACTION_ESTIMATE_CATEGORIES.has(action);
                               const scan = getTechnicalScanForStock(technicalScans, stock);
-                              const setup = formatTechnicalSetup(scan, stock.representative);
-                              return (
-                                <tr key={`${market}-${stock.key}`} className="bg-white/40">
-                                  <td className="whitespace-nowrap px-3 py-2 align-top">
+                              const renderColumn = (column: FinalActionableColumnKey) => {
+                                if (column === "stock") {
+                                  return (
                                     <span className="inline-flex items-center whitespace-nowrap">
                                       <StockDetailsButton
                                         stock={stock}
                                         market={market}
                                         technicalScan={scan}
                                         detailsData={detailsData}
+                                        onFocusCalculation={(target) => {
+                                          setCalculationFocusTarget(target);
+                                          setCalculationsMarket(market);
+                                        }}
+                                        historicalRows={historicalActionRows}
+                                        formulaConfig={scoreMatrixFormulaConfig}
+                                        onMatrixDetailOpen={setSelectedMatrixDetail}
                                       />
                                       <TradingViewSymbolLink
                                         symbol={stock.symbol}
@@ -4441,43 +8561,50 @@ export function DashboardFinalActionablesTables() {
                                         {stock.symbol}
                                       </TradingViewSymbolLink>
                                     </span>
-                                  </td>
-                                  <td className="whitespace-nowrap px-3 py-2 align-top font-semibold text-gray-800">
-                                    <button
-                                      type="button"
-                                      className="rounded-full transition hover:ring-2 hover:ring-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                      onClick={() => setSelectedMatrixDetail(row.detail)}
-                                      title={`Open Consolidated score matrix Final Action Rule for ${stock.symbol}`}
-                                      aria-label={`Open Consolidated score matrix Final Action Rule for ${stock.symbol}`}
-                                    >
-                                      <ScoreSymbolBadge score={row.formulaScore} />
-                                    </button>
-                                  </td>
-                                  <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">
-                                    <ConsensusBreakupButton stock={stock} action={action} />
-                                  </td>
-                                  <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">
-                                    {formatQuantity(estimate.currentUnits)}
-                                  </td>
-                                  <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">
-                                    {formatDisplayAmount(estimate.currentInvestmentAmount ?? getCurrentValueAmount(stock.representative), market)}
-                                  </td>
-                                  <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">
-                                    {showActionColumns ? formatQuantity(estimate.units) : "—"}
-                                  </td>
-                                  <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">
-                                    {showActionColumns ? formatDisplayAmount(estimate.amount, market) : "—"}
-                                  </td>
-                                  <td className={cn("min-w-56 px-3 py-2 align-top font-medium", getTechnicalScanClass(scan, stock.representative))}>
-                                    <TechnicalSetupLink setup={setup} />
-                                  </td>
-                                  <td className={cn("whitespace-nowrap px-3 py-2 align-top font-semibold", getTechnicalScanClass(scan, stock.representative))}>
-                                    {formatTechnicalConfidence(scan, stock.representative)}
-                                  </td>
+                                  );
+                                }
+                                if (column === "score") return <ScoreMatrixButton detail={row.detail} formulaConfig={scoreMatrixFormulaConfig} onOpenDetail={setSelectedMatrixDetail} />;
+                                if (column === "consensus") return <ConsensusBreakupButton stock={stock} action={action} />;
+                                if (column === "currentValue") return formatDisplayAmount(estimate.currentInvestmentAmount ?? getCurrentValueAmount(stock.representative), market);
+                                if (column === "actionCurrentUnits") {
+                                  const actionUnits = showActionColumns ? formatQuantity(estimate.units) : "0";
+                                  return `${actionUnits}/${formatQuantity(estimate.currentUnits)}`;
+                                }
+                                return showActionColumns ? formatDisplayAmount(estimate.amount, market) : "—";
+                              };
+                              return (
+                                <tr key={`${market}-${stock.key}`} className="bg-white/40">
+                                  {finalActionableLayout.order.map((column) => {
+                                    const width = finalActionableLayout.widths[column] ?? FINAL_ACTIONABLE_DEFAULT_WIDTHS[column];
+                                    return (
+                                      <td
+                                        key={`${market}-${stock.key}-${column}`}
+                                        className={cn(
+                                          "overflow-hidden px-3 py-2 align-top text-gray-700",
+                                          column === "score" ? "font-semibold text-gray-800" : "",
+                                        )}
+                                        style={{ width, minWidth: width, maxWidth: width }}
+                                      >
+                                        <div className="truncate">{renderColumn(column)}</div>
+                                      </td>
+                                    );
+                                  })}
                                 </tr>
                               );
                             })}
                           </tbody>
+                          {showBuyAmountTotal ? (
+                            <tfoot>
+                              <tr className="border-t border-emerald-200 bg-white/80 text-slate-900">
+                                <td colSpan={Math.max(finalActionableLayout.order.length - 1, 1)} className="px-3 py-3 text-right text-[11px] font-bold uppercase tracking-wide text-slate-600">
+                                  Total new buy amount required
+                                </td>
+                                <td className="whitespace-nowrap px-3 py-3 font-black text-emerald-950">
+                                  {formatDisplayAmount(buyAmountTotal, market)}
+                                </td>
+                              </tr>
+                            </tfoot>
+                          ) : null}
                         </table>
                       </div>
                     ) : (
@@ -4524,6 +8651,12 @@ export function DashboardFinalActionablesTables() {
       </div>
 
       <div className="p-6">
+        {fallbackNotice ? (
+          <div className="mb-4 rounded-[20px] border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            {fallbackNotice}
+          </div>
+        ) : null}
+
         {error ? (
           <div className="mb-4 rounded-[20px] border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
             {error}
@@ -4543,29 +8676,58 @@ export function DashboardFinalActionablesTables() {
           )}
         </div>
       </div>
-      <ScoreMatrixModal
-        detail={selectedMatrixDetail}
-        onClose={() => setSelectedMatrixDetail(null)}
-      />
       <ActionablesCalculationsModal
+        key={calculationsMarket ?? "india"}
         open={calculationsMarket !== null}
-        onClose={() => setCalculationsMarket(null)}
+        onClose={() => {
+          setCalculationsMarket(null);
+          setCalculationFocusTarget(null);
+        }}
         title={calculationsMarket === "us" ? "Final Actionable US" : "Final Actionable Zerodha"}
         market={calculationsMarket ?? "india"}
         stocks={(calculationsMarket ? actionRowsByMarket[calculationsMarket] : actionRowsByMarket.india).map((row) => row.stock)}
         technicalScans={technicalScans}
+        formulaConfig={scoreMatrixFormulaConfig}
+        onFormulaConfigChange={setScoreMatrixFormulaConfig}
+        runs={runs}
         detailsData={calculationsMarket ? detailsDataByMarket[calculationsMarket] : detailsDataByMarket.india}
+        focusTarget={calculationFocusTarget}
+        loading={loading}
+        loadError={error}
+        onRetry={() => void loadRuns()}
+      />
+      <ScoreMatrixModal
+        detail={selectedMatrixDetail}
+        formulaConfig={scoreMatrixFormulaConfig}
+        onFormulaConfigChange={setScoreMatrixFormulaConfig}
+        onClose={() => setSelectedMatrixDetail(null)}
+        onFocusCalculation={(target) => {
+          const targetMarket = actionRowsByMarket.us.some((row) => row.stock.key === target.stockKey) ? "us" : "india";
+          setCalculationFocusTarget(target);
+          setCalculationsMarket(targetMarket);
+          setSelectedMatrixDetail(null);
+        }}
       />
     </section>
   );
 }
 
-export function FinalActionablesConsole({
+export function FinalActionablesConsole(props: {
+  portfolio: RebalancePortfolioKey;
+  market: SwingTradeMarket;
+  openCalculationsOnMount?: boolean;
+}) {
+  return <ScopedFinalActionablesConsole key={`${props.portfolio}:${props.market}`} {...props} />;
+}
+
+function ScopedFinalActionablesConsole({
   portfolio,
   market,
+  openCalculationsOnMount = false,
 }: {
   portfolio: RebalancePortfolioKey;
   market: SwingTradeMarket;
+  openCalculationsOnMount?: boolean;
 }) {
   const runCacheKey = useMemo(
     () => buildFinalActionablesCacheKey(portfolio, market),
@@ -4576,13 +8738,16 @@ export function FinalActionablesConsole({
     [runCacheKey],
   );
   const [runs, setRuns] = useState<RunResponse[]>(() => cachedRunsOnFirstRender ?? []);
-  const [loading, setLoading] = useState(() => !cachedRunsOnFirstRender);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [historyNotice, setHistoryNotice] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [showRunDetails, setShowRunDetails] = useState(false);
   const [selectedSetupGroup, setSelectedSetupGroup] = useState<SetupStockGroup | null>(null);
   const [selectedMatrixDetail, setSelectedMatrixDetail] = useState<ScoreMatrixDetail | null>(null);
-  const [calculationsOpen, setCalculationsOpen] = useState(false);
+  const [scoreMatrixFormulaConfig, setScoreMatrixFormulaConfig] = useState<ScoreMatrixFormulaConfig>(() => loadScoreMatrixFormulaConfig());
+  const [calculationsOpen, setCalculationsOpen] = useState(openCalculationsOnMount);
+  const [calculationFocusTarget, setCalculationFocusTarget] = useState<ActionablesCalculationFocusTarget | null>(null);
   const [technicalScanRunning, setTechnicalScanRunning] = useState(false);
   const [detailsData, setDetailsData] = useState<StockDetailsData>({
     portfolioSnapshot: null,
@@ -4592,65 +8757,52 @@ export function FinalActionablesConsole({
   });
   const usdInrRate = useUsdInrRate();
 
-  const loadRuns = useCallback(async (showLoading = true) => {
-    if (showLoading) {
-      setLoading(true);
-      setError(null);
-    }
+  const runsRequestRef = useRef(0);
+  const loadRuns = useCallback(async () => {
+    const request = ++runsRequestRef.current;
+    setLoading(true);
+    setError(null);
+    setHistoryNotice(null);
     try {
-      const response = await fetchAllFullRuns();
+      // Full retained history is required for exact input-bundle matching. Do
+      // not replace it with recent-only or partial data just to beat 30 seconds.
+      const response = await withFinalActionablesReadDeadline(fetchAllFullRuns(), 120_000, () => {
+        if (request === runsRequestRef.current) setHistoryNotice("Still reading the full retained run history. Previously available results are not yet refreshed. This view waits up to two minutes; the shared background read is not cancelled by that limit. No scan or trade is started.");
+      });
+      if (request !== runsRequestRef.current) return;
       setRuns(response);
       cacheFinalActionablesRuns(runCacheKey, response, market);
+      return response;
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Failed to load rebalance runs.",
-      );
+      if (request !== runsRequestRef.current) return;
+      setError(err instanceof Error ? err.message : "Failed to load rebalance runs.");
     } finally {
-      setLoading(false);
+      if (request === runsRequestRef.current) {
+        setLoading(false);
+        setHistoryNotice(null);
+      }
     }
   }, [market, runCacheKey]);
 
   const loadTechnicalScanHistory = useCallback(async () => {
-    const response = await fetchAllFullRuns();
-    setRuns(response);
-    cacheFinalActionablesRuns(runCacheKey, response, market);
+    const response = await loadRuns();
+    if (!response) throw new Error("Unable to load technical scan history. Please try again.");
     return buildTechnicalScanHistory(response);
-  }, [market, runCacheKey]);
+  }, [loadRuns]);
 
   useEffect(() => {
-    let ignore = false;
-
-    fetchAllFullRuns()
-      .then((response) => {
-        if (!ignore) {
-          setRuns(response);
-          cacheFinalActionablesRuns(runCacheKey, response, market);
-        }
-      })
-      .catch((err: unknown) => {
-        if (!ignore) {
-          setError(
-            err instanceof Error
-              ? err.message
-              : "Failed to load rebalance runs.",
-          );
-        }
-      })
-      .finally(() => {
-        if (!ignore) setLoading(false);
-      });
-
+    const timeout = window.setTimeout(() => { void loadRuns(); }, 0);
     return () => {
-      ignore = true;
+      window.clearTimeout(timeout);
+      runsRequestRef.current += 1;
     };
-  }, [market, runCacheKey]);
+  }, [loadRuns]);
 
   useEffect(() => {
     let ignore = false;
 
     async function loadCapturedDetails() {
-      try {
-        const [portfolioResponse, eventsResponse, threatsResponse] = await Promise.all([
+      const [portfolioResponse, eventsResponse, threatsResponse] = await Promise.allSettled([
           portfolio === "zerodha"
             ? apiService.zerodhaPortfolioOverview()
             : apiService.indmoneyUsPortfolioOverview(),
@@ -4660,23 +8812,19 @@ export function FinalActionablesConsole({
           portfolio === "zerodha"
             ? apiService.zerodhaThreatsLatest()
             : apiService.indmoneyUsThreatsLatest(),
-        ]);
+      ]);
 
-        if (!ignore) {
-          setDetailsData({
-            portfolioSnapshot: portfolioResponse.latest,
-            eventsAnalysis: eventsResponse.analysis,
-            threatsAnalysis: threatsResponse.analysis,
-            error: null,
-          });
-        }
-      } catch (err) {
-        if (!ignore) {
-          setDetailsData((current) => ({
-            ...current,
-            error: err instanceof Error ? err.message : "Failed to load captured stock details.",
-          }));
-        }
+      if (!ignore) {
+        setDetailsData((current) => ({
+          portfolioSnapshot: portfolioResponse.status === "fulfilled" ? portfolioResponse.value.latest : current.portfolioSnapshot,
+          eventsAnalysis: eventsResponse.status === "fulfilled" ? eventsResponse.value.analysis : current.eventsAnalysis,
+          threatsAnalysis: threatsResponse.status === "fulfilled" ? threatsResponse.value.analysis : current.threatsAnalysis,
+          error: combineOperationalErrors([
+            getRejectedResultMessage(portfolioResponse, "Portfolio"),
+            getRejectedResultMessage(eventsResponse, "Events"),
+            getRejectedResultMessage(threatsResponse, "Threats"),
+          ]),
+        }));
       }
     }
 
@@ -4686,6 +8834,10 @@ export function FinalActionablesConsole({
       ignore = true;
     };
   }, [portfolio]);
+
+  useEffect(() => {
+    saveScoreMatrixFormulaConfig(scoreMatrixFormulaConfig);
+  }, [scoreMatrixFormulaConfig]);
 
   const groupedRuns = useMemo(() => {
     const marketRuns = runs
@@ -4706,11 +8858,21 @@ export function FinalActionablesConsole({
   }, [market, runs]);
 
   const consensus = useMemo(
-    () => buildConsensusRows(groupedRuns.runs, market, detailsData.portfolioSnapshot),
-    [detailsData.portfolioSnapshot, groupedRuns.runs, market],
+    () => buildConsensusRows(groupedRuns.runs, market, detailsData.portfolioSnapshot, runs),
+    [detailsData.portfolioSnapshot, groupedRuns.runs, market, runs],
   );
   const totalStocksConsolidated = consensus.length;
   const technicalScans = useMemo(() => buildTechnicalScanMap(runs), [runs]);
+  const historicalActionRows = useMemo(
+    () => buildHistoricalDashboardActionRows(
+      runs,
+      market,
+      detailsData.portfolioSnapshot,
+      technicalScans,
+      scoreMatrixFormulaConfig,
+    ),
+    [detailsData.portfolioSnapshot, market, runs, scoreMatrixFormulaConfig, technicalScans],
+  );
   const setupStockGroups = useMemo(
     () => getSetupStockGroups(consensus, technicalScans, market),
     [consensus, market, technicalScans],
@@ -4719,17 +8881,24 @@ export function FinalActionablesConsole({
   const technicalScanIsActive = useMemo(() => hasActiveTechnicalScan(runs), [runs]);
 
   useEffect(() => {
-    if (!technicalScanIsActive || technicalScanRunning) return;
+    if (!technicalScanIsActive || technicalScanRunning || loading) return;
 
     const interval = window.setInterval(() => {
-      void loadRuns(false);
+      void loadRuns();
     }, TECHNICAL_SCAN_POLL_INTERVAL_MS);
 
     return () => window.clearInterval(interval);
-  }, [loadRuns, technicalScanIsActive, technicalScanRunning]);
+  }, [loadRuns, technicalScanIsActive, technicalScanRunning, loading]);
+
+  useEffect(() => {
+    if (!runs.length) return;
+    writeHistoricalActionRowsCache(market, historicalActionRows);
+    // Keep this read path local-only; durable reconstruction belongs to workers.
+  }, [historicalActionRows, market, runs]);
 
   const technicalScanCostByTarget = useMemo(() => {
     const costs: Record<string, number> = {};
+    if (!isVerifiedFxRate(usdInrRate)) return costs;
     technicalScanHistory.forEach((item) => {
       if (item.status !== "completed" || typeof item.estimated_cost !== "number") return;
       const key = `${item.provider}::${item.model}`;
@@ -4750,9 +8919,9 @@ export function FinalActionablesConsole({
         targets: [target],
         allow_parallel: true,
       });
-      await loadRuns(false);
+      await loadRuns();
       await waitForTechnicalScanRunCompletion(run.id);
-      await loadRuns(false);
+      await loadRuns();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to queue technical scan.");
     } finally {
@@ -4772,6 +8941,7 @@ export function FinalActionablesConsole({
   return (
     <div className="min-h-screen bg-gray-50">
       <main className="mx-auto max-w-7xl space-y-8 px-4 py-8 sm:px-6 lg:px-8">
+        {historyNotice ? <p role="status" className="rounded border border-amber-400 bg-amber-50 p-3 text-sm text-amber-900">{historyNotice}</p> : null}
         <PortfolioAnalysisNav
           portfolio={portfolio}
           active="finalActionables"
@@ -4829,7 +8999,17 @@ export function FinalActionablesConsole({
         ) : null}
 
 
-        {showRunDetails ? (
+        <ActionablesRunGroup
+          market={market}
+          latestRun={groupedRuns.latestRun ?? null}
+          runCount={groupedRuns.runs.length}
+          stockCount={totalStocksConsolidated}
+          loading={loading}
+          error={error}
+          onDetails={() => setShowRunDetails(value => !value)}
+        />
+
+        {showRunDetails && ((!loading && !error) || groupedRuns.latestRun) ? (
           <RunGroupDetails
             runs={groupedRuns.runs}
             latestRun={groupedRuns.latestRun}
@@ -4838,51 +9018,21 @@ export function FinalActionablesConsole({
           />
         ) : (
           <>
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg">Run Group</CardTitle>
-              </CardHeader>
-              <CardContent className="grid gap-4 text-sm text-gray-600 sm:grid-cols-3">
-                <div>
-                  <div className="font-semibold text-gray-900">
-                    Latest matching run
-                  </div>
-                  <div>
-                    {groupedRuns.latestRun
-                      ? `#${groupedRuns.latestRun.id}`
-                      : "None found"}
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setShowRunDetails(true)}
-                  className="rounded-lg border border-blue-100 bg-blue-50/60 p-3 text-left transition hover:border-blue-300 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <div className="font-semibold text-gray-900">
-                    Runs consolidated
-                  </div>
-                  <div>{groupedRuns.runs.length}</div>
-                  <div className="mt-1 text-xs text-blue-700">
-                    Open run consideration details
-                  </div>
-                </button>
-                <div>
-                  <div className="font-semibold text-gray-900">
-                    Total Stocks consolidated
-                  </div>
-                  <div>{totalStocksConsolidated}</div>
-                </div>
-              </CardContent>
-            </Card>
 
-            <ActionSummarySections
+            {(!loading && !error || groupedRuns.latestRun) ? <ActionSummarySections
+              formulaConfig={scoreMatrixFormulaConfig}
               consensus={consensus}
               market={market}
               technicalScans={technicalScans}
               setupGroups={setupStockGroups}
               detailsData={detailsData}
+              historicalRows={historicalActionRows}
               onSetupClick={setSelectedSetupGroup}
-            />
+              onFocusCalculation={(target) => {
+                setCalculationFocusTarget(target);
+                setCalculationsOpen(true);
+              }}
+            /> : null}
           </>
         )}
 
@@ -4891,12 +9041,15 @@ export function FinalActionablesConsole({
             <CardHeader>
               <div className="flex items-center justify-between gap-3">
                 <CardTitle className="text-lg">
-                  Stock-wise Consolidated Rebalance Output
+                  Stock-wise Model Consensus
                 </CardTitle>
                 <button
                   type="button"
-                  onClick={() => setCalculationsOpen(true)}
-                  className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700 transition hover:border-blue-400 hover:bg-blue-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  onClick={() => {
+                    setCalculationFocusTarget(null);
+                    setCalculationsOpen(true);
+                  }}
+                  className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700 transition hover:border-blue-400 hover:bg-blue-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   title="Actionables Calculations"
                 >
                   <ActionablesCalculationsIcon className="size-4" />
@@ -4909,6 +9062,8 @@ export function FinalActionablesConsole({
                 <div className="py-12 text-center text-sm text-gray-500">
                   Loading final actionables…
                 </div>
+              ) : error && !consensus.length ? (
+                <ActionablesEmptyState loading={false} error={error} hasMatchingRun={Boolean(groupedRuns.latestRun)} />
               ) : consensus.length ? (
                 <div className="overflow-x-auto">
                   <table className="min-w-max text-sm">
@@ -4945,10 +9100,16 @@ export function FinalActionablesConsole({
                             onToggle={() => toggleExpanded(stock.key)}
                             market={market}
                             technicalScan={getTechnicalScanForStock(technicalScans, stock)}
+                            formulaConfig={scoreMatrixFormulaConfig}
                             setupGroups={setupStockGroups}
                             detailsData={detailsData}
+                            historicalRows={historicalActionRows}
                             onSetupClick={setSelectedSetupGroup}
                             onMatrixDetailOpen={setSelectedMatrixDetail}
+                            onFocusCalculation={(target) => {
+                              setCalculationFocusTarget(target);
+                              setCalculationsOpen(true);
+                            }}
                           />
                         );
                       })}
@@ -4957,10 +9118,7 @@ export function FinalActionablesConsole({
                 </div>
               ) : (
                 <div className="mx-auto max-w-2xl py-12 text-center text-sm text-gray-500">
-                  No completed rebalance output tables were found for the latest
-                  matching input set. Runs with empty or missing prompts are
-                  ignored by the input-set matcher until a completed rebalance
-                  response is available.
+                  <ActionablesEmptyState loading={loading} error={error} hasMatchingRun={Boolean(groupedRuns.latestRun)} />
                 </div>
               )}
             </CardContent>
@@ -4968,15 +9126,26 @@ export function FinalActionablesConsole({
         ) : null}
       </main>
       <ActionablesCalculationsModal
+        key={market}
         open={calculationsOpen}
-        onClose={() => setCalculationsOpen(false)}
+        onClose={() => {
+          setCalculationsOpen(false);
+          setCalculationFocusTarget(null);
+        }}
         title={PAGE_COPY[portfolio].title}
         market={market}
         stocks={consensus}
         technicalScans={technicalScans}
+        formulaConfig={scoreMatrixFormulaConfig}
+        onFormulaConfigChange={setScoreMatrixFormulaConfig}
         setupGroups={setupStockGroups}
+        runs={runs}
         detailsData={detailsData}
         onSetupClick={setSelectedSetupGroup}
+        focusTarget={calculationFocusTarget}
+        loading={loading}
+        loadError={error}
+        onRetry={() => void loadRuns()}
       />
       <SetupStocksModal
         group={selectedSetupGroup}
@@ -4984,7 +9153,14 @@ export function FinalActionablesConsole({
       />
       <ScoreMatrixModal
         detail={selectedMatrixDetail}
+        formulaConfig={scoreMatrixFormulaConfig}
+        onFormulaConfigChange={setScoreMatrixFormulaConfig}
         onClose={() => setSelectedMatrixDetail(null)}
+        onFocusCalculation={(target) => {
+          setCalculationFocusTarget(target);
+          setCalculationsOpen(true);
+          setSelectedMatrixDetail(null);
+        }}
       />
     </div>
   );
@@ -4997,6 +9173,8 @@ function SetupStocksModal({
   group: SetupStockGroup | null;
   onClose: () => void;
 }) {
+  const { dragHandleProps, draggableStyle } = useDraggablePopup();
+
   if (!group) return null;
 
   return (
@@ -5009,14 +9187,16 @@ function SetupStocksModal({
     >
       <div
         className="max-h-[85vh] w-full max-w-3xl overflow-hidden rounded-2xl bg-white shadow-xl"
+        style={draggableStyle}
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="flex items-start justify-between gap-4 border-b border-gray-200 px-5 py-4">
+        <div className="flex cursor-move touch-none select-none items-start justify-between gap-4 border-b border-gray-200 px-5 py-4" {...dragHandleProps}>
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">Technical setup stocks</p>
             <h2 id="setup-stocks-modal-title" className="mt-1 text-lg font-semibold text-gray-950">
               {group.setup} ({group.stocks.length})
             </h2>
+            <PopupDragHint />
           </div>
           <button
             type="button"
@@ -5075,20 +9255,26 @@ function FragmentRows({
   onToggle,
   market,
   technicalScan,
+  formulaConfig,
   setupGroups,
   detailsData,
+  historicalRows,
   onSetupClick,
   onMatrixDetailOpen,
+  onFocusCalculation,
 }: {
   stock: StockConsensus;
   isExpanded: boolean;
   onToggle: () => void;
   market: SwingTradeMarket;
   technicalScan: TechnicalScanResult | null;
+  formulaConfig: ScoreMatrixFormulaConfig;
   setupGroups: Record<string, SetupStockGroup>;
   detailsData: StockDetailsData;
+  historicalRows: HistoricalDashboardActionRow[];
   onSetupClick: (group: SetupStockGroup) => void;
   onMatrixDetailOpen: (detail: ScoreMatrixDetail) => void;
+  onFocusCalculation?: (target: ActionablesCalculationFocusTarget) => void;
 }) {
   return (
     <>
@@ -5115,9 +9301,12 @@ function FragmentRows({
           <div className="flex items-start gap-2">
             <StockDetailsButton
               stock={stock}
+              formulaConfig={formulaConfig}
               market={market}
               technicalScan={technicalScan}
               detailsData={detailsData}
+              historicalRows={historicalRows}
+              onFocusCalculation={onFocusCalculation}
             />
             <div>
               <TradingViewSymbolLink
@@ -5130,6 +9319,7 @@ function FragmentRows({
               </TradingViewSymbolLink>
               <div className="text-xs text-gray-500">{stock.exchange || "—"}</div>
               <div className="text-xs text-gray-600">{stock.representative["Stock Name"] || stock.symbol}</div>
+              <div className="mt-1 max-w-64 whitespace-normal text-[11px] text-gray-500">Position: {getPositionContextLabel(stock)}</div>
             </div>
           </div>
         </td>
@@ -5142,12 +9332,16 @@ function FragmentRows({
               <span className="inline-flex items-center whitespace-nowrap">
                 <StockDetailsButton
                   stock={stock}
+                  formulaConfig={formulaConfig}
                   market={market}
                   technicalScan={technicalScan}
                   detailsData={detailsData}
+                  historicalRows={historicalRows}
+                  onFocusCalculation={onFocusCalculation}
                 />
                 <RebalanceCell
                   row={stock.representative}
+                  isConsolidated
                   header={header}
                   market={market}
                   technicalScan={technicalScan}
@@ -5156,6 +9350,7 @@ function FragmentRows({
             ) : (
               <RebalanceCell
                 row={stock.representative}
+                isConsolidated
                 header={header}
                 market={market}
                 technicalScan={technicalScan}
@@ -5171,6 +9366,7 @@ function FragmentRows({
               <ScoreMatrixSection
                 stock={stock}
                 technicalScan={technicalScan}
+                formulaConfig={formulaConfig}
                 onOpenDetail={onMatrixDetailOpen}
               />
 
@@ -5196,11 +9392,11 @@ function FragmentRows({
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
-                      {stock.rows.map((row) => (
-                        <tr key={`${row.meta.runId}-${row.meta.jobId}`}>
+                      {stock.rows.map((row, sourceIndex) => (
+                        <tr key={`${row.meta.runId}-${row.meta.jobId}${stock.usIdentity ? `-raw-${sourceIndex}` : ""}`}>
                           <td className="whitespace-nowrap px-3 py-2 align-top text-gray-700">
                             <div className="font-semibold">
-                              Run #{row.meta.runId}
+                              {row.meta.runLabel}
                             </div>
                             <div>
                               {row.meta.provider} {row.meta.model}

@@ -5,17 +5,9 @@ from sqlalchemy import engine_from_config, pool
 
 from alembic import context
 
-# ── Import all models so Alembic autogenerate can see them ────────────────────
-from app.infrastructure.database.base import Base  # noqa: F401
-from app.domains.auth.models import User, UserProfile, UserSession, APIKey, ActivityLog  # noqa: F401
-from app.domains.google_sheets.models import GoogleSheetsAppConfig, GoogleSheetsCredential  # noqa: F401
-from app.domains.indmoney_us.models import IndMoneyUsPortfolioSnapshot  # noqa: F401
-from app.domains.jobs.models import Job  # noqa: F401
-from app.domains.prompts.models import Prompt  # noqa: F401
-from app.domains.runs.models import Run, RunJob  # noqa: F401
-from app.infrastructure.database.outbox.models import OutboxMessage  # noqa: F401
-from app.domains.zerodha.models import ZerodhaCredential, ZerodhaPortfolioSnapshot  # noqa: F401
-from app.domains.zerodha.audit import ZerodhaAuditLog  # noqa: F401
+# Import the canonical model registry so autogenerate sees every table.
+from app.infrastructure.database.base import Base
+from app.models import *  # noqa: F401,F403
 
 config = context.config
 

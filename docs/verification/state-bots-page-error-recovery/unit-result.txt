@@ -1,0 +1,23 @@
+✔ all page effects use only the passive state API (2.071341ms)
+✔ mount and visible polling read state without doctor, balance or lifecycle writes (32.200904ms)
+✔ explicit refresh and start controls remain while missing runtime status is honest (8.448524ms)
+✔ persisted page renders honest cold runtime sections and explicit controls (232.031393ms)
+✔ unavailable page renders honest cold runtime sections and explicit controls (139.569529ms)
+✔ copy: actual page failed read identifies page, unknown state and console exit (60.425757ms)
+✔ copy: actual page loading remains separate from failure (52.488788ms)
+✔ copy: verified empty success does not show recovery (65.297248ms)
+✔ copy: later failed read retains successful snapshot (52.024873ms)
+✔ direct: actual page failed read identifies page, unknown state and console exit (60.678776ms)
+✔ direct: actual page loading remains separate from failure (47.841703ms)
+✔ direct: verified empty success does not show recovery (39.708981ms)
+✔ direct: later failed read retains successful snapshot (47.14401ms)
+✔ copy: populated success retains verified fixture metrics (53.031831ms)
+✔ direct: populated success retains verified fixture metrics (52.669469ms)
+ℹ tests 15
+ℹ suites 0
+ℹ pass 15
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1298.159782

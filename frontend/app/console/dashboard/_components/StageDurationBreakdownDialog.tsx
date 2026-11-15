@@ -1,0 +1,330 @@
+"use client";
+
+import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { useModalFocus } from "@/hooks/useModalFocus";
+import { Clock3, Loader2, X } from "lucide-react";
+
+import { parseApiTimestamp } from "@/lib/datetime";
+import { apiService } from "@/services/api";
+import type { JobResponse, RunResponse } from "@/types/api";
+
+type StageDurationInfo = {
+  state: string;
+  startedAt?: string | null;
+  endedAt?: string | null;
+  completedAt?: string | null;
+  provider?: string | null;
+  model?: string | null;
+  activeRunId?: number | null;
+  lastRunId?: number | null;
+  totalLlms?: number | null;
+};
+
+type DurationBreakdownStep = {
+  id: string;
+  label: string;
+  duration: string;
+  detail: string;
+};
+
+type DurationBreakdown = {
+  totalDuration: string;
+  steps: DurationBreakdownStep[];
+  hasParallelJobs: boolean;
+};
+
+function parseTimestampMs(value?: string | null) {
+  if (!value) return null;
+  return parseApiTimestamp(value)?.getTime() ?? null;
+}
+
+function formatDurationMs(value: number | null) {
+  if (value === null || !Number.isFinite(value)) return "n/a";
+  if (value < 0) return "Invalid interval (end before start)";
+  const totalSeconds = Math.floor(value / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return [hours, minutes, seconds]
+    .map((part) => String(part).padStart(2, "0"))
+    .join(":");
+}
+
+function getDurationMs(startMs: number | null, endMs: number | null) {
+  if (startMs === null || endMs === null) return null;
+  return endMs - startMs;
+}
+
+function isActiveStatus(status?: string | null) {
+  return ["pending", "queued", "processing", "running"].includes(
+    (status || "").toLowerCase(),
+  );
+}
+
+function getJobEndMs(job: JobResponse, now: number) {
+  if (isActiveStatus(job.status)) return now;
+  return parseTimestampMs(job.updated_at);
+}
+
+function buildFallbackBreakdown(
+  info: StageDurationInfo,
+  totalDuration: string,
+): DurationBreakdown {
+  const llmLabel = [info.provider, info.model].filter(Boolean).join(" / ");
+  return {
+    totalDuration,
+    hasParallelJobs: false,
+    steps: [
+      {
+        id: "setup",
+        label: "Stage setup and request dispatch",
+        duration: "Not recorded",
+        detail: "This stage did not save a separate setup timestamp.",
+      },
+      {
+        id: "execution",
+        label: llmLabel ? `Stage wall-clock · ${llmLabel}` : "Stage wall-clock (phases not recorded)",
+        duration: totalDuration,
+        detail:
+          "The available timestamps cover the complete execution window, including provider processing and any queue time.",
+      },
+      {
+        id: "finalisation",
+        label: "Validation and persistence",
+        duration: "Not recorded",
+        detail: "This stage did not save a separate finalisation timestamp.",
+      },
+    ],
+  };
+}
+
+function buildDurationBreakdown(
+  info: StageDurationInfo,
+  run: RunResponse | null,
+  now: number,
+): DurationBreakdown {
+  const stageStartMs = parseTimestampMs(info.startedAt);
+  const recordedStageEndMs = parseTimestampMs(info.endedAt ?? info.completedAt);
+  const stageEndMs = recordedStageEndMs ?? (isActiveStatus(info.state) ? now : null);
+  const totalDuration = formatDurationMs(getDurationMs(stageStartMs, stageEndMs));
+  const jobs = (run?.run_jobs ?? [])
+    .map((link) => link.job)
+    .filter((job): job is JobResponse => Boolean(job))
+    .sort(
+      (left, right) =>
+        (parseTimestampMs(left.created_at) ?? Number.MAX_SAFE_INTEGER) -
+        (parseTimestampMs(right.created_at) ?? Number.MAX_SAFE_INTEGER),
+    );
+
+  if (jobs.length === 0) {
+    return buildFallbackBreakdown(info, totalDuration);
+  }
+
+  const jobWindows = jobs.map((job) => ({
+    job,
+    startMs: parseTimestampMs(job.created_at),
+    endMs: getJobEndMs(job, now),
+  }));
+  const jobStartValues = jobWindows
+    .map((window) => window.startMs)
+    .filter((value): value is number => value !== null);
+  const jobEndValues = jobWindows
+    .map((window) => window.endMs)
+    .filter((value): value is number => value !== null);
+  const earliestJobStartMs = jobStartValues.length === jobs.length
+    ? Math.min(...jobStartValues)
+    : null;
+  const latestJobEndMs = jobEndValues.length === jobs.length ? Math.max(...jobEndValues) : null;
+
+  const steps: DurationBreakdownStep[] = [
+    {
+      id: "setup",
+      label: "Stage setup and LLM dispatch",
+      duration: formatDurationMs(
+        getDurationMs(stageStartMs, earliestJobStartMs),
+      ),
+      detail: "Time between the stage starting and the first LLM job being created.",
+    },
+    ...jobWindows.map(({ job, startMs, endMs }) => ({
+      id: `job-${job.id}`,
+      label: `LLM execution · ${job.provider} / ${job.model}`,
+      duration: formatDurationMs(getDurationMs(startMs, endMs)),
+      detail: `Job #${job.id} · ${job.status || "unknown status"} · includes queue and provider processing time.`,
+    })),
+    {
+      id: "finalisation",
+      label: "Unattributed time after last job update",
+      duration: formatDurationMs(getDurationMs(latestJobEndMs, stageEndMs)),
+      detail: "Gap between the last job update and recorded stage end. Validation, aggregation and finalisation phases were not separately recorded; this gap is not a measured phase duration.",
+    },
+  ];
+
+  return {
+    totalDuration,
+    steps,
+    hasParallelJobs: jobs.length > 1,
+  };
+}
+
+export function StageDurationBreakdownDialog({
+  open,
+  stageLabel,
+  stagePurpose,
+  info,
+  now,
+  onClose,
+}: {
+  open: boolean;
+  stageLabel: string;
+  stagePurpose?: string;
+  info: StageDurationInfo;
+  now: number;
+  onClose: () => void;
+}) {
+  const runId = info.activeRunId ?? info.lastRunId ?? null;
+  const [run, setRun] = useState<RunResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const panel = useRef<HTMLElement>(null);
+  useModalFocus(open, panel, onClose);
+
+  useEffect(() => {
+    if (!open) return;
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      if (!runId) {
+        setRun(null);
+        setError(null);
+        setLoading(false);
+        return;
+      }
+      setRun(null);
+      setError(null);
+      setLoading(true);
+      void apiService
+        .getRun(runId, { signal: controller.signal })
+        .then((response) => {
+          if (!controller.signal.aborted) setRun(response);
+        })
+        .catch((reason: unknown) => {
+          if (controller.signal.aborted) return;
+          setError(
+            reason instanceof Error
+              ? reason.message
+              : "Detailed LLM timing could not be loaded.",
+          );
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setLoading(false);
+        });
+    }, 0);
+
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [open, runId]);
+
+  const breakdown = useMemo(
+    () => buildDurationBreakdown(info, run, now),
+    [info, now, run],
+  );
+
+  if (!open) return null;
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/55 px-4 py-6 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <section
+        ref={panel}
+        tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="stage-duration-breakdown-title"
+        className="flex max-h-[88vh] w-full max-w-2xl flex-col overflow-hidden rounded-3xl border border-blue-100 bg-indigo-50 shadow-2xl"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <header className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+          <div className="min-w-0">
+            <p className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-blue-600">
+              <Clock3 className="size-4" /> Duration breakdown
+            </p>
+            <h3
+              id="stage-duration-breakdown-title"
+              className="mt-1 truncate text-xl font-extrabold text-slate-950"
+            >
+              {stageLabel}
+            </h3>
+            {stagePurpose ? <p className="mt-2 text-sm leading-5 text-slate-600">{stagePurpose}</p> : null}
+            <p className="mt-3 text-xs font-medium text-slate-500">Total wall-clock duration</p>
+            <p className="mt-1 font-mono text-3xl font-bold tabular-nums text-slate-950">
+              {breakdown.totalDuration}
+            </p>
+            {info.startedAt || info.endedAt || info.completedAt ? (
+              <p className="mt-2 break-words text-xs text-slate-600">
+                Recorded start: {info.startedAt ?? "Not recorded"} · Recorded end: {info.endedAt ?? info.completedAt ?? "Not recorded"}.
+                Timestamps without an offset are interpreted as UTC. Invalid intervals preserve the recorded values and require source-event reconciliation.
+              </p>
+            ) : null}
+            <p className="mt-2 text-sm leading-5 text-slate-600">
+              The complete execution window includes provider processing and queue time.
+              Separate phases are shown only where timestamps were recorded.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-full p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-950 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            aria-label="Close duration breakdown"
+          >
+            <X className="size-5" />
+          </button>
+        </header>
+
+        <div className="flex-1 overflow-y-auto px-6 py-5">
+          {loading ? (
+            <div className="mb-4 flex items-center gap-2 rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+              <Loader2 className="size-4 animate-spin" /> Loading detailed LLM timings…
+            </div>
+          ) : null}
+          {error ? (
+            <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
+              Detailed run timing could not be loaded. The recorded stage timing is shown below. {error}
+            </div>
+          ) : null}
+
+          <div className="hidden grid-cols-[minmax(0,1.3fr)_7rem_minmax(0,1fr)] gap-4 px-4 pb-2 text-xs font-semibold text-slate-600 sm:grid" aria-hidden="true">
+            <span>Component</span><span>Duration</span><span>Measurement</span>
+          </div>
+          <dl className="divide-y divide-blue-100 overflow-hidden rounded-xl border border-blue-100 bg-white">
+            {breakdown.steps.map((step) => (
+              <div key={step.id} className="grid gap-2 px-4 py-3 sm:grid-cols-[minmax(0,1.3fr)_7rem_minmax(0,1fr)] sm:gap-4">
+                <dt className="min-w-0 break-words text-sm font-medium text-slate-800">{step.label}</dt>
+                <dd className="font-mono text-sm font-semibold tabular-nums text-slate-950">{step.duration}</dd>
+                <dd className="text-xs leading-5 text-slate-600">{step.detail}</dd>
+              </div>
+            ))}
+          </dl>
+
+          <details className="mt-4 rounded-xl border border-slate-200 bg-slate-50 text-xs leading-5 text-slate-600">
+            <summary className="cursor-pointer rounded-xl px-4 py-3 font-semibold text-slate-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500">
+              How timing is measured
+            </summary>
+            <div className="space-y-3 px-4 pb-4">
+              {breakdown.steps.map((step) => (
+                <p key={step.id}><span className="font-semibold">{step.label}: </span>{step.detail}</p>
+              ))}
+              {breakdown.hasParallelJobs ? (
+                <p>LLM rows can overlap because providers run in parallel. Their individual durations therefore do not add up to the wall-clock total.</p>
+              ) : null}
+            </div>
+          </details>
+        </div>
+      </section>
+    </div>, document.body,
+  );
+}

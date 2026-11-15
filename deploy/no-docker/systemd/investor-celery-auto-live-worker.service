@@ -1,0 +1,31 @@
+# Template rendered by deploy/no-docker/redeploy.sh
+[Unit]
+Description=Investor Auto-Live Celery planning worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__APP_USER__
+Group=__APP_USER__
+WorkingDirectory=__APP_ROOT__/backend
+Environment=APP_ROOT=__APP_ROOT__
+Environment=APP_USER=__APP_USER__
+EnvironmentFile=__BACKEND_ENV_FILE__
+ExecStart=__APP_ROOT__/deploy/no-docker/scripts/run-celery-auto-live-worker.sh
+Restart=always
+RestartSec=5
+# Contain a large scan in its worker instead of exhausting the database host.
+# Existing late acknowledgement, run leases and watchdogs handle worker loss.
+MemoryAccounting=true
+MemoryHigh=1024M
+MemoryMax=1536M
+MemorySwapMax=256M
+OOMPolicy=kill
+TimeoutStartSec=60
+# Let a warm Celery shutdown finish a short Stage 1/2 section before systemd
+# escalates.  If it cannot, late ack/redelivery plus the run lease recover it.
+TimeoutStopSec=180
+
+[Install]
+WantedBy=multi-user.target

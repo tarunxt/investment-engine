@@ -1,5 +1,4 @@
 import { UserResponse } from "@/types/api";
-import { sessionStorage } from '@/services/session';
 
 /**
  * API Base URL Configuration
@@ -105,11 +104,14 @@ function shouldUseBrowserApiProxy() {
     return false;
   }
 
-  if (process.env.NEXT_PUBLIC_DISABLE_API_PROXY === "true") {
+  if (
+    process.env.NEXT_PUBLIC_DISABLE_AUTH === "true" &&
+    process.env.NEXT_PUBLIC_DISABLE_API_PROXY === "true"
+  ) {
     return false;
   }
 
-  return !LOCAL_HOSTNAMES.has(window.location.hostname);
+  return true;
 }
 
 function resolveApiBaseUrl() {
@@ -127,6 +129,75 @@ function resolveApiBaseUrl() {
   }
 
   return inferBrowserApiBaseUrl() || LOCAL_API_FALLBACK;
+}
+
+export type ApiReadTransportCandidate = {
+  url: string;
+  stage: "primary" | "secondary";
+  transport: "configured-or-inferred-api" | "same-origin-proxy";
+};
+
+/**
+ * Builds the bounded browser read path used by the API service.
+ *
+ * Authenticated production reads begin at the same-origin BFF so bearer
+ * credentials never have to exist in browser memory. Auth-disabled local
+ * development may still use a configured direct API and one bounded fallback.
+ */
+export function resolveApiReadTransportCandidates(
+  primaryUrl: string,
+): ApiReadTransportCandidate[] {
+  const primary: ApiReadTransportCandidate = {
+    url: primaryUrl,
+    stage: "primary",
+    transport: primaryUrl.startsWith(BROWSER_API_PROXY_BASE)
+      ? "same-origin-proxy"
+      : "configured-or-inferred-api",
+  };
+
+  if (typeof window === "undefined" || LOCAL_HOSTNAMES.has(window.location.hostname)) {
+    return [primary];
+  }
+
+  const parsedPrimary = new URL(primaryUrl, window.location.origin);
+  const proxyPrefix = `${window.location.origin}${BROWSER_API_PROXY_BASE}`;
+  const primaryUsesProxy =
+    parsedPrimary.origin === window.location.origin &&
+    (parsedPrimary.pathname === BROWSER_API_PROXY_BASE ||
+      parsedPrimary.pathname.startsWith(`${BROWSER_API_PROXY_BASE}/`));
+
+  // Authenticated browser reads stay on the same-origin BFF. Falling back to
+  // the public API would require exposing a bearer token to browser code.
+  if (primaryUsesProxy && process.env.NEXT_PUBLIC_DISABLE_AUTH !== "true") {
+    return [primary];
+  }
+
+  const secondaryUrl = primaryUsesProxy
+    ? (() => {
+        const directBase =
+          resolveConfiguredClientApiBaseUrl() || inferBrowserApiBaseUrl();
+        if (!directBase) return null;
+        const backendPath = parsedPrimary.pathname.slice(
+          BROWSER_API_PROXY_BASE.length,
+        );
+        return `${directBase}${backendPath}${parsedPrimary.search}`;
+      })()
+    : `${proxyPrefix}${parsedPrimary.pathname}${parsedPrimary.search}`;
+
+  if (!secondaryUrl || secondaryUrl === primaryUrl) {
+    return [primary];
+  }
+
+  return [
+    primary,
+    {
+      url: secondaryUrl,
+      stage: "secondary",
+      transport: primaryUsesProxy
+        ? "configured-or-inferred-api"
+        : "same-origin-proxy",
+    },
+  ];
 }
 
 function resolveFrontendBaseUrl() {
@@ -156,6 +227,130 @@ function resolveWebSocketBaseUrl() {
   return (inferBrowserApiBaseUrl() || LOCAL_API_FALLBACK).replace(/^http/, "ws");
 }
 
+const bullpenAutoLiveApiUrls = {
+  // This is intentionally separate from `summary`.  Console status badges need
+  // persisted scheduler configuration immediately and must not wait for run
+  // recovery, runtime diagnostics, or a Bullpen CLI auth refresh.
+  status: () => `${resolveApiBaseUrl()}/polymarket/auto-live/status`,
+  summary: () => `${resolveApiBaseUrl()}/polymarket/auto-live/summary`,
+  dashboardSummary: (workspaceProfile?: "bullpen007" | "bullpen-sports") => {
+    const resolvedWorkspaceProfile =
+      workspaceProfile ??
+      (typeof window !== "undefined" &&
+      window.location.pathname.startsWith("/console/bullpen-sports")
+        ? "bullpen-sports"
+        : undefined);
+    return `${resolveApiBaseUrl()}/polymarket/auto-live/summary/dashboard${
+      resolvedWorkspaceProfile
+        ? `?workspace_profile=${encodeURIComponent(resolvedWorkspaceProfile)}`
+        : ""
+    }`;
+  },
+  state: () => `${resolveApiBaseUrl()}/polymarket/auto-live/state`,
+  hourlyRebalanceResult: () =>
+    `${resolveApiBaseUrl()}/polymarket/auto-live/hourly-rebalance/result`,
+  clusteringProgress: (runId: string) =>
+    `${resolveApiBaseUrl()}/polymarket/auto-live/clustering/${encodeURIComponent(runId)}/progress`,
+  settings: (profile?: string) =>
+    `${resolveApiBaseUrl()}/polymarket/auto-live/settings${
+      profile ? `?profile=${encodeURIComponent(profile)}` : ""
+    }`,
+  history: () => `${resolveApiBaseUrl()}/polymarket/auto-live/history`,
+  historyEventTrends: () =>
+    `${resolveApiBaseUrl()}/polymarket/auto-live/history/event-trends`,
+  historyEventTrendsScanCount: () =>
+    `${resolveApiBaseUrl()}/polymarket/auto-live/history/event-trends/scan-count`,
+  runs: (includeDetail = false) =>
+    `${resolveApiBaseUrl()}/polymarket/auto-live/runs${
+      includeDetail ? "?include_detail=true" : ""
+    }`,
+  run: (runId: string) =>
+    `${resolveApiBaseUrl()}/polymarket/auto-live/runs/${encodeURIComponent(runId)}`,
+  runConsole: (runId: string) =>
+    `${resolveApiBaseUrl()}/polymarket/auto-live/runs/${encodeURIComponent(runId)}/console`,
+  runStageOne: (runId: string) =>
+    `${resolveApiBaseUrl()}/polymarket/auto-live/runs/${encodeURIComponent(runId)}/stage-one`,
+  runStageOneExcel: (runId: string) =>
+    `${resolveApiBaseUrl()}/polymarket/auto-live/runs/${encodeURIComponent(runId)}/stage-one.xlsx`,
+  runDecisions: (runId: string) =>
+    `${resolveApiBaseUrl()}/polymarket/auto-live/runs/${encodeURIComponent(runId)}/decisions`,
+  runOrders: (runId: string) => `${resolveApiBaseUrl()}/polymarket/auto-live/runs/${runId}/orders`,
+  reconcileRunOrders: (runId: string) =>
+    `${resolveApiBaseUrl()}/polymarket/auto-live/runs/${runId}/reconcile`,
+  retryExitsAndContinueBuys: (runId: string) =>
+    `${resolveApiBaseUrl()}/polymarket/auto-live/runs/${runId}/retry-exits-and-continue-buys`,
+  decisions: () => `${resolveApiBaseUrl()}/polymarket/auto-live/decisions`,
+  retryOrder: (intentId: string) =>
+    `${resolveApiBaseUrl()}/polymarket/auto-live/orders/${intentId}/retry`,
+  cancelOrder: (intentId: string) =>
+    `${resolveApiBaseUrl()}/polymarket/auto-live/orders/${intentId}/cancel`,
+  runOnce: () => `${resolveApiBaseUrl()}/polymarket/auto-live/run-once`,
+  workflowRunNow: () =>
+    `${resolveApiBaseUrl()}/polymarket/auto-live/workflow-run-now`,
+  start: () => `${resolveApiBaseUrl()}/polymarket/auto-live/start`,
+  stop: () => `${resolveApiBaseUrl()}/polymarket/auto-live/stop`,
+  pause: () => `${resolveApiBaseUrl()}/polymarket/auto-live/pause`,
+  resume: () => `${resolveApiBaseUrl()}/polymarket/auto-live/resume`,
+  resetSettings: () => `${resolveApiBaseUrl()}/polymarket/auto-live/settings/reset`,
+  emergencyStop: () => `${resolveApiBaseUrl()}/polymarket/auto-live/emergency-stop`,
+  clearEmergencyStop: () => `${resolveApiBaseUrl()}/polymarket/auto-live/clear-emergency-stop`,
+};
+
+const bullpen008ApiUrls = {
+  bootstrap: () => `${resolveApiBaseUrl()}/polymarket/bullpen008/bootstrap`,
+  settings: () => `${resolveApiBaseUrl()}/polymarket/bullpen008/settings`,
+  schedulerStart: () =>
+    `${resolveApiBaseUrl()}/polymarket/bullpen008/scheduler/start`,
+  schedulerStop: () =>
+    `${resolveApiBaseUrl()}/polymarket/bullpen008/scheduler/stop`,
+  schedulerPause: () =>
+    `${resolveApiBaseUrl()}/polymarket/bullpen008/scheduler/pause`,
+  schedulerResume: () =>
+    `${resolveApiBaseUrl()}/polymarket/bullpen008/scheduler/resume`,
+  emergencyStop: () =>
+    `${resolveApiBaseUrl()}/polymarket/bullpen008/emergency-stop`,
+  clearEmergencyStop: () =>
+    `${resolveApiBaseUrl()}/polymarket/bullpen008/emergency-stop/clear`,
+  kill: () => `${resolveApiBaseUrl()}/polymarket/bullpen008/kill`,
+  runOnce: () => `${resolveApiBaseUrl()}/polymarket/bullpen008/run-once`,
+  runs: () => `${resolveApiBaseUrl()}/polymarket/bullpen008/runs`,
+  historyEventTrends: () =>
+    `${resolveApiBaseUrl()}/polymarket/bullpen008/history/event-trends`,
+  run: (runId: string) =>
+    `${resolveApiBaseUrl()}/polymarket/bullpen008/runs/${encodeURIComponent(runId)}`,
+  retryRun: (runId: string) =>
+    `${resolveApiBaseUrl()}/polymarket/bullpen008/runs/${encodeURIComponent(runId)}/retry`,
+  stage: (runId: string, stageNumber: number) =>
+    `${resolveApiBaseUrl()}/polymarket/bullpen008/runs/${encodeURIComponent(runId)}/stages/${stageNumber}`,
+};
+
+const bullpenTradeAnalysisApiUrls = {
+  list: () => `${resolveApiBaseUrl()}/bullpen-ai/trade-analysis`,
+  detail: (tradeId: string) => `${resolveApiBaseUrl()}/bullpen-ai/trade-analysis/${tradeId}`,
+  recompute: (tradeId: string) =>
+    `${resolveApiBaseUrl()}/bullpen-ai/trade-analysis/${tradeId}/post-trade-analysis`,
+};
+
+const bullpenRunAuditApiUrls = {
+  list: () => `${resolveApiBaseUrl()}/bullpen-ai/run-audits`,
+  detail: (runId: string) => `${resolveApiBaseUrl()}/bullpen-ai/run-audits/${runId}`,
+  materialize: (runId: string) => `${resolveApiBaseUrl()}/bullpen-ai/run-audits/${runId}/materialize`,
+  section: (runId: string, section: string) =>
+    `${resolveApiBaseUrl()}/bullpen-ai/run-audits/${runId}/sections/${section}`,
+  findings: (runId: string) => `${resolveApiBaseUrl()}/bullpen-ai/run-audits/${runId}/findings`,
+  remarks: (runId: string) => `${resolveApiBaseUrl()}/bullpen-ai/run-audits/${runId}/remarks`,
+  manualChecks: (runId: string) => `${resolveApiBaseUrl()}/bullpen-ai/run-audits/${runId}/manual-checks`,
+  feedback: (runId: string) => `${resolveApiBaseUrl()}/bullpen-ai/run-audits/${runId}/feedback`,
+  feedbackDetail: (runId: string, feedbackId: number) =>
+    `${resolveApiBaseUrl()}/bullpen-ai/run-audits/${runId}/feedback/${feedbackId}`,
+  export: (runId: string) => `${resolveApiBaseUrl()}/bullpen-ai/run-audits/${runId}/export`,
+};
+
+const tradingBotsApiUrls = {
+  summary: () => `${resolveApiBaseUrl()}/trading-bots/summary`,
+  overview: () => `${resolveApiBaseUrl()}/trading-bots/overview`,
+};
+
 /**
  * URL Resolver - Centralized API endpoint management
  */
@@ -166,6 +361,29 @@ export const URLs = {
   },
   get frontend() {
     return resolveFrontendBaseUrl();
+  },
+
+  costDrivers: {
+    summary: (month?: string) => {
+      const query = month ? `?month=${encodeURIComponent(month)}` : "";
+      return `${resolveApiBaseUrl()}/api/admin/cost-drivers/summary${query}`;
+    },
+    refresh: (month?: string) => {
+      const query = month ? `?month=${encodeURIComponent(month)}` : "";
+      return `${resolveApiBaseUrl()}/api/admin/cost-drivers/refresh${query}`;
+    },
+  },
+
+  dashboard: {
+    summary: () => `${resolveApiBaseUrl()}/dashboard/summary`,
+  },
+
+  mails: {
+    sendTest: () => `${resolveApiBaseUrl()}/mails/send-test`,
+    history: () => `${resolveApiBaseUrl()}/mails/history`,
+    sellAction: (historyId: number) =>
+      `${resolveApiBaseUrl()}/mails/history/${historyId}/sell-action`,
+    preferences: () => `${resolveApiBaseUrl()}/mails/preferences`,
   },
 
   // Health Check endpoints
@@ -180,6 +398,7 @@ export const URLs = {
   auth: {
     register: () => `${resolveApiBaseUrl()}/auth/register`,
     login: () => `${resolveApiBaseUrl()}/auth/login`,
+    google: () => `${resolveApiBaseUrl()}/auth/google`,
     logout: () => `${resolveApiBaseUrl()}/auth/logout`,
     refresh: () => `${resolveApiBaseUrl()}/auth/refresh`,
     me: () => `${resolveApiBaseUrl()}/auth/me`,
@@ -205,6 +424,7 @@ export const URLs = {
     create: () => `${resolveApiBaseUrl()}/jobs`,
     list: () => `${resolveApiBaseUrl()}/jobs`,
     get: (id: number) => `${resolveApiBaseUrl()}/jobs/${id}`,
+    cancel: (id: number) => `${resolveApiBaseUrl()}/jobs/${id}/cancel`,
     update: (id: number) => `${resolveApiBaseUrl()}/jobs/${id}`,
     delete: (id: number) => `${resolveApiBaseUrl()}/jobs/${id}`,
     getCost: (id: number) => `${resolveApiBaseUrl()}/jobs/${id}/cost`,
@@ -219,6 +439,19 @@ export const URLs = {
     list: () => `${resolveApiBaseUrl()}/runs`,
     get: (id: number) => `${resolveApiBaseUrl()}/runs/${id}`,
     cancel: (id: number) => `${resolveApiBaseUrl()}/runs/${id}/cancel`,
+    autoRebalanceLabel: () => `${resolveApiBaseUrl()}/runs/auto-rebalance-label`,
+    autoRebalanceCompletionEmail: () => `${resolveApiBaseUrl()}/runs/auto-rebalance-completion-email`,
+    finalActionableHistory: () => `${resolveApiBaseUrl()}/runs/final-actionables/history`,
+    finalActionableHistoryBackfill: () => `${resolveApiBaseUrl()}/runs/final-actionables/history/backfill`,
+    autoRebalanceHistory: (portfolio: 'india' | 'indmoney_us') =>
+      `${resolveApiBaseUrl()}/runs/auto-rebalance-history?portfolio=${portfolio}`,
+    autoRebalanceHistoryDetail: (portfolio: 'india' | 'indmoney_us', sequence: number) =>
+      `${resolveApiBaseUrl()}/runs/auto-rebalance-history/${portfolio}/${sequence}`,
+    autoRebalanceStage: (
+      portfolio: 'india' | 'indmoney_us',
+      sequence: number,
+      stage: string,
+    ) => `${resolveApiBaseUrl()}/runs/auto-rebalance-history/${portfolio}/${sequence}/stages/${stage}`,
     ws: () => `${resolveWebSocketBaseUrl()}/ws/runs`,
     wsRun: (id: number) => `${resolveWebSocketBaseUrl()}/ws/runs/${id}`,
   },
@@ -232,6 +465,9 @@ export const URLs = {
     portfolioSync: () => `${resolveApiBaseUrl()}/zerodha/portfolio/sync`,
     portfolioSnapshot: (snapshotDate: string) => `${resolveApiBaseUrl()}/zerodha/portfolio/${snapshotDate}`,
     orders: () => `${resolveApiBaseUrl()}/zerodha/orders`,
+    prepareBasketOrders: () => `${resolveApiBaseUrl()}/zerodha/orders/prepare-basket`,
+    placeProtectedMarketOrders: () => `${resolveApiBaseUrl()}/zerodha/orders/place-protected-market`,
+    placeProtectedMarketOrdersSequenced: () => `${resolveApiBaseUrl()}/zerodha/orders/place-protected-market-sequenced`,
     disconnect: () => `${resolveApiBaseUrl()}/zerodha/disconnect`,
     eventsLatest: () => `${resolveApiBaseUrl()}/zerodha/events/latest`,
     eventsHistory: () => `${resolveApiBaseUrl()}/zerodha/events/history`,
@@ -248,6 +484,8 @@ export const URLs = {
     portfolio: () => `${resolveApiBaseUrl()}/indmoney-us/portfolio`,
     portfolioSnapshot: (snapshotId: number) => `${resolveApiBaseUrl()}/indmoney-us/portfolio/${snapshotId}`,
     currentPrices: () => `${resolveApiBaseUrl()}/indmoney-us/prices/current`,
+    displayQuotes: () => `${resolveApiBaseUrl()}/indmoney-us/prices/display`,
+    displayListings: () => `${resolveApiBaseUrl()}/indmoney-us/prices/listings`,
     eventsLatest: () => `${resolveApiBaseUrl()}/indmoney-us/events/latest`,
     eventsHistory: () => `${resolveApiBaseUrl()}/indmoney-us/events/history`,
     eventJob: (jobId: number) => `${resolveApiBaseUrl()}/indmoney-us/events/${jobId}`,
@@ -269,13 +507,50 @@ export const URLs = {
     liveLock: () => `${resolveApiBaseUrl()}/polymarket/live/lock`,
     liveDoctor: () => `${resolveApiBaseUrl()}/polymarket/live/doctor`,
     liveBalanceRefresh: () => `${resolveApiBaseUrl()}/polymarket/live/balance/refresh`,
+    liveRedeem: () => `${resolveApiBaseUrl()}/polymarket/live/redeem`,
     liveEmergencyStop: () => `${resolveApiBaseUrl()}/polymarket/live/emergency-stop`,
     liveResetEmergencyStop: () => `${resolveApiBaseUrl()}/polymarket/live/reset-emergency-stop`,
+    liveLimits: () => `${resolveApiBaseUrl()}/polymarket/live/limits`,
     liveTradeConfirm: (tradeId: string) => `${resolveApiBaseUrl()}/polymarket/live/trades/${tradeId}/confirm`,
     liveTradeReject: (tradeId: string) => `${resolveApiBaseUrl()}/polymarket/live/trades/${tradeId}/reject`,
     liveRejectAll: () => `${resolveApiBaseUrl()}/polymarket/live/trades/reject-all`,
+    manualInvest: () => `${resolveApiBaseUrl()}/polymarket/manual-invest`,
+    trackedAccounts: () => `${resolveApiBaseUrl()}/polymarket/tracked-accounts`,
+    trackedAccount: (accountId: string) => `${resolveApiBaseUrl()}/polymarket/tracked-accounts/${accountId}`,
+    trackedAccountNetWorthRefresh: (accountId: string) => `${resolveApiBaseUrl()}/polymarket/tracked-accounts/${accountId}/net-worth/refresh`,
     discoveryDebug: () => `${resolveApiBaseUrl()}/polymarket/live/discovery/debug`,
   },
+
+  // Direct Polymarket endpoints
+  polymarketDirect: {
+    state: () => `${resolveApiBaseUrl()}/polymarket-direct/state`,
+    start: () => `${resolveApiBaseUrl()}/polymarket-direct/start`,
+    stop: () => `${resolveApiBaseUrl()}/polymarket-direct/stop`,
+    pause: () => `${resolveApiBaseUrl()}/polymarket-direct/pause`,
+    resume: () => `${resolveApiBaseUrl()}/polymarket-direct/resume`,
+    liveUnlock: () => `${resolveApiBaseUrl()}/polymarket-direct/live/unlock`,
+    liveLock: () => `${resolveApiBaseUrl()}/polymarket-direct/live/lock`,
+    liveDoctor: () => `${resolveApiBaseUrl()}/polymarket-direct/live/doctor`,
+    liveBalanceRefresh: () => `${resolveApiBaseUrl()}/polymarket-direct/live/balance/refresh`,
+    liveRedeem: () => `${resolveApiBaseUrl()}/polymarket-direct/live/redeem`,
+    liveEmergencyStop: () => `${resolveApiBaseUrl()}/polymarket-direct/live/emergency-stop`,
+    liveResetEmergencyStop: () => `${resolveApiBaseUrl()}/polymarket-direct/live/reset-emergency-stop`,
+    liveLimits: () => `${resolveApiBaseUrl()}/polymarket-direct/live/limits`,
+    liveTradeConfirm: (tradeId: string) => `${resolveApiBaseUrl()}/polymarket-direct/live/trades/${tradeId}/confirm`,
+    liveTradeReject: (tradeId: string) => `${resolveApiBaseUrl()}/polymarket-direct/live/trades/${tradeId}/reject`,
+    liveRejectAll: () => `${resolveApiBaseUrl()}/polymarket-direct/live/trades/reject-all`,
+    trackedAccounts: () => `${resolveApiBaseUrl()}/polymarket-direct/tracked-accounts`,
+    trackedAccount: (accountId: string) => `${resolveApiBaseUrl()}/polymarket-direct/tracked-accounts/${accountId}`,
+    discoveryDebug: () => `${resolveApiBaseUrl()}/polymarket-direct/live/discovery/debug`,
+  },
+
+  bullpenAutoLive: bullpenAutoLiveApiUrls,
+  bullpen008: bullpen008ApiUrls,
+  bullpenTradeAnalysis: bullpenTradeAnalysisApiUrls,
+  bullpenRunAudit: bullpenRunAuditApiUrls,
+  polymarketAutoLive: bullpenAutoLiveApiUrls,
+
+  tradingBots: tradingBotsApiUrls,
 
   // Google Sheets endpoints
   googleSheets: {
@@ -306,6 +581,7 @@ export const URLs = {
   apiUsage: {
     summary: () => `${resolveApiBaseUrl()}/api-usage/summary`,
     llmPerformance: () => `${resolveApiBaseUrl()}/api-usage/llms/performance`,
+    llmCostHistory: () => `${resolveApiBaseUrl()}/api-usage/llms/cost-history`,
   },
 
   // Schedule endpoints
@@ -344,6 +620,7 @@ export const URLs = {
     console: {
       dashboard: () => "/console/dashboard",
       overview: () => "/console/dashboard",
+      database: () => "/database",
       jobs: () => "/console/jobs",
       runs: () => "/console/runs",
       jobDetail: (id: number) => `/console/jobs/${id}`,
@@ -362,18 +639,48 @@ export const URLs = {
       indmoneyUsEvents: () => "/console/indmoney-us/events",
       indmoneyUsRebalance: () => "/console/indmoney-us/rebalance",
       indmoneyUsFinalActionables: () => "/console/indmoney-us/final-actionables",
+      automatedRebalance: () => "/console/automated-rebalance",
+      autoRebalanceRuns: (portfolio: 'zerodha' | 'indmoneyUs') =>
+        `/console/auto-rebalance-runs/${portfolio}`,
+      autoRebalanceRunDetail: (
+        portfolio: 'zerodha' | 'indmoneyUs',
+        sequence: number,
+      ) => `/console/auto-rebalance-runs/${portfolio}/${sequence}`,
       zerodhaThreats: () => "/console/zerodha/threats",
       indmoneyUsThreats: () => "/console/indmoney-us/threats",
+      tradingBots: () => "/console/trading-bots",
       polymarketBot: () => "/console/polymarket-bot",
-      googleSheets: () => "/console/google-sheets",
+      polymarketDirectBot: () => "/console/polymarket-direct-bot",
+      bullpenAi: () => "/console/bullpen-ai",
+      bullpenSports: () => "/console/bullpen-sports",
+      bullpen008: () => "/console/bullpen008",
+      bullpen008History: () => "/console/bullpen-ai/008history",
+      bullpen008AnalyseEvents: () => "/console/bullpen008/analyse-events",
+      bullpen008AnalyseRuns: () => "/console/bullpen008/analyse-runs",
+      bullpen008RunDetail: (runId: string) =>
+        `/console/bullpen008/runs/${encodeURIComponent(runId)}`,
+      bullpenAiAnalyseEvents: () => "/console/bullpen-ai/analyse-events",
+      bullpenAiAnalyseEventDetail: (tradeId: string) =>
+        `/console/bullpen-ai/analyse-events/${tradeId}`,
+      bullpenAiAnalyseRuns: () => "/console/bullpen-ai/analyse-runs",
+      bullpenAiAnalyseRunDetail: (runId: string) =>
+        `/console/bullpen-ai/analyse-runs/${runId}`,
+      bullpenAiAutoLive: () => "/console/trading-bots/bullpen-ai-auto-live",
+      bullpenAi30Days: () => "/console/bullpen-ai?tab=30-days",
+      bullpenAiEndOfMonth: () => "/console/bullpen-ai?tab=end-of-month",
+      bullpenSports30Days: () => "/console/bullpen-sports?tab=30-days",
+      bullpenSportsEndOfMonth: () =>
+        "/console/bullpen-sports?tab=end-of-month",
       apis: () => "/console/apis",
       llms: () => "/console/llms",
       technicalSetups: () => "/console/technical-setups",
+      mails: () => "/console/mails",
     },
 
     profile: {
       root: () => "/console/profile",
       preferences: () => "/console/profile/preferences",
+      costDrivers: () => "/console/profile/cost-drivers",
       security: () => "/console/profile/security",
       activity: () => "/console/profile/activity",
     },
@@ -424,6 +731,11 @@ export const apiRequest = async (
   options: RequestOptions = {},
 ): Promise<Response> => {
   const { token, query, headers = {}, ...init } = options;
+  if (token) {
+    throw new Error(
+      "Browser Authorization headers are disabled; use the same-origin BFF.",
+    );
+  }
 
   // Build URL with query parameters
   let url = endpoint;
@@ -440,11 +752,6 @@ export const apiRequest = async (
     ...(headers as Record<string, string>),
   };
 
-  // Add authorization token if provided
-  if (token) {
-    requestHeaders.Authorization = `Bearer ${token}`;
-  }
-
   // Make request
   const response = await fetch(url, {
     ...init,
@@ -459,7 +766,7 @@ export const apiRequest = async (
  * Delegates to centralized session storage service
  */
 export const getAccessToken = (): string | null => {
-  return sessionStorage.getAccessToken();
+  return null;
 };
 
 /**
@@ -467,7 +774,7 @@ export const getAccessToken = (): string | null => {
  * Delegates to centralized session storage service
  */
 export const getRefreshToken = (): string | null => {
-  return sessionStorage.getRefreshToken();
+  return null;
 };
 
 /**
@@ -478,7 +785,9 @@ export const storeTokens = (
   accessToken: string,
   refreshToken: string,
 ): void => {
-  sessionStorage.setTokens(accessToken, refreshToken);
+  void accessToken;
+  void refreshToken;
+  throw new Error("Browser token storage is disabled; use the server session.");
 };
 
 /**
@@ -486,7 +795,7 @@ export const storeTokens = (
  * Delegates to centralized session storage service
  */
 export const clearTokens = (): void => {
-  sessionStorage.clearSession();
+  // Auth.js owns its encrypted HttpOnly session cookie.
 };
 
 /**
@@ -494,7 +803,7 @@ export const clearTokens = (): void => {
  * Delegates to centralized session storage service
  */
 export const storeUser = (user: UserResponse): void => {
-  sessionStorage.setUserData(user);
+  void user;
 };
 
 /**
@@ -502,7 +811,7 @@ export const storeUser = (user: UserResponse): void => {
  * Delegates to centralized session storage service
  */
 export const getUser = (): UserResponse | null => {
-  return sessionStorage.getUserData();
+  return null;
 };
 
 /**
@@ -510,5 +819,5 @@ export const getUser = (): UserResponse | null => {
  * Delegates to centralized session storage service
  */
 export const clearUser = (): void => {
-  sessionStorage.setUserData(null);
+  // User state is supplied by the server-validated Auth.js session.
 };

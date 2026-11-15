@@ -7,16 +7,12 @@ interface User {
   name?: string | null;
   username?: string;
   role?: string;
-  accessToken?: string;
-  refreshToken?: string;
-  expiresIn?: number;
 }
 
 declare module "next-auth" {
   interface Session {
-    accessToken?: string;
-    refreshToken?: string;
     userData?: User;
+    generation?: string;
     user: {
       id?: string;
       email?: string | null;
@@ -32,6 +28,9 @@ declare module "next-auth/jwt" {
     id?: string;
     accessToken?: string;
     refreshToken?: string;
+    expiresIn?: number;
+    accessTokenExpiresAt?: number;
+    sessionGeneration?: string;
     userData?: User;
     username?: string;
     role?: string;

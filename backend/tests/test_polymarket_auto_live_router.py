@@ -1,0 +1,940 @@
+import os
+from pathlib import Path
+
+os.environ.setdefault(
+    "DATABASE_URL",
+    "postgresql+asyncpg://test:test@localhost:5432/testdb",
+)
+os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
+
+import httpx
+import pytest
+from fastapi import FastAPI
+from types import SimpleNamespace
+
+from app.domains.auth.dependencies import get_current_user
+from app.domains.polymarket_auto_live.router import (
+    _fit_dashboard_response_budget,
+    _read_dashboard_summary,
+    _read_history,
+)
+from app.domains.polymarket_auto_live.router import router as auto_live_router
+from app.domains.polymarket_auto_live.schemas import (
+    BullpenAutoLiveBotCardSummary,
+    BullpenAutoLiveEventTrend,
+    BullpenAutoLiveEventTrendsResponse,
+    BullpenAutoLiveHistoryPage,
+    BullpenHourlyRebalanceResultRequest,
+    BullpenAutoLiveRun,
+    BullpenAutoLiveRunOnceRequest,
+    BullpenAutoLiveStageResult,
+    BullpenAutoLiveSettings,
+    BullpenAutoLiveSettingsUpdate,
+    BullpenAutoLiveState,
+    BullpenAutoLiveSummary,
+)
+from app.domains.trading_bots.router import router as trading_bots_router
+from app.domains.trading_bots.schemas import (
+    TradingBotCardSummary,
+    TradingBotsSummaryResponse,
+)
+
+
+def _current_user():
+    return SimpleNamespace(id=7)
+
+
+def _build_test_app(*routers) -> FastAPI:
+    app = FastAPI()
+    for router in routers:
+        app.include_router(router)
+    app.dependency_overrides[get_current_user] = _current_user
+    return app
+
+
+def _summary_card(bot_id: str, name: str, route: str):
+    return TradingBotCardSummary(
+        id=bot_id,  # type: ignore[arg-type]
+        name=name,
+        route=route,
+        status="stopped",
+        mode="paper" if bot_id != "bullpen-x-ai" else "analysis-only",
+        guardrails_summary="Guardrails ready",
+        strategy_summary="Strategy summary",
+        risk_summary="Risk summary",
+    )
+
+
+@pytest.mark.anyio
+async def test_trading_bots_summary_route_returns_four_cards(monkeypatch):
+    app = _build_test_app(trading_bots_router)
+
+    async def fake_build_trading_bots_summary(user_id: int):
+        return TradingBotsSummaryResponse(
+            generated_at="2026-06-21T10:00:00+00:00",
+            cards=[
+                _summary_card(
+                    "bullpen-x-polymarket",
+                    "Bullpen x Polymarket",
+                    "/console/polymarket-bot",
+                ),
+                _summary_card(
+                    "polymarket-direct",
+                    "Polymarket Direct",
+                    "/console/polymarket-direct-bot",
+                ),
+                _summary_card(
+                    "bullpen-x-ai",
+                    "Bullpen x AI",
+                    "/console/bullpen-ai",
+                ),
+                _summary_card(
+                    "bullpen-ai-auto-live",
+                    "Bullpen AI Auto-Live",
+                    "/console/trading-bots/bullpen-ai-auto-live",
+                ),
+            ],
+        )
+
+    monkeypatch.setattr(
+        "app.domains.trading_bots.router.build_trading_bots_summary",
+        fake_build_trading_bots_summary,
+    )
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.get("/trading-bots/summary")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload["cards"]) == 4
+    assert [card["id"] for card in payload["cards"]] == [
+        "bullpen-x-polymarket",
+        "polymarket-direct",
+        "bullpen-x-ai",
+        "bullpen-ai-auto-live",
+    ]
+
+
+class _FakeAutoLiveBot:
+    def __init__(self) -> None:
+        self.settings = BullpenAutoLiveSettings()
+        self.state = BullpenAutoLiveState()
+        self.run_once_request: BullpenAutoLiveRunOnceRequest | None = None
+
+    async def get_settings(self) -> BullpenAutoLiveSettings:
+        return self.settings
+
+    async def update_settings(
+        self,
+        update: BullpenAutoLiveSettingsUpdate,
+    ) -> BullpenAutoLiveSettings:
+        merged = self.settings.model_dump()
+        merged.update(update.model_dump(exclude_unset=True))
+        self.settings = BullpenAutoLiveSettings.model_validate(merged)
+        return self.settings
+
+    async def reset_settings(self) -> BullpenAutoLiveSettings:
+        self.settings = BullpenAutoLiveSettings()
+        return self.settings
+
+    async def record_hourly_rebalance_result(
+        self,
+        request: BullpenHourlyRebalanceResultRequest,
+    ) -> BullpenAutoLiveState:
+        self.state.latest_hourly_rebalance_status = request.status
+        self.state.latest_hourly_rebalance_at = "2026-09-10T07:15:00+00:00"
+        self.state.latest_hourly_rebalance_detail = request.detail
+        return self.state
+
+    async def run_once(
+        self,
+        *,
+        triggered_by: str = "manual",
+        request: BullpenAutoLiveRunOnceRequest | None = None,
+    ) -> BullpenAutoLiveRun:
+        self.run_once_request = request
+        return BullpenAutoLiveRun(
+            id="run-1",
+            triggered_by=triggered_by,  # type: ignore[arg-type]
+            status="running",
+            dry_run=True,
+            started_at="2026-06-21T10:00:00+00:00",
+            summary="Queued",
+            request_context=request,
+        )
+
+    async def get_run(self, run_id: str) -> BullpenAutoLiveRun:
+        if run_id != "run-1":
+            raise ValueError("Auto-Live run not found.")
+        return BullpenAutoLiveRun(
+            id=run_id,
+            triggered_by="manual",
+            status="running",
+            dry_run=True,
+            started_at="2026-06-21T10:00:00+00:00",
+            summary="Queued",
+        )
+
+
+@pytest.mark.anyio
+async def test_auto_live_settings_routes_load_validate_and_reset(monkeypatch):
+    app = _build_test_app(auto_live_router)
+    fake_bot = _FakeAutoLiveBot()
+
+    async def fake_get_bot(user_id: int):
+        return fake_bot
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.router.polymarket_auto_live_bot_manager.get_bot",
+        fake_get_bot,
+    )
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        get_response = await client.get("/polymarket/auto-live/settings")
+        assert get_response.status_code == 200
+        assert get_response.json() == BullpenAutoLiveSettings().model_dump(mode="json")
+
+        invalid_response = await client.put(
+            "/polymarket/auto-live/settings",
+            json={
+                "max_single_trade_pct_bankroll": 7,
+                "max_single_market_pct_bankroll": 6,
+            },
+        )
+        assert invalid_response.status_code == 400
+        assert "max_single_trade_pct_bankroll" in invalid_response.json()["detail"]
+
+        update_response = await client.put(
+            "/polymarket/auto-live/settings",
+            json={
+                "bankroll_usd": 250,
+                "auto_live_enabled": True,
+                "dry_run": True,
+                "llm_execution_mode": "single_combined",
+                "llm_events_per_prompt": 7,
+                "console_min_market_odds": 8.5,
+                "console_max_closing_days": 45,
+                "console_min_volume_usd": 125,
+                "console_min_liquidity_usd": 150,
+                "console_rejected_theme_pattern": "crypto|mentions",
+                "console_exclude_sports": False,
+                "console_exclude_weather": False,
+                "console_exclude_market_predictions": False,
+                "console_exclude_tweet_count_questions": False,
+                "console_exclude_released_by_events": False,
+                "console_only_binary_yes_no": False,
+                "console_exclude_custom_phrases": False,
+                "console_llm_prompt_template": "Saved prompt {{SELECTED_QUESTIONS}}",
+            },
+        )
+        assert update_response.status_code == 200
+        assert update_response.json()["bankroll_usd"] == 250
+        assert update_response.json()["auto_live_enabled"] is True
+        assert update_response.json()["llm_execution_mode"] == "single_combined"
+        assert update_response.json()["llm_events_per_prompt"] == 7
+        assert update_response.json()["console_min_market_odds"] == 8.5
+        assert update_response.json()["console_max_closing_days"] == 45
+        assert update_response.json()["console_min_volume_usd"] == 125
+        assert update_response.json()["console_min_liquidity_usd"] == 150
+        assert update_response.json()["console_rejected_theme_pattern"] == "crypto|mentions"
+        assert update_response.json()["console_exclude_sports"] is False
+        assert update_response.json()["console_exclude_weather"] is False
+        assert update_response.json()["console_exclude_market_predictions"] is False
+        assert update_response.json()["console_exclude_tweet_count_questions"] is False
+        assert update_response.json()["console_exclude_released_by_events"] is False
+        assert update_response.json()["console_only_binary_yes_no"] is False
+        assert update_response.json()["console_exclude_custom_phrases"] is False
+        assert (
+            update_response.json()["console_llm_prompt_template"]
+            == "Saved prompt {{SELECTED_QUESTIONS}}"
+        )
+
+        invalid_llm_events_response = await client.put(
+            "/polymarket/auto-live/settings",
+            json={"llm_events_per_prompt": "7.5"},
+        )
+        assert invalid_llm_events_response.status_code == 422
+        assert "llm_events_per_prompt" in str(invalid_llm_events_response.json())
+
+        invalid_floor_response = await client.put(
+            "/polymarket/auto-live/settings",
+            json={"console_min_market_odds": 50},
+        )
+        assert invalid_floor_response.status_code == 422
+        assert "console_min_market_odds" in str(invalid_floor_response.json())
+
+        invalid_expiry_window_response = await client.put(
+            "/polymarket/auto-live/settings",
+            json={"console_max_closing_days": 0},
+        )
+        assert invalid_expiry_window_response.status_code == 422
+        assert "console_max_closing_days" in str(invalid_expiry_window_response.json())
+
+        reset_response = await client.post("/polymarket/auto-live/settings/reset")
+        assert reset_response.status_code == 200
+        assert reset_response.json() == BullpenAutoLiveSettings().model_dump(mode="json")
+
+
+@pytest.mark.anyio
+async def test_hourly_rebalance_result_records_terminal_status(monkeypatch):
+    app = _build_test_app(auto_live_router)
+    fake_bot = _FakeAutoLiveBot()
+
+    async def fake_get_bot(user_id: int):
+        assert user_id == 7
+        return fake_bot
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.router.polymarket_auto_live_bot_manager.get_bot",
+        fake_get_bot,
+    )
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.post(
+            "/polymarket/auto-live/hourly-rebalance/result",
+            json={"status": "failed", "detail": "Bullpen reconciliation was blocked."},
+        )
+        invalid_response = await client.post(
+            "/polymarket/auto-live/hourly-rebalance/result",
+            json={"status": "running"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["latest_hourly_rebalance_status"] == "failed"
+    assert response.json()["latest_hourly_rebalance_at"] == "2026-09-10T07:15:00+00:00"
+    assert response.json()["latest_hourly_rebalance_detail"] == "Bullpen reconciliation was blocked."
+    assert invalid_response.status_code == 422
+
+
+@pytest.mark.anyio
+async def test_auto_live_run_once_route_accepts_manual_console_rows(monkeypatch):
+    app = _build_test_app(auto_live_router)
+    fake_bot = _FakeAutoLiveBot()
+
+    async def fake_get_bot(user_id: int):
+        return fake_bot
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.router.polymarket_auto_live_bot_manager.get_bot",
+        fake_get_bot,
+    )
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.post(
+            "/polymarket/auto-live/run-once",
+            json={
+                "client_run_id": "client-run-0001",
+                "console_profile": {
+                    "source_label": "Bullpen CLI",
+                    "total_candidates": 2,
+                    "candidate_rows": [
+                        {
+                            "question_id": "candidate-market-1",
+                            "market_id": "candidate-market-1",
+                            "market_title": "Candidate market 1",
+                            "slug": "candidate-market-1",
+                            "current_yes_odds": 18,
+                            "current_no_odds": 82,
+                            "llm_yes_odds": 8,
+                            "llm_no_odds": 92,
+                            "returns_per_day": 9.2,
+                            "amount_to_be_invested": 5,
+                            "selected": True,
+                            "llm_outputs": [],
+                        }
+                    ],
+                }
+            },
+        )
+
+    assert response.status_code == 200
+    assert fake_bot.run_once_request is not None
+    assert fake_bot.run_once_request.client_run_id == "client-run-0001"
+    assert fake_bot.run_once_request.console_profile is not None
+    assert fake_bot.run_once_request.console_profile.source_label == "Bullpen CLI"
+    assert fake_bot.run_once_request.console_profile.candidate_rows[0].selected is True
+
+
+@pytest.mark.anyio
+async def test_auto_live_exact_run_route_supports_idempotent_start_recovery(
+    monkeypatch,
+):
+    app = _build_test_app(auto_live_router)
+    fake_bot = _FakeAutoLiveBot()
+
+    async def fake_get_bot(user_id: int):
+        return fake_bot
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.router.polymarket_auto_live_bot_manager.get_bot",
+        fake_get_bot,
+    )
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://testserver",
+    ) as client:
+        found = await client.get("/polymarket/auto-live/runs/run-1")
+        missing = await client.get("/polymarket/auto-live/runs/missing-run")
+
+    assert found.status_code == 200
+    assert found.json()["id"] == "run-1"
+    assert missing.status_code == 404
+
+
+@pytest.mark.anyio
+async def test_dashboard_summary_reader_reuses_single_database_session(monkeypatch):
+    shared_session = object()
+    events: list[tuple[str, object]] = []
+    summary = BullpenAutoLiveSummary(
+        state=BullpenAutoLiveState(),
+        settings=BullpenAutoLiveSettings(),
+        bot_card=BullpenAutoLiveBotCardSummary(
+            status="stopped",
+            mode="analysis-only",
+            guardrails_summary="Ready",
+            strategy_summary="Ready",
+            risk_summary="Ready",
+        ),
+    )
+
+    class FakeSessionContext:
+        async def __aenter__(self):
+            events.append(("enter", shared_session))
+            return shared_session
+
+        async def __aexit__(self, _exc_type, _exc, _traceback):
+            events.append(("exit", shared_session))
+            return False
+
+    class FakeBot:
+        async def get_dashboard_summary(
+            self,
+            session=None,
+            workspace_profile=None,
+        ):
+            events.append(("summary", session))
+            assert workspace_profile is None
+            return summary
+
+    async def fake_resolve_user(_credentials, session):
+        events.append(("auth", session))
+        return 7
+
+    async def fake_get_bot(user_id: int):
+        events.append(("bot", user_id))
+        return FakeBot()
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.router.AsyncSessionLocal",
+        FakeSessionContext,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.router._resolve_persisted_status_user_id",
+        fake_resolve_user,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.router.polymarket_auto_live_bot_manager.get_bot",
+        fake_get_bot,
+    )
+
+    result, user_id = await _read_dashboard_summary(None)
+
+    assert result == summary
+    assert user_id == 7
+    assert events == [
+        ("enter", shared_session),
+        ("auth", shared_session),
+        ("bot", 7),
+        ("summary", shared_session),
+        ("exit", shared_session),
+    ]
+
+
+@pytest.mark.anyio
+async def test_dashboard_summary_uses_cached_auth_and_supports_etag(monkeypatch):
+    app = _build_test_app(auto_live_router)
+    auth_reads: list[tuple[bool, float | None]] = []
+
+    summary = BullpenAutoLiveSummary(
+        state=BullpenAutoLiveState(),
+        settings=BullpenAutoLiveSettings(),
+        bot_card=BullpenAutoLiveBotCardSummary(
+            status="stopped",
+            mode="analysis-only",
+            guardrails_summary="Ready",
+            strategy_summary="Ready",
+            risk_summary="Ready",
+        ),
+        generated_at="2026-07-26T10:00:00+00:00",
+        projection_version=1,
+    )
+
+    summary_reads: list[bool] = []
+
+    async def fake_read_dashboard_summary(_credentials, _workspace_profile=None):
+        summary_reads.append(True)
+        return summary, 7
+
+    async def fake_attach_auth(
+        value,
+        *,
+        refresh_if_stale=True,
+        timeout_seconds=None,
+    ):
+        auth_reads.append((refresh_if_stale, timeout_seconds))
+        return value
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.router._read_dashboard_summary",
+        fake_read_dashboard_summary,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.router._attach_latest_active_auth",
+        fake_attach_auth,
+    )
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://testserver",
+    ) as client:
+        first = await client.get("/polymarket/auto-live/summary/dashboard")
+        cached = await client.get(
+            "/polymarket/auto-live/summary/dashboard",
+            headers={"If-None-Match": first.headers["etag"]},
+        )
+
+    assert first.status_code == 200
+    assert int(first.headers["x-response-bytes"]) < 150_000
+    assert first.headers["cache-control"] == "private, no-cache"
+    assert first.headers["vary"] == "Authorization, Cookie"
+    assert "app;dur=" in first.headers["server-timing"]
+    assert cached.status_code == 304
+    assert summary_reads == [True, True]
+    assert auth_reads == [(False, 0.25), (False, 0.25)]
+
+
+def test_dashboard_summary_hard_bounds_oversized_optional_workflow_detail():
+    run = BullpenAutoLiveRun(
+        id="run-large",
+        triggered_by="scheduler",
+        status="running",
+        dry_run=True,
+        started_at="2026-07-26T10:00:00+00:00",
+        summary="Working",
+        diagnostics={
+            "scanned_candidates": 1592,
+            "candidate_rows_before_llm": 12,
+            "active_wallet_positions": 13,
+            "llm_candidate_count": 17,
+        },
+        stage_results=[
+            BullpenAutoLiveStageResult(
+                stage_number=1,
+                stage_name="Stage 1",
+                status="pass",
+                reason="Complete",
+                outputs={
+                    "oversized": "x" * 250_000,
+                    "scanned_candidates": 1592,
+                    "accepted_candidates_count": 12,
+                    "active_position_rows_before_llm": 13,
+                },
+                started_at="2026-07-26T10:00:00+00:00",
+            )
+        ],
+    )
+    summary = BullpenAutoLiveSummary(
+        state=BullpenAutoLiveState(),
+        settings=BullpenAutoLiveSettings(),
+        bot_card=BullpenAutoLiveBotCardSummary(
+            status="running",
+            mode="paper",
+            guardrails_summary="Ready",
+            strategy_summary="Ready",
+            risk_summary="Ready",
+        ),
+        latest_run=run,
+        recent_runs=[run],
+    )
+
+    bounded, serialized = _fit_dashboard_response_budget(summary)
+
+    assert len(serialized) <= 150_000
+    assert bounded.latest_run is not None
+    assert len(bounded.latest_run.stage_results) == 1
+    compact_stage = bounded.latest_run.stage_results[0]
+    assert compact_stage.stage_number == 1
+    assert compact_stage.status == "pass"
+    assert compact_stage.outputs == {
+        "workflow_stage_key": "scan",
+        "scanned_candidates": 1592,
+        "accepted_candidates_count": 12,
+        "active_position_rows_before_llm": 13,
+    }
+    assert bounded.latest_run.diagnostics.scanned_candidates == 1592
+    assert bounded.latest_run.diagnostics.candidate_rows_before_llm == 12
+    assert bounded.latest_run.diagnostics.active_wallet_positions == 13
+    assert bounded.latest_run.diagnostics.llm_candidate_count == 17
+    assert "workflow" in bounded.degraded_sections
+
+
+@pytest.mark.anyio
+async def test_history_is_paginated_and_full_decisions_are_lazy(monkeypatch):
+    app = _build_test_app(auto_live_router)
+    calls: list[tuple[object, ...]] = []
+
+    class FakeBot:
+        async def list_run_history(self, *, page: int, size: int):
+            calls.append(("history", page, size))
+            return BullpenAutoLiveHistoryPage(
+                items=[],
+                total=0,
+                page=page,
+                size=size,
+                pages=0,
+                generated_at="2026-07-26T10:00:00+00:00",
+            )
+
+        async def list_run_decisions(self, run_id: str):
+            calls.append(("decisions", run_id))
+            return []
+
+    async def fake_get_bot(_current_user):
+        return FakeBot()
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.router._get_bot",
+        fake_get_bot,
+    )
+    async def fake_read_history(
+        _credentials,
+        *,
+        page=1,
+        size=20,
+        event_trends=False,
+        workspace_profile=None,
+    ):
+        calls.append(("workspace", workspace_profile))
+        if event_trends:
+            return await FakeBot().list_recent_event_trends()
+        return await FakeBot().list_run_history(page=page, size=size)
+
+    monkeypatch.setattr("app.domains.polymarket_auto_live.router._read_history", fake_read_history)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://testserver",
+    ) as client:
+        history = await client.get(
+            "/polymarket/auto-live/history?page=2&size=10&workspace_profile=bullpen-sports"
+        )
+        assert calls == [("workspace", "bullpen-sports"), ("history", 2, 10)]
+        details = await client.get(
+            "/polymarket/auto-live/runs/run-1/decisions"
+        )
+
+    assert history.status_code == 200
+    assert history.json()["page"] == 2
+    assert history.headers["cache-control"] == "private, no-cache"
+    assert details.status_code == 200
+    assert calls == [
+        ("workspace", "bullpen-sports"),
+        ("history", 2, 10),
+        ("decisions", "run-1"),
+    ]
+
+
+@pytest.mark.anyio
+async def test_history_event_trends_returns_bounded_scan_heatmap(monkeypatch):
+    app = _build_test_app(auto_live_router)
+    workspace_profiles = []
+
+    class FakeBot:
+        async def list_recent_event_trends(self):
+            return BullpenAutoLiveEventTrendsResponse(
+                events=[BullpenAutoLiveEventTrend(
+                    market_id="market-1",
+                    market_title="Will the event happen?",
+                    score=140,
+                    scan_scores=[80, 80, 80] + [None] * 17,
+                )],
+                generated_at="2026-08-06T10:00:00+00:00",
+            )
+
+    async def fake_get_bot(_current_user):
+        return FakeBot()
+
+    monkeypatch.setattr("app.domains.polymarket_auto_live.router._get_bot", fake_get_bot)
+    async def fake_read_history(
+        _credentials,
+        *,
+        page=1,
+        size=20,
+        event_trends=False,
+        workspace_profile=None,
+    ):
+        workspace_profiles.append(workspace_profile)
+        if event_trends:
+            return await FakeBot().list_recent_event_trends()
+        return await FakeBot().list_run_history(page=page, size=size)
+
+    monkeypatch.setattr("app.domains.polymarket_auto_live.router._read_history", fake_read_history)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.get(
+            "/polymarket/auto-live/history/event-trends?workspace_profile=bullpen-sports"
+        )
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "private, no-cache"
+    assert response.json()["events"][0]["score"] == 140
+    assert workspace_profiles == ["bullpen-sports"]
+    assert len(response.json()["events"][0]["scan_scores"]) == 20
+    assert response.json()["events"][0]["scan_llm_outputs"] == [[] for _ in range(20)]
+
+
+def test_polymarket_manual_invest_route_remains_available():
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "app/domains/polymarket/router.py"
+    ).read_text()
+    assert '@router.post("/manual-invest"' in source
+    assert "execute_manual_investments" in source
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("event_trends", [False, True])
+async def test_history_auth_and_read_share_one_session(monkeypatch, event_trends):
+    session = object()
+    events = []
+    expected = object()
+
+    class Context:
+        async def __aenter__(self):
+            events.append("enter")
+            return session
+
+        async def __aexit__(self, *args):
+            events.append("exit")
+
+    async def auth(credentials, db):
+        assert db is session
+        events.append("auth")
+        return 7
+
+    class Repo:
+        def __init__(self, db):
+            assert db is session
+
+        async def list_run_history_page(
+            self,
+            user_id,
+            *,
+            page,
+            size,
+            workspace_profile=None,
+        ):
+            assert (user_id, page, size, workspace_profile) == (
+                7,
+                2,
+                10,
+                "bullpen-sports",
+            )
+            events.append("history")
+            return expected
+
+        async def list_recent_event_trends(self, user_id, *, workspace_profile=None):
+            assert (user_id, workspace_profile) == (7, "bullpen-sports")
+            events.append("trends")
+            return expected
+
+    prefix = "app.domains.polymarket_auto_live.router."
+    monkeypatch.setattr(prefix + "AsyncSessionLocal", Context)
+    monkeypatch.setattr(prefix + "_resolve_persisted_status_user_id", auth)
+    monkeypatch.setattr(prefix + "AsyncPolymarketAutoLiveRepository", Repo)
+    assert await _read_history(
+        None,
+        page=2,
+        size=10,
+        event_trends=event_trends,
+        workspace_profile="bullpen-sports",
+    ) is expected
+    assert events == ["enter", "auth", "trends" if event_trends else "history", "exit"]
+
+
+@pytest.mark.anyio
+async def test_event_trends_scan_count_update_uses_one_session(monkeypatch):
+    events = []
+
+    class Session:
+        async def commit(self):
+            events.append("commit")
+
+        async def rollback(self):
+            events.append("rollback")
+
+    session = Session()
+
+    class Context:
+        async def __aenter__(self):
+            events.append("enter")
+            return session
+
+        async def __aexit__(self, *args):
+            events.append("exit")
+
+    async def auth(_credentials, db):
+        assert db is session
+        events.append("auth")
+        return 7
+
+    class Repo:
+        def __init__(self, db):
+            assert db is session
+
+        async def ensure_settings(self, user_id):
+            assert user_id == 7
+            events.append("read")
+            return BullpenAutoLiveSettings()
+
+        async def save_settings(self, user_id, settings):
+            assert user_id == 7
+            assert settings.event_trends_scan_count == 1
+            events.append("save")
+
+    prefix = "app.domains.polymarket_auto_live.router."
+    monkeypatch.setattr(prefix + "AsyncSessionLocal", Context)
+    monkeypatch.setattr(prefix + "_resolve_persisted_status_user_id", auth)
+    monkeypatch.setattr(prefix + "AsyncPolymarketAutoLiveRepository", Repo)
+    app = _build_test_app(auto_live_router)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.put(
+            "/polymarket/auto-live/history/event-trends/scan-count",
+            json={"event_trends_scan_count": 1},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["event_trends_scan_count"] == 1
+    assert events == ["enter", "auth", "read", "save", "commit", "exit"]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("suffix", ["", "/event-trends"])
+async def test_history_deadline_includes_auth_pool_wait(monkeypatch, suffix):
+    import asyncio
+    closed = []
+
+    class Context:
+        async def __aenter__(self):
+            return object()
+
+        async def __aexit__(self, *args):
+            closed.append(True)
+
+    async def blocked_auth(credentials, session):
+        await asyncio.Event().wait()
+
+    prefix = "app.domains.polymarket_auto_live.router."
+    monkeypatch.setattr(prefix + "AsyncSessionLocal", Context)
+    monkeypatch.setattr(prefix + "_resolve_persisted_status_user_id", blocked_auth)
+    monkeypatch.setattr(prefix + "HISTORY_TIMEOUT_SECONDS", 0.01)
+    monkeypatch.setattr(prefix + "_event_trends_timeout_seconds", lambda _: 0.01)
+    app = _build_test_app(auto_live_router)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver") as client:
+        response = await client.get("/polymarket/auto-live/history" + suffix)
+    assert response.status_code == 503
+    assert response.headers["cache-control"] == "no-store"
+    if suffix:
+        assert "30 seconds" in response.json()["detail"]
+    assert closed == [True]
+
+
+def test_event_trends_defer_immutable_decision_payload_reads():
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "app/domains/polymarket_auto_live/repository.py"
+    ).read_text()
+    decision_query = source.index(
+        "# Decision rows preserve legacy history and enrich the newest scan"
+    )
+    fallback_query = source.index(
+        "frozen_outputs_by_decision_id",
+        decision_query,
+    )
+    initial_slice = source[decision_query:fallback_query]
+
+    assert 'decision.payload["llm_outputs"]' not in initial_slice
+    assert "fallback_decision_ids" in source[fallback_query:]
+    assert 'decision.payload["llm_outputs"]' in source[fallback_query:]
+
+
+@pytest.mark.anyio
+async def test_history_state_poll_is_read_only_and_preserves_rebalance(monkeypatch):
+    from app.domains.polymarket_auto_live import bot as bot_module
+    from app.domains.polymarket_auto_live import router as route_module
+
+    class MetadataRepo:
+        def __init__(self, session):
+            assert session is sentinel
+
+        async def get_settings_record(self, user_id):
+            assert user_id == 7
+            return None
+
+        async def get_state_record(self, user_id):
+            assert user_id == 7
+            return None
+
+        def __getattr__(self, name):
+            raise AssertionError(f"Display polling must not call {name}")
+
+    sentinel = object()
+    state = BullpenAutoLiveState(
+        last_run_id="large-running-run",
+        latest_hourly_rebalance_status="failed",
+        latest_hourly_rebalance_at="2026-09-17T05:00:00+00:00",
+        latest_hourly_rebalance_detail="Recorded failure",
+    )
+    monkeypatch.setattr(bot_module, "AsyncPolymarketAutoLiveRepository", MetadataRepo)
+    monkeypatch.setattr(bot_module, "record_to_state", lambda record: state)
+    bot = bot_module.BullpenAutoLiveBot(user_id=7)
+
+    async def read_display(credentials):
+        return await bot.get_display_state(sentinel)
+
+    monkeypatch.setattr(route_module, "_read_display_state", read_display)
+    app = _build_test_app(auto_live_router)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver") as client:
+        response = await client.get("/polymarket/auto-live/state")
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "private, no-store"
+    assert response.json()["last_run_id"] == "large-running-run"
+    assert response.json()["latest_hourly_rebalance_status"] == "failed"
+    assert response.json()["latest_hourly_rebalance_detail"] == "Recorded failure"
+
+
+@pytest.mark.anyio
+async def test_history_state_poll_returns_retryable_timeout(monkeypatch):
+    import asyncio
+    from app.domains.polymarket_auto_live import router as route_module
+
+    async def delayed_read(credentials):
+        await asyncio.sleep(1)
+
+    monkeypatch.setattr(route_module, "_read_display_state", delayed_read)
+    monkeypatch.setattr(route_module, "PERSISTED_STATUS_TIMEOUT_SECONDS", 0.001)
+    app = _build_test_app(auto_live_router)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver") as client:
+        response = await client.get("/polymarket/auto-live/state")
+    assert response.status_code == 503
+    assert "temporarily delayed" in response.json()["detail"]

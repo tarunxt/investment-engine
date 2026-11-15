@@ -1,23 +1,97 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const LOCAL_SERVER_API_BASE_URLS = [
-  "http://127.0.0.1:8000",
-  "http://localhost:8000",
-];
-const VERCEL_BACKEND_ROUTE_PREFIX = "/_/backend";
+import {
+  ApiOriginCircuitBreaker,
+  ApiTransportDeadlineError,
+  executeBoundedApiRequest,
+  type BufferedTransportResponse,
+} from "@/lib/boundedApiTransport";
+import {
+  createBackendSessionContext,
+  rotateBackendTokens,
+} from "@/app/api/bullpen-ai/_lib/serverBackendSession";
+import { BackendRuntimeHttpError } from "@/app/api/bullpen-ai/_lib/backendBullpenRuntime";
+
+const LOCAL_SERVER_API_BASE_URL = "http://127.0.0.1:8000";
+const DOCKER_SERVER_API_BASE_URL = "http://backend:8000";
 const LOCAL_HOSTNAMES = new Set(["localhost", "127.0.0.1", "0.0.0.0"]);
 const PLACEHOLDER_HOST_SNIPPETS = ["yourdomain.com", "example.com"];
 const FORWARDED_HEADER_BLOCKLIST = new Set([
   "accept-encoding",
   "content-length",
+  "cookie",
   "host",
+  "authorization",
   "x-forwarded-for",
   "x-forwarded-host",
   "x-forwarded-port",
   "x-forwarded-proto",
 ]);
 const RESPONSE_HEADER_BLOCKLIST = new Set(["content-encoding", "content-length"]);
-const RETRYABLE_PROXY_STATUSES = new Set([502, 503, 504]);
+// Broker connection/snapshot reads may wait behind a database transaction.
+const ZERODHA_SYNC_PROXY_ATTEMPT_TIMEOUT_MS = 16_000;
+const ZERODHA_SYNC_PROXY_TOTAL_TIMEOUT_MS = 18_000;
+const DEFAULT_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS = 1_200;
+const DEFAULT_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 4_000;
+// Captured portfolio reports can wait for a DB connection and parse stored
+// model output. Keep these read-only routes inside the browser's 20s budget.
+const CAPTURED_ANALYSIS_PROXY_ATTEMPT_TIMEOUT_MS = 16_000;
+const CAPTURED_ANALYSIS_PROXY_TOTAL_TIMEOUT_MS = 18_000;
+const DEFAULT_BULLPEN_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS = 4_200;
+const DEFAULT_BULLPEN_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 4_750;
+const MAX_BULLPEN_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS = 4_500;
+const MAX_BULLPEN_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 4_900;
+// History reads have a twelve-second backend deadline because the bounded
+// twenty-scan projection can briefly wait behind a persistence transaction.
+// Keep only these two BFF routes outside that deadline; fast dashboard polling
+// retains its existing strict budget.
+const BULLPEN_HISTORY_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS = 12_500;
+const BULLPEN_HISTORY_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 14_000;
+const BULLPEN_DASHBOARD_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS = 12_500;
+const BULLPEN_DASHBOARD_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 14_000;
+const DEFAULT_EVENT_TRENDS_PROXY_TIMEOUT_MS = 30_000;
+const MIN_EVENT_TRENDS_PROXY_TIMEOUT_MS = 5_000;
+const MAX_EVENT_TRENDS_PROXY_TIMEOUT_MS = 120_000;
+const EVENT_TRENDS_PROXY_TRANSPORT_GRACE_MS = 2_000;
+const BULLPEN_STAGE_ONE_EXCEL_TIMEOUT_MS = 600_000;
+const BULLPEN008_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS = 10_000;
+const BULLPEN008_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 12_000;
+const SPORTS_EVENT_COMPARISONS_PROXY_TIMEOUT_MS = 18_000;
+const SPORTS_RANKINGS_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS = 12_500;
+const SPORTS_RANKINGS_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 14_000;
+const ZERODHA_PROTECTED_ORDER_TIMEOUT_MS = 180_000;
+const DEFAULT_BACKEND_PROXY_MUTATION_TIMEOUT_MS = 8_000;
+const EVENT_TRENDS_SCAN_COUNT_MUTATION_TIMEOUT_MS = 20_000;
+const SAFE_FALLBACK_METHODS = new Set(["GET", "HEAD"]);
+const PUBLIC_BACKEND_PATHS = new Set([
+  "auth/google/config",
+  "auth/register",
+  "auth/forgot-password",
+  "auth/reset-password",
+  "auth/verify-email",
+  "health/live",
+  "health/ready",
+]);
+const originCircuit = new ApiOriginCircuitBreaker(2, 30_000);
+// Read fallbacks share a circuit so a dead primary does not consume every
+// dashboard poll budget. Mutations are single-target and carry server-side
+// idempotency keys; they must still reach that target when a prior read opened
+// its circuit. A practically non-opening circuit retains the transport's
+// accounting contract without suppressing an explicitly requested mutation.
+const mutationOriginCircuit = new ApiOriginCircuitBreaker(
+  Number.MAX_SAFE_INTEGER,
+  0,
+);
+
+type BackendApiCandidate = {
+  baseUrl: string;
+  stage: "primary" | "secondary" | "tertiary";
+  transport:
+    | "configured-server-api"
+    | "host-loopback"
+    | "docker-service"
+    | "public-api";
+};
 
 type RouteContext = {
   params: Promise<{ path?: string[] }>;
@@ -43,48 +117,92 @@ function isPlaceholderHostname(hostname: string) {
   return PLACEHOLDER_HOST_SNIPPETS.some((snippet) => hostname.includes(snippet));
 }
 
-function resolveConfiguredBackendApiBaseUrls() {
-  return [
-    process.env.BACKEND_API_URL,
-    process.env.API_URL,
-    ...LOCAL_SERVER_API_BASE_URLS,
-    process.env.NEXT_PUBLIC_API_URL,
-  ]
+function resolveFirstConfiguredBackendApiBaseUrl() {
+  return [process.env.BACKEND_API_URL, process.env.API_URL]
     .map(parseConfiguredUrl)
     .filter((parsed): parsed is URL => Boolean(parsed))
     .filter((parsed) => !isPlaceholderHostname(parsed.hostname))
-    .map((parsed) => trimTrailingSlash(parsed.toString()));
+    .map((parsed) => trimTrailingSlash(parsed.toString()))[0] ?? null;
 }
 
-function inferBackendApiBaseUrlsFromRequest(request: NextRequest) {
+function resolvePublicBackendApiBaseUrl(request: NextRequest) {
+  const configured = parseConfiguredUrl(process.env.NEXT_PUBLIC_API_URL);
+  if (configured && !isPlaceholderHostname(configured.hostname)) {
+    return trimTrailingSlash(configured.toString());
+  }
+
   const host = request.nextUrl.hostname;
   if (LOCAL_HOSTNAMES.has(host)) {
-    return LOCAL_SERVER_API_BASE_URLS;
+    return null;
   }
 
   const rootHostname = host.replace(/^www\./, "");
-  return [
-    `${request.nextUrl.protocol}//${request.nextUrl.host}${VERCEL_BACKEND_ROUTE_PREFIX}`,
-    `${request.nextUrl.protocol}//api.${rootHostname}`,
+  return `${request.nextUrl.protocol}//api.${rootHostname}`;
+}
+
+function resolveBackendApiCandidates(request: NextRequest): BackendApiCandidate[] {
+  const configuredServerUrl = resolveFirstConfiguredBackendApiBaseUrl();
+  const primary: BackendApiCandidate = configuredServerUrl
+    ? {
+        baseUrl: configuredServerUrl,
+        stage: "primary",
+        transport: "configured-server-api",
+      }
+    : {
+        baseUrl: LOCAL_SERVER_API_BASE_URL,
+        stage: "primary",
+        transport: "host-loopback",
+      };
+  const secondary: BackendApiCandidate = configuredServerUrl
+    ? {
+        baseUrl: LOCAL_SERVER_API_BASE_URL,
+        stage: "secondary",
+        transport: "host-loopback",
+      }
+    : {
+        baseUrl: DOCKER_SERVER_API_BASE_URL,
+        stage: "secondary",
+        transport: "docker-service",
+      };
+  const publicUrl = resolvePublicBackendApiBaseUrl(request);
+  const candidates = [
+    primary,
+    secondary,
+    ...(publicUrl
+      ? [
+          {
+            baseUrl: publicUrl,
+            stage: "tertiary" as const,
+            transport: "public-api" as const,
+          },
+        ]
+      : []),
   ];
+  const seen = new Set<string>();
+  return candidates.filter((candidate) => {
+    if (seen.has(candidate.baseUrl)) return false;
+    seen.add(candidate.baseUrl);
+    return true;
+  });
 }
 
-function resolveBackendApiBaseUrls(request: NextRequest) {
-  return Array.from(
-    new Set([
-      ...resolveConfiguredBackendApiBaseUrls(),
-      ...inferBackendApiBaseUrlsFromRequest(request),
-    ]),
-  );
-}
-
-function buildForwardHeaders(request: NextRequest) {
+function buildForwardHeaders(
+  request: NextRequest,
+  correlationId: string,
+  accessToken: string | null,
+) {
   const headers = new Headers();
   request.headers.forEach((value, key) => {
     if (!FORWARDED_HEADER_BLOCKLIST.has(key.toLowerCase())) {
       headers.set(key, value);
     }
   });
+  if (!headers.has("x-correlation-id")) {
+    headers.set("X-Correlation-ID", correlationId);
+  }
+  if (accessToken) {
+    headers.set("Authorization", `Bearer ${accessToken}`);
+  }
   return headers;
 }
 
@@ -104,54 +222,440 @@ function buildTargetUrl(baseUrl: string, path: string, request: NextRequest) {
   return targetUrl;
 }
 
+function readBoundedTimeout(
+  rawValue: string | undefined,
+  fallbackMs: number,
+  maximumMs: number,
+) {
+  const configured = Number.parseInt(rawValue || "", 10);
+  if (!Number.isFinite(configured)) {
+    return fallbackMs;
+  }
+  return Math.min(Math.max(configured, 1_000), maximumMs);
+}
+
+function formatTimeoutBudget(timeoutMs: number) {
+  const seconds = timeoutMs / 1_000;
+  const value = Number.isInteger(seconds)
+    ? String(seconds)
+    : String(Number(seconds.toFixed(3)));
+  return `${value} ${seconds === 1 ? "second" : "seconds"}`;
+}
+
+function isBullpenAutoLiveRead(method: string, path: string) {
+  return (
+    SAFE_FALLBACK_METHODS.has(method) &&
+    (path === "polymarket/auto-live" ||
+      path.startsWith("polymarket/auto-live/"))
+  );
+}
+
+function getCapturedPortfolioAnalysisReadScope(method: string, path: string) {
+  if (!SAFE_FALLBACK_METHODS.has(method)) return undefined;
+  const match = /^(zerodha|indmoney-us)\/(events|threats)\/(?:latest|history|[0-9]+)$/.exec(path);
+  // Four fixed scopes isolate DB-only reads from wallet/broker failures;
+  // never key circuit state by a user or captured job ID.
+  return match ? `${match[1]}/${match[2]}` : undefined;
+}
+
+function getResearchHistoryReadScope(method: string, path: string) {
+  if (!SAFE_FALLBACK_METHODS.has(method)) return undefined;
+  // Full stored run details and model cost estimates read historical model
+  // output. Keep their deadline and circuit separate from wallet/broker reads.
+  if (path === "runs" || path === "runs/auto-rebalance-history") return "runs/history";
+  if (/^runs\/[0-9]+$/.test(path)) return "runs/detail";
+  if (path === "providers") return "providers";
+  return undefined;
+}
+
+function isBullpen008Read(method: string, path: string) {
+  return (
+    SAFE_FALLBACK_METHODS.has(method) &&
+    (path === "polymarket/bullpen008" ||
+      path.startsWith("polymarket/bullpen008/"))
+  );
+}
+
+function isBullpenHistoryRead(method: string, path: string) {
+  return (
+    SAFE_FALLBACK_METHODS.has(method) &&
+    (path === "polymarket/auto-live/history" ||
+      path === "polymarket/auto-live/history/event-trends")
+  );
+}
+
+function isBullpenEventTrendsRead(method: string, path: string) {
+  return (
+    SAFE_FALLBACK_METHODS.has(method) &&
+    path === "polymarket/auto-live/history/event-trends"
+  );
+}
+
+function isBullpenDashboardRead(method: string, path: string) {
+  return (
+    SAFE_FALLBACK_METHODS.has(method) &&
+    (path === "polymarket/auto-live/status" ||
+      path === "polymarket/auto-live/summary/dashboard" ||
+      path === "polymarket/state")
+  );
+}
+
+function getEventTrendsProxyTimeoutMs(request: NextRequest, path: string) {
+  if (!isBullpenEventTrendsRead(request.method, path)) return null;
+  const requestedSeconds = Number.parseInt(
+    request.nextUrl.searchParams.get("proxy_timeout_seconds") || "",
+    10,
+  );
+  if (!Number.isFinite(requestedSeconds)) {
+    return DEFAULT_EVENT_TRENDS_PROXY_TIMEOUT_MS;
+  }
+  return Math.min(
+    MAX_EVENT_TRENDS_PROXY_TIMEOUT_MS,
+    Math.max(MIN_EVENT_TRENDS_PROXY_TIMEOUT_MS, requestedSeconds * 1_000),
+  );
+}
+
+function isClusteringProgressRead(method: string, path: string) {
+  return SAFE_FALLBACK_METHODS.has(method) &&
+    /^polymarket\/auto-live\/clustering\/[^/]+\/progress$/.test(path);
+}
+
+function isBullpenStageOneExcelDownload(method: string, path: string) {
+  return (
+    method === "GET" &&
+    /^polymarket\/auto-live\/runs\/[^/]+\/stage-one\.xlsx$/.test(path)
+  );
+}
+
+function isSportsEventComparisonsRead(method: string, path: string) {
+  return method === "POST" && path === "api/sports-rankings/event-comparisons";
+}
+
+function isZerodhaSyncRequest(method: string, path: string) {
+  return (
+    (SAFE_FALLBACK_METHODS.has(method) &&
+      ["zerodha/status", "zerodha/login-url", "zerodha/portfolio"].includes(path)) ||
+    (method === "POST" &&
+      ["zerodha/callback", "zerodha/portfolio/sync"].includes(path))
+  );
+}
+
+function getProxyAttemptTimeoutMs(method: string, path: string) {
+  if (method === "POST" && ["zerodha/orders/place-protected-market", "zerodha/orders/place-protected-market-sequenced"].includes(path)) return ZERODHA_PROTECTED_ORDER_TIMEOUT_MS;
+  if (isZerodhaSyncRequest(method, path)) return ZERODHA_SYNC_PROXY_ATTEMPT_TIMEOUT_MS;
+  if (getCapturedPortfolioAnalysisReadScope(method, path) || getResearchHistoryReadScope(method, path)) {
+    return CAPTURED_ANALYSIS_PROXY_ATTEMPT_TIMEOUT_MS;
+  }
+  if (isSportsEventComparisonsRead(method, path)) return SPORTS_EVENT_COMPARISONS_PROXY_TIMEOUT_MS;
+  if (SAFE_FALLBACK_METHODS.has(method) && (path === "api/sports-rankings" || path.startsWith("api/sports-rankings/"))) return SPORTS_RANKINGS_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS;
+  if (/^polymarket\/auto-live\/runs\/[^/]+\/stage-one-export$/.test(path)) return 30_000;
+  if (isBullpenStageOneExcelDownload(method, path)) {
+    return BULLPEN_STAGE_ONE_EXCEL_TIMEOUT_MS;
+  }
+  if (
+    method === "PUT" &&
+    path === "polymarket/auto-live/history/event-trends/scan-count"
+  ) {
+    return EVENT_TRENDS_SCAN_COUNT_MUTATION_TIMEOUT_MS;
+  }
+  if (!SAFE_FALLBACK_METHODS.has(method)) {
+    return readBoundedTimeout(
+      process.env.BACKEND_PROXY_TIMEOUT_MS,
+      DEFAULT_BACKEND_PROXY_MUTATION_TIMEOUT_MS,
+      30_000,
+    );
+  }
+
+
+  if (isBullpenHistoryRead(method, path)) {
+    return BULLPEN_HISTORY_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS;
+  }
+
+  if (isBullpenDashboardRead(method, path)) {
+    return BULLPEN_DASHBOARD_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS;
+  }
+
+  if (isBullpenAutoLiveRead(method, path)) {
+    return readBoundedTimeout(
+      process.env.BULLPEN_BACKEND_PROXY_TIMEOUT_MS,
+      DEFAULT_BULLPEN_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS,
+      MAX_BULLPEN_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS,
+    );
+  }
+
+  if (isBullpen008Read(method, path)) {
+    return BULLPEN008_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS;
+  }
+
+  return readBoundedTimeout(
+    process.env.BACKEND_PROXY_TIMEOUT_MS,
+    DEFAULT_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS,
+    DEFAULT_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS,
+  );
+}
+
+function getProxyTotalTimeoutMs(method: string, path: string) {
+  if (method === "POST" && ["zerodha/orders/place-protected-market", "zerodha/orders/place-protected-market-sequenced"].includes(path)) return ZERODHA_PROTECTED_ORDER_TIMEOUT_MS;
+  if (isZerodhaSyncRequest(method, path)) return ZERODHA_SYNC_PROXY_TOTAL_TIMEOUT_MS;
+  if (getCapturedPortfolioAnalysisReadScope(method, path) || getResearchHistoryReadScope(method, path)) {
+    return CAPTURED_ANALYSIS_PROXY_TOTAL_TIMEOUT_MS;
+  }
+  if (isSportsEventComparisonsRead(method, path)) return SPORTS_EVENT_COMPARISONS_PROXY_TIMEOUT_MS;
+  if (SAFE_FALLBACK_METHODS.has(method) && (path === "api/sports-rankings" || path.startsWith("api/sports-rankings/"))) return SPORTS_RANKINGS_BACKEND_PROXY_TOTAL_TIMEOUT_MS;
+  if (/^polymarket\/auto-live\/runs\/[^/]+\/stage-one-export$/.test(path)) return 30_000;
+  if (isBullpenStageOneExcelDownload(method, path)) {
+    return BULLPEN_STAGE_ONE_EXCEL_TIMEOUT_MS;
+  }
+  if (!SAFE_FALLBACK_METHODS.has(method)) {
+    return getProxyAttemptTimeoutMs(method, path);
+  }
+
+  if (isBullpenHistoryRead(method, path)) {
+    return BULLPEN_HISTORY_BACKEND_PROXY_TOTAL_TIMEOUT_MS;
+  }
+
+  if (isBullpenDashboardRead(method, path)) {
+    return BULLPEN_DASHBOARD_BACKEND_PROXY_TOTAL_TIMEOUT_MS;
+  }
+
+  if (isBullpenAutoLiveRead(method, path)) {
+    return readBoundedTimeout(
+      process.env.BULLPEN_BACKEND_PROXY_TOTAL_TIMEOUT_MS,
+      DEFAULT_BULLPEN_BACKEND_PROXY_TOTAL_TIMEOUT_MS,
+      MAX_BULLPEN_BACKEND_PROXY_TOTAL_TIMEOUT_MS,
+    );
+  }
+
+  if (isBullpen008Read(method, path)) {
+    return BULLPEN008_BACKEND_PROXY_TOTAL_TIMEOUT_MS;
+  }
+
+  // Keep the same-origin BFF attempt chain inside one bounded deadline.
+  return readBoundedTimeout(
+    process.env.BACKEND_PROXY_TOTAL_TIMEOUT_MS,
+    DEFAULT_BACKEND_PROXY_TOTAL_TIMEOUT_MS,
+    DEFAULT_BACKEND_PROXY_TOTAL_TIMEOUT_MS,
+  );
+}
+
+function createProxyCorrelationId(request: NextRequest) {
+  return request.headers.get("x-correlation-id") || crypto.randomUUID();
+}
+
+function logProxyFailure(input: {
+  request: NextRequest;
+  correlationId: string;
+  outcome: string;
+  durationMs: number;
+  status?: number;
+  errorType?: string;
+}) {
+  // This runs on the Next server only. Do not include upstream URLs, error
+  // messages, credentials, or response bodies in browser-visible payloads.
+  console.warn(
+    JSON.stringify({
+      event: "backend_api_proxy_failure",
+      method: input.request.method,
+      path: input.request.nextUrl.pathname,
+      correlation_id: input.correlationId,
+      outcome: input.outcome,
+      duration_ms: Math.round(input.durationMs),
+      ...(input.status === undefined ? {} : { status: input.status }),
+      ...(input.errorType ? { error_type: input.errorType } : {}),
+    }),
+  );
+}
+
+async function bufferBackendResponse(
+  response: Response,
+  method: string,
+): Promise<BufferedTransportResponse> {
+  // Browser-facing API calls are JSON payloads. Buffering makes the BFF
+  // deadline cover body delivery too (not merely response headers), which
+  // prevents a stalled upstream stream from leaving client state unresolved.
+  const body = method === "HEAD" ? null : await response.arrayBuffer();
+  return {
+    body,
+    status: response.status,
+    statusText: response.statusText,
+    headers: buildResponseHeaders(response),
+  };
+}
+
 async function proxyBackendRequest(request: NextRequest, context: RouteContext) {
   const params = await context.params;
   const path = (params.path ?? []).map(encodeURIComponent).join("/");
   const body = ["GET", "HEAD"].includes(request.method) ? undefined : await request.arrayBuffer();
-  let lastErrorMessage: string | null = null;
-  let lastResponse: Response | null = null;
+  const startedAt = performance.now();
+  const correlationId = createProxyCorrelationId(request);
+  let outcome = "unreachable";
+  let responseStatus: number | undefined;
+  // Slow wallet/CLI reads must not open the circuit for healthy database-only
+  // history reads on the same backend origin. Use fixed scopes so this
+  // registry remains bounded; never key circuit state by user or run ID.
+  const readCircuitScope =
+    SAFE_FALLBACK_METHODS.has(request.method) && PUBLIC_BACKEND_PATHS.has(path)
+      ? path
+      : SAFE_FALLBACK_METHODS.has(request.method) && (path === "api/sports-rankings" || path.startsWith("api/sports-rankings/"))
+      ? "api/sports-rankings"
+      : isClusteringProgressRead(request.method, path)
+      ? "polymarket/auto-live/clustering/progress"
+      : SAFE_FALLBACK_METHODS.has(request.method) &&
+    (path === "polymarket/auto-live/history" ||
+      path === "polymarket/auto-live/history/event-trends")
+      ? path
+      : SAFE_FALLBACK_METHODS.has(request.method) && isZerodhaSyncRequest(request.method, path)
+      ? "zerodha/sync"
+      : getCapturedPortfolioAnalysisReadScope(request.method, path)
+        ?? getResearchHistoryReadScope(request.method, path);
+  const resolvedCandidates = resolveBackendApiCandidates(request).map(
+    (candidate) => ({ ...candidate, circuitScope: readCircuitScope }),
+  );
+  const isPublicRequest = PUBLIC_BACKEND_PATHS.has(path);
+  const backendSession = isPublicRequest
+    ? null
+    : await createBackendSessionContext(request);
+  if (
+    !isPublicRequest &&
+    process.env.NEXT_PUBLIC_DISABLE_AUTH !== "true" &&
+    !backendSession?.accessToken &&
+    !backendSession?.refreshToken
+  ) {
+    return NextResponse.json(
+      { message: "Not authenticated" },
+      {
+        status: 401,
+        headers: { "X-Correlation-ID": correlationId },
+      },
+    );
+  }
 
-  for (const baseUrl of resolveBackendApiBaseUrls(request)) {
-    const targetUrl = buildTargetUrl(baseUrl, path, request);
+  // Logout needs revocation only, even when access is expired or refresh has
+  // already been reserved. Never rotate simply to authenticate this action.
+  const revokeWithRefresh = request.method === "POST" && path === "auth/logout" &&
+    Boolean(backendSession?.refreshToken);
+  const upstreamPath = revokeWithRefresh ? "auth/logout-refresh" : path;
+  const upstreamBody = revokeWithRefresh
+    ? JSON.stringify({ refresh_token: backendSession!.refreshToken })
+    : body;
 
-    try {
-      const response = await fetch(targetUrl, {
-        method: request.method,
-        headers: buildForwardHeaders(request),
-        body,
-        cache: "no-store",
+  const eventTrendsTimeoutMs = getEventTrendsProxyTimeoutMs(request, path);
+  const totalTimeoutMs =
+    eventTrendsTimeoutMs === null
+      ? getProxyTotalTimeoutMs(request.method, path)
+      : eventTrendsTimeoutMs + EVENT_TRENDS_PROXY_TRANSPORT_GRACE_MS;
+  const primaryAttemptTimeoutMs = eventTrendsTimeoutMs
+    ? eventTrendsTimeoutMs + 1_000
+    : getProxyAttemptTimeoutMs(request.method, path);
+
+  try {
+    const result = await executeBoundedApiRequest({
+      method: request.method,
+      candidates: resolvedCandidates,
+      circuit: SAFE_FALLBACK_METHODS.has(request.method)
+        ? originCircuit
+        : mutationOriginCircuit,
+      callerSignal: request.signal,
+      totalBudgetMs: totalTimeoutMs,
+      primaryAttemptBudgetMs: primaryAttemptTimeoutMs,
+      refreshAuthentication: backendSession && !revokeWithRefresh
+        ? (signal) => rotateBackendTokens(backendSession, signal)
+        : undefined,
+      fetchCandidate: async (candidate, signal) => {
+        const targetUrl = buildTargetUrl(candidate.baseUrl, upstreamPath, request);
+        const headers = buildForwardHeaders(request, correlationId,
+          revokeWithRefresh ? null : backendSession?.accessToken ?? null);
+        if (revokeWithRefresh) headers.set("Content-Type", "application/json");
+        const response = await fetch(targetUrl, {
+          method: request.method,
+          headers,
+          body: upstreamBody,
+          cache: "no-store",
+          signal,
+        });
+        if (isBullpenStageOneExcelDownload(request.method, path) && response.ok) {
+          return {
+            body: response.body,
+            status: response.status,
+            statusText: response.statusText,
+            headers: buildResponseHeaders(response),
+          };
+        }
+        return bufferBackendResponse(
+          response,
+          request.method,
+        );
+      },
+    });
+    responseStatus = result.response.status;
+    outcome = "success";
+    const responseHeaders = result.response.headers;
+    responseHeaders.set("X-Correlation-ID", correlationId);
+    if (result.candidate) {
+      responseHeaders.set("X-API-Transport", result.candidate.transport);
+    }
+    return new NextResponse(result.response.body, {
+      status: result.response.status,
+      statusText: result.response.statusText,
+      headers: responseHeaders,
+    });
+  } catch (error) {
+    if (error instanceof ApiTransportDeadlineError) {
+      outcome = "timeout";
+      return NextResponse.json(
+        {
+          message: `The backend did not respond in time (${formatTimeoutBudget(eventTrendsTimeoutMs ?? totalTimeoutMs)}). Please retry.`,
+        },
+        {
+          status: 504,
+          headers: {
+            "Retry-After": "1",
+            "X-Correlation-ID": correlationId,
+            "X-Backend-Proxy-Budget-Ms": String(totalTimeoutMs),
+          },
+        },
+      );
+    }
+
+    if (error instanceof BackendRuntimeHttpError && error.status === 409) {
+      outcome = "refresh_coordination_required";
+      return NextResponse.json(
+        { message: "Your session update is in progress or could not be confirmed. Reload this page, or sign in again." },
+        { status: 409, headers: { "X-Correlation-ID": correlationId } },
+      );
+    }
+    if (error instanceof BackendRuntimeHttpError && error.status === 401) {
+      outcome = "authentication_failed";
+      return NextResponse.json(
+        { message: "Your session has expired. Please sign in again." },
+        {
+          status: 401,
+          headers: { "X-Correlation-ID": correlationId },
+        },
+      );
+    }
+
+    outcome = "unreachable";
+    return NextResponse.json(
+      {
+        message: "Unable to reach the backend API right now.",
+      },
+      {
+        status: 502,
+        headers: { "X-Correlation-ID": correlationId },
+      },
+    );
+  } finally {
+    if (outcome !== "success") {
+      logProxyFailure({
+        request,
+        correlationId,
+        outcome,
+        durationMs: performance.now() - startedAt,
+        status: responseStatus,
       });
-
-      if (RETRYABLE_PROXY_STATUSES.has(response.status)) {
-        lastResponse = response;
-        continue;
-      }
-
-      return new NextResponse(response.body, {
-        status: response.status,
-        statusText: response.statusText,
-        headers: buildResponseHeaders(response),
-      });
-    } catch (error) {
-      lastErrorMessage = error instanceof Error ? error.message : String(error);
     }
   }
-
-  if (lastResponse) {
-    return new NextResponse(lastResponse.body, {
-      status: lastResponse.status,
-      statusText: lastResponse.statusText,
-      headers: buildResponseHeaders(lastResponse),
-    });
-  }
-
-  return NextResponse.json(
-    {
-      message: "Unable to reach backend API through the frontend proxy.",
-      detail: lastErrorMessage ?? "No backend API target was available.",
-    },
-    { status: 502 },
-  );
 }
 
 export const dynamic = "force-dynamic";

@@ -30,9 +30,11 @@ import {
   buildRebalancePrompt,
   getPreviousMarketClose,
   getRebalanceDefaultExportSheetName,
+  REBALANCE_INPUT_SECTION_MARKERS,
   type RebalancePortfolioKey,
 } from "@/lib/rebalance";
 import type { SwingTradeMarket } from "@/lib/swingTrade";
+import { RebalanceReadiness } from "./RebalanceReadiness";
 import { apiService } from "@/services/api";
 import type {
   IndMoneyUsPortfolioSnapshotDetail,
@@ -86,7 +88,7 @@ const INPUT_SECTION_META: Array<{
 }> = [
   {
     key: "portfolio",
-    marker: "## 1. Latest Portfolio Snapshot",
+    marker: REBALANCE_INPUT_SECTION_MARKERS.portfolio,
     title: "Portfolio",
     eyebrow: "Holdings snapshot",
     description:
@@ -97,18 +99,18 @@ const INPUT_SECTION_META: Array<{
   },
   {
     key: "swing",
-    marker: "## 2. Completed Swing Trade Runs After Previous Market Close",
+    marker: REBALANCE_INPUT_SECTION_MARKERS.swing,
     title: "Swing",
     eyebrow: "Post-close runs",
     description:
-      "Completed swing-trade model outputs created after the prior market-close cutoff.",
+      "Explicitly selected completed swing-trade model outputs; selections may be historical.",
     Icon: TrendingUp,
     shellClassName: "border-emerald-200 bg-emerald-50/70",
     iconClassName: "bg-emerald-600 text-white",
   },
   {
     key: "threats",
-    marker: "## 3. Latest Threats Report",
+    marker: REBALANCE_INPUT_SECTION_MARKERS.threats,
     title: "Threats",
     eyebrow: "Risk radar",
     description:
@@ -228,6 +230,19 @@ function getSelectedSwingRuns(
     .filter((run) => run.run_jobs.length > 0);
 }
 
+function buildRebalanceInputPreviews(inputs: Parameters<typeof buildRebalanceInputBundle>[0]) {
+  const now = inputs.now ?? new Date();
+  try {
+    return {
+      prompt: buildRebalanceInputBundle({ ...inputs, now, swingDisplayMode: "full" }),
+      display: buildRebalanceInputBundle({ ...inputs, now, swingDisplayMode: "summary" }),
+      error: null,
+    };
+  } catch (error) {
+    return { prompt: "", display: "", error: normalizeError(error) };
+  }
+}
+
 function RebalanceInputBox({
   portfolio,
   market,
@@ -237,7 +252,7 @@ function RebalanceInputBox({
   market: SwingTradeMarket;
   basePrompt: string;
 }) {
-  const { setPrompt } = useDashboard();
+  const { setPrompt, setOutputSourceSelection, prompt, hasUnsavedPromptDraft, selectedTargets, submitting } = useDashboard();
   const [portfolioSnapshot, setPortfolioSnapshot] =
     useState<PortfolioSnapshot>(null);
   const [threatAnalysis, setThreatAnalysis] = useState<ThreatAnalysis>(null);
@@ -252,10 +267,12 @@ function RebalanceInputBox({
     () => new Set(),
   );
   const lastGeneratedPromptRef = useRef("");
+  const inputRequestRef = useRef(0);
 
   const previousClose = useMemo(() => getPreviousMarketClose(market), [market]);
 
   const loadInputs = useCallback(async () => {
+    const request = ++inputRequestRef.current;
     setLoading(true);
     setError(null);
     try {
@@ -288,24 +305,27 @@ function RebalanceInputBox({
         run.run_jobs.map((link) => getSwingJobSelectionId(run.id, link)),
       );
 
+      if (request !== inputRequestRef.current) return;
       setPortfolioSnapshot(portfolioRes.latest as PortfolioSnapshot);
       setThreatAnalysis(threatsRes.analysis as ThreatAnalysis);
       setSwingRuns(fullRuns);
       setSelectedSwingJobIds(new Set(allSwingJobIds));
     } catch (err) {
+      if (request !== inputRequestRef.current) return;
       setError(normalizeError(err));
       setPortfolioSnapshot(null);
       setThreatAnalysis(null);
       setSwingRuns([]);
       setSelectedSwingJobIds(new Set());
     } finally {
-      setLoading(false);
+      if (request === inputRequestRef.current) setLoading(false);
     }
   }, [market, portfolio, previousClose]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadInputs();
+    return () => { inputRequestRef.current += 1; };
   }, [loadInputs]);
 
   const selectedSwingRuns = useMemo(
@@ -313,19 +333,18 @@ function RebalanceInputBox({
     [selectedSwingJobIds, swingRuns],
   );
 
-  const promptInputBundle = useMemo(() => {
-    if (loading) return "Loading rebalance inputs…";
-    if (error) {
-      return "Failed to load one or more rebalance inputs. Refresh to try again.";
+  const inputPreviews = useMemo(() => {
+    if (loading || error) {
+      const message = loading ? "Loading rebalance inputs…" : error!;
+      return { prompt: message, display: message, error: message };
     }
 
-    return buildRebalanceInputBundle({
+    return buildRebalanceInputPreviews({
       market,
       previousClose,
       portfolio: portfolioSnapshot,
       threats: threatAnalysis,
       swingRuns: selectedSwingRuns,
-      swingDisplayMode: "full",
     });
   }, [
     error,
@@ -336,32 +355,20 @@ function RebalanceInputBox({
     selectedSwingRuns,
     threatAnalysis,
   ]);
-
-  const displayInputBundle = useMemo(() => {
-    if (loading) return "Loading rebalance inputs…";
-    if (error) {
-      return "Failed to load one or more rebalance inputs. Refresh to try again.";
-    }
-
-    return buildRebalanceInputBundle({
-      market,
-      previousClose,
-      portfolio: portfolioSnapshot,
-      threats: threatAnalysis,
-      swingRuns: selectedSwingRuns,
-      swingDisplayMode: "summary",
-    });
-  }, [
-    error,
-    loading,
-    market,
-    portfolioSnapshot,
-    previousClose,
-    selectedSwingRuns,
-    threatAnalysis,
-  ]);
+  const promptInputBundle = inputPreviews.prompt;
+  const displayInputBundle = inputPreviews.display;
+  const inputError = inputPreviews.error;
 
   useEffect(() => {
+    setOutputSourceSelection(inputError ? null : {
+      market, runs: selectedSwingRuns, inputBundle: promptInputBundle,
+    });
+    return () => setOutputSourceSelection(null);
+  }, [inputError, market, promptInputBundle, selectedSwingRuns, setOutputSourceSelection]);
+
+  useEffect(() => {
+    if (inputError) return;
+    if (hasUnsavedPromptDraft) return;
     const nextPrompt = composePrompt(basePrompt, promptInputBundle);
     setPrompt((current) => {
       if (
@@ -374,7 +381,7 @@ function RebalanceInputBox({
       }
       return current;
     });
-  }, [basePrompt, promptInputBundle, setPrompt]);
+  }, [basePrompt, inputError, promptInputBundle, setPrompt, hasUnsavedPromptDraft]);
 
   const inputCount = promptInputBundle.length.toLocaleString("en-IN");
   const inputSections = useMemo(
@@ -484,6 +491,14 @@ function RebalanceInputBox({
   }
 
   return (
+    <>
+    <RebalanceReadiness
+      market={market}
+      loading={loading} error={error}
+      portfolio={portfolioSnapshot} threats={threatAnalysis}
+      selectedSwingCount={selectedSwingRuns.reduce((count, run) => count + run.run_jobs.filter((link) => Boolean(link.job.response?.trim())).length, 0)}
+      blockedReason={inputError || (submitting ? "Submission in progress." : !prompt.trim() ? "Enter a prompt." : selectedTargets.size === 0 ? "Select at least one model." : null)}
+    />
     <Card
       className="overflow-hidden border border-gray-200 shadow-sm"
       size="sm"
@@ -570,6 +585,7 @@ function RebalanceInputBox({
                           ? promptSwingInputSection?.content.length
                           : content.length;
                       if (loading) return "Loading…";
+                      if (inputError) return "Input context unavailable";
                       if (!characterCount) return "No data";
                       if (key === "swing") {
                         return `${swingBriefStats} · ${characterCount.toLocaleString(
@@ -587,10 +603,10 @@ function RebalanceInputBox({
       </CardHeader>
       {isExpanded ? (
         <CardContent className="space-y-4 pt-4">
-          {error ? (
+          {inputError && !loading ? (
             <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
               <AlertCircle className="mt-0.5 size-4 shrink-0" />
-              <span>{error}</span>
+              <span>{inputError}</span>
             </div>
           ) : null}
 
@@ -664,12 +680,16 @@ function RebalanceInputBox({
                       {swingInputSection.description}
                     </p>
                     <p className="mt-2 text-xs font-medium text-emerald-800">
-                      {swingBriefStats} ·{" "}
-                      {selectedSwingJobCount.toLocaleString("en-IN")} of{" "}
-                      {totalSwingJobCount.toLocaleString("en-IN")} LLM outputs
-                      selected ·{" "}
-                      {selectedSwingCharacterCount.toLocaleString("en-IN")}{" "}
-                      output characters selected
+                      {loading ? "Loading selected outputs…" : inputError ? "Input context unavailable" : (
+                        <>
+                          {swingBriefStats} ·{" "}
+                          {selectedSwingJobCount.toLocaleString("en-IN")} of{" "}
+                          {totalSwingJobCount.toLocaleString("en-IN")} LLM outputs
+                          selected ·{" "}
+                          {selectedSwingCharacterCount.toLocaleString("en-IN")}{" "}
+                          output characters selected
+                        </>
+                      )}
                     </p>
                   </div>
                 </div>
@@ -692,10 +712,12 @@ function RebalanceInputBox({
                   <div className="rounded-lg border border-emerald-100 bg-white/70 p-4 text-sm text-gray-600">
                     Loading swing-trade model outputs…
                   </div>
+                ) : inputError ? (
+                  <p className="p-4 text-sm text-gray-600">Selected swing input could not be verified. Refresh Input Box to retry.</p>
                 ) : swingRuns.length === 0 ? (
                   <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded-lg border border-emerald-100 bg-white/70 p-4 font-mono text-xs leading-5 text-gray-800">
                     {swingInputSection.content ||
-                      "No completed swing-trade runs found after previous market close."}
+                      "No completed swing-trade runs selected."}
                   </pre>
                 ) : (
                   swingRuns.map((run) => {
@@ -814,13 +836,15 @@ function RebalanceInputBox({
               </div>
 
               <div className="border-t border-white/70 bg-white/65 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-500">
-                {promptSwingInputSection?.content
-                  ? `${swingBriefStats} · ${promptSwingInputSection.content.length.toLocaleString(
-                      "en-IN",
-                    )} characters in selected swing input prompt context`
-                  : loading
-                    ? "Counting characters…"
-                    : "0 runs considered · 0 LLMs considered · 0 stocks recommended · 0 characters"}
+                {loading
+                  ? "Counting characters…"
+                  : inputError
+                    ? "Input context unavailable"
+                    : promptSwingInputSection?.content
+                      ? `${swingBriefStats} · ${promptSwingInputSection.content.length.toLocaleString(
+                          "en-IN",
+                        )} characters in selected swing input prompt context`
+                      : "0 runs considered · 0 LLMs considered · 0 stocks recommended · 0 characters"}
               </div>
             </section>
           ) : null}
@@ -838,6 +862,16 @@ function RebalanceInputBox({
         </CardContent>
       ) : null}
     </Card>
+    <CreateJobCard
+      title="Create Job"
+      collapsible
+      defaultExpanded
+      runActionLabel="Run Rebalance"
+      runButtonClassName="bg-emerald-600 text-white hover:bg-emerald-500 focus-visible:border-emerald-600 focus-visible:ring-emerald-300"
+      submitBlockedReason={inputError}
+      showEstimateReadiness
+    />
+    </>
   );
 }
 
@@ -888,13 +922,6 @@ export function PortfolioRebalanceConsole({
             portfolio={portfolio}
             market={market}
             basePrompt={basePrompt}
-          />
-          <CreateJobCard
-            title="Create Job"
-            collapsible
-            defaultExpanded
-            runActionLabel="Run Rebalance"
-            runButtonClassName="bg-emerald-600 text-white hover:bg-emerald-500 focus-visible:border-emerald-600 focus-visible:ring-emerald-300"
           />
           <RecentJobsTable />
         </div>

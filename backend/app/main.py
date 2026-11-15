@@ -1,3 +1,9 @@
+
+from app.core.recovery import RecoveryMiddleware
+from app.domains.jobs.resource_body import ResourceBodyMiddleware
+
+from app.core.recovery import recovery_mode
+import json
 import time
 from contextlib import asynccontextmanager
 from os import getenv
@@ -10,39 +16,60 @@ from fastapi.responses import JSONResponse
 
 from app.core.config import settings
 from app.core.logging import configure_logging, get_logger
+from app.core.request_timing import (
+    add_serialization_duration,
+    begin_request_timing,
+    current_request_timing,
+    end_request_timing,
+)
 from app.core.seed import seed_system_prompts
 from app.domains.ai_providers.router import router as providers_router
 from app.domains.api_usage.router import router as api_usage_router
 from app.domains.auth.router import router as auth_router
+from app.domains.sports_rankings.router import router as sports_rankings_router
+from app.domains.bullpen_run_audit.router import router as bullpen_run_audit_router
+from app.domains.bullpen008.router import router as bullpen008_router
+from app.domains.bullpen_trade_analysis.router import (
+    router as bullpen_trade_analysis_router,
+)
+from app.domains.cost_drivers.router import router as cost_drivers_router
+from app.domains.dashboard.router import router as dashboard_router
 from app.domains.google_sheets.router import router as google_sheets_router
 from app.domains.indmoney_us.events_router import router as indmoney_us_events_router
 from app.domains.indmoney_us.router import router as indmoney_us_router
 from app.domains.indmoney_us.threats_router import router as indmoney_us_threats_router
 from app.domains.health.router import router as health_router
 from app.domains.jobs.router import router as jobs_router
+from app.domains.mails.router import router as mails_router
 from app.domains.jobs.ws_router import router as jobs_ws_router
 from app.domains.polymarket.router import router as polymarket_router
+from app.domains.polymarket.runtime_broker import (
+    close_bullpen_runtime_broker,
+    get_bullpen_runtime_broker,
+)
+from app.domains.polymarket.runtime_positions_refresh import (
+    install_bullpen_ui_positions_refresh,
+)
 from app.domains.polymarket.service import polymarket_bot_manager
+from app.domains.polymarket_auto_live.router import router as polymarket_auto_live_router
+from app.domains.polymarket_auto_live.service import polymarket_auto_live_bot_manager
+from app.domains.polymarket_direct.router import router as polymarket_direct_router
+from app.domains.polymarket_direct.service import polymarket_direct_bot_manager
 from app.domains.prompts.router import router as prompts_router
 from app.domains.runs.router import router as runs_router
 from app.domains.runs.ws_router import router as runs_ws_router
+from app.domains.trading_bots.router import router as trading_bots_router
 from app.domains.zerodha.router import router as zerodha_router
 from app.domains.zerodha.events_router import router as zerodha_events_router
 from app.domains.zerodha.threats_router import router as zerodha_threats_router
 from app.infrastructure.database.session import AsyncSessionLocal, async_engine
+from app.infrastructure.database.errors import database_is_unavailable
 from app.shared.exceptions import AppException
 
-# Ensure all ORM models are registered with the shared metadata
-from app.domains.auth.models import User, UserProfile, UserSession, APIKey, ActivityLog  # noqa: F401
-from app.domains.google_sheets.models import GoogleSheetsAppConfig, GoogleSheetsCredential  # noqa: F401
-from app.domains.indmoney_us.models import IndMoneyUsPortfolioSnapshot  # noqa: F401
-from app.domains.jobs.models import Job  # noqa: F401
-from app.domains.prompts.models import Prompt  # noqa: F401
-from app.domains.runs.models import Run, RunJob  # noqa: F401
-from app.domains.zerodha.audit import ZerodhaAuditLog  # noqa: F401
-from app.domains.zerodha.models import ZerodhaCredential, ZerodhaPortfolioSnapshot  # noqa: F401
-from app.infrastructure.database.outbox.models import OutboxMessage  # noqa: F401
+# Ensure all ORM models are registered with the shared metadata.
+from app.models import *  # noqa: F401,F403
 
+install_bullpen_ui_positions_refresh()
 configure_logging()
 logger = get_logger(__name__)
 
@@ -93,10 +120,22 @@ cors_allowed_origins = _build_cors_allowed_origins()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    recovery_mode()  # Refuse malformed recovery configuration before startup work.
+    from app.domains.auth.session_startup import require_session_schema
+    async with AsyncSessionLocal() as session_schema_db:
+        await require_session_schema(session_schema_db)
     logger.info("Starting AI Investment Platform Backend")
-    logger.info("Database: %s", settings.database_url.split("@")[-1])
-    logger.info("Redis: %s", settings.redis_url)
+    logger.info("Database configured: %s", bool(settings.database_url))
+    logger.info("Redis configured: %s", bool(settings.redis_url))
     logger.info("CORS allowed origins: %s", cors_allowed_origins)
+    get_bullpen_runtime_broker().validate_startup()
+    # Do not terminalize persisted Auto-Live runs during FastAPI startup.
+    # Late-acknowledged Celery work may still be queued/reserved while systemd
+    # restarts services. The dedicated Auto-Live worker schedules lifecycle-
+    # aware recovery after a redelivery/heartbeat grace period instead.
+    logger.info(
+        "Auto-Live restart recovery is deferred to the dedicated worker grace period."
+    )
 
     # Seed default prompts (idempotent — only inserts if missing)
     async with AsyncSessionLocal() as db:
@@ -105,11 +144,28 @@ async def lifespan(app: FastAPI):
     yield
 
     await polymarket_bot_manager.shutdown()
+    await polymarket_auto_live_bot_manager.shutdown()
+    await polymarket_direct_bot_manager.shutdown()
+    await close_bullpen_runtime_broker()
     await async_engine.dispose()
     logger.info("Shutdown complete")
 
 
-app = FastAPI(title=settings.app_name, version=settings.version, lifespan=lifespan)
+class TimedJSONResponse(JSONResponse):
+    def render(self, content) -> bytes:
+        started_at = time.monotonic()
+        try:
+            return super().render(content)
+        finally:
+            add_serialization_duration((time.monotonic() - started_at) * 1000)
+
+
+app = FastAPI(
+    title=settings.app_name,
+    version=settings.version,
+    lifespan=lifespan,
+    default_response_class=TimedJSONResponse,
+)
 
 
 # ── Exception handlers ────────────────────────────────────────────────────────
@@ -125,6 +181,13 @@ async def app_exception_handler(request: Request, exc: AppException):
 
 @app.exception_handler(Exception)
 async def general_exception_handler(request: Request, exc: Exception):
+    if database_is_unavailable(exc):
+        logger.error("Database unavailable", exc_info=exc)
+        return JSONResponse(
+            status_code=503,
+            headers={"Retry-After": "3", "Cache-Control": "no-store"},
+            content={"error": "DATABASE_UNAVAILABLE", "message": "The service is temporarily unavailable. Please retry shortly."},
+        )
     logger.error("Unhandled exception", exc_info=exc)
     return JSONResponse(
         status_code=500,
@@ -134,24 +197,94 @@ async def general_exception_handler(request: Request, exc: Exception):
 
 # ── Middleware ────────────────────────────────────────────────────────────────
 
+SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+}
+PRODUCTION_ENVIRONMENTS = {"production", "prod"}
+
+
+def _request_is_https(request: Request) -> bool:
+    forwarded_proto = request.headers.get("x-forwarded-proto", "")
+    return request.url.scheme == "https" or forwarded_proto.split(",", 1)[0].strip() == "https"
+
+
+def _add_security_headers(request: Request, response):
+    for header, value in SECURITY_HEADERS.items():
+        response.headers.setdefault(header, value)
+
+    if settings.environment.lower() in PRODUCTION_ENVIRONMENTS and _request_is_https(request):
+        response.headers.setdefault(
+            "Strict-Transport-Security",
+            "max-age=63072000; includeSubDomains; preload",
+        )
+
+
+@app.middleware("http")
+async def security_headers_middleware(request: Request, call_next):
+    response = await call_next(request)
+    _add_security_headers(request, response)
+    return response
+
+
 @app.middleware("http")
 async def correlation_id_middleware(request: Request, call_next):
     corr_id = request.headers.get("X-Correlation-ID", str(uuid4()))
     request.state.correlation_id = corr_id
     start = time.monotonic()
-    response = await call_next(request)
-    duration_ms = (time.monotonic() - start) * 1000
-    logger.debug(
-        "%s %s %s %.2fms corr=%s",
-        request.method,
-        request.url.path,
-        response.status_code,
-        duration_ms,
-        corr_id,
-    )
-    response.headers["X-Correlation-ID"] = corr_id
-    return response
+    timing_token = begin_request_timing()
+    try:
+        response = await call_next(request)
+        duration_ms = (time.monotonic() - start) * 1000
+        timing = current_request_timing()
+        if timing is not None:
+            response.headers["Server-Timing"] = ", ".join(
+                (
+                    f'app;dur={duration_ms:.2f}',
+                    f'auth;dur={timing.auth_ms:.2f}',
+                    f'db;dur={timing.db_ms:.2f};desc="{timing.db_queries} queries"',
+                    f'redis;dur={timing.redis_ms:.2f}',
+                    f'external;dur={timing.external_ms:.2f}',
+                    f'serialize;dur={timing.serialization_ms:.2f}',
+                )
+            )
+        response.headers["X-Correlation-ID"] = corr_id
+        response_bytes = response.headers.get("content-length")
+        logger.info(
+            "request_performance %s",
+            json.dumps(
+                {
+                    "method": request.method,
+                    "path": request.url.path,
+                    "status": response.status_code,
+                    "correlation_id": corr_id,
+                    "total_ms": round(duration_ms, 2),
+                    "auth_ms": round(timing.auth_ms, 2) if timing else 0,
+                    "db_query_count": timing.db_queries if timing else 0,
+                    "db_ms": round(timing.db_ms, 2) if timing else 0,
+                    "redis_ms": round(timing.redis_ms, 2) if timing else 0,
+                    "external_ms": round(timing.external_ms, 2) if timing else 0,
+                    "serialization_ms": (
+                        round(timing.serialization_ms, 2) if timing else 0
+                    ),
+                    "response_bytes": (
+                        int(response_bytes)
+                        if response_bytes and response_bytes.isdigit()
+                        else None
+                    ),
+                },
+                separators=(",", ":"),
+            ),
+        )
+        return response
+    finally:
+        end_request_timing(timing_token)
 
+
+app.add_middleware(RecoveryMiddleware)
+app.add_middleware(ResourceBodyMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
@@ -159,6 +292,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["Server-Timing", "X-Correlation-ID", "ETag"],
 )
 
 
@@ -166,18 +300,30 @@ app.add_middleware(
 
 app.include_router(health_router)
 app.include_router(auth_router)
+app.include_router(sports_rankings_router)
+app.include_router(bullpen_run_audit_router)
+app.include_router(bullpen008_router)
+app.include_router(bullpen_trade_analysis_router)
+app.include_router(cost_drivers_router)
+app.include_router(dashboard_router)
 app.include_router(google_sheets_router)
 app.include_router(indmoney_us_events_router)
 app.include_router(indmoney_us_router)
 app.include_router(indmoney_us_threats_router)
 app.include_router(jobs_router)
 app.include_router(jobs_ws_router)
+app.include_router(mails_router)
 app.include_router(polymarket_router)
+app.include_router(polymarket_auto_live_router)
+app.include_router(polymarket_direct_router)
 app.include_router(prompts_router)
 app.include_router(providers_router)
 app.include_router(api_usage_router)
+from app.domains.recommendation_audit.router import router as recommendation_audit_router
+app.include_router(recommendation_audit_router)
 app.include_router(runs_router)
 app.include_router(runs_ws_router)
+app.include_router(trading_bots_router)
 app.include_router(zerodha_events_router)
 app.include_router(zerodha_router)
 app.include_router(zerodha_threats_router)

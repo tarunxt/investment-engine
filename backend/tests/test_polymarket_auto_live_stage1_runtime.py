@@ -1,0 +1,958 @@
+import asyncio
+import os
+from datetime import UTC, datetime
+from types import SimpleNamespace
+
+import pytest
+
+os.environ.setdefault(
+    "DATABASE_URL",
+    "postgresql+asyncpg://test:test@localhost:5432/testdb",
+)
+os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
+
+from app.domains.polymarket_auto_live.console_profile import (
+    CONSOLE_DISCOVER_TIMEOUT_SECONDS,
+    CONSOLE_POSITIONS_TIMEOUT_SECONDS,
+    CONSOLE_POSITIONS_TIMEOUT_ENV_VAR,
+    read_console_wallet_positions,
+    console_market_filter_reasons,
+    scan_console_profile_markets,
+)
+from app.domains.polymarket_auto_live.execution import refresh_balance
+from app.domains.polymarket_auto_live.scanner import (
+    ScanResult,
+    ScannedMarket,
+    _fetch_gamma_deadline_cursor_page,
+    _fetch_gamma_keyset_page,
+    _fetch_gamma_page,
+    scan_candidate_markets,
+)
+from app.domains.polymarket_auto_live.schemas import (
+    BullpenAutoLiveRun,
+    BullpenAutoLiveState,
+)
+from app.domains.polymarket_auto_live.tasks import (
+    AutoLiveRunCancelled,
+    persist_auto_live_progress_sync,
+)
+
+
+def test_console_profile_custom_phrases_exclude_matching_market_context():
+    market = ScannedMarket(
+        market_id="praise-market",
+        question="Will Trump publicly Praise someone in August?",
+        market_url=None,
+        slug="will-trump-praise-someone",
+        close_time="2026-09-01T00:00:00Z",
+        theme="Politics",
+        current_yes_odds=50,
+        current_no_odds=50,
+        volume_usd=None,
+        liquidity_usd=None,
+        description=None,
+        outcome_labels=["Yes", "No"],
+        event_slug=None,
+        best_bid_cents=None,
+        best_ask_cents=None,
+        spread_cents=None,
+        raw={},
+    )
+
+    reasons = console_market_filter_reasons(
+        market,
+        now=datetime(2026, 8, 30, tzinfo=UTC),
+        custom_exclude_phrases=["Praise", "Praises"],
+    )
+
+    assert 'Excluded by custom phrase "Praise".' in reasons
+
+
+@pytest.mark.anyio
+async def test_console_profile_scan_uses_fast_timeout_without_login_wait(
+    monkeypatch,
+):
+    captured: dict[str, object] = {}
+    gamma_called = False
+
+    async def fake_run_first_bullpen_json(
+        _command_variants,
+        *,
+        timeout_seconds: int,
+        extra_env=None,
+        wait_for_login: bool = True,
+    ):
+        captured["timeout_seconds"] = timeout_seconds
+        captured["wait_for_login"] = wait_for_login
+        return {
+            "markets": [
+                {
+                    "id": "market-fast-scan",
+                    "question": "Will the fast Stage 1 scan finish?",
+                    "slug": "will-the-fast-stage-1-scan-finish",
+                    "endDate": "2026-07-19T00:00:00Z",
+                    "outcomes": "[\"Yes\", \"No\"]",
+                    "outcomePrices": "[0.05, 0.95]",
+                    "volume": 7000,
+                    "liquidity": 1000,
+                    "volume24hr": 500,
+                    "spread": 0.02,
+                }
+            ]
+        }
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.console_profile.run_first_bullpen_json",
+        fake_run_first_bullpen_json,
+    )
+
+    async def forbidden_gamma(*_args, **_kwargs):
+        nonlocal gamma_called
+        gamma_called = True
+        raise AssertionError("Trending must not invoke the catalogue scan")
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.console_profile.scan_candidate_markets",
+        forbidden_gamma,
+    )
+
+    result = await scan_console_profile_markets(
+        now=datetime(2026, 7, 18, 12, 0, tzinfo=UTC),
+    )
+
+    assert captured == {
+        "timeout_seconds": CONSOLE_DISCOVER_TIMEOUT_SECONDS,
+        "wait_for_login": False,
+    }
+    assert result.source_label == "Bullpen CLI"
+    assert result.total_candidates == 1
+    assert len(result.accepted) == 1
+    assert gamma_called is False
+    assert result.complete_universe is False
+
+
+@pytest.mark.anyio
+async def test_console_profile_scan_falls_back_to_empty_set_after_bounded_scan_failure(
+    monkeypatch,
+):
+    async def fail_cli(*_args, **_kwargs):
+        raise RuntimeError("Bullpen CLI unavailable")
+
+    async def hang_gamma(*_args, **_kwargs):
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.console_profile.run_first_bullpen_json",
+        fail_cli,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.console_profile.scan_candidate_markets",
+        hang_gamma,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.console_profile.CONSOLE_GAMMA_SCAN_TIMEOUT_SECONDS",
+        0.01,
+    )
+
+    result = await scan_console_profile_markets(
+        now=datetime(2026, 7, 18, 12, 0, tzinfo=UTC),
+        gamma_scan_timeout_seconds=0.01,
+    )
+
+    assert result.accepted == []
+    assert result.rejected == []
+    assert result.total_candidates == 0
+    assert result.warning == (
+        "Bullpen CLI and Gamma scan failed; continuing with no Stage 1 candidates."
+    )
+
+
+@pytest.mark.anyio
+async def test_keyset_scan_preserves_successful_pages_after_later_page_failure(
+    monkeypatch,
+):
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+    market = ScannedMarket(
+        market_id="preserved-market",
+        question="Will the first page be preserved?",
+        market_url=None,
+        slug="preserved-market",
+        close_time="2026-09-30T00:00:00Z",
+        theme="Other",
+        current_yes_odds=50,
+        current_no_odds=50,
+        volume_usd=None,
+        liquidity_usd=None,
+        description=None,
+        outcome_labels=["Yes", "No"],
+        event_slug=None,
+        best_bid_cents=None,
+        best_ask_cents=None,
+        spread_cents=None,
+        raw={"id": "preserved-market"},
+    )
+    calls = 0
+
+    async def fake_keyset_page(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return [{"id": "preserved-market"}], "page-2"
+        raise RuntimeError("page 2 unavailable")
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.scanner.httpx.AsyncClient",
+        lambda **_kwargs: FakeClient(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.scanner._fetch_gamma_keyset_page",
+        fake_keyset_page,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.scanner._normalize_market",
+        lambda *_args, **_kwargs: market,
+    )
+
+    result = await scan_candidate_markets(
+        min_liquidity_usd=0,
+        apply_base_filters=False,
+        use_keyset_pagination=True,
+        preserve_partial_on_error=True,
+    )
+
+    assert [row.market_id for row in result.accepted] == ["preserved-market"]
+    assert result.complete_universe is False
+    assert result.warning is not None
+    assert result.details == "page 2 unavailable"
+
+
+@pytest.mark.anyio
+async def test_console_wallet_positions_use_fast_timeout_without_login_wait(
+    monkeypatch,
+):
+    captured: dict[str, object] = {}
+
+    class FakeBroker:
+        async def get_positions_snapshot(
+            self,
+            *,
+            force_fresh: bool,
+            caller_source: str,
+            max_age_seconds: int,
+            timeout_seconds: int,
+        ):
+            captured["force_fresh"] = force_fresh
+            captured["caller_source"] = caller_source
+            captured["max_age_seconds"] = max_age_seconds
+            captured["timeout_seconds"] = timeout_seconds
+            return SimpleNamespace(
+                payload={
+                    "positions": [
+                        {
+                            "slug": "fast-wallet-position",
+                            "market": "Fast wallet position",
+                            "outcome": "No",
+                            "shares": 4,
+                            "avg_price": 0.45,
+                            "current_price": 0.4,
+                            "invested_usd": 1.8,
+                            "end_date": "2026-07-19T00:00:00+00:00",
+                        }
+                    ]
+                },
+                source="fresh",
+                fetched_at="2026-07-19T00:00:00+00:00",
+                diagnostics=SimpleNamespace(
+                    model_dump=lambda **_kwargs: {"source": "fresh"}
+                ),
+            )
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.console_profile.get_bullpen_runtime_broker",
+        lambda: FakeBroker(),
+    )
+
+    positions = await read_console_wallet_positions()
+
+    assert captured == {
+        "force_fresh": True,
+        "caller_source": "console-wallet",
+        "max_age_seconds": CONSOLE_POSITIONS_TIMEOUT_SECONDS,
+        "timeout_seconds": CONSOLE_POSITIONS_TIMEOUT_SECONDS,
+    }
+    assert len(positions) == 1
+    assert positions[0].slug == "fast-wallet-position"
+
+
+@pytest.mark.anyio
+async def test_console_wallet_positions_allow_timeout_env_override(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class FakeBroker:
+        async def get_positions_snapshot(
+            self,
+            *,
+            force_fresh: bool,
+            caller_source: str,
+            max_age_seconds: int,
+            timeout_seconds: int,
+        ):
+            captured["force_fresh"] = force_fresh
+            captured["caller_source"] = caller_source
+            captured["max_age_seconds"] = max_age_seconds
+            captured["timeout_seconds"] = timeout_seconds
+            return SimpleNamespace(
+                payload={
+                    "positions": [
+                        {
+                            "slug": "env-timeout-wallet-position",
+                            "market": "Env timeout wallet position",
+                            "outcome": "Yes",
+                            "shares": 2,
+                            "avg_price": 0.51,
+                            "current_price": 0.55,
+                            "invested_usd": 1.02,
+                            "end_date": "2026-07-19T00:00:00+00:00",
+                        }
+                    ]
+                },
+                source="fresh",
+                fetched_at="2026-07-19T00:00:00+00:00",
+                diagnostics=SimpleNamespace(
+                    model_dump=lambda **_kwargs: {"source": "fresh"}
+                ),
+            )
+
+    monkeypatch.setenv(CONSOLE_POSITIONS_TIMEOUT_ENV_VAR, "27")
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.console_profile.get_bullpen_runtime_broker",
+        lambda: FakeBroker(),
+    )
+
+    positions = await read_console_wallet_positions()
+
+    assert captured == {
+        "force_fresh": True,
+        "caller_source": "console-wallet",
+        "max_age_seconds": CONSOLE_POSITIONS_TIMEOUT_SECONDS,
+        "timeout_seconds": 27,
+    }
+    assert len(positions) == 1
+    assert positions[0].slug == "env-timeout-wallet-position"
+
+
+@pytest.mark.anyio
+async def test_console_wallet_positions_reuse_provided_snapshot_payload_without_refetch(
+    monkeypatch,
+):
+    broker_called = False
+
+    class FakeBroker:
+        async def get_positions_snapshot(self, **_kwargs):
+            nonlocal broker_called
+            broker_called = True
+            raise AssertionError("Broker should not be called when snapshot payload is supplied")
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.console_profile.get_bullpen_runtime_broker",
+        lambda: FakeBroker(),
+    )
+
+    positions = await read_console_wallet_positions(
+        snapshot_payload={
+            "positions": [
+                {
+                    "slug": "snapshot-wallet-position",
+                    "market": "Snapshot wallet position",
+                    "outcome": "No",
+                    "shares": 5,
+                    "avg_price": 0.37,
+                    "current_price": 0.41,
+                    "invested_usd": 1.85,
+                    "end_date": "2026-07-21T00:00:00+00:00",
+                }
+            ]
+        }
+    )
+
+    assert broker_called is False
+    assert len(positions) == 1
+    assert positions[0].slug == "snapshot-wallet-position"
+
+
+@pytest.mark.anyio
+async def test_auto_live_refresh_balance_skips_interactive_login_wait(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class FakeBalanceReader:
+        async def refresh(self, *, wait_for_login: bool = True):
+            captured["wait_for_login"] = wait_for_login
+            return SimpleNamespace(status="ready")
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.execution.BullpenBalanceReader",
+        lambda: FakeBalanceReader(),
+    )
+
+    balance_state = await refresh_balance()
+
+    assert captured == {"wait_for_login": False}
+    assert balance_state.status == "ready"
+
+
+def test_persist_auto_live_progress_sync_rejects_user_cancelled_run():
+    cancelled_run = BullpenAutoLiveRun(
+        id="run-cancelled-during-stage1",
+        triggered_by="manual",
+        status="failed",
+        dry_run=True,
+        started_at="2026-07-18T17:46:00+00:00",
+        completed_at="2026-07-18T17:47:00+00:00",
+        summary="Auto-Live run cancelled by user.",
+        error_message="Cancelled by user",
+    )
+    worker_run = BullpenAutoLiveRun(
+        id="run-cancelled-during-stage1",
+        triggered_by="manual",
+        status="running",
+        dry_run=True,
+        started_at="2026-07-18T17:46:00+00:00",
+        summary="Stage 1 started. Bullpen scan is preparing the candidate fetch.",
+    )
+    saved_calls: list[str] = []
+
+    class FakeRepo:
+        def get_run_for_update(self, run_id: str):
+            assert run_id == worker_run.id
+            return cancelled_run
+
+        def get_run(self, run_id: str):
+            raise AssertionError("worker cancellation checks must refresh and lock the run")
+
+        def save_run(self, user_id: int, run: BullpenAutoLiveRun) -> None:
+            saved_calls.append(f"save_run:{user_id}:{run.id}")
+
+        def replace_run_decisions_from_stage3_payload(self, user_id: int, run) -> None:
+            saved_calls.append(f"replace:{user_id}:{run.id}")
+
+        def save_state(self, user_id: int, state) -> None:
+            saved_calls.append(f"save_state:{user_id}:{state.last_run_id}")
+
+    class FakeSession:
+        def __init__(self) -> None:
+            self.committed = False
+
+        def commit(self) -> None:
+            self.committed = True
+
+    session = FakeSession()
+
+    with pytest.raises(AutoLiveRunCancelled):
+        persist_auto_live_progress_sync(
+            user_id=7,
+            repo=FakeRepo(),
+            session=session,
+            run=worker_run,
+            state=BullpenAutoLiveState(running=True, last_run_id=worker_run.id),
+        )
+
+    assert saved_calls == []
+    assert session.committed is False
+
+
+@pytest.mark.anyio
+async def test_gamma_page_uses_active_event_catalog_and_flattens_markets():
+    captured: dict[str, object] = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return [
+                {
+                    "id": "event-1",
+                    "slug": "event-one",
+                    "title": "Event one",
+                    "active": True,
+                    "archived": False,
+                    "closed": False,
+                    "markets": [
+                        {
+                            "id": "market-1",
+                            "question": "Will event one happen?",
+                            "active": True,
+                            "archived": False,
+                            "closed": False,
+                        }
+                    ],
+                }
+            ]
+
+    class FakeClient:
+        async def get(self, url, *, params):
+            captured["url"] = url
+            captured["params"] = params
+            return FakeResponse()
+
+    rows, event_count = await _fetch_gamma_page(
+        FakeClient(),
+        offset=1_500,
+        end_date_min="2026-08-24T00:00:00+00:00",
+    )
+
+    assert event_count == 1
+    assert rows[0]["id"] == "market-1"
+    assert rows[0]["events"] == [
+        {"id": "event-1", "slug": "event-one", "title": "Event one"}
+    ]
+    assert captured["url"] == "https://gamma-api.polymarket.com/events"
+    assert captured["params"] == {
+        "active": "true",
+        "archived": "false",
+        "closed": "false",
+        "end_date_min": "2026-08-24T00:00:00+00:00",
+        "limit": "100",
+        "offset": "1500",
+    }
+
+
+@pytest.mark.anyio
+async def test_gamma_scan_continues_past_legacy_1500_market_cutoff(monkeypatch):
+    requested_offsets: list[int] = []
+    target_question = "Will Iran target a Arab country on August 30, 2026?"
+
+    def row(index: int, *, question: str | None = None) -> dict[str, object]:
+        return {
+            "id": f"market-{index}",
+            "question": question or f"Will candidate {index} happen?",
+            "slug": f"market-{index}",
+            "endDate": "2026-08-30T20:59:59Z",
+            "outcomes": '["Yes", "No"]',
+            "outcomePrices": "[0.10, 0.90]",
+            "active": True,
+            "archived": False,
+            "closed": False,
+        }
+
+    async def fake_fetch_gamma_page(
+        _client,
+        *,
+        offset: int,
+        end_date_min: str,
+    ):
+        assert end_date_min
+        requested_offsets.append(offset)
+        if offset < 2_000:
+            return [row(index) for index in range(offset, offset + 100)], 100
+        if offset == 2_000:
+            return [row(2_000, question=target_question)], 1
+        return [], 0
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.scanner._fetch_gamma_page",
+        fake_fetch_gamma_page,
+    )
+
+    result = await scan_candidate_markets(min_liquidity_usd=0)
+
+    assert requested_offsets == [
+        *range(0, 2_001, 100),
+        2_001,
+    ]
+    assert len(result.accepted) == 2_001
+    assert any(market.question == target_question for market in result.accepted)
+
+
+@pytest.mark.anyio
+async def test_gamma_keyset_page_uses_cursor_and_returns_nested_markets():
+    captured: dict[str, object] = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "events": [
+                    {
+                        "id": "event-1",
+                        "slug": "event-one",
+                        "title": "Event one",
+                        "active": True,
+                        "closed": False,
+                        "archived": False,
+                        "markets": [
+                            {
+                                "id": "market-1",
+                                "question": "Will event one happen?",
+                                "active": True,
+                                "closed": False,
+                                "archived": False,
+                            }
+                        ],
+                    }
+                ],
+                "next_cursor": "cursor-2",
+            }
+
+    class FakeClient:
+        async def get(self, url, *, params):
+            captured["url"] = url
+            captured["params"] = params
+            return FakeResponse()
+
+    rows, next_cursor = await _fetch_gamma_keyset_page(
+        FakeClient(),
+        after_cursor="cursor-1",
+        end_date_min="2026-08-30T00:00:00+00:00",
+    )
+
+    assert captured == {
+        "url": "https://gamma-api.polymarket.com/events/keyset",
+        "params": {
+            "archived": "false",
+            "closed": "false",
+            "end_date_min": "2026-08-30T00:00:00+00:00",
+            "limit": "500",
+            "after_cursor": "cursor-1",
+        },
+    }
+    assert rows[0]["id"] == "market-1"
+    assert rows[0]["events"] == [
+        {"id": "event-1", "slug": "event-one", "title": "Event one"}
+    ]
+    assert next_cursor == "cursor-2"
+
+    await _fetch_gamma_keyset_page(
+        FakeClient(),
+        after_cursor=None,
+        end_date_min=None,
+    )
+    assert "end_date_min" not in captured["params"]
+
+
+@pytest.mark.anyio
+async def test_console_scans_expand_parent_events_before_child_deadline_filter(monkeypatch):
+    captured: dict[str, object] = {}
+
+    async def fake_scan_candidate_markets(**kwargs):
+        captured.update(kwargs)
+        return ScanResult(
+            source_label="Gamma",
+            source_url="https://gamma-api.polymarket.com/events",
+            scanned_at="2026-09-05T00:00:00+00:00",
+            accepted=[],
+            rejected=[],
+        )
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.console_profile.run_first_bullpen_json",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("CLI unavailable")),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.console_profile.scan_candidate_markets",
+        fake_scan_candidate_markets,
+    )
+
+    await scan_console_profile_markets(
+        now=datetime(2026, 9, 5, tzinfo=UTC),
+        min_market_odds=0,
+        max_closing_days=7,
+        scan_scope="full_universe",
+    )
+
+    assert captured["filter_parent_deadlines"] is False
+    assert captured["apply_base_filters"] is False
+
+
+@pytest.mark.anyio
+async def test_008_keyset_scan_follows_every_cursor(monkeypatch):
+    requested_cursors: list[str | None] = []
+
+    def row(index: int) -> dict[str, object]:
+        return {
+            "id": f"market-{index}",
+            "question": f"Will candidate {index} happen?",
+            "slug": f"market-{index}",
+            "endDate": "2026-09-30T20:59:59Z",
+            "outcomes": '["Yes", "No"]',
+            "outcomePrices": "[0.10, 0.90]",
+            "active": True,
+            "archived": False,
+            "closed": False,
+        }
+
+    async def fake_fetch_keyset_page(
+        _client,
+        *,
+        after_cursor: str | None,
+        end_date_min: str,
+    ):
+        assert end_date_min
+        requested_cursors.append(after_cursor)
+        if after_cursor is None:
+            return [row(1)], "cursor-2"
+        return [row(2)], None
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.scanner._fetch_gamma_keyset_page",
+        fake_fetch_keyset_page,
+    )
+
+    result = await scan_candidate_markets(
+        min_liquidity_usd=0,
+        apply_base_filters=False,
+        use_keyset_pagination=True,
+    )
+
+    assert requested_cursors == [None, "cursor-2"]
+    assert [market.market_id for market in result.accepted] == [
+        "market-1",
+        "market-2",
+    ]
+
+
+@pytest.mark.anyio
+async def test_008_deadline_cursor_scan_advances_boundary_offset(monkeypatch):
+    # Freeze the scan clock before these fixed fixture deadlines. The test
+    # verifies cursor transitions, not expiry relative to the CI wall clock.
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.scanner._now_iso",
+        lambda: "2026-09-01T00:00:00+00:00",
+    )
+    requested_pages: list[tuple[str, int]] = []
+
+    def row(index: int) -> dict[str, object]:
+        return {
+            "id": f"deadline-market-{index}",
+            "question": f"Will deadline candidate {index} happen?",
+            "slug": f"deadline-market-{index}",
+            "endDate": "2026-09-30T20:59:59Z",
+            "outcomes": '["Yes", "No"]',
+            "outcomePrices": "[0.10, 0.90]",
+            "active": True,
+            "archived": False,
+            "closed": False,
+        }
+
+    async def fake_fetch_deadline_page(
+        _client,
+        *,
+        offset: int,
+        end_date_min: str,
+    ):
+        requested_pages.append((end_date_min, offset))
+        page = len(requested_pages) - 1
+        if page < 4:
+            deadline = (
+                "2026-09-30T20:59:59Z"
+                if page < 3
+                else "2026-10-31T20:59:59Z"
+            )
+            boundary = 500 if page < 3 else 5
+            return (
+                [row(page * 500 + index) for index in range(500)],
+                500,
+                deadline,
+                boundary,
+            )
+        return [row(2000)], 1, "2026-11-30T20:59:59Z", 1
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.scanner._fetch_gamma_deadline_cursor_page",
+        fake_fetch_deadline_page,
+    )
+
+    result = await scan_candidate_markets(
+        min_liquidity_usd=0,
+        apply_base_filters=False,
+        use_deadline_cursor_pagination=True,
+    )
+
+    assert requested_pages[:3] == [
+        (requested_pages[0][0], 0),
+        (requested_pages[0][0], 500),
+        (requested_pages[0][0], 1000),
+    ]
+    assert requested_pages[3] == (requested_pages[0][0], 1500)
+    assert requested_pages[4] == ("2026-10-31T20:59:59Z", 5)
+    assert len(result.accepted) == 2001
+
+
+@pytest.mark.anyio
+async def test_gamma_deadline_cursor_page_orders_and_reports_boundary():
+    captured: dict[str, object] = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return [
+                {
+                    "id": "event-1",
+                    "slug": "event-one",
+                    "title": "Event one",
+                    "endDate": "2026-09-30T20:59:59Z",
+                    "active": True,
+                    "closed": False,
+                    "archived": False,
+                    "markets": [{"id": "market-1", "question": "Question one?"}],
+                },
+                {
+                    "id": "event-2",
+                    "slug": "event-two",
+                    "title": "Event two",
+                    "endDate": "2026-10-31T20:59:59Z",
+                    "active": True,
+                    "closed": False,
+                    "archived": False,
+                    "markets": [{"id": "market-2", "question": "Question two?"}],
+                },
+            ]
+
+    class FakeClient:
+        async def get(self, url, *, params):
+            captured["url"] = url
+            captured["params"] = params
+            return FakeResponse()
+
+    rows, count, deadline, boundary_count = await _fetch_gamma_deadline_cursor_page(
+        FakeClient(),
+        offset=7,
+        end_date_min="2026-09-30T00:00:00+00:00",
+    )
+
+    assert captured["url"] == "https://gamma-api.polymarket.com/events"
+    assert captured["params"] == {
+        "active": "true",
+        "archived": "false",
+        "closed": "false",
+        "end_date_min": "2026-09-30T00:00:00+00:00",
+        "limit": "500",
+        "offset": "7",
+        "order": "endDate",
+        "ascending": "true",
+    }
+    assert [row["id"] for row in rows] == ["market-1", "market-2"]
+    assert (count, deadline, boundary_count) == (
+        2,
+        "2026-10-31T20:59:59+00:00",
+        1,
+    )
+
+
+@pytest.mark.anyio
+async def test_console_scan_does_not_treat_large_cli_payload_as_complete(monkeypatch):
+    target_question = "Will Iran target a Arab country on August 30, 2026?"
+    cli_rows = [
+        {
+            "id": f"cli-market-{index}",
+            "question": f"Will CLI candidate {index} happen?",
+            "slug": f"cli-market-{index}",
+            "endDate": "2026-08-30T20:59:59Z",
+            "outcomes": '["Yes", "No"]',
+            "outcomePrices": "[0.10, 0.90]",
+        }
+        for index in range(1_000)
+    ]
+
+    async def fake_run_first_bullpen_json(*_args, **_kwargs):
+        return {"markets": cli_rows}
+
+    target_market = ScannedMarket(
+        market_id="iran-arab-country-august-30",
+        question=target_question,
+        market_url="https://polymarket.com/event/will-iran-target-a-arab-country-onptptpt-20260801004719118",
+        slug="will-iran-target-a-arab-country-on-august-30-2026",
+        close_time="2026-08-30T20:59:59+00:00",
+        theme="World",
+        current_yes_odds=5.0,
+        current_no_odds=95.0,
+        volume_usd=7_000.0,
+        liquidity_usd=1_000.0,
+        volume_24hr_usd=500.0,
+        description=None,
+        outcome_labels=["Yes", "No"],
+        event_slug="will-iran-target-a-arab-country-onptptpt-20260801004719118",
+        best_bid_cents=9.0,
+        best_ask_cents=11.0,
+        spread_cents=2.0,
+    )
+
+    gamma_call: dict[str, object] = {}
+
+    async def fake_scan_candidate_markets(**kwargs):
+        gamma_call.update(kwargs)
+        return ScanResult(
+            source_label="Polymarket Gamma API",
+            source_url="https://gamma-api.polymarket.com/markets",
+            scanned_at="2026-08-24T00:00:00+00:00",
+            accepted=[target_market],
+            rejected=[],
+        )
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.console_profile.run_first_bullpen_json",
+        fake_run_first_bullpen_json,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.console_profile.scan_candidate_markets",
+        fake_scan_candidate_markets,
+    )
+
+    result = await scan_console_profile_markets(
+        now=datetime(2026, 8, 24, 0, 0, tzinfo=UTC),
+        scan_scope="full_universe",
+    )
+
+    assert result.source_label == "Bullpen + Polymarket Full Universe"
+    assert result.total_candidates == 1_001
+    assert target_question in [market.question for market in result.accepted]
+    assert gamma_call["use_keyset_pagination"] is True
+    assert gamma_call["preserve_partial_on_error"] is True
+    assert result.complete_universe is True
+    assert result.trending_candidates == 1_000
+    assert result.catalogue_candidates == 1
+
+
+def test_full_universe_scan_incompleteness_blocks_stage2_buy_authority():
+    from app.domains.polymarket_auto_live.engine import (
+        apply_full_universe_scan_completeness,
+        build_console_stage2_universe_status,
+    )
+
+    status = build_console_stage2_universe_status(
+        eligible_rows_total=16,
+        reviewed_rows=16,
+        max_llm_candidates_per_run=16,
+        active_rows_reviewed=16,
+        fresh_candidate_rows_total=0,
+        reviewed_fresh_candidate_rows=0,
+    )
+
+    blocked = apply_full_universe_scan_completeness(
+        status,
+        scan_scope="full_universe",
+        scan_complete_universe=False,
+        scan_warning="Cursor page 4 failed.",
+    )
+
+    assert blocked["stage2_universe_complete"] is False
+    assert blocked["stage2_universe_blocker_code"] == "FULL_UNIVERSE_SCAN_INCOMPLETE"
+    assert blocked["stage2_universe_status"]["is_complete"] is False
+
+
+def test_console_gamma_scan_budget_allows_full_event_catalog():
+    from app.domains.polymarket_auto_live.console_profile import (
+        CONSOLE_GAMMA_SCAN_TIMEOUT_SECONDS,
+    )
+
+    assert CONSOLE_GAMMA_SCAN_TIMEOUT_SECONDS == 90

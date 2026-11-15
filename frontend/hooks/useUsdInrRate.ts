@@ -4,10 +4,8 @@ import { useEffect, useState } from 'react';
 
 import { apiService } from '@/services/api';
 
-const DEFAULT_USD_INR_RATE = 83.5;
-
 export function useUsdInrRate() {
-  const [usdInrRate, setUsdInrRate] = useState(DEFAULT_USD_INR_RATE);
+  const [usdInrRate, setUsdInrRate] = useState(0);
 
   useEffect(() => {
     let mounted = true;
@@ -16,12 +14,14 @@ export function useUsdInrRate() {
       .getApiUsageSummary()
       .then((response) => {
         const nextRate = Number(response.usd_inr_rate);
-        if (mounted && nextRate > 0) {
+        if (mounted && response.fx_status === 'valid' && nextRate > 0) {
           setUsdInrRate(nextRate);
+        } else if (mounted) {
+          setUsdInrRate(0);
         }
       })
       .catch(() => {
-        // Keep the fallback rate when the usage summary is unavailable.
+        if (mounted) setUsdInrRate(0);
       });
 
     return () => {

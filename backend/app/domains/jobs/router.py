@@ -9,6 +9,7 @@ from app.infrastructure.database.session import get_async_db
 from app.infrastructure.locks.redis_lock import RedisLock
 from app.infrastructure.messaging.event_bus import event_bus
 from app.infrastructure.messaging.idempotency import IdempotencyStore
+from app.infrastructure.messaging.task_registry import revoke_registered_job_task
 from app.shared.exceptions import AppException
 from app.shared.pagination import PagedQuery
 from app.shared.types import JobId, JobStatus, UserId
@@ -63,7 +64,9 @@ async def create_job(
 
     # Re-fetch to return full JobResponse (use case only returns minimal result)
     repo = PostgresJobRepository(db)
-    job = await repo.get(result.job_id)
+    job = await repo.get_for_user(result.job_id, UserId(current_user.id))
+    if job is None:
+        raise HTTPException(404, detail="Job not found")
     return job
 
 
@@ -74,6 +77,7 @@ async def list_jobs(
     status: str | None = Query(None),
     q: str | None = Query(None),
     db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
 ):
     repo = PostgresJobRepository(db)
     status_filter: JobStatus | None = None
@@ -83,21 +87,48 @@ async def list_jobs(
         except ValueError:
             raise HTTPException(400, detail=f"Invalid status: '{status}'")
 
-    result = await repo.list(
-        PagedQuery(page=page, limit=limit),
+    result = await repo.list_for_user(
+        UserId(current_user.id), PagedQuery(page=page, limit=limit),
         status=status_filter,
         search=q or None,
     )
-    return result.to_dict()
+    # List responses must use the same public DTO projection as detail/create.
+    payload = result.to_dict()
+    payload["items"] = [JobResponse.model_validate(job).model_dump(mode="json") for job in result.items]
+    return payload
 
 
 @router.get("/{job_id}", response_model=JobResponse)
 async def get_job(
     job_id: int,
     db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
 ):
     repo = PostgresJobRepository(db)
-    job = await repo.get(JobId(job_id))
+    job = await repo.get_for_user(JobId(job_id), UserId(current_user.id))
     if not job:
         raise HTTPException(404, detail="Job not found")
+    return job
+
+
+@router.post("/{job_id}/cancel", response_model=JobResponse)
+async def cancel_job(
+    job_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    repo = PostgresJobRepository(db)
+    job, changed = await repo.cancel_for_user(JobId(job_id), UserId(current_user.id))
+    if not job:
+        raise HTTPException(404, detail="Job not found")
+    await db.commit()
+
+    job = await repo.get_for_user(JobId(job_id), UserId(current_user.id))
+    if not job:
+        raise HTTPException(404, detail="Job not found")
+
+    if changed:
+        await revoke_registered_job_task(job_id)
+        from app.domains.jobs.tasks import _publish_job_update
+        _publish_job_update(job)
     return job

@@ -118,7 +118,7 @@ export default function ProfilePage() {
             disabled
             className="bg-muted"
           />
-          <p className="text-[0.8rem] text-muted-foreground">
+          <p className="text-xs text-muted-foreground">
             This is your public display name. It cannot be changed.
           </p>
         </div>

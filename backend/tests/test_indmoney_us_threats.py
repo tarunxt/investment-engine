@@ -93,6 +93,41 @@ class IndMoneyUsThreatsTests(unittest.TestCase):
         self.assertEqual(metadata.snapshot_date, date(2026, 5, 30))
         self.assertEqual(metadata.captured_at, datetime(2026, 5, 30, 9, 15, tzinfo=timezone.utc))
 
+    def test_wallet_contract_preserves_unknown_zero_and_independent_buying_power(self):
+        # A7-L04 / F01 / F02: synthetic nullable-wallet source contract.
+        for wallet in ("absent", None, 0, 125.5):
+            for buying_power in (None, 0, 987.65):
+                with self.subTest(wallet=wallet, buying_power=buying_power):
+                    fields = dict(
+                        id=7001, snapshot_date=date(2026, 5, 30),
+                        captured_at=datetime(2026, 5, 30, tzinfo=timezone.utc),
+                        source="synthetic_fixture", parse_status="partial",
+                        parse_warnings=["Wallet not supplied"],
+                        reported_holdings_count=None, holdings_count=0,
+                        current_value=1000, invested_value=800,
+                        day_return_value=None, day_return_percent=None,
+                        total_return_value=None, total_return_percent=None,
+                        market_indices=[], holdings=[],
+                        buying_power=buying_power,
+                        raw_text=f"Buying power: {buying_power}",
+                    )
+                    if wallet != "absent":
+                        fields["wallet_balance"] = wallet
+                    snapshot = SimpleNamespace(**fields)
+                    before = vars(snapshot).copy()
+                    prompt = build_indmoney_us_threat_prompt(snapshot)
+                    expected = (
+                        "Unknown (not supplied in snapshot)"
+                        if wallet in ("absent", None) else f"{wallet:,.2f}"
+                    )
+                    self.assertIn(f"- Wallet balance (USD): {expected}\n", prompt)
+                    self.assertIn("Buying power is distinct from wallet cash", prompt)
+                    self.assertIn("do not claim a zero cash buffer", prompt)
+                    self.assertEqual(build_indmoney_us_threat_prompt(snapshot), prompt)
+                    self.assertEqual(vars(snapshot), before)
+                    metadata = extract_indmoney_us_threat_prompt_metadata(prompt)
+                    self.assertEqual(metadata.snapshot_id, 7001)
+
     def test_parse_report_reuses_markdown_table_and_summary_parser(self):
         markdown = """
 ## Summary

@@ -18,11 +18,6 @@ class IndMoneyUsCurrentPriceService:
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36"
     )
-    DATASET_PATTERN_TEMPLATE = (
-        r'<script class="{dataset_key}"[^>]*>'
-        r"AF_initDataCallback\(\{key: '{dataset_key}'.*?data:(?P<data>.*?),\s*sideChannel:\s*\{{\}}\}\);"
-        r"</script>"
-    )
 
     def __init__(self, *, timeout_seconds: float = 15.0, max_concurrency: int = 5) -> None:
         self._timeout_seconds = timeout_seconds
@@ -135,7 +130,7 @@ class IndMoneyUsCurrentPriceService:
 
         price_stats = quote_row[5] if len(quote_row) > 5 and isinstance(quote_row[5], list) else []
         session_open_at, session_close_at, market_open = self._extract_session_state(
-            quote_row[20] if len(quote_row) > 20 else [],
+            self._session_entries_from_quote_row(quote_row),
             now=now,
         )
 
@@ -156,7 +151,9 @@ class IndMoneyUsCurrentPriceService:
 
     def _extract_dataset(self, html: str, *, dataset_key: str) -> Any:
         pattern = re.compile(
-            self.DATASET_PATTERN_TEMPLATE.format(dataset_key=re.escape(dataset_key)),
+            rf'<script class="{re.escape(dataset_key)}"[^>]*>\s*'
+            rf"AF_initDataCallback\(\{{.*?data:(?P<data>.*?),\s*sideChannel:\s*\{{\}}\}}\);\s*"
+            rf"</script>",
             flags=re.DOTALL,
         )
         match = pattern.search(html)
@@ -179,6 +176,19 @@ class IndMoneyUsCurrentPriceService:
             return dataset[0][0][0]
 
         return None
+
+    @staticmethod
+    def _session_entries_from_quote_row(quote_row: list[Any]) -> Any:
+        for value in quote_row:
+            if (
+                isinstance(value, list)
+                and value
+                and isinstance(value[0], list)
+                and len(value[0]) >= 3
+                and value[0][0] == 1
+            ):
+                return value
+        return []
 
     def _extract_session_state(
         self,

@@ -1,0 +1,75 @@
+{
+  "timestamp": "2026-11-01T06:20:11.963Z",
+  "records": [
+    {
+      "width": 1440,
+      "state": "loading",
+      "zoom": 1,
+      "text": "Run History\n\nLoading all runs…\n\nREFRESH\nIndMoney Runs—\nZerodha—\nBullpen—\n\nRefreshing run history… Available saved results remain visible.\n\nLoading all IndMoney Runs…\nLoading results…\n1 / 1"
+    },
+    {
+      "width": 1440,
+      "state": "empty",
+      "zoom": 1,
+      "text": "Run History\n\nLast refreshed 11:50:10 am\n\nREFRESH\nIndMoney Runs0\nZerodha0\nBullpen0\nNo runs found in this category.\nNo results\n1 / 1"
+    },
+    {
+      "width": 1440,
+      "state": "populated",
+      "zoom": 1,
+      "text": "Run History\n\nLast refreshed 11:50:10 am\n\nREFRESH\nIndMoney Runs1\nZerodha1\nBullpen0\nWorkflow · indmoney_us saved workflow 7\nFinished · completeness unverified\n\nExecution: completed\n\nA workflow contains stage runs; each stage run contains provider jobs with saved prompts and outputs.\n\nRun summary\nRun 7 stage evidence\nDiagnostics and earlier context\nSelected run\nindmoney_us saved workflow 7\nExecution\ncompleted\nResult quality\nFinished · completeness unverified\nStarted\n01 Nov 05:30\nLast refreshed\n11:50:10 am\nOpen workflow details · indmoney_us saved workflow 7\n\nFinished · completeness unverified. Completed execution is not equivalent to fully successful results.\n\n1–1 of 1 run groups\n1 / 1"
+    },
+    {
+      "width": 1440,
+      "state": "error",
+      "zoom": 1,
+      "text": "Run History\n\nLast refreshed 11:50:10 am\n\nREFRESH\nIndMoney Runs—\nZerodha—\nBullpen0\nIndMoney grouped history: Synthetic unavailable history Available saved results remain visible; use Refresh to retry unavailable history.\nHistory could not be fully loaded. Use Refresh to retry; saved runs have not been deleted.\nResults unavailable\n1 / 1"
+    },
+    {
+      "width": 1440,
+      "state": "partial",
+      "zoom": 1,
+      "text": "Run History\n\nLast refreshed 11:50:10 am\n\nREFRESH\nIndMoney Runs1\nZerodha1\nBullpen0\nWorkflow · indmoney_us saved workflow 7\nFinished with partial results\n\nExecution: partial\n\nA workflow contains stage runs; each stage run contains provider jobs with saved prompts and outputs.\n\nRun summary\nRun 7 stage evidence\nDiagnostics and earlier context\nSelected run\nindmoney_us saved workflow 7\nExecution\npartial\nResult quality\nFinished with partial results\nStarted\n01 Nov 05:30\nLast refreshed\n11:50:10 am\nOpen workflow details · indmoney_us saved workflow 7\n\nFinished with partial results. Completed execution is not equivalent to fully successful results.\n\n1–1 of 1 run groups\n1 / 1"
+    },
+    {
+      "width": 390,
+      "state": "loading",
+      "zoom": 1,
+      "text": "Run History\n\nLoading all runs…\n\nREFRESH\nIndMoney Runs—\nZerodha—\nBullpen—\n\nRefreshing run history… Available saved results remain visible.\n\nLoading all IndMoney Runs…\nLoading results…\n1 / 1"
+    },
+    {
+      "width": 390,
+      "state": "empty",
+      "zoom": 1,
+      "text": "Run History\n\nLast refreshed 11:50:11 am\n\nREFRESH\nIndMoney Runs0\nZerodha0\nBullpen0\nNo runs found in this category.\nNo results\n1 / 1"
+    },
+    {
+      "width": 390,
+      "state": "populated",
+      "zoom": 1,
+      "text": "Run History\n\nLast refreshed 11:50:11 am\n\nREFRESH\nIndMoney Runs1\nZerodha1\nBullpen0\nWorkflow · indmoney_us saved workflow 7\nFinished · completeness unverified\n\nExecution: completed\n\nA workflow contains stage runs; each stage run contains provider jobs with saved prompts and outputs.\n\nRun summary\nRun 7 stage evidence\nDiagnostics and earlier context\nSelected run\nindmoney_us saved workflow 7\nExecution\ncompleted\nResult quality\nFinished · completeness unverified\nStarted\n01 Nov 05:30\nLast refreshed\n11:50:11 am\nOpen workflow details · indmoney_us saved workflow 7\n\nFinished · completeness unverified. Completed execution is not equivalent to fully successful results.\n\n1–1 of 1 run groups\n1 / 1"
+    },
+    {
+      "width": 390,
+      "state": "error",
+      "zoom": 1,
+      "text": "Run History\n\nLast refreshed 11:50:11 am\n\nREFRESH\nIndMoney Runs—\nZerodha—\nBullpen0\nIndMoney grouped history: Synthetic unavailable history Available saved results remain visible; use Refresh to retry unavailable history.\nHistory could not be fully loaded. Use Refresh to retry; saved runs have not been deleted.\nResults unavailable\n1 / 1"
+    },
+    {
+      "width": 390,
+      "state": "partial",
+      "zoom": 1,
+      "text": "Run History\n\nLast refreshed 11:50:11 am\n\nREFRESH\nIndMoney Runs1\nZerodha1\nBullpen0\nWorkflow · indmoney_us saved workflow 7\nFinished with partial results\n\nExecution: partial\n\nA workflow contains stage runs; each stage run contains provider jobs with saved prompts and outputs.\n\nRun summary\nRun 7 stage evidence\nDiagnostics and earlier context\nSelected run\nindmoney_us saved workflow 7\nExecution\npartial\nResult quality\nFinished with partial results\nStarted\n01 Nov 05:30\nLast refreshed\n11:50:11 am\nOpen workflow details · indmoney_us saved workflow 7\n\nFinished with partial results. Completed execution is not equivalent to fully successful results.\n\n1–1 of 1 run groups\n1 / 1"
+    }
+  ],
+  "errors": [],
+  "external": [],
+  "checks": [
+    "actual RunsPage",
+    "desktop 100%",
+    "narrow 390px no overflow",
+    "keyboard tab selection",
+    "retained category, keyboard focus and saved records on refresh",
+    "Back URL/category restoration"
+  ]
+}

@@ -31,6 +31,7 @@ export function LlmModelMixControls({
   return (
     <div className="grid gap-2 sm:grid-cols-[1fr_auto_auto_auto] sm:items-center">
       <select
+        aria-label="Model mix templates"
         value={selectedMixId || "none"}
         onChange={(e) => onApply(e.target.value)}
         className="h-11 rounded-xl border border-slate-300 bg-white px-4 text-sm text-slate-700 shadow-sm"
@@ -52,7 +53,7 @@ export function LlmModelMixControls({
       <button
         type="button"
         disabled={!canEditSavedMix}
-        className="h-11 rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-400"
+        className="h-11 rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
         onClick={onEdit}
       >
         Edit
@@ -60,7 +61,7 @@ export function LlmModelMixControls({
       <button
         type="button"
         disabled={!canEditSavedMix}
-        className="h-11 rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-400"
+        className="h-11 rounded-xl border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
         onClick={onDelete}
       >
         Delete

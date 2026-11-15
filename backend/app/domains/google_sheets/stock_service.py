@@ -408,6 +408,84 @@ def _parse_headerless_canonical_items(tokens: list[str]) -> list[dict[str, str]]
     return []
 
 
+def _normalize_action_value(value: Any) -> str | None:
+    text = str(value or "").strip()
+    normalized = re.sub(r"[^a-z]+", " ", text.lower()).strip()
+    if not normalized:
+        return None
+    if "sell all" in normalized or normalized == "sell":
+        return "Sell All"
+    if "trim" in normalized or "reduce" in normalized:
+        return "Trim"
+    if "buy new" in normalized or "new buy" in normalized:
+        return "Buy New"
+    if "add" in normalized or "buy more" in normalized:
+        return "Add more"
+    if "hold" in normalized:
+        return "Hold"
+    return None
+
+
+def _normalize_rebalance_numeric_fields(item: dict[str, Any]) -> None:
+    action = _normalize_action_value(item.get("action"))
+    units_change_action = _normalize_action_value(item.get("units_change"))
+    if action is None and units_change_action is not None:
+        item["action"], item["units_change"] = units_change_action, item.get("action")
+        action = units_change_action
+    elif action is not None:
+        item["action"] = action
+
+    current_units = _to_number(item.get("current_units"))
+    units_change = _to_number(item.get("units_change"))
+    final_units = _to_number(item.get("final_units"))
+    units_to_buy = _to_number(item.get("units_to_buy"))
+
+    if action == "Buy New" and current_units is None:
+        current_units = 0
+        item["current_units"] = 0
+
+    if action == "Hold":
+        if units_change is None:
+            units_change = 0
+            item["units_change"] = 0
+        if final_units is None and current_units is not None:
+            final_units = current_units
+            item["final_units"] = final_units
+
+    if action == "Sell All" and current_units is not None:
+        if units_change is None:
+            units_change = -abs(current_units)
+            item["units_change"] = units_change
+        if final_units is None:
+            final_units = 0
+            item["final_units"] = 0
+
+    if (
+        action in {"Add more", "Buy New"}
+        and (units_change is None or units_change == 0)
+        and current_units is not None
+        and final_units is not None
+        and final_units > current_units
+    ):
+        units_change = final_units - current_units
+        item["units_change"] = units_change
+
+    if action in {"Add more", "Buy New"} and units_change is None and units_to_buy is not None:
+        units_change = abs(units_to_buy)
+        item["units_change"] = units_change
+
+    if action == "Trim" and units_change is None and units_to_buy is not None:
+        units_change = -abs(units_to_buy)
+        item["units_change"] = units_change
+
+    if final_units is None and current_units is not None and units_change is not None:
+        final_units = current_units + units_change
+        item["final_units"] = final_units
+
+    if units_to_buy is None and units_change is not None and units_change > 0:
+        item["units_to_buy"] = units_change
+
+
 def normalize_stock_rows(stocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Normalize keys and drop non-stock/preamble rows before Sheet export."""
     normalized: list[dict[str, Any]] = []
@@ -432,6 +510,8 @@ def normalize_stock_rows(stocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
             item["upside_horizon"] = upside
         if weeks is not None and not item.get("weeks"):
             item["weeks"] = weeks
+
+        _normalize_rebalance_numeric_fields(item)
 
         normalized.append(item)
     return normalized

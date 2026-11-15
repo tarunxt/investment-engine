@@ -1,0 +1,126 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import test from 'node:test';
+import ts from 'typescript';
+
+const source = readFileSync(new URL('../lib/sportsRankingsApi.ts', import.meta.url), 'utf8');
+const js = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 } }).outputText;
+const { RankingReadError, readRankingJson } = await import(`data:text/javascript;base64,${Buffer.from(js).toString('base64')}`);
+
+test('500 and 504 reads recover with bounded sequential backoff', async () => {
+  const codes = [500, 504, 200], pauses = [], calls = [];
+  const result = await readRankingJson('', undefined, async (url, options) => {
+    calls.push({ url, options });
+    return new Response(JSON.stringify({ competitions: [{ id: 'nhl' }] }), { status: codes.shift() });
+  }, async ms => pauses.push(ms));
+  assert.equal(result.competitions[0].id, 'nhl');
+  assert.deepEqual(pauses, [1500, 3000]);
+  assert.equal(calls.length, 3);
+  assert.ok(calls.every(c => !c.options.method && c.options.cache === 'no-store'));
+});
+
+test('summary reads preserve the opt-in query through bounded retries', async () => {
+  const calls = [], pauses = [], controller = new AbortController();
+  const card = { id: 'nhl', participants: [{ name: 'Full team name', aliases: ['Full alias'] }], ranked_count: 32 };
+  const result = await readRankingJson('?view=summary', controller.signal, async (url, options) => {
+    calls.push({ url, options });
+    return new Response(JSON.stringify({ competitions: [card] }), { status: calls.length < 3 ? 504 : 200 });
+  }, async ms => pauses.push(ms));
+  assert.deepEqual(result.competitions, [card]);
+  assert.deepEqual(pauses, [1500, 3000]);
+  assert.equal(calls.length, 3);
+  assert.ok(calls.every(call => call.url === '/backend-api/api/sports-rankings?view=summary'));
+  assert.ok(calls.every(call => !call.options.method && call.options.cache === 'no-store'));
+  controller.abort();
+  assert.ok(calls.every(call => call.options.signal.aborted));
+});
+
+test('aborting a summary read cancels remaining retries', async () => {
+  const controller = new AbortController(), urls = [];
+  await assert.rejects(readRankingJson('?view=summary', controller.signal, async url => {
+    urls.push(url);
+    return new Response('{}', { status: 503 });
+  }, async () => controller.abort()), { name: 'AbortError' });
+  assert.deepEqual(urls, ['/backend-api/api/sports-rankings?view=summary']);
+});
+
+test('outage retries are capped; 401 and permanent failures are never retried', async () => {
+  for (const [status, expected] of [[503, 3], [401, 1], [403, 1]]) {
+    let calls = 0;
+    await assert.rejects(readRankingJson('', undefined, async () => { calls++; return new Response('{}', { status }); }, async () => {}));
+    assert.equal(calls, expected);
+  }
+});
+
+test('changing selection cancels retries for the old competition', async () => {
+  const controller = new AbortController();
+  let calls = 0;
+  await assert.rejects(readRankingJson('/competitions/nhl', controller.signal, async () => {
+    calls++; return new Response('{}', { status: 504 });
+  }, async () => controller.abort()), { name: 'AbortError' });
+  assert.equal(calls, 1);
+});
+
+test('network failure can recover without retrying a mutation', async () => {
+  let calls = 0;
+  const result = await readRankingJson('', undefined, async () => {
+    if (++calls === 1) throw new TypeError('network unavailable');
+    return new Response('{"ok":true}');
+  }, async () => {});
+  assert.deepEqual(result, { ok: true });
+  assert.equal(calls, 2);
+});
+
+test('terminal 504 preserves safe diagnostics for the error popup', async () => {
+  const error = await readRankingJson('/competitions/uel', undefined, async () => new Response(
+    JSON.stringify({ message: 'The backend did not respond in time (14 seconds). Please retry.' }),
+    { status: 504, headers: { 'X-Correlation-ID': 'corr-123', 'X-Backend-Proxy-Budget-Ms': '14000', 'Retry-After': '1' } },
+  ), async () => {}).catch(value => value);
+
+  assert.ok(error instanceof RankingReadError);
+  assert.equal(error.details.code, 'BACKEND_TIMEOUT');
+  assert.equal(error.details.status, 504);
+  assert.equal(error.details.endpoint, '/backend-api/api/sports-rankings/competitions/uel');
+  assert.equal(error.details.correlationId, 'corr-123');
+  assert.equal(error.details.proxyBudgetMs, 14000);
+  assert.equal(error.details.retryAfter, '1');
+  assert.equal(error.details.attempts, 3);
+  assert.match(error.details.cause, /service\/database availability problem/);
+  assert.equal(error.details.steps.length, 4);
+});
+
+test('recovery containment retains backend provenance without inferring database health', async () => {
+  let calls = 0;
+  const error = await readRankingJson('', undefined, async () => {
+    calls++;
+    return new Response(JSON.stringify({ code: 'RECOVERY_CONTAINMENT', detail: 'Endpoint unavailable during analysis-only recovery.' }), {
+      status: 503, headers: { 'X-Correlation-ID': 'synthetic-recovery-reference' },
+    });
+  }, async () => {}).catch(value => value);
+  assert.ok(error instanceof RankingReadError);
+  assert.equal(error.details.code, 'RECOVERY_CONTAINMENT');
+  assert.equal(error.details.status, 503);
+  assert.equal(error.details.correlationId, 'synthetic-recovery-reference');
+  assert.equal(error.details.serviceMessage, 'Endpoint unavailable during analysis-only recovery.');
+  assert.equal(error.details.attempts, 3);
+  assert.equal(calls, 3);
+  assert.match(error.details.summary, /analysis-only recovery/);
+  assert.match(error.details.cause, /does not establish database health or whether ranking records exist/);
+  assert.match(error.details.steps.join(' '), /after authorized recovery/);
+  assert.doesNotMatch(error.details.steps.join(' '), /restart|stale scan/);
+});
+
+test('structured backend codes preserve database diagnostics and legacy error precedence', async () => {
+  for (const payload of [
+    { code: 'DATABASE_UNAVAILABLE' },
+    { error: 'DATABASE_UNAVAILABLE', code: 'OTHER_CODE' },
+  ]) {
+    const error = await readRankingJson('', undefined, async () => new Response(JSON.stringify(payload), { status: 503 }), async () => {}).catch(value => value);
+    assert.equal(error.details.code, 'DATABASE_UNAVAILABLE');
+    assert.match(error.details.cause, /healthy database connection/);
+  }
+  for (const code of [undefined, null, 17, {}]) {
+    const error = await readRankingJson('', undefined, async () => new Response(JSON.stringify({ code }), { status: 503 }), async () => {}).catch(value => value);
+    assert.equal(error.details.code, 'SERVICE_UNAVAILABLE');
+  }
+});

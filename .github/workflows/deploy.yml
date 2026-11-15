@@ -13,91 +13,649 @@ on:
         type: choice
         options:
           - auto
+          - frontend
           - backend
           - full
+
+      expected_sha:
+        description: Exact reviewed main SHA (required for frontend scope or a runner SSH window)
+        required: false
+        type: string
+
+      runner_ssh_window:
+        description: Publish each runner IPv4 and wait for operator-managed single-host SSH access
+        type: boolean
+        default: false
+
+permissions:
+  actions: read
+  contents: read
 
 concurrency:
   group: production-deploy
   cancel-in-progress: false
 
+env:
+  FRONTEND_ARTIFACT_NAME: frontend-runtime-${{ github.sha }}
+  FRONTEND_ARTIFACT_FILE: frontend-runtime-${{ github.sha }}.tar.gz
+
 jobs:
   detect-changes:
-    name: Detect changes
+    name: Detect deployment scope
     runs-on: ubuntu-latest
     outputs:
-      backend: ${{ steps.filter.outputs.backend }}
-      full: ${{ steps.filter.outputs.full }}
+      scope: ${{ steps.scope.outputs.scope }}
+      frontend_base_sha: ${{ steps.scope.outputs.frontend_base_sha }}
 
     steps:
       - name: Checkout
-        if: github.event_name == 'push'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
-          fetch-depth: 2
+          fetch-depth: 0
 
-      - name: Detect deploy scope
-        if: github.event_name == 'push'
-        id: filter
-        uses: dorny/paths-filter@v3
-        with:
-          filters: |
-            backend:
-              - 'backend/**'
-            full:
-              - 'frontend/**'
-              - '.env.prod.example'
-              - '.github/workflows/deploy.yml'
-              - 'deploy/no-docker/**'
-              - 'scripts/**'
+      - name: Resolve deployment scope
+        id: scope
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_SCOPE: ${{ github.event.inputs.scope }}
+          RUNNER_SSH_WINDOW: ${{ inputs.runner_ssh_window }}
+          EXPECTED_RELEASE_SHA: ${{ github.event.inputs.expected_sha }}
+        run: |
+          set -euo pipefail
 
-  deploy-backend:
-    name: Deploy backend
+          node scripts/resolve-deploy-scope.mjs | tee -a "${GITHUB_OUTPUT}"
+
+  build-frontend:
+    name: Build production frontend artifact
     needs: detect-changes
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    if: |
-      (github.event_name == 'workflow_dispatch' && github.event.inputs.scope == 'backend') ||
-      (github.event_name == 'push' &&
-        needs.detect-changes.outputs.backend == 'true' &&
-        needs.detect-changes.outputs.full != 'true')
+    if: contains(fromJSON('["frontend-only","full-stack"]'), needs.detect-changes.outputs.scope)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    outputs:
+      checkout_seconds: ${{ steps.checkout-timing.outputs.seconds }}
+      dependency_seconds: ${{ steps.dependency-timing.outputs.seconds }}
+      build_seconds: ${{ steps.build.outputs.seconds }}
+      package_seconds: ${{ steps.package.outputs.seconds }}
+      upload_seconds: ${{ steps.upload-timing.outputs.seconds }}
+
+    env:
+      NODE_ENV: production
+      NEXT_TELEMETRY_DISABLED: "1"
+      NEXT_STANDALONE_BUILD: "true"
+      NEXT_PUBLIC_API_URL: ${{ vars.PROD_NEXT_PUBLIC_API_URL || 'https://api.cred-x.in' }}
+      NEXT_PUBLIC_FRONTEND_URL: ${{ vars.PROD_NEXT_PUBLIC_FRONTEND_URL || 'https://cred-x.in' }}
+      NEXT_PUBLIC_BRAND_PREFIX: ${{ vars.PROD_NEXT_PUBLIC_BRAND_PREFIX || 'Cred-X' }}
+      NEXT_PUBLIC_BRAND_ACRONYM: ${{ vars.PROD_NEXT_PUBLIC_BRAND_ACRONYM || 'TIE' }}
+      NEXT_PUBLIC_BRAND_EXPANSION: ${{ vars.PROD_NEXT_PUBLIC_BRAND_EXPANSION || 'Tarun''s Investment Engine' }}
+      NEXT_PUBLIC_DISABLE_AUTH: ${{ vars.PROD_NEXT_PUBLIC_DISABLE_AUTH || 'false' }}
+      NEXT_PUBLIC_DISABLE_API_PROXY: ${{ vars.PROD_NEXT_PUBLIC_DISABLE_API_PROXY || 'false' }}
+      NEXT_PUBLIC_API_DEBUG: ${{ vars.PROD_NEXT_PUBLIC_API_DEBUG || 'false' }}
+      NEXT_PUBLIC_RECOMMENDATION_AUDIT_ENABLED: "false"
+      NEXTAUTH_URL: ${{ vars.PROD_NEXTAUTH_URL || 'https://cred-x.in' }}
+      NEXTAUTH_SECRET: build-only-runtime-secret-is-loaded-on-ec2
+      AUTH_TRUST_HOST: "true"
+      BACKEND_API_URL: http://127.0.0.1:8000
 
     steps:
-      - name: Deploy backend via SSH
-        uses: appleboy/ssh-action@v1.2.0
+      - name: Start checkout timer
+        run: echo "CHECKOUT_STARTED_AT=$(date +%s)" >>"${GITHUB_ENV}"
+
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Record checkout duration
+        id: checkout-timing
+        run: echo "seconds=$(( $(date +%s) - CHECKOUT_STARTED_AT ))" >>"${GITHUB_OUTPUT}"
+
+      - &record-runner-address
+        name: Identify this job's public IPv4
+        if: inputs.runner_ssh_window
+        id: runner-address
+        shell: bash
+        run: |
+          set -euo pipefail
+          ipv4=$(curl -4 --noproxy '*' --proto '=https' --fail --silent --show-error --max-time 10 --retry 2 https://checkip.amazonaws.com)
+          python3 - "$ipv4" <<'PY'
+          import ipaddress, sys
+          address = ipaddress.IPv4Address(sys.argv[1])
+          if not address.is_global or address.is_multicast:
+              sys.exit("Runner address is not public unicast IPv4")
+          PY
+          printf '%s/32\n' "$ipv4" > "$RUNNER_TEMP/runner-cidr.txt"
+          printf 'ipv4=%s\n' "$ipv4" >> "$GITHUB_OUTPUT"
+
+      - &publish-runner-address
+        name: Publish this job's SSH source for the operator
+        if: inputs.runner_ssh_window
+        uses: actions/upload-artifact@v7
+        with:
+          name: ssh-source-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}-${{ steps.runner-address.outputs.ipv4 }}
+          path: ${{ runner.temp }}/runner-cidr.txt
+          retention-days: 1
+          if-no-files-found: error
+
+      - &wait-for-ssh
+        name: Wait up to five minutes for this runner's SSH route
+        if: inputs.runner_ssh_window
+        timeout-minutes: 6
+        env:
+          DEPLOY_HOST: ${{ secrets.EC2_HOST }}
+        run: |
+          python3 - <<'PY'
+          import os, socket, time
+          target = (os.environ["DEPLOY_HOST"], 22)
+          deadline = time.monotonic() + 300
+          while time.monotonic() < deadline:
+              try:
+                  with socket.create_connection(target, timeout=3):
+                      break
+              except OSError:
+                  time.sleep(5)
+          else:
+              raise SystemExit("Timed out waiting for the approved SSH route")
+          PY
+
+      - name: Read canonical non-secret audit build flag
+        id: audit-public-flag
+        uses: appleboy/ssh-action@v1.2.4
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          timeout: 1800s
-          command_timeout: 1800s
+          fingerprint: ${{ secrets.EC2_SSH_FINGERPRINT }}
+          timeout: 120s
+          command_timeout: 30s
+          capture_stdout: true
           script: |
-            set -euo pipefail
-            APP="${{ secrets.APP_PATH }}"
-            cd "$APP"
-            sudo -u investor -H bash -lc "cd '$APP' && git fetch origin main && git reset --hard origin/main"
-            SKIP_GIT_SYNC=true bash "$APP/deploy/no-docker/redeploy.sh" backend
+            sudo -n python3 -B - <<'PY'
+            import re
+            from pathlib import Path
+            matches=[]
+            for line in Path('/etc/investor/frontend.env').read_text().splitlines():
+                match=re.fullmatch(r'\s*NEXT_PUBLIC_RECOMMENDATION_AUDIT_ENABLED\s*=\s*(.*?)\s*',line)
+                if match:
+                    value=match.group(1)
+                    if len(value)>=2 and value[0]==value[-1] and value[0] in "\"'": value=value[1:-1]
+                    if value not in {'true','false'}: raise SystemExit('Invalid public audit flag')
+                    matches.append(value)
+            if len(matches)>1: raise SystemExit('Duplicate public audit flag')
+            print('CREDX_PUBLIC_AUDIT_FLAG='+ (matches[0] if matches else 'false'))
+            PY
 
-  deploy-full:
-    name: Deploy full stack
-    needs: detect-changes
+      - name: Set artifact public audit build variable
+        env:
+          AUDIT_PUBLIC_FLAG: ${{ steps.audit-public-flag.outputs.stdout }}
+        run: |
+          set -euo pipefail
+          flag=$(printf '%s\n' "$AUDIT_PUBLIC_FLAG" | node scripts/read-audit-public-flag.mjs)
+          case "$flag" in true|false) ;; *) echo 'Invalid public audit build flag' >&2; exit 1 ;; esac
+          echo "NEXT_PUBLIC_RECOMMENDATION_AUDIT_ENABLED=$flag" >>"${GITHUB_ENV}"
+
+      - name: Start dependency restore timer
+        run: echo "DEPENDENCIES_STARTED_AT=$(date +%s)" >>"${GITHUB_ENV}"
+
+      - name: Set up Node.js with npm cache
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Restore reusable Next.js Webpack cache
+        uses: actions/cache@v6
+        with:
+          path: frontend/.next/cache
+          key: >-
+            ${{ runner.os }}-node22-next-webpack-${{
+              hashFiles('frontend/package-lock.json')
+            }}-${{
+              hashFiles('frontend/app/**', 'frontend/components/**', 'frontend/hooks/**',
+              'frontend/lib/**', 'frontend/providers/**', 'frontend/services/**',
+              'frontend/types/**', 'frontend/next.config.ts', 'frontend/tsconfig.json')
+            }}
+          restore-keys: |
+            ${{ runner.os }}-node22-next-webpack-${{ hashFiles('frontend/package-lock.json') }}-
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci --include=dev --prefer-offline --no-audit --fund=false --loglevel=error
+
+      - name: Record dependency restore duration
+        id: dependency-timing
+        run: echo "seconds=$(( $(date +%s) - DEPENDENCIES_STARTED_AT ))" >>"${GITHUB_OUTPUT}"
+
+      - name: Log build runner resources
+        run: |
+          echo "==> CPU"
+          nproc
+          echo "==> Memory"
+          free -h
+          echo "==> Swap"
+          swapon --show || true
+          echo "==> Disk"
+          df -h "${GITHUB_WORKSPACE}" "${RUNNER_TEMP}"
+
+      - name: Stamp production build fingerprint
+        run: |
+          build_timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          node scripts/stamp-frontend-build.mjs \
+            frontend/lib/generatedBuildInfo.ts \
+            "${GITHUB_SHA}" \
+            "${build_timestamp}"
+          echo "BUILD_TIMESTAMP=${build_timestamp}" >>"${GITHUB_ENV}"
+
+      - name: Build production frontend with Webpack
+        id: build
+        working-directory: frontend
+        run: |
+          set -o pipefail
+          started_at="$(date +%s)"
+          set +e
+          /usr/bin/time -v -o "${RUNNER_TEMP}/frontend-webpack-resources.txt" \
+            npm run build 2>&1 | tee "${RUNNER_TEMP}/frontend-webpack-build.log"
+          build_status="${PIPESTATUS[0]}"
+          set -e
+          echo "seconds=$(( $(date +%s) - started_at ))" >>"${GITHUB_OUTPUT}"
+          echo "==> Frontend build resource usage"
+          cat "${RUNNER_TEMP}/frontend-webpack-resources.txt"
+          exit "$build_status"
+
+      - name: Package standalone frontend runtime
+        id: package
+        run: |
+          started_at="$(date +%s)"
+          deploy/no-docker/package-frontend-artifact.sh \
+            frontend/.next \
+            "${RUNNER_TEMP}/${FRONTEND_ARTIFACT_FILE}" \
+            "${GITHUB_SHA}" \
+            "${BUILD_TIMESTAMP}" \
+            webpack
+          echo "seconds=$(( $(date +%s) - started_at ))" >>"${GITHUB_OUTPUT}"
+
+      - name: Verify packaged frontend runtime before upload
+        run: |
+          mkdir "${RUNNER_TEMP}/production-frontend-runtime"
+          tar -xzf "${RUNNER_TEMP}/${FRONTEND_ARTIFACT_FILE}" \
+            -C "${RUNNER_TEMP}/production-frontend-runtime"
+          node scripts/verify-frontend-artifact-runtime.mjs \
+            "${RUNNER_TEMP}/production-frontend-runtime" \
+            "${GITHUB_SHA}"
+
+      - name: Start artifact upload timer
+        if: success()
+        run: echo "UPLOAD_STARTED_AT=$(date +%s)" >>"${GITHUB_ENV}"
+
+      - name: Upload production frontend artifact
+        if: success()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.FRONTEND_ARTIFACT_NAME }}
+          path: |
+            ${{ runner.temp }}/${{ env.FRONTEND_ARTIFACT_FILE }}
+            ${{ runner.temp }}/${{ env.FRONTEND_ARTIFACT_FILE }}.sha256
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Record artifact upload duration
+        id: upload-timing
+        if: always() && env.UPLOAD_STARTED_AT != ''
+        run: echo "seconds=$(( $(date +%s) - UPLOAD_STARTED_AT ))" >>"${GITHUB_OUTPUT}"
+
+      - name: Upload raw frontend timing logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: frontend-timing-logs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/frontend-webpack-build.log
+            ${{ runner.temp }}/frontend-webpack-resources.txt
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Frontend build timing summary
+        if: always()
+        run: |
+          {
+            echo "### Production frontend build"
+            echo
+            echo "| Phase | Duration |"
+            echo "| --- | ---: |"
+            echo "| Checkout | ${{ steps.checkout-timing.outputs.seconds || 'n/a' }}s |"
+            echo "| Dependency/cache restore + npm ci | ${{ steps.dependency-timing.outputs.seconds || 'n/a' }}s |"
+            echo "| Webpack production build | ${{ steps.build.outputs.seconds || 'n/a' }}s |"
+            echo "| Artifact packaging | ${{ steps.package.outputs.seconds || 'n/a' }}s |"
+            echo "| Artifact upload | ${{ steps.upload-timing.outputs.seconds || 'n/a' }}s |"
+            echo
+            echo "Production remains on Webpack; Turbopack is benchmarked separately in PR checks."
+          } >>"${GITHUB_STEP_SUMMARY}"
+
+  deploy-production:
+    name: Deploy ${{ needs.detect-changes.outputs.scope }}
+    needs:
+      - detect-changes
+      - build-frontend
+    if: >-
+      !cancelled() &&
+      needs.detect-changes.result == 'success' &&
+      contains(fromJSON('["frontend-only","backend-only","full-stack"]'), needs.detect-changes.outputs.scope) &&
+      (
+        needs.detect-changes.outputs.scope == 'backend-only' ||
+        needs.build-frontend.result == 'success'
+      )
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    if: |
-      (github.event_name == 'workflow_dispatch' && (github.event.inputs.scope == 'auto' || github.event.inputs.scope == 'full')) ||
-      (github.event_name == 'push' && needs.detect-changes.outputs.full == 'true')
+    timeout-minutes: 60
 
     steps:
-      - name: Deploy full stack via SSH
-        uses: appleboy/ssh-action@v1.2.0
+      - *record-runner-address
+      - *publish-runner-address
+      - *wait-for-ssh
+
+      - name: Start artifact download timer
+        if: needs.detect-changes.outputs.scope != 'backend-only'
+        run: echo "DOWNLOAD_STARTED_AT=$(date +%s)" >>"${GITHUB_ENV}"
+
+      - name: Download production frontend artifact
+        if: needs.detect-changes.outputs.scope != 'backend-only'
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ env.FRONTEND_ARTIFACT_NAME }}
+          path: artifact
+
+      - name: Record artifact download duration
+        id: download-timing
+        if: always() && env.DOWNLOAD_STARTED_AT != ''
+        run: echo "seconds=$(( $(date +%s) - DOWNLOAD_STARTED_AT ))" >>"${GITHUB_OUTPUT}"
+
+      - name: Start artifact transfer timer
+        if: needs.detect-changes.outputs.scope != 'backend-only'
+        run: echo "TRANSFER_STARTED_AT=$(date +%s)" >>"${GITHUB_ENV}"
+
+      - name: Transfer frontend artifact to EC2
+        if: needs.detect-changes.outputs.scope != 'backend-only'
+        uses: appleboy/scp-action@v1.0.0
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          timeout: 1800s
-          command_timeout: 1800s
+          fingerprint: ${{ secrets.EC2_SSH_FINGERPRINT }}
+          source: artifact/${{ env.FRONTEND_ARTIFACT_FILE }},artifact/${{ env.FRONTEND_ARTIFACT_FILE }}.sha256
+          target: /tmp/investor-deploy-${{ github.run_id }}-${{ github.run_attempt }}
+          strip_components: 1
+          timeout: 10m
+          command_timeout: 10m
+
+      - name: Record artifact transfer duration
+        id: transfer-timing
+        if: always() && env.TRANSFER_STARTED_AT != ''
+        run: echo "seconds=$(( $(date +%s) - TRANSFER_STARTED_AT ))" >>"${GITHUB_OUTPUT}"
+
+      - name: Start remote deployment timer
+        if: success()
+        run: echo "REMOTE_DEPLOY_STARTED_AT=$(date +%s)" >>"${GITHUB_ENV}"
+
+      - name: Deploy exact commit via SSH
+        id: deploy-ssh
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          DEPLOY_COMMIT_SHA: ${{ github.sha }}
+          DEPLOY_SCOPE: ${{ needs.detect-changes.outputs.scope }}
+          FRONTEND_BASE_SHA: ${{ needs.detect-changes.outputs.frontend_base_sha }}
+          REMOTE_ARTIFACT_DIR: /tmp/investor-deploy-${{ github.run_id }}-${{ github.run_attempt }}
+          REMOTE_ARTIFACT_FILE: ${{ env.FRONTEND_ARTIFACT_FILE }}
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          fingerprint: ${{ secrets.EC2_SSH_FINGERPRINT }}
+          envs: DEPLOY_COMMIT_SHA,DEPLOY_SCOPE,FRONTEND_BASE_SHA,REMOTE_ARTIFACT_DIR,REMOTE_ARTIFACT_FILE
+          timeout: 3600s
+          command_timeout: 3600s
+          capture_stdout: true
           script: |
             set -euo pipefail
-            APP="${{ secrets.APP_PATH }}"
-            cd "$APP"
-            sudo -u investor -H bash -lc "cd '$APP' && git fetch origin main && git reset --hard origin/main"
-            SKIP_GIT_SYNC=true bash "$APP/deploy/no-docker/redeploy.sh" full
+            deploy_started_at="$(date +%s)"
+            APP_ROOT="${{ vars.EC2_APP_PATH || '/srv/investment-engine' }}"
+            LEGACY_APP_ROOT="/srv/investor"
+            APP_USER="${{ vars.EC2_APP_USER || 'investment-engine' }}"
+            LEGACY_APP_USER="investor"
+            BACKEND_ENV_FILE="/etc/investor/backend.env"
+            FRONTEND_ENV_FILE="/etc/investor/frontend.env"
+            DEPLOY_LOCK_FILE="/run/investor-production-deploy.lock"
+            remote_artifact=""
+            contained_driver=""
+            rollback_armed=false
+            export CREDX_RECOVERY_ROLLBACK_OWNER=workflow
+
+            cleanup_remote_artifact() {
+              if [[ -n "${REMOTE_ARTIFACT_DIR:-}" && "$REMOTE_ARTIFACT_DIR" == /tmp/investor-deploy-* ]]; then
+                rm -rf -- "$REMOTE_ARTIFACT_DIR"
+              fi
+            }
+            finish_deployment() {
+              status=$?
+              rollback_failed=false
+              trap - EXIT
+              if [[ "$rollback_armed" == true ]]; then
+                echo 'Contained promotion failed; restoring the complete previous backend artifact.' >&2
+                APP_ROOT="$APP_ROOT" APP_USER="$APP_USER" BACKEND_ENV_FILE="$BACKEND_ENV_FILE" \
+                  bash "$contained_driver/deploy-recovery.sh" --restore || { status=1; rollback_failed=true; }
+              fi
+              cleanup_remote_artifact
+              if [[ "$rollback_failed" == true ]]; then
+                echo "ROLLBACK_BLOCKED: stable recovery driver retained at $contained_driver" >&2
+              elif [[ -n "$contained_driver" && "$contained_driver" == /tmp/investor-contained-driver.* ]]; then
+                rm -rf -- "$contained_driver"
+              fi
+              exit "$status"
+            }
+            trap finish_deployment EXIT
+
+            command -v flock >/dev/null
+            sudo touch "$DEPLOY_LOCK_FILE"
+            sudo chown "$(id -u):$(id -g)" "$DEPLOY_LOCK_FILE"
+            exec 9>"$DEPLOY_LOCK_FILE"
+            echo "==> Waiting for the production host deployment lock"
+            if ! flock -w 1800 9; then
+              echo "Timed out waiting for the production host deployment lock." >&2
+              exit 1
+            fi
+
+            if [[ ! -d "$APP_ROOT" && -d "$LEGACY_APP_ROOT" ]]; then
+              APP_ROOT="$LEGACY_APP_ROOT"
+            fi
+            if ! id "$APP_USER" >/dev/null 2>&1 && id "$LEGACY_APP_USER" >/dev/null 2>&1; then
+              APP_USER="$LEGACY_APP_USER"
+            fi
+
+            echo "==> Production app root: $APP_ROOT"
+            echo "==> Production app user: $APP_USER"
+            echo "==> Resolved deployment scope: $DEPLOY_SCOPE"
+            command -v git >/dev/null
+            sudo test -d "$APP_ROOT/.git"
+            id "$APP_USER" >/dev/null
+
+            case "$DEPLOY_SCOPE" in
+              frontend-only)
+                MIN_FREE_KB=1048576
+                ;;
+              backend-only)
+                MIN_FREE_KB=1048576
+                ;;
+              full-stack)
+                MIN_FREE_KB=2097152
+                ;;
+              *)
+                echo "Invalid resolved deployment scope: $DEPLOY_SCOPE" >&2
+                exit 1
+                ;;
+            esac
+
+            AVAILABLE_KB="$(df -Pk "$APP_ROOT" | awk 'NR == 2 {print $4}')"
+            # Deployment never reclaims space by deleting diagnostics, audit
+            # records, source caches or rollback artifacts. Capacity recovery
+            # requires a separately reviewed operational action.
+            if (( AVAILABLE_KB < MIN_FREE_KB )); then
+              echo "STORAGE_BLOCKED: deployment requires ${MIN_FREE_KB} KiB free; ${AVAILABLE_KB} KiB available. No files or logs were deleted." >&2
+              exit 1
+            fi
+
+            source_sync_started_at="$(date +%s)"
+            sudo -u "$APP_USER" -H git -C "$APP_ROOT" diff --quiet
+            sudo -u "$APP_USER" -H git -C "$APP_ROOT" diff --cached --quiet
+            sudo -u "$APP_USER" -H git -C "$APP_ROOT" fetch origin main
+            sudo -u "$APP_USER" -H git -C "$APP_ROOT" cat-file -e "${DEPLOY_COMMIT_SHA}^{commit}"
+            if [[ "$DEPLOY_SCOPE" == frontend-only ]]; then
+              # Proof is bound to the runner's exact immutable diff. Reject host
+              # source drift before checkout; no backend driver runs on this path.
+              [[ "$FRONTEND_BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+              current_sha="$(sudo -u "$APP_USER" -H git -C "$APP_ROOT" rev-parse HEAD)"
+              [[ "$current_sha" == "$FRONTEND_BASE_SHA" || "$current_sha" == "$DEPLOY_COMMIT_SHA" ]]
+            else
+              # Driver and rollback handler survive checkout and source restoration.
+              contained_driver=$(mktemp -d /tmp/investor-contained-driver.XXXXXX)
+              chmod 0755 "$contained_driver"
+              for driver_file in deploy-recovery.sh backend-recovery-artifact.py; do
+                sudo -u "$APP_USER" git -C "$APP_ROOT" show "$DEPLOY_COMMIT_SHA:deploy/no-docker/$driver_file" > "$contained_driver/$driver_file"
+                chmod 0644 "$contained_driver/$driver_file"
+              done
+              APP_ROOT="$APP_ROOT" APP_USER="$APP_USER" BACKEND_ENV_FILE="$BACKEND_ENV_FILE" \
+                bash "$contained_driver/deploy-recovery.sh" --preflight
+              export CREDX_RECOVERY_ROLLBACK_DIR="$APP_ROOT/.recovery-release-${DEPLOY_COMMIT_SHA:0:12}-$(date +%s)-$$"
+              APP_ROOT="$APP_ROOT" APP_USER="$APP_USER" BACKEND_ENV_FILE="$BACKEND_ENV_FILE" \
+                bash "$contained_driver/deploy-recovery.sh" --prepare
+              rollback_armed=true
+              sudo systemctl stop investor-backend investor-recovery-analysis
+            fi
+            sudo -u "$APP_USER" -H git -C "$APP_ROOT" reset --hard "$DEPLOY_COMMIT_SHA"
+            actual_sha="$(sudo -u "$APP_USER" -H git -C "$APP_ROOT" rev-parse HEAD)"
+            if [[ "$actual_sha" != "$DEPLOY_COMMIT_SHA" ]]; then
+              echo "EC2 checkout mismatch: expected=$DEPLOY_COMMIT_SHA actual=$actual_sha" >&2
+              exit 1
+            fi
+            echo "==> Exact source sync: $(( $(date +%s) - source_sync_started_at ))s"
+
+            if [[ "$DEPLOY_SCOPE" != "backend-only" ]]; then
+              remote_artifact="$REMOTE_ARTIFACT_DIR/$REMOTE_ARTIFACT_FILE"
+              test -f "$remote_artifact"
+              test -f "$remote_artifact.sha256"
+              chmod 0755 "$REMOTE_ARTIFACT_DIR"
+              chmod 0644 "$remote_artifact" "$remote_artifact.sha256"
+            fi
+
+            RECOVERY_DEPLOY=true
+            if [[ "$DEPLOY_SCOPE" != frontend-only ]]; then
+              APP_ROOT="$APP_ROOT" APP_USER="$APP_USER" BACKEND_ENV_FILE="$BACKEND_ENV_FILE" \
+                bash "$contained_driver/deploy-recovery.sh"
+            fi
+            if [[ "$DEPLOY_SCOPE" == full-stack ]]; then DEPLOY_SCOPE=frontend-only; fi
+            if [[ "$DEPLOY_SCOPE" == frontend-only ]]; then
+            SKIP_GIT_SYNC=true \
+            APP_ROOT="$APP_ROOT" \
+            APP_USER="$APP_USER" \
+            BACKEND_ENV_FILE="$BACKEND_ENV_FILE" \
+            CREDX_CONTAINED_RELEASE_DRIVER="${contained_driver:+$contained_driver/deploy-recovery.sh}" \
+            FRONTEND_ARTIFACT="$remote_artifact" \
+            EXPECTED_FRONTEND_SHA="$DEPLOY_COMMIT_SHA" \
+              bash "$APP_ROOT/deploy/no-docker/redeploy.sh" "$DEPLOY_SCOPE"
+            fi
+
+            if [[ "$DEPLOY_SCOPE" == backend-only ]]; then
+              APP_ROOT="$APP_ROOT" APP_USER="$APP_USER" BACKEND_ENV_FILE="$BACKEND_ENV_FILE" \
+                bash "$contained_driver/deploy-recovery.sh" --post-frontend-check
+            fi
+            rollback_armed=false
+
+            echo "==> EC2 deployment total: $(( $(date +%s) - deploy_started_at ))s"
+
+      - name: Record remote deployment duration
+        id: remote-timing
+        if: always() && env.REMOTE_DEPLOY_STARTED_AT != ''
+        run: echo "seconds=$(( $(date +%s) - REMOTE_DEPLOY_STARTED_AT ))" >>"${GITHUB_OUTPUT}"
+
+      - name: Write machine-readable deployment timings
+        if: always()
+        env:
+          DEPLOY_STDOUT: ${{ steps.deploy-ssh.outputs.stdout }}
+          CHECKOUT_SECONDS: ${{ needs.build-frontend.outputs.checkout_seconds }}
+          DEPENDENCY_SECONDS: ${{ needs.build-frontend.outputs.dependency_seconds }}
+          BUILD_SECONDS: ${{ needs.build-frontend.outputs.build_seconds }}
+          PACKAGE_SECONDS: ${{ needs.build-frontend.outputs.package_seconds }}
+          UPLOAD_SECONDS: ${{ needs.build-frontend.outputs.upload_seconds }}
+          DOWNLOAD_SECONDS: ${{ steps.download-timing.outputs.seconds }}
+          TRANSFER_SECONDS: ${{ steps.transfer-timing.outputs.seconds }}
+          REMOTE_SECONDS: ${{ steps.remote-timing.outputs.seconds }}
+          DEPLOY_SCOPE: ${{ needs.detect-changes.outputs.scope }}
+        run: |
+          printf '%s\n' "$DEPLOY_STDOUT" >"${RUNNER_TEMP}/remote-deploy.log"
+          remote_phases="$(
+            awk -F '\t' '$1 == "INVESTOR_DEPLOY_TIMING" {
+              print $2 "\t" $3
+            }' "${RUNNER_TEMP}/remote-deploy.log" |
+              jq -Rn '
+                [inputs | split("\t") | {(.[0]): (.[1] | tonumber)}]
+                | add // {}
+              '
+          )"
+          jq -n \
+            --arg commit "$GITHUB_SHA" \
+            --arg scope "$DEPLOY_SCOPE" \
+            --arg checkout "${CHECKOUT_SECONDS:-}" \
+            --arg dependency_restore "${DEPENDENCY_SECONDS:-}" \
+            --arg frontend_build "${BUILD_SECONDS:-}" \
+            --arg packaging "${PACKAGE_SECONDS:-}" \
+            --arg artifact_upload "${UPLOAD_SECONDS:-}" \
+            --arg artifact_download "${DOWNLOAD_SECONDS:-}" \
+            --arg artifact_transfer "${TRANSFER_SECONDS:-}" \
+            --arg remote_deploy "${REMOTE_SECONDS:-}" \
+            --argjson remote_phases "$remote_phases" \
+            '{
+              schemaVersion: 1,
+              commit: $commit,
+              scope: $scope,
+              durationsSeconds: {
+                checkout: ($checkout | tonumber?),
+                dependencyRestore: ($dependency_restore | tonumber?),
+                frontendBuild: ($frontend_build | tonumber?),
+                packaging: ($packaging | tonumber?),
+                artifactUpload: ($artifact_upload | tonumber?),
+                artifactDownload: ($artifact_download | tonumber?),
+                artifactTransfer: ($artifact_transfer | tonumber?),
+                remoteDeploy: ($remote_deploy | tonumber?)
+              },
+              remotePhasesSeconds: $remote_phases
+            }' >"${RUNNER_TEMP}/deployment-timings.json"
+
+      - name: Upload raw deployment timing logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: deployment-timing-logs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/deployment-timings.json
+            ${{ runner.temp }}/remote-deploy.log
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Deployment timing summary
+        if: always()
+        run: |
+          {
+            echo "### Production deployment"
+            echo
+            echo "**Scope:** \`${{ needs.detect-changes.outputs.scope }}\`"
+            echo
+            echo "| Phase | Duration |"
+            echo "| --- | ---: |"
+            echo "| Checkout | ${{ needs.build-frontend.outputs.checkout_seconds || 'n/a' }}s |"
+            echo "| Dependency/cache restore + npm ci | ${{ needs.build-frontend.outputs.dependency_seconds || 'n/a' }}s |"
+            echo "| Frontend build | ${{ needs.build-frontend.outputs.build_seconds || 'n/a' }}s |"
+            echo "| Artifact packaging | ${{ needs.build-frontend.outputs.package_seconds || 'n/a' }}s |"
+            echo "| Artifact upload | ${{ needs.build-frontend.outputs.upload_seconds || 'n/a' }}s |"
+            echo "| Artifact download | ${{ steps.download-timing.outputs.seconds || 'n/a' }}s |"
+            echo "| Artifact transfer | ${{ steps.transfer-timing.outputs.seconds || 'n/a' }}s |"
+            echo "| Remote source sync + deploy | ${{ steps.remote-timing.outputs.seconds || 'n/a' }}s |"
+            echo
+            echo "EC2 extraction, restart, fingerprint, and smoke-test durations are printed in the SSH step's final timing table."
+          } >>"${GITHUB_STEP_SUMMARY}"

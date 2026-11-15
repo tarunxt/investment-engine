@@ -7,12 +7,17 @@ import re
 
 from openai import OpenAI
 
+from app.domains.api_usage.metering import metered_call
 from app.core.config import settings
 from app.domains.ai_providers.base import (
     AIProviderResponse,
     BaseAIProvider,
 )
 from app.domains.ai_providers.tools import web_search as web_search_tool
+from app.domains.ai_providers.web_metadata import (
+    extract_web_search_sources,
+    merge_web_metadata,
+)
 
 MODEL_PRICING_PER_1M_TOKENS = {
     "gpt-4o-mini": {
@@ -74,7 +79,9 @@ class OpenAIProvider(BaseAIProvider):
         model: str,
     ) -> AIProviderResponse:
 
-        response = self.client.responses.create(
+        response = metered_call(
+            self.client.responses.create, provider=self.provider_name, meter_model=model,
+            phase="request", tariff_rates=MODEL_PRICING_PER_1M_TOKENS.get(model),
             model=model,
             input=prompt,
         )
@@ -90,7 +97,9 @@ class OpenAIProvider(BaseAIProvider):
         needs_stock_recommendation_table = self._requires_stock_recommendation_output(prompt)
         if needs_table and not self._looks_like_markdown_table(content):
             minimum_rows = 5 if needs_stock_recommendation_table else 1
-            rewrite = self.client.responses.create(
+            rewrite = metered_call(
+                self.client.responses.create, provider=self.provider_name, meter_model=model,
+                phase="format_repair", tariff_rates=MODEL_PRICING_PER_1M_TOKENS.get(model),
                 model=model,
                 input=(
                     "Return ONLY one valid markdown table. "
@@ -119,6 +128,9 @@ class OpenAIProvider(BaseAIProvider):
             ),
             provider=self.provider_name,
             model=model,
+            web_search_used=False,
+            web_search_queries=[],
+            web_sources=[],
         )
 
     def _generate_with_tools(
@@ -151,9 +163,14 @@ class OpenAIProvider(BaseAIProvider):
         tokens_in = 0
         tokens_out = 0
         content = ""
+        web_search_used = False
+        web_search_queries: list[str] = []
+        web_sources: list[str] = []
 
         for _round in range(self._max_tool_rounds):
-            response = self.client.chat.completions.create(
+            response = metered_call(
+                self.client.chat.completions.create, provider=self.provider_name, meter_model=model,
+                phase="request" if _round == 0 else "tool_round", tariff_rates=MODEL_PRICING_PER_1M_TOKENS.get(model),
                 model=model,
                 messages=messages,
                 tools=web_search_tool.TOOL_DEFINITIONS,
@@ -194,6 +211,15 @@ class OpenAIProvider(BaseAIProvider):
             for tool_call in tool_calls:
                 arguments = self._safe_tool_arguments(tool_call.function.arguments)
                 result = web_search_tool.execute(tool_call.function.name, arguments)
+                query = arguments.get("query")
+                web_search_used, web_search_queries, web_sources = merge_web_metadata(
+                    web_search_used,
+                    web_search_queries,
+                    web_sources,
+                    response_used=True,
+                    response_queries=[query] if isinstance(query, str) and query.strip() else None,
+                    response_sources=extract_web_search_sources(result),
+                )
                 messages.append(
                     {
                         "role": "tool",
@@ -209,7 +235,9 @@ class OpenAIProvider(BaseAIProvider):
         needs_stock_recommendation_table = self._requires_stock_recommendation_output(prompt)
         if needs_table and not self._looks_like_markdown_table(content):
             minimum_rows = 5 if needs_stock_recommendation_table else 1
-            rewrite = self.client.responses.create(
+            rewrite = metered_call(
+                self.client.responses.create, provider=self.provider_name, meter_model=model,
+                phase="format_repair", tariff_rates=MODEL_PRICING_PER_1M_TOKENS.get(model),
                 model=model,
                 input=(
                     "Return ONLY one valid markdown table. "
@@ -238,6 +266,9 @@ class OpenAIProvider(BaseAIProvider):
             ),
             provider=self.provider_name,
             model=model,
+            web_search_used=web_search_used,
+            web_search_queries=web_search_queries,
+            web_sources=web_sources,
         )
 
     @staticmethod
@@ -256,6 +287,8 @@ class OpenAIProvider(BaseAIProvider):
     @staticmethod
     def _requires_live_web_context(prompt: str) -> bool:
         text = (prompt or "").lower()
+        if "[stage2_shared_evidence_only]" in text:
+            return False
         if "[enable_web_search]" in text:
             return True
         keywords = (

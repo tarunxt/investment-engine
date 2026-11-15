@@ -4,14 +4,15 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
+import { logoutWarning } from "@/lib/logoutOutcome";
 import { isClientAuthBypassed, resolveAuthRedirectTarget } from "@/lib/authRedirect";
-import { URLs } from "@/lib/urls";
 import { AuthRedirect } from "@/components/AuthRedirect";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { FormAlert } from "@/components/auth/FormAlert";
 import { Loader2 } from "lucide-react";
+import { GoogleSignIn } from "@/components/auth/GoogleSignIn";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -21,6 +22,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [validationError, setValidationError] = useState<string | null>(null);
   const redirectTo = resolveAuthRedirectTarget(searchParams.get("redirectTo"));
+  const signOutWarning = logoutWarning(searchParams.get("logout"));
 
   const validateForm = () => {
     if (!email) {
@@ -59,6 +61,8 @@ export default function LoginPage() {
             <CardDescription>Sign in to your account to continue</CardDescription>
           </CardHeader>
           <CardContent>
+            {signOutWarning && <p role="status" className="mb-4 text-sm">{signOutWarning}</p>}
+            <GoogleSignIn redirectTo={redirectTo} />
             <form onSubmit={handleSubmit} className="space-y-4">
               {/* Error Alert */}
               {(error || validationError) && (
@@ -76,7 +80,7 @@ export default function LoginPage() {
                   type="button"
                   variant="outline"
                   className="w-full border-purple-300 bg-purple-50 text-purple-700 hover:bg-purple-100"
-                  onClick={() => router.replace(redirectTo || URLs.routes.console.dashboard())}
+                  onClick={() => router.replace(redirectTo || "/console/dashboard")}
                 >
                   Continue to Dashboard
                 </Button>
@@ -144,25 +148,19 @@ export default function LoginPage() {
 
               <div className="relative">
                 <div className="absolute inset-0 flex items-center">
-                  <span className="w-full border-t border-slate-200" />
+                  <span className="w-full border-t border-border" />
                 </div>
                 <div className="relative flex justify-center text-xs uppercase">
-                  <span className="bg-white px-2 text-slate-500">Don&apos;t have an account?</span>
+                  <span className="bg-card px-2 text-muted-foreground">Don&apos;t have an account?</span>
                 </div>
               </div>
 
-              <Link href={URLs.routes.register()}>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="w-full"
-                >
-                  Create Account
-                </Button>
-              </Link>
+              <Button type="button" variant="outline" className="w-full" asChild>
+                <Link href="/register">Create Account</Link>
+              </Button>
 
               <div className="text-center mt-2">
-                <Link href={URLs.routes.forgotPassword()} className="text-sm text-purple-600 hover:text-purple-700">
+                <Link href="/forgot-password" className="text-sm text-purple-600 hover:text-purple-700">
                   Forgot password?
                 </Link>
               </div>

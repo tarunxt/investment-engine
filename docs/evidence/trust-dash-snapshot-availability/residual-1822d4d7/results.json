@@ -1,0 +1,98 @@
+[
+  {
+    "state": "loading",
+    "passed": true,
+    "reads": 1,
+    "screenshot": "loading-desktop.png"
+  },
+  {
+    "state": "success",
+    "passed": true,
+    "reads": 2,
+    "screenshot": "success-desktop.png"
+  },
+  {
+    "state": "empty",
+    "passed": true,
+    "reads": 1,
+    "screenshot": "empty-desktop.png"
+  },
+  {
+    "state": "failed",
+    "passed": true,
+    "reads": 1,
+    "screenshot": "failed-desktop.png"
+  },
+  {
+    "state": "stale-cache",
+    "passed": true,
+    "reads": 1,
+    "screenshot": "stale-cache-desktop.png"
+  },
+  {
+    "state": "stale-response",
+    "passed": true,
+    "reads": 1,
+    "screenshot": "stale-response-desktop.png"
+  },
+  {
+    "state": "failed-retained-history",
+    "passed": true,
+    "reads": 2,
+    "screenshot": "failed-retained-history-desktop.png"
+  },
+  {
+    "state": "partial-source",
+    "passed": true,
+    "reads": 1,
+    "screenshot": "partial-source-desktop.png"
+  },
+  {
+    "state": "missing-cash",
+    "passed": true,
+    "reads": 1,
+    "screenshot": "missing-cash-desktop.png"
+  },
+  {
+    "state": "unavailable-fx",
+    "passed": true,
+    "reads": 1,
+    "screenshot": "unavailable-fx-desktop.png"
+  },
+  {
+    "state": "deferred-panels",
+    "passed": true,
+    "reads": 1,
+    "screenshot": "deferred-panels-desktop.png"
+  },
+  {
+    "state": "loading-panels",
+    "passed": true,
+    "reads": 1,
+    "screenshot": "loading-panels-desktop.png"
+  },
+  {
+    "state": "saved-panels",
+    "passed": true,
+    "reads": 1,
+    "screenshot": "saved-panels-desktop.png"
+  },
+  {
+    "state": "cached-panels",
+    "passed": true,
+    "reads": 1,
+    "screenshot": "cached-panels-desktop.png"
+  },
+  {
+    "state": "empty-panels",
+    "passed": true,
+    "reads": 1,
+    "screenshot": "empty-panels-desktop.png"
+  },
+  {
+    "state": "failed-panels",
+    "passed": true,
+    "reads": 1,
+    "screenshot": "failed-panels-desktop.png"
+  }
+]

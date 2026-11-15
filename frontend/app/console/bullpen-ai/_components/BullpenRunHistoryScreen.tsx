@@ -1,0 +1,823 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+
+import { formatUnknownError } from "@/lib/apiErrors";
+import { BullpenEventIdentityResolver } from "@/lib/bullpenEventIdentityResolver";
+import { isBullpenHistoryActivePosition, isBullpenHistoryClaimablePosition } from "@/lib/bullpenHistoryPositions";
+import {
+  isUsableBullpenPositionsSnapshot,
+  type BullpenActivePositionView,
+  type BullpenPositionsResponse,
+} from "@/lib/bullpenPositions";
+import {
+  APIError,
+  InvalidAPIResponseError,
+  NetworkError,
+  apiService,
+} from "@/services/api";
+import type {
+  BullpenAutoLiveEventTrend,
+  BullpenAutoLiveEventTrendsResponse,
+  BullpenAutoLiveHistoryItem,
+  BullpenAutoLiveHistoryPage,
+  BullpenSportsRankingComparison,
+} from "@/types/api";
+import { readSportsEventComparisons } from "@/lib/sportsRankingsApi";
+import { BullpenHistoryPortfolio } from "./BullpenHistoryPortfolio";
+import { BullpenRunHistoryContent } from "./BullpenRunHistoryContent";
+import { BullpenClusteringProgressHandoff } from "./BullpenClusteringProgress";
+import type { BullpenWorkspaceProfile } from "@/lib/bullpenStageOneSettings";
+import { bullpenWorkspaceRunPath } from "@/lib/bullpenWorkspaceRoutes";
+import { useEventTrendsTimeout } from "./useEventTrendsTimeout";
+
+const EVENT_TRENDS_CACHE_KEY = "bullpen-auto-live-event-trends-v3";
+const HISTORY_PAGE_CACHE_KEY = "bullpen-auto-live-history-page-v2";
+const HISTORY_READ_TIMEOUT_MS = 20_000;
+const EVENT_TRENDS_CLIENT_GRACE_MS = 2_000;
+const HISTORY_READ_RETRY_DELAY_MS = 750;
+const DEFAULT_RUN_HISTORY_REFRESH_SECONDS = 300;
+const MIN_RUN_HISTORY_REFRESH_SECONDS = 60;
+const MAX_RUN_HISTORY_REFRESH_SECONDS = 86_400;
+const RUN_HISTORY_REFRESH_SECONDS_STORAGE_KEY =
+  "bullpen-run-history-refresh-seconds-v1";
+const HOURLY_REBALANCE_RESULT_QUERY_PARAM = "hourlyRebalanceResult";
+
+type HourlyRebalanceResult = "completed" | "failed";
+
+function requestedHourlyRebalanceResult(): HourlyRebalanceResult | null {
+  if (typeof window === "undefined") return null;
+  const value = new URLSearchParams(window.location.search).get(
+    HOURLY_REBALANCE_RESULT_QUERY_PARAM,
+  );
+  return value === "completed" || value === "failed" ? value : null;
+}
+
+function clearHourlyRebalanceResultRequest() {
+  const url = new URL(window.location.href);
+  url.searchParams.delete(HOURLY_REBALANCE_RESULT_QUERY_PARAM);
+  window.history.replaceState(window.history.state, "", url);
+}
+
+function workspaceCacheKey(key: string, profile: BullpenWorkspaceProfile) {
+  return `${key}:${profile}`;
+}
+
+function readCachedHistoryPage(
+  profile: BullpenWorkspaceProfile,
+): BullpenAutoLiveHistoryPage | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const parsed = JSON.parse(
+      window.localStorage.getItem(
+        workspaceCacheKey(HISTORY_PAGE_CACHE_KEY, profile),
+      ) || "null",
+    ) as BullpenAutoLiveHistoryPage | null;
+    return parsed?.page === 1 && Array.isArray(parsed.items) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function cacheHistoryPage(
+  page: BullpenAutoLiveHistoryPage,
+  profile: BullpenWorkspaceProfile,
+) {
+  if (page.page !== 1) return;
+  try {
+    window.localStorage.setItem(
+      workspaceCacheKey(HISTORY_PAGE_CACHE_KEY, profile),
+      JSON.stringify(page),
+    );
+  } catch {
+    // Storage can be unavailable in private/restricted browser contexts.
+  }
+}
+
+function isRetryableHistoryReadError(error: unknown) {
+  return (
+    error instanceof NetworkError ||
+    error instanceof InvalidAPIResponseError ||
+    (error instanceof APIError && (error.status === 429 || error.status >= 500))
+  );
+}
+
+async function readHistoryWithRetry<T>(load: () => Promise<T>): Promise<T> {
+  try {
+    return await load();
+  } catch (error) {
+    if (!isRetryableHistoryReadError(error)) throw error;
+    await new Promise<void>((resolve) =>
+      window.setTimeout(resolve, HISTORY_READ_RETRY_DELAY_MS),
+    );
+    return load();
+  }
+}
+
+function readCachedEventTrends(
+  profile: BullpenWorkspaceProfile,
+): BullpenAutoLiveEventTrendsResponse | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const parsed = JSON.parse(
+      window.localStorage.getItem(
+        workspaceCacheKey(EVENT_TRENDS_CACHE_KEY, profile),
+      ) || "null",
+    ) as BullpenAutoLiveEventTrendsResponse | null;
+    return parsed && Array.isArray(parsed.events) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function cacheEventTrends(
+  trends: BullpenAutoLiveEventTrendsResponse,
+  profile: BullpenWorkspaceProfile,
+) {
+  try {
+    window.localStorage.setItem(
+      workspaceCacheKey(EVENT_TRENDS_CACHE_KEY, profile),
+      JSON.stringify(trends),
+    );
+  } catch {
+    // Storage can be unavailable in private/restricted browser contexts.
+  }
+}
+
+function preserveCachedSportsRankings(
+  trends: BullpenAutoLiveEventTrendsResponse,
+  cached: BullpenAutoLiveEventTrendsResponse | null,
+) {
+  // Current backend diagnostics are authoritative. Never resurrect cached matches.
+  void cached;
+  return trends;
+}
+
+async function fetchCurrentBullpenPositions() {
+  const params = new URLSearchParams({
+    caller_source: "ui-history-portfolio-refresh",
+    force_fresh: "true",
+    max_age_seconds: "0",
+    request_id: crypto.randomUUID(),
+  });
+  const response = await fetch(`/api/bullpen-ai/positions?${params}`, {
+    cache: "no-store",
+    credentials: "same-origin",
+    headers: { "Cache-Control": "no-cache" },
+    signal: AbortSignal.timeout(10_000),
+  });
+  const payload = (await response.json()) as BullpenPositionsResponse;
+  if (!response.ok && !payload.positions?.length) {
+    throw new Error(
+      payload.error || `Bullpen positions request failed (${response.status}).`,
+    );
+  }
+  return payload;
+}
+
+type CurrentOrderBookMarket = {
+  eventSlug?: string | null;
+  eventTitle?: string | null;
+  yesOdds?: number | null;
+  noOdds?: number | null;
+  yesBestBid?: number | null;
+  yesBestAsk?: number | null;
+  yesSpread?: number | null;
+  noBestBid?: number | null;
+  noBestAsk?: number | null;
+  noSpread?: number | null;
+};
+
+type CurrentOrderBookOddsResponse = {
+  markets?: Record<string, CurrentOrderBookMarket>;
+  fetchedAt?: string | null;
+};
+
+type SportsEventMetadataResponse = {
+  events?: Record<string, { eventSlug: string; eventTitle: string | null }>;
+};
+
+const MAX_CURRENT_ODDS_LOOKUP_BATCH_SIZE = 100;
+
+function historyCurrentOddsLookupId(
+  event: BullpenAutoLiveEventTrend,
+  index: number,
+) {
+  const exactIdentity =
+    event.condition_id ?? event.slug ?? event.market_id ?? event.market_title;
+  return `history-current-odds-${index}-${exactIdentity}`;
+}
+
+async function fetchCurrentOrderBookOdds(
+  trends: BullpenAutoLiveEventTrendsResponse,
+): Promise<CurrentOrderBookOddsResponse> {
+  const questions = trends.events.map((event, index) => ({
+    id: historyCurrentOddsLookupId(event, index),
+    marketId: event.market_id,
+    conditionId: event.condition_id ?? null,
+    slug: event.slug ?? null,
+    marketUrl: event.market_url ?? null,
+    question: event.market_title,
+    category: null,
+  }));
+  const mergedMarkets: Record<string, CurrentOrderBookMarket> = {};
+  let fetchedAt: string | null = null;
+
+  for (
+    let index = 0;
+    index < questions.length;
+    index += MAX_CURRENT_ODDS_LOOKUP_BATCH_SIZE
+  ) {
+    const response = await fetch("/api/bullpen-ai/current-odds", {
+      method: "POST",
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: {
+        "Cache-Control": "no-cache",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        questions: questions.slice(
+          index,
+          index + MAX_CURRENT_ODDS_LOOKUP_BATCH_SIZE,
+        ),
+      }),
+      signal: AbortSignal.timeout(20_000),
+    });
+    const payload = (await response.json()) as CurrentOrderBookOddsResponse & {
+      error?: string;
+    };
+    if (!response.ok) {
+      throw new Error(
+        payload.error ||
+          `Current order-book request failed (${response.status}).`,
+      );
+    }
+    Object.assign(mergedMarkets, payload.markets ?? {});
+    if (payload.fetchedAt) {
+      fetchedAt = payload.fetchedAt;
+    }
+  }
+
+  return { markets: mergedMarkets, fetchedAt };
+}
+
+function sportsEventSlug(event: BullpenAutoLiveEventTrend) {
+  if (event.sports_event_slug) return event.sports_event_slug;
+  const match = event.market_url?.match(/polymarket\.com\/event\/([^/?#]+)/i);
+  return match?.[1]?.toLowerCase() ?? null;
+}
+
+async function fetchSportsEventMetadata(
+  trends: BullpenAutoLiveEventTrendsResponse,
+): Promise<SportsEventMetadataResponse> {
+  const slugs = Array.from(new Set(trends.events.map(sportsEventSlug).filter((slug): slug is string => Boolean(slug))));
+  const response = await fetch("/api/bullpen-ai/sports-event-metadata", {
+    method: "POST",
+    cache: "no-store",
+    credentials: "same-origin",
+    headers: { "Cache-Control": "no-cache", "content-type": "application/json" },
+    body: JSON.stringify({ slugs }),
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!response.ok) throw new Error(`Sports event metadata request failed (${response.status}).`);
+  return response.json() as Promise<SportsEventMetadataResponse>;
+}
+
+function applySportsEventMetadata(
+  trends: BullpenAutoLiveEventTrendsResponse,
+  response: SportsEventMetadataResponse | null,
+): BullpenAutoLiveEventTrendsResponse {
+  return {
+    ...trends,
+    events: trends.events.map((event) => {
+      const slug = sportsEventSlug(event);
+      const metadata = slug ? response?.events?.[slug] : null;
+      return {
+        ...event,
+        sports_event_slug: metadata?.eventSlug ?? slug,
+        sports_event_title: metadata?.eventTitle ?? event.sports_event_title ?? null,
+      };
+    }),
+  };
+}
+
+function currentReturnsPerDay(
+  event: BullpenAutoLiveEventTrend,
+  currentYesOdds: number | null,
+  currentNoOdds: number | null,
+  asOfTimestamp?: string | null,
+) {
+  if (event.is_claimable_position || !event.close_time) {
+    return event.returns_per_day ?? null;
+  }
+  const closeTime = new Date(event.close_time).getTime();
+  const latestScan = event.scan_timestamps.find(Boolean);
+  const scanTime = new Date(
+    asOfTimestamp ?? latestScan ?? "",
+  ).getTime();
+  if (!Number.isFinite(closeTime) || !Number.isFinite(scanTime)) {
+    return event.returns_per_day ?? null;
+  }
+  const daysUntilClose = Number(
+    ((closeTime - scanTime) / 86_400_000).toFixed(1),
+  );
+  const formulaDaysUntilClose =
+    daysUntilClose < 0
+      ? Number((daysUntilClose - 1).toFixed(1))
+      : daysUntilClose;
+  const activeSide = event.active_position_side?.trim().toUpperCase();
+  const chosenSide =
+    activeSide === "YES" || activeSide === "NO"
+      ? activeSide
+      : event.llm_yes_odds != null && event.llm_no_odds != null
+        ? event.llm_yes_odds >= event.llm_no_odds
+          ? "YES"
+          : "NO"
+        : currentYesOdds !== null && currentNoOdds !== null
+          ? currentYesOdds >= currentNoOdds
+            ? "YES"
+            : "NO"
+          : currentYesOdds !== null
+            ? "YES"
+            : currentNoOdds !== null
+              ? "NO"
+              : null;
+  if (chosenSide === null) return event.returns_per_day ?? null;
+  const currentOdds =
+    chosenSide === "YES" ? currentYesOdds : currentNoOdds;
+  const denominator = formulaDaysUntilClose + 4;
+  if (currentOdds === null || denominator === 0) {
+    return event.returns_per_day ?? null;
+  }
+  return Number(((100 - currentOdds) / denominator).toFixed(2));
+}
+
+export function applyCurrentOrderBookOddsToEventTrends(
+  trends: BullpenAutoLiveEventTrendsResponse,
+  response: CurrentOrderBookOddsResponse,
+): BullpenAutoLiveEventTrendsResponse {
+  return {
+    ...trends,
+    current_odds_fetched_at: response.fetchedAt ?? trends.current_odds_fetched_at,
+    events: trends.events.map((event, index) => {
+      const market = response.markets?.[
+        historyCurrentOddsLookupId(event, index)
+      ];
+      const activeSide = event.active_position_side?.trim().toUpperCase();
+      const currentYesOdds =
+        activeSide === "YES" && typeof market?.yesBestBid === "number"
+          ? market.yesBestBid
+          : typeof market?.yesOdds === "number"
+            ? market.yesOdds
+          : event.current_yes_odds ?? null;
+      const currentNoOdds =
+        activeSide === "NO" && typeof market?.noBestBid === "number"
+          ? market.noBestBid
+          : typeof market?.noOdds === "number"
+            ? market.noOdds
+          : event.current_no_odds ?? null;
+      return {
+        ...event,
+        sports_event_slug: market?.eventSlug ?? event.sports_event_slug ?? null,
+        sports_event_title: market?.eventTitle ?? event.sports_event_title ?? null,
+        current_yes_odds: currentYesOdds,
+        current_no_odds: currentNoOdds,
+        current_yes_bid_cents: market?.yesBestBid ?? null,
+        current_yes_ask_cents: market?.yesBestAsk ?? null,
+        current_yes_spread_cents: market?.yesSpread ?? null,
+        current_no_bid_cents: market?.noBestBid ?? null,
+        current_no_ask_cents: market?.noBestAsk ?? null,
+        current_no_spread_cents: market?.noSpread ?? null,
+        returns_per_day: currentReturnsPerDay(
+          event,
+          currentYesOdds,
+          currentNoOdds,
+          response.fetchedAt ?? trends.generated_at,
+        ),
+      };
+    }),
+  };
+}
+
+async function applySportsRankingsToEventTrends(
+  trends: BullpenAutoLiveEventTrendsResponse,
+): Promise<BullpenAutoLiveEventTrendsResponse> {
+  const events = trends.events
+    .filter((event) => event.sports_event_slug || event.sports_event_title)
+    .map((event) => ({
+      market_id: event.market_id,
+      event_slug: event.sports_event_slug ?? null,
+      event_title: event.sports_event_title ?? null,
+  }));
+  if (!events.length) return trends;
+  let comparisons: Record<string, BullpenSportsRankingComparison> = {};
+  try {
+    comparisons = (await readSportsEventComparisons<{
+      comparisons: Record<string, BullpenSportsRankingComparison>;
+    }>(events)).comparisons;
+  } catch (error) {
+    comparisons = Object.fromEntries(events.map(event => [event.market_id, {
+      market_id: event.market_id, code: event.event_slug?.split("-", 1)[0] ?? null,
+      tags: event.event_slug ? [event.event_slug.split("-", 1)[0]] : [],
+      team_a: null, team_b: null, match_status: "unmatched" as const,
+      ranking: null, rating: null, points: null, competition_id: null,
+      competition: null, source_as_of: null, status_code: "SERVICE_UNAVAILABLE",
+      explanation: `${error instanceof Error ? error.message : "Rankings request failed."} Refresh to retry the canonical ranking service.`,
+      view: "current", resolution_version: "sports-ranking-v2",
+    }]));
+  }
+  return {
+    ...trends,
+    events: trends.events.map((event) => ({
+      ...event,
+      sports_ranking:
+        comparisons[event.market_id] ?? null,
+    })),
+  };
+}
+
+function resolveActivePositionSide(
+  position: BullpenActivePositionView,
+): "YES" | "NO" | null {
+  if (position.heldSide === "YES" || position.heldSide === "NO") {
+    return position.heldSide;
+  }
+  const outcome = position.outcome.trim().toUpperCase();
+  return outcome === "YES" || outcome === "NO" ? outcome : null;
+}
+
+function normalizeBullpenContractIdentity(value: string | null | undefined) {
+  if (!value) return null;
+  const normalized = value.trim().toLowerCase();
+  return normalized.length > 0 ? normalized : null;
+}
+
+function normalizeBullpenContractTitle(value: string | null | undefined) {
+  const normalized = normalizeBullpenContractIdentity(value);
+  return normalized
+    ? normalized.replace(/\s+/g, " ").replace(/[?!.]+$/, "")
+    : null;
+}
+
+function isSameBullpenContract(
+  event: BullpenAutoLiveEventTrend,
+  position: BullpenActivePositionView,
+) {
+  const eventMarketId = normalizeBullpenContractIdentity(event.market_id);
+  const conditionId = normalizeBullpenContractIdentity(position.conditionId);
+  const positionKey = normalizeBullpenContractIdentity(position.key);
+
+  // A Bullpen/Polymarket marketId can identify the parent event shared by
+  // several deadline/outcome contracts. Never use position.marketId alone to
+  // paint an active tick: that is what made sibling contracts (Aug 14/15/22,
+  // Aug 15/16/17, etc.) all look active when only one contract was actually held.
+  if (
+    eventMarketId &&
+    (eventMarketId === conditionId || eventMarketId === positionKey)
+  ) {
+    return true;
+  }
+
+  const eventTitle = normalizeBullpenContractTitle(event.market_title);
+  const positionTitle = normalizeBullpenContractTitle(position.marketTitle);
+  return Boolean(eventTitle && positionTitle && eventTitle === positionTitle);
+}
+
+export function applyCurrentBullpenPositionsToEventTrends(
+  trends: BullpenAutoLiveEventTrendsResponse,
+  positions: BullpenPositionsResponse,
+): BullpenAutoLiveEventTrendsResponse {
+  const currentPositions = positions.positions ?? [];
+  const activePositions = currentPositions.filter(isBullpenHistoryActivePosition);
+  const claimablePositions = currentPositions.filter(
+    isBullpenHistoryClaimablePosition,
+  );
+
+  const events = trends.events.map((event: BullpenAutoLiveEventTrend) => {
+    const target = BullpenEventIdentityResolver.buildIdentity({
+      marketId: event.market_id,
+      marketUrl: event.market_url ?? null,
+      title: event.market_title,
+    });
+    const contractCandidates = activePositions.filter((position) =>
+      isSameBullpenContract(event, position),
+    );
+    const match = BullpenEventIdentityResolver.resolveMatch({
+      target,
+      candidates: contractCandidates,
+      getIdentity: BullpenEventIdentityResolver.fromPosition,
+    });
+    const activePosition =
+      match.status === "matched" ? (match.match?.item ?? null) : null;
+    const claimableMatch = BullpenEventIdentityResolver.resolveMatch({
+      target,
+      candidates: claimablePositions.filter((position) =>
+        isSameBullpenContract(event, position),
+      ),
+      getIdentity: BullpenEventIdentityResolver.fromPosition,
+    });
+    const claimablePosition =
+      claimableMatch.status === "matched"
+        ? (claimableMatch.match?.item ?? null)
+        : null;
+
+    const currentPosition = activePosition ?? claimablePosition;
+    const reconciledEvent: BullpenAutoLiveEventTrend = {
+      ...event,
+      condition_id: event.condition_id ?? currentPosition?.conditionId ?? null,
+      slug: event.slug ?? currentPosition?.slug ?? null,
+      close_time: event.close_time ?? currentPosition?.closeTime ?? null,
+      is_active_position: activePosition !== null,
+      is_claimable_position: claimablePosition !== null,
+      active_position_side: activePosition
+        ? resolveActivePositionSide(activePosition)
+        : null,
+      position_average_price_cents:
+        currentPosition?.averagePrice == null
+          ? null
+          : Number((currentPosition.averagePrice * 100).toFixed(2)),
+    };
+
+    return {
+      ...reconciledEvent,
+      returns_per_day:
+        currentReturnsPerDay(
+          reconciledEvent,
+          reconciledEvent.current_yes_odds ?? null,
+          reconciledEvent.current_no_odds ?? null,
+          trends.current_odds_fetched_at ?? trends.generated_at,
+        ) ?? activePosition?.returnsPerDay ?? event.returns_per_day ?? null,
+    };
+  });
+
+  return { ...trends, events };
+}
+
+export function BullpenRunHistoryScreen({
+  workspaceProfile = "bullpen007",
+}: {
+  workspaceProfile?: BullpenWorkspaceProfile;
+}) {
+  const { timeoutSeconds: eventTrendsTimeoutSeconds, saveTimeoutSeconds } =
+    useEventTrendsTimeout();
+  const router = useRouter();
+  const [page, setPage] =
+    useState<BullpenAutoLiveHistoryPage | null>(() =>
+      readCachedHistoryPage(workspaceProfile),
+    );
+  const [trends, setTrends] =
+    useState<BullpenAutoLiveEventTrendsResponse | null>(() =>
+      readCachedEventTrends(workspaceProfile),
+    );
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [trendsError, setTrendsError] = useState<string | null>(null);
+  const [portfolioReady, setPortfolioReady] = useState(false);
+  const [portfolioVersion, setPortfolioVersion] = useState(0);
+  const [lastRebalanceAt, setLastRebalanceAt] = useState<string | null>(null);
+  const [hourlyRebalanceStatus, setHourlyRebalanceStatus] = useState<"completed" | "failed" | null>(null);
+  const [hourlyRebalanceAt, setHourlyRebalanceAt] = useState<string | null>(null);
+  const [hourlyRebalanceDetail, setHourlyRebalanceDetail] = useState<string | null>(null);
+  const [hourlyRebalanceLastError, setHourlyRebalanceLastError] = useState<string | null>(null);
+  const [hourlyRebalanceLastAction, setHourlyRebalanceLastAction] = useState<string | null>(null);
+  const [latestRuns, setLatestRuns] = useState<BullpenAutoLiveHistoryItem[]>(
+    () => readCachedHistoryPage(workspaceProfile)?.items ?? [],
+  );
+  const refreshInProgress = useRef(false);
+  const [refreshIntervalSeconds, setRefreshIntervalSeconds] = useState(
+    DEFAULT_RUN_HISTORY_REFRESH_SECONDS,
+  );
+
+  useEffect(() => {
+    const savedSeconds = Number.parseInt(
+      window.localStorage.getItem(RUN_HISTORY_REFRESH_SECONDS_STORAGE_KEY) ?? "",
+      10,
+    );
+    if (
+      Number.isInteger(savedSeconds) &&
+      savedSeconds >= MIN_RUN_HISTORY_REFRESH_SECONDS &&
+      savedSeconds <= MAX_RUN_HISTORY_REFRESH_SECONDS
+    ) {
+      setRefreshIntervalSeconds(savedSeconds);
+    }
+  }, []);
+
+  const saveRefreshInterval = useCallback((seconds: number) => {
+    setRefreshIntervalSeconds(seconds);
+    window.localStorage.setItem(
+      RUN_HISTORY_REFRESH_SECONDS_STORAGE_KEY,
+      String(seconds),
+    );
+  }, []);
+
+  const load = useCallback(async (pageNumber = 1) => {
+    if (refreshInProgress.current) return;
+    refreshInProgress.current = true;
+    setLoading(true);
+    setError(null);
+    setTrendsError(null);
+    try {
+      const requestedRebalanceResult = requestedHourlyRebalanceResult();
+      const positionsPromise = fetchCurrentBullpenPositions().catch(() => null);
+      const historyRequestOptions = { timeoutMs: HISTORY_READ_TIMEOUT_MS };
+      // Do not make the two heaviest database reads compete for the same small
+      // connection pool. Each read receives one bounded retry after a
+      // transient gateway/database failure.
+      const historyAndTrendsPromise = (async () => {
+        const [pageResult] = await Promise.allSettled([
+          readHistoryWithRetry(() =>
+            apiService.getBullpenAutoLiveHistory(
+              { page: pageNumber, size: 20, workspaceProfile },
+              historyRequestOptions,
+            ),
+          ),
+        ]);
+        const [trendsResult] = await Promise.allSettled([
+          readHistoryWithRetry(() =>
+            apiService.getBullpenAutoLiveHistoryEventTrends(
+              {
+                workspaceProfile,
+                timeoutSeconds: eventTrendsTimeoutSeconds,
+              },
+              {
+                timeoutMs:
+                  eventTrendsTimeoutSeconds * 1_000 +
+                  EVENT_TRENDS_CLIENT_GRACE_MS,
+              },
+            ),
+          ),
+        ]);
+        return [pageResult, trendsResult] as const;
+      })();
+      const runtimeStatePromise = requestedRebalanceResult
+        ? apiService
+            .recordBullpenHourlyRebalanceResult(
+              requestedRebalanceResult,
+              "Reported by the authenticated Hourly Bullpen Rebalance browser handoff.",
+            )
+            .then((state) => {
+              clearHourlyRebalanceResultRequest();
+              return state;
+            })
+        : apiService.getBullpenAutoLiveState();
+      const [[pageResult, trendsResult], currentPositions, runtimeState] = await Promise.all([
+        historyAndTrendsPromise,
+        positionsPromise,
+        runtimeStatePromise.catch(() => null),
+      ]);
+      // Show the freshly primed portfolio before optional event enrichment.
+      setPortfolioVersion((version) => version + 1);
+      setPortfolioReady(true);
+      if (runtimeState) {
+        setLastRebalanceAt(runtimeState.last_rebalance_at ?? null);
+        setHourlyRebalanceStatus(runtimeState.latest_hourly_rebalance_status ?? null);
+        setHourlyRebalanceAt(runtimeState.latest_hourly_rebalance_at ?? null);
+        setHourlyRebalanceDetail(runtimeState.latest_hourly_rebalance_detail ?? null);
+        setHourlyRebalanceLastError(runtimeState.last_error ?? null);
+        setHourlyRebalanceLastAction(runtimeState.last_action ?? null);
+      }
+      const hasUsableCurrentPositions = Boolean(
+        currentPositions &&
+          isUsableBullpenPositionsSnapshot({
+            positionsSource: currentPositions.positionsSource,
+            liveAvailable: currentPositions.liveAvailable,
+          }),
+      );
+      if (pageResult.status === "fulfilled") {
+        setPage(pageResult.value);
+        if (pageResult.value.page === 1) {
+          setLatestRuns(pageResult.value.items);
+          cacheHistoryPage(pageResult.value, workspaceProfile);
+        }
+      } else {
+        const cachedPage =
+          pageNumber === 1 ? readCachedHistoryPage(workspaceProfile) : null;
+        if (cachedPage) {
+          setPage(cachedPage);
+          setLatestRuns(cachedPage.items);
+        } else {
+          setError(
+            `Run history is temporarily unavailable. ${formatUnknownError(pageResult.reason)}`,
+          );
+        }
+      }
+      if (trendsResult.status === "fulfilled") {
+        const positionTrends =
+          hasUsableCurrentPositions && currentPositions
+            ? applyCurrentBullpenPositionsToEventTrends(
+                trendsResult.value,
+                currentPositions,
+              )
+            : trendsResult.value;
+        const identityBaseTrends = applySportsEventMetadata(positionTrends, null);
+        setTrends(identityBaseTrends);
+        const currentOrderBookOddsPromise = fetchCurrentOrderBookOdds(identityBaseTrends).catch(() => null);
+        const sportsEventMetadata = await fetchSportsEventMetadata(identityBaseTrends).catch(() => null);
+        const metadataTrends = preserveCachedSportsRankings(
+          applySportsEventMetadata(identityBaseTrends, sportsEventMetadata),
+          readCachedEventTrends(workspaceProfile),
+        );
+        setTrends(metadataTrends);
+        const rankedTrends = await applySportsRankingsToEventTrends(metadataTrends).catch(
+          () => metadataTrends,
+        );
+        setTrends(rankedTrends);
+        const currentOrderBookOdds = await currentOrderBookOddsPromise;
+        const oddsTrends = currentOrderBookOdds
+          ? applyCurrentOrderBookOddsToEventTrends(
+              rankedTrends,
+              currentOrderBookOdds,
+            )
+          : rankedTrends;
+        setTrends(oddsTrends);
+        cacheEventTrends(oddsTrends, workspaceProfile);
+      } else {
+        const cachedTrends = readCachedEventTrends(workspaceProfile);
+        if (cachedTrends) {
+          const identityBaseTrends = applySportsEventMetadata(cachedTrends, null);
+          setTrends(identityBaseTrends);
+          const sportsEventMetadata = await fetchSportsEventMetadata(identityBaseTrends).catch(() => null);
+          const metadataTrends = preserveCachedSportsRankings(
+            applySportsEventMetadata(identityBaseTrends, sportsEventMetadata),
+            cachedTrends,
+          );
+          setTrends(metadataTrends);
+          const rankedTrends = await applySportsRankingsToEventTrends(metadataTrends).catch(
+            () => metadataTrends,
+          );
+          setTrends(rankedTrends);
+          cacheEventTrends(rankedTrends, workspaceProfile);
+        } else {
+          setTrendsError(
+            `Event trends are temporarily unavailable. ${formatUnknownError(trendsResult.reason)}`,
+          );
+        }
+      }
+    } catch (cause) {
+      setError(
+        `Run history is temporarily unavailable. ${formatUnknownError(cause)}`,
+      );
+    } finally {
+      refreshInProgress.current = false;
+      setPortfolioReady(true);
+      setLoading(false);
+    }
+  }, [eventTrendsTimeoutSeconds, workspaceProfile]);
+
+  useEffect(() => {
+    window.queueMicrotask(() => void load());
+  }, [load]);
+
+  useEffect(() => {
+    const interval = window.setInterval(
+      () => void load(page?.page ?? 1),
+      refreshIntervalSeconds * 1_000,
+    );
+    return () => window.clearInterval(interval);
+  }, [load, page?.page, refreshIntervalSeconds]);
+
+  const openRun = (run: BullpenAutoLiveHistoryItem) =>
+    router.push(
+      bullpenWorkspaceRunPath(workspaceProfile, run.id),
+    );
+
+  return (
+    <main className="min-h-screen bg-slate-100 p-4 md:p-8">
+      <div className="mx-auto max-w-[96rem] space-y-6">
+        <BullpenClusteringProgressHandoff />
+        {portfolioReady ? (
+          <BullpenHistoryPortfolio key={portfolioVersion} />
+        ) : (
+          <div className="rounded-3xl border border-slate-800 bg-slate-950 px-6 py-8 text-sm font-semibold text-slate-300 shadow-xl">
+            Refreshing current Bullpen portfolio…
+          </div>
+        )}
+        <BullpenRunHistoryContent
+          page={page}
+          trends={trends}
+          loading={loading}
+          trendsLoading={loading}
+          error={error}
+          trendsError={trendsError}
+          onRefresh={() => void load(page?.page ?? 1)}
+          refreshIntervalSeconds={refreshIntervalSeconds}
+          onRefreshIntervalChange={saveRefreshInterval}
+          eventTrendsTimeoutSeconds={eventTrendsTimeoutSeconds}
+          onEventTrendsTimeoutChange={saveTimeoutSeconds}
+          onPage={(next) => void load(next)}
+          onOpenRun={openRun}
+          showFullScreen={false}
+          lastRebalanceAt={lastRebalanceAt}
+          hourlyRebalanceStatus={hourlyRebalanceStatus}
+          hourlyRebalanceAt={hourlyRebalanceAt}
+          hourlyRebalanceDetail={hourlyRebalanceDetail}
+          hourlyRebalanceLastError={hourlyRebalanceLastError}
+          hourlyRebalanceLastAction={hourlyRebalanceLastAction}
+          latestRuns={latestRuns}
+        />
+      </div>
+    </main>
+  );
+}

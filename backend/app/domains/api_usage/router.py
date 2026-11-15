@@ -2,21 +2,24 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from datetime import date, datetime, timedelta, time
-import logging
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.concurrency import run_in_threadpool
-import httpx
+from sqlalchemy.orm import load_only
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.auth.dependencies import get_current_user
 from app.domains.auth.models import User
 from app.domains.google_sheets.service import GoogleSheetsService
+from app.domains.fx_rates.service import load_persisted_usd_inr_rate
 from app.domains.jobs.models import Job
 from app.domains.runs.models import Run, RunJob
 from app.domains.api_usage.schemas import (
+    LlmCostHistoryDay,
+    LlmCostHistoryResponse,
+    LlmCostHistoryRun,
     LlmPerformanceGroup,
     LlmPerformanceResponse,
     LlmScanPerformanceItem,
@@ -28,8 +31,7 @@ from app.infrastructure.database.session import get_async_db
 router = APIRouter(prefix="/api-usage", tags=["api-usage"])
 
 
-IST = ZoneInfo("Asia/Kolkata")
-logger = logging.getLogger(__name__)
+API_USAGE_TZ = ZoneInfo("Asia/Kolkata")
 _google_sheets_service = GoogleSheetsService()
 
 SCAN_MARKERS: tuple[tuple[str, str], ...] = (
@@ -115,8 +117,25 @@ def _build_llm_group(provider: str, model: str, scans: list[LlmScanPerformanceIt
         scans=sorted(scans, key=lambda item: item.created_at, reverse=True),
     )
 
-USD_INR_FALLBACK = 83.50
-FX_SOURCE = "https://open.er-api.com/v6/latest/USD"
+LLM_PROVIDER_LABELS = {
+    "openai": "OpenAI",
+    "anthropic": "Anthropic",
+    "gemini": "Gemini",
+    "deepseek": "DeepSeek",
+}
+
+
+def _normalize_llm_provider(provider: str) -> str:
+    normalized = provider.strip().lower()
+    if normalized not in LLM_PROVIDER_LABELS:
+        raise HTTPException(400, detail="Invalid LLM provider.")
+    return normalized
+
+
+def _usage_day_string(dt: datetime) -> str:
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=ZoneInfo("UTC"))
+    return dt.astimezone(API_USAGE_TZ).date().isoformat()
 
 
 @dataclass
@@ -128,7 +147,7 @@ class ApiUsageItem:
     daily_tokens_in: int
     daily_tokens_out: int
     daily_estimated_cost: float
-    daily_estimated_cost_inr: float
+    daily_estimated_cost_inr: float | None
     daily_limit_requests: int | None
     notes: str | None
     console_url: str | None
@@ -154,29 +173,29 @@ def _window_utc(
     custom_start: date | None = None,
     custom_end: date | None = None,
 ) -> tuple[datetime, datetime, str]:
-    now_ist = datetime.now(IST)
-    day_start_ist = now_ist.replace(hour=0, minute=0, second=0, microsecond=0)
+    now = datetime.now(API_USAGE_TZ)
+    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
     if period == "today":
-        start_ist = day_start_ist
-        end_ist = day_start_ist + timedelta(days=1)
+        start = day_start
+        end = day_start + timedelta(days=1)
         label = "Today"
     elif period == "week":
-        # Monday-start week in IST
-        start_ist = day_start_ist - timedelta(days=day_start_ist.weekday())
-        end_ist = day_start_ist + timedelta(days=1)
+        # Monday-start week in the user's provider-console timezone.
+        start = day_start - timedelta(days=day_start.weekday())
+        end = day_start + timedelta(days=1)
         label = "This week"
     elif period == "month":
-        start_ist = day_start_ist.replace(day=1)
-        end_ist = day_start_ist + timedelta(days=1)
+        start = day_start.replace(day=1)
+        end = day_start + timedelta(days=1)
         label = "This month"
     elif period == "custom":
         if custom_start is None or custom_end is None:
             raise HTTPException(400, detail="custom_start and custom_end are required for custom period.")
         if custom_end < custom_start:
             raise HTTPException(400, detail="custom_end must be on or after custom_start.")
-        start_ist = datetime.combine(custom_start, time.min, tzinfo=IST)
-        end_ist = datetime.combine(custom_end + timedelta(days=1), time.min, tzinfo=IST)
+        start = datetime.combine(custom_start, time.min, tzinfo=API_USAGE_TZ)
+        end = datetime.combine(custom_end + timedelta(days=1), time.min, tzinfo=API_USAGE_TZ)
         if (custom_end - custom_start).days > 365:
             raise HTTPException(400, detail="Custom range cannot exceed 366 days.")
         label = f"Custom ({custom_start.isoformat()} to {custom_end.isoformat()})"
@@ -186,21 +205,16 @@ def _window_utc(
     # jobs.created_at is stored as a naive UTC timestamp in Postgres, so the
     # query window must also be naive UTC to avoid asyncpg datetime coercion
     # errors when filtering.
-    return _to_naive_utc(start_ist), _to_naive_utc(end_ist), label
+    return _to_naive_utc(start), _to_naive_utc(end), label
 
 
-async def _fetch_usd_inr_rate() -> tuple[float, str]:
-    try:
-        async with httpx.AsyncClient(timeout=3.0) as client:
-            resp = await client.get(FX_SOURCE)
-            resp.raise_for_status()
-            payload = resp.json()
-            inr_rate = float((payload.get("rates") or {}).get("INR"))
-            if inr_rate > 0:
-                return inr_rate, FX_SOURCE
-    except Exception as exc:  # pragma: no cover - fallback is expected in outages
-        logger.warning("USD/INR live rate fetch failed, using fallback: %s", exc)
-    return USD_INR_FALLBACK, "fallback"
+def _convert_usd_to_inr(
+    value: float,
+    verified_rate: float | None,
+) -> float | None:
+    if verified_rate is None:
+        return None
+    return round(value * verified_rate, 4)
 
 
 @router.get("/summary")
@@ -215,7 +229,8 @@ async def api_usage_summary(
         lambda: _google_sheets_service.is_configured
     )
     start_utc, end_utc, period_label = _window_utc(period, custom_start, custom_end)
-    usd_inr_rate, fx_source = await _fetch_usd_inr_rate()
+    fx = await load_persisted_usd_inr_rate()
+    usd_inr_rate = fx.valid_value
 
     rows = (
         await db.execute(
@@ -303,7 +318,10 @@ async def api_usage_summary(
                         daily_tokens_in=total_tokens_in if consumed else 0,
                         daily_tokens_out=total_tokens_out if consumed else 0,
                         daily_estimated_cost=usd_cost if consumed else 0.0,
-                        daily_estimated_cost_inr=round((usd_cost if consumed else 0.0) * usd_inr_rate, 4),
+                        daily_estimated_cost_inr=_convert_usd_to_inr(
+                            usd_cost if consumed else 0.0,
+                            usd_inr_rate,
+                        ),
                         daily_limit_requests=None,
                         notes="Primary key is used first; fallback keys are used automatically on quota/rate-limit and transient provider errors.",
                         console_url=console_url,
@@ -325,7 +343,10 @@ async def api_usage_summary(
                 daily_tokens_in=usage.get("tokens_in", 0),
                 daily_tokens_out=usage.get("tokens_out", 0),
                 daily_estimated_cost=usd_cost,
-                daily_estimated_cost_inr=round(usd_cost * usd_inr_rate, 4),
+                daily_estimated_cost_inr=_convert_usd_to_inr(
+                    usd_cost,
+                    usd_inr_rate,
+                ),
                 daily_limit_requests=None,
                 notes="Daily request limit depends on provider plan/quota.",
                 console_url=console_url,
@@ -342,7 +363,10 @@ async def api_usage_summary(
                 daily_tokens_in=0,
                 daily_tokens_out=0,
                 daily_estimated_cost=0.0,
-                daily_estimated_cost_inr=0.0,
+                daily_estimated_cost_inr=_convert_usd_to_inr(
+                    0.0,
+                    usd_inr_rate,
+                ),
                 daily_limit_requests=None,
                 notes="Usage from Google console quotas; app-side token metrics not tracked.",
                 console_url="https://console.cloud.google.com/apis/api/sheets.googleapis.com/quotas",
@@ -355,7 +379,10 @@ async def api_usage_summary(
                 daily_tokens_in=0,
                 daily_tokens_out=0,
                 daily_estimated_cost=0.0,
-                daily_estimated_cost_inr=0.0,
+                daily_estimated_cost_inr=_convert_usd_to_inr(
+                    0.0,
+                    usd_inr_rate,
+                ),
                 daily_limit_requests=None,
                 notes="Kite limits are account-specific.",
                 console_url="https://kite.trade/docs/connect/v3/exceptions/#api-rate-limit",
@@ -368,7 +395,10 @@ async def api_usage_summary(
                 daily_tokens_in=0,
                 daily_tokens_out=0,
                 daily_estimated_cost=0.0,
-                daily_estimated_cost_inr=0.0,
+                daily_estimated_cost_inr=_convert_usd_to_inr(
+                    0.0,
+                    usd_inr_rate,
+                ),
                 daily_limit_requests=None,
                 notes="Used by DeepSeek tool-calling for live web search.",
                 console_url="https://app.tavily.com/home",
@@ -377,17 +407,150 @@ async def api_usage_summary(
     )
 
     return {
-        "timezone": "Asia/Kolkata",
-        "date": datetime.now(IST).date().isoformat(),
+        "timezone": str(API_USAGE_TZ),
+        "date": datetime.now(API_USAGE_TZ).date().isoformat(),
         "last_env_loaded_at_utc": settings_loaded_at_utc,
         "period": period,
         "period_label": period_label,
         "from_date": (custom_start.isoformat() if custom_start else None),
         "to_date": (custom_end.isoformat() if custom_end else None),
-        "usd_inr_rate": round(usd_inr_rate, 4),
-        "fx_source": fx_source,
+        "usd_inr_rate": round(usd_inr_rate, 4) if usd_inr_rate is not None else None,
+        "fx_source": fx.source,
+        "fx_as_of": fx.as_of,
+        "fx_age_seconds": fx.age_seconds,
+        "fx_status": fx.status,
+        "fx_stale_after_seconds": fx.stale_after_seconds,
         "items": [asdict(item) for item in items],
     }
+
+
+@router.get("/llms/cost-history", response_model=LlmCostHistoryResponse)
+async def llm_cost_history(
+    provider: str = Query(..., min_length=1),
+    day_limit: int = Query(default=10, ge=1, le=100),
+    run_limit: int = Query(default=10, ge=1, le=100),
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    normalized_provider = _normalize_llm_provider(provider)
+    fx = await load_persisted_usd_inr_rate()
+    usd_inr_rate = fx.valid_value
+
+    today = datetime.now(API_USAGE_TZ).date()
+    oldest_day = today - timedelta(days=day_limit - 1)
+    start = datetime.combine(oldest_day, time.min, tzinfo=API_USAGE_TZ)
+    end = datetime.combine(today + timedelta(days=1), time.min, tzinfo=API_USAGE_TZ)
+    start_utc = _to_naive_utc(start)
+    end_utc = _to_naive_utc(end)
+
+    day_rows = (
+        await db.execute(
+            select(Job).options(load_only(Job.id, Job.model, Job.status, Job.created_at, Job.estimated_cost, Job.tokens_in, Job.tokens_out))
+            .where(
+                Job.user_id == current_user.id,
+                Job.provider == normalized_provider,
+                Job.created_at >= start_utc,
+                Job.created_at < end_utc,
+            )
+            .order_by(Job.created_at.desc(), Job.id.desc())
+        )
+    ).scalars().all()
+
+    daily_totals: dict[str, dict[str, float | int]] = {
+        (today - timedelta(days=offset)).isoformat(): {
+            "cost": 0.0,
+            "requests": 0,
+            "tokens_in": 0,
+            "tokens_out": 0,
+        }
+        for offset in range(day_limit)
+    }
+    for job in day_rows:
+        day_key = _usage_day_string(job.created_at)
+        totals = daily_totals.get(day_key)
+        if totals is None:
+            continue
+        totals["cost"] = float(totals["cost"]) + float(job.estimated_cost or 0.0)
+        totals["requests"] = int(totals["requests"]) + 1
+        totals["tokens_in"] = int(totals["tokens_in"]) + int(job.tokens_in or 0)
+        totals["tokens_out"] = int(totals["tokens_out"]) + int(job.tokens_out or 0)
+
+    run_jobs = (
+        await db.execute(
+            select(Job).options(load_only(Job.id, Job.model, Job.status, Job.created_at, Job.estimated_cost, Job.tokens_in, Job.tokens_out))
+            .where(
+                Job.user_id == current_user.id,
+                Job.provider == normalized_provider,
+            )
+            .order_by(Job.created_at.desc(), Job.id.desc())
+            .limit(run_limit)
+        )
+    ).scalars().all()
+
+    total_runs = int(
+        await db.scalar(
+            select(func.count(Job.id)).where(
+                Job.user_id == current_user.id,
+                Job.provider == normalized_provider,
+            )
+        )
+        or 0
+    )
+
+    days = [
+        LlmCostHistoryDay(
+            date=day_key,
+            estimated_cost=round(float(totals["cost"]), 6),
+            estimated_cost_inr=_convert_usd_to_inr(
+                float(totals["cost"]),
+                usd_inr_rate,
+            ),
+            requests=int(totals["requests"]),
+            tokens_in=int(totals["tokens_in"]),
+            tokens_out=int(totals["tokens_out"]),
+        )
+        for day_key, totals in sorted(daily_totals.items(), reverse=True)
+    ]
+
+    runs = []
+    for job in run_jobs:
+        status = job.status.value if hasattr(job.status, "value") else str(job.status)
+        cost = float(job.estimated_cost or 0.0)
+        runs.append(
+            LlmCostHistoryRun(
+                job_id=job.id,
+                model=job.model,
+                status=status,
+                timestamp=job.created_at,
+                estimated_cost=round(cost, 6),
+                estimated_cost_inr=_convert_usd_to_inr(
+                    cost,
+                    usd_inr_rate,
+                ),
+                tokens_in=job.tokens_in,
+                tokens_out=job.tokens_out,
+            )
+        )
+
+    return LlmCostHistoryResponse(
+        provider=normalized_provider,
+        name=LLM_PROVIDER_LABELS[normalized_provider],
+        timezone=str(API_USAGE_TZ),
+        usd_inr_rate=round(usd_inr_rate, 4) if usd_inr_rate is not None else None,
+        fx_source=fx.source,
+        fx_as_of=fx.as_of,
+        fx_age_seconds=fx.age_seconds,
+        fx_status=fx.status,
+        fx_stale_after_seconds=fx.stale_after_seconds,
+        generated_at=datetime.now(ZoneInfo("UTC")),
+        day_limit=day_limit,
+        run_limit=run_limit,
+        days=days,
+        runs=runs,
+        total_runs=total_runs,
+        has_more_days=day_limit < 100,
+        has_more_runs=total_runs > len(runs),
+    )
 
 
 @router.get("/llms/performance", response_model=LlmPerformanceResponse)

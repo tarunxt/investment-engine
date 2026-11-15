@@ -6,11 +6,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 import redis.asyncio as aioredis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import load_only
 
 from app.core.config import settings
 from app.domains.auth.dependencies import get_current_user
 from app.domains.auth.models import User
+from app.domains.indmoney_us.models import IndMoneyUsPortfolioSnapshot
 from app.domains.indmoney_us.repository import IndMoneyUsPortfolioSnapshotRepository
+from app.domains.indmoney_us.snapshot_validation import validate_holdings_snapshot
 from app.domains.indmoney_us.threats import (
     THREAT_ANALYSIS_MODEL,
     THREAT_ANALYSIS_PROVIDER,
@@ -19,16 +22,19 @@ from app.domains.indmoney_us.threats import (
     extract_indmoney_us_threat_prompt_metadata,
     is_indmoney_us_threat_job,
     parse_indmoney_us_threat_report,
+    parse_indmoney_us_threat_urgent_actionables,
 )
 from app.domains.indmoney_us.threats_schemas import (
     IndMoneyUsThreatAnalysisResponse,
     IndMoneyUsThreatHistoryResponse,
     IndMoneyUsThreatLatestResponse,
     IndMoneyUsThreatRunResponse,
+    IndMoneyUsThreatRunRequest,
 )
 from app.domains.jobs.models import Job
 from app.domains.jobs.repository import PostgresJobRepository
 from app.domains.jobs.use_cases.create_job import CreateJobCommand, CreateJobUseCase
+from app.domains.portfolio_events.job_projection import portfolio_analysis_job_projection
 from app.domains.portfolio_events.urgent_actionables import (
     HoldingContext,
     build_holding_context_index,
@@ -50,6 +56,8 @@ from app.shared.types import JobStatus
 
 logger = logging.getLogger(__name__)
 
+THREAT_HISTORY_AUGMENTATION_LIMIT = 50
+
 router = APIRouter(prefix="/indmoney-us/threats", tags=["indmoney-us"])
 
 
@@ -59,22 +67,35 @@ def _get_redis() -> aioredis.Redis:
 
 @router.get("/latest", response_model=IndMoneyUsThreatLatestResponse)
 async def get_latest_threat_analysis(
+    include_history: bool = Query(
+        default=False,
+        description=(
+            "Include historical urgent-action augmentation. Disabled by default "
+            "so dashboard refreshes only parse the latest report."
+        ),
+    ),
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
     job = await _get_latest_threat_job(db, current_user.id)
     if not job:
         return IndMoneyUsThreatLatestResponse(analysis=None)
-    return IndMoneyUsThreatLatestResponse(analysis=await _serialize_threat_job(db, job))
+    return IndMoneyUsThreatLatestResponse(
+        analysis=await _serialize_threat_job(
+            db,
+            job,
+            include_history=include_history,
+        )
+    )
 
 
 @router.get("/history", response_model=IndMoneyUsThreatHistoryResponse)
 async def get_threat_history(
-    limit: int = Query(default=100, ge=1, le=500),
+    limit: int = Query(default=100, ge=1, le=100),
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
-    jobs = await _get_threat_jobs(db, current_user.id, limit)
+    jobs = await _get_threat_jobs(db, current_user.id, limit, include_details=False)
     return IndMoneyUsThreatHistoryResponse(history=[_serialize_threat_history_item(job) for job in jobs])
 
 
@@ -93,11 +114,11 @@ async def get_threat_analysis(
 
 @router.post("/run", response_model=IndMoneyUsThreatRunResponse)
 async def run_threat_analysis(
-    body: PortfolioEventRunRequest | None = None,
+    body: IndMoneyUsThreatRunRequest | None = None,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
-    provider, model = _resolve_threat_target(body)
+    provider, model = await _resolve_threat_target(body, db)
 
     snapshot_repo = IndMoneyUsPortfolioSnapshotRepository(db)
     latest_snapshot = await snapshot_repo.get_latest_by_user(current_user.id)
@@ -107,6 +128,17 @@ async def run_threat_analysis(
             detail="No INDmoney US portfolio snapshot found. Paste a snapshot first.",
         )
 
+    if body and body.expected_snapshot_id is not None and body.expected_snapshot_id != latest_snapshot.id:
+        raise HTTPException(
+            409,
+            detail="The latest saved snapshot changed. Reopen the snapshot choice and review the new source before continuing.",
+        )
+
+    validate_holdings_snapshot({
+        "holdings": latest_snapshot.holdings,
+        "parse_status": latest_snapshot.parse_status,
+        "reported_holdings_count": latest_snapshot.reported_holdings_count,
+    })
     prompt = build_indmoney_us_threat_prompt(latest_snapshot)
     redis = _get_redis()
     try:
@@ -122,12 +154,15 @@ async def run_threat_analysis(
                 provider=provider,
                 model=model,
                 user_id=UserId(current_user.id),
+                auto_rebalance_portfolio=body.auto_rebalance_portfolio if body else None,
+                auto_rebalance_sequence=body.auto_rebalance_sequence if body else None,
+                auto_rebalance_label=body.auto_rebalance_label if body else None,
             )
         )
     finally:
         await redis.aclose()
 
-    job = await PostgresJobRepository(db).get(result.job_id)
+    job = await PostgresJobRepository(db).get_for_user(result.job_id, UserId(current_user.id))
     if not job:
         raise HTTPException(500, detail="Threat analysis job could not be loaded after creation")
 
@@ -149,9 +184,13 @@ async def run_threat_analysis(
     )
 
 
-def _resolve_threat_target(body: PortfolioEventRunRequest | None) -> tuple[str, str]:
-    return resolve_portfolio_analysis_target(
+async def _resolve_threat_target(
+    body: PortfolioEventRunRequest | None,
+    db: AsyncSession,
+) -> tuple[str, str]:
+    return await resolve_portfolio_analysis_target(
         body,
+        db=db,
         default_provider=THREAT_ANALYSIS_PROVIDER,
         default_model=THREAT_ANALYSIS_MODEL,
         analysis_label="threats",
@@ -163,9 +202,17 @@ async def _get_latest_threat_job(db: AsyncSession, user_id: int) -> Job | None:
     return jobs[0] if jobs else None
 
 
-async def _get_threat_jobs(db: AsyncSession, user_id: int, limit: int) -> list[Job]:
+async def _get_threat_jobs(
+    db: AsyncSession, user_id: int, limit: int, *, include_details: bool = True,
+) -> list[Job]:
     result = await db.execute(
         select(Job)
+        .options(
+            portfolio_analysis_job_projection(
+                include_details=include_details,
+                include_runtime_metadata=True,
+            )
+        )
         .where(
             Job.user_id == user_id,
             Job.prompt.ilike(f"%{THREAT_JOB_MARKER}%"),
@@ -184,24 +231,41 @@ async def _get_completed_threat_jobs_upto(
 ) -> list[Job]:
     result = await db.execute(
         select(Job)
+        .options(
+            load_only(
+                Job.id,
+                Job.user_id,
+                Job.prompt,
+                Job.status,
+                Job.response,
+                Job.created_at,
+                Job.updated_at,
+            )
+        )
         .where(
             Job.user_id == user_id,
             Job.id <= max_job_id,
             Job.status == JobStatus.COMPLETED,
             Job.prompt.ilike(f"%{THREAT_JOB_MARKER}%"),
         )
-        .order_by(Job.id.asc())
+        .order_by(Job.id.desc())
+        .limit(THREAT_HISTORY_AUGMENTATION_LIMIT)
     )
-    return list(result.scalars().all())
+    jobs = list(result.scalars().all())
+    jobs.reverse()
+    return jobs
 
 
 async def _serialize_threat_job(
     db: AsyncSession,
     job: Job,
+    *,
+    include_history: bool = True,
 ) -> IndMoneyUsThreatAnalysisResponse:
     metadata = extract_indmoney_us_threat_prompt_metadata(job.prompt or "")
     parsed = parse_indmoney_us_threat_report(job.response)
-    parsed = await _augment_report_with_urgent_history(db, job, parsed)
+    if include_history:
+        parsed = await _augment_report_with_urgent_history(db, job, parsed)
     return IndMoneyUsThreatAnalysisResponse(
         job_id=job.id,
         status=job.status,
@@ -216,6 +280,7 @@ async def _serialize_threat_job(
         tokens_out=job.tokens_out,
         estimated_cost=job.estimated_cost,
         error_message=job.error_message,
+        runtime_metadata_json=job.runtime_metadata_json,
         report=parsed,
     )
 
@@ -232,24 +297,44 @@ async def _augment_report_with_urgent_history(
     if not history_jobs:
         return parsed
 
-    snapshot_repo = IndMoneyUsPortfolioSnapshotRepository(db)
-    holding_context_cache: dict[int, dict[str, HoldingContext]] = {}
-    history_entries = []
-
+    history_items = []
+    snapshot_ids = set()
     for history_job in history_jobs:
-        history_report = parse_indmoney_us_threat_report(history_job.response)
+        history_report = parse_indmoney_us_threat_urgent_actionables(
+            history_job.response
+        )
         if not history_report:
             continue
 
         prompt_metadata = extract_indmoney_us_threat_prompt_metadata(history_job.prompt or "")
-        holding_context_index: dict[str, HoldingContext] = {}
+        history_items.append((history_job, history_report, prompt_metadata))
         if prompt_metadata.snapshot_id is not None:
-            cache_key = prompt_metadata.snapshot_id
-            if cache_key not in holding_context_cache:
-                snapshot = await snapshot_repo.get_by_user_and_id(job.user_id, cache_key)
-                holding_context_cache[cache_key] = _build_holding_context_index(snapshot)
-            holding_context_index = holding_context_cache[cache_key]
+            snapshot_ids.add(prompt_metadata.snapshot_id)
 
+    snapshots_by_id = {}
+    if snapshot_ids:
+        snapshot_result = await db.execute(
+            select(IndMoneyUsPortfolioSnapshot).where(
+                IndMoneyUsPortfolioSnapshot.user_id == job.user_id,
+                IndMoneyUsPortfolioSnapshot.id.in_(tuple(snapshot_ids)),
+            )
+        )
+        snapshots_by_id = {
+            snapshot.id: snapshot
+            for snapshot in snapshot_result.scalars().all()
+        }
+
+    holding_context_by_snapshot_id = {
+        snapshot_id: _build_holding_context_index(snapshot)
+        for snapshot_id, snapshot in snapshots_by_id.items()
+    }
+    history_entries = []
+    for history_job, history_report, prompt_metadata in history_items:
+        holding_context_index = (
+            holding_context_by_snapshot_id.get(prompt_metadata.snapshot_id, {})
+            if prompt_metadata.snapshot_id is not None
+            else {}
+        )
         history_entries.extend(
             build_urgent_action_history_entries(
                 history_report,
@@ -323,4 +408,7 @@ def _serialize_threat_history_item(job: Job) -> PortfolioAnalysisHistoryItemResp
         updated_at=job.updated_at,
         estimated_cost=job.estimated_cost,
         error_message=job.error_message,
+        auto_rebalance_portfolio=job.auto_rebalance_portfolio,
+        auto_rebalance_sequence=job.auto_rebalance_sequence,
+        auto_rebalance_label=job.auto_rebalance_label,
     )

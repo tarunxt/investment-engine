@@ -6,6 +6,10 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from app.domains.indmoney_us.models import IndMoneyUsPortfolioSnapshot
+from app.shared.portfolio_summary import (
+    build_persisted_portfolio_summary,
+    signed_holding_return_percent,
+)
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -79,12 +83,16 @@ class IndMoneyUsPortfolioService:
         derived = self._build_derived(holdings, summary)
         warnings = self._build_warnings(summary, holdings, derived)
         parse_status = self._build_parse_status(summary, holdings, market_indices, warnings)
+        dashboard_top_holdings, _ = build_persisted_portfolio_summary(
+            holdings,
+            total_value=summary.get("current_value"),
+        )
 
         return {
             "snapshot_date": captured.astimezone(IST).date(),
             "captured_at": captured,
             "source": source,
-            "raw_text": normalized_text,
+            "raw_text": raw_text,
             "parse_status": parse_status,
             "parse_warnings": warnings,
             "holdings_count": len(holdings),
@@ -98,6 +106,7 @@ class IndMoneyUsPortfolioService:
             "total_return_value": summary.get("total_return_value"),
             "total_return_percent": summary.get("total_return_percent"),
             "market_indices": market_indices,
+            "dashboard_top_holdings": dashboard_top_holdings,
             "holdings": holdings,
         }
 
@@ -105,6 +114,9 @@ class IndMoneyUsPortfolioService:
         self,
         snapshot: IndMoneyUsPortfolioSnapshot,
     ) -> dict[str, Any]:
+        wallet = snapshot.wallet_balance
+        if wallet is None:
+            wallet = self._parse_wallet_balance(self._normalized_lines(snapshot.raw_text or ""))
         return {
             "id": snapshot.id,
             "snapshot_date": snapshot.snapshot_date,
@@ -115,7 +127,7 @@ class IndMoneyUsPortfolioService:
             "holdings_count": snapshot.holdings_count,
             "reported_holdings_count": snapshot.reported_holdings_count,
             "indices_count": snapshot.indices_count,
-            "wallet_balance": snapshot.wallet_balance,
+            "wallet_balance": wallet,
             "current_value": snapshot.current_value,
             "invested_value": snapshot.invested_value,
             "day_return_value": snapshot.day_return_value,
@@ -226,6 +238,18 @@ class IndMoneyUsPortfolioService:
             (index for index, line in enumerate(lines) if line.casefold() == "current value"),
             len(lines),
         )
+        header = lines[:current_value_idx]
+        # The web header renders the wallet as an icon: the pasted text contains
+        # only "My Portfolio", the USD amount and "Add money".
+        balances = [
+            self._parse_money(header[i - 1])
+            for i in range(2, len(header))
+            if header[i].casefold() == "add money"
+            and header[i - 2].casefold() == "my portfolio"
+            and re.fullmatch(r"[+-]?\$\s*(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.\d{2})?", header[i - 1])
+        ]
+        if balances:
+            return balances[0] if len(set(balances)) == 1 else None
         for index, line in enumerate(lines[:current_value_idx]):
             if line.casefold() != "wallet":
                 continue
@@ -406,6 +430,11 @@ class IndMoneyUsPortfolioService:
             current_value = holding.get("current_value")
             average_price = holding.get("average_price")
             market_price = holding.get("market_price")
+            holding["total_pnl_percent"] = signed_holding_return_percent(
+                holding.get("total_pnl_percent"),
+                pnl=holding.get("total_pnl"),
+                invested_value=holding.get("invested_value"),
+            )
             if denominator and current_value is not None:
                 holding["portfolio_weight_percent"] = (current_value / denominator) * 100
             else:

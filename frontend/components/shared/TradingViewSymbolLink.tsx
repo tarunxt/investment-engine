@@ -30,7 +30,7 @@ export function TradingViewSymbolLink({
       target="_blank"
       rel="noopener noreferrer"
       title={title ?? `Open ${symbol} on TradingView`}
-      className={cn('transition-colors', className)}
+      className={cn('cursor-pointer transition-colors', className)}
     >
       {children}
     </a>

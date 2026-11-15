@@ -12,6 +12,31 @@ from app.shared.pagination import PagedQuery, PagedResult
 from app.shared.types import JobStatus
 
 
+MAX_FULL_RUN_LIST_LIMIT = 20
+
+
+def run_summary_columns():
+    """Columns safe for list views; deliberately excludes the full prompt."""
+
+    return (
+        Run.id,
+        Run.prompt_preview,
+        Run.prompt_id,
+        Run.status,
+        Run.current_stage,
+        Run.auto_export_enabled,
+        Run.export_status,
+        Run.export_error,
+        Run.exported_at,
+        Run.exported_sheet_url,
+        Run.auto_rebalance_portfolio,
+        Run.auto_rebalance_sequence,
+        Run.auto_rebalance_label,
+        Run.created_at,
+        Run.updated_at,
+    )
+
+
 class PostgresRunRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -22,33 +47,43 @@ class PostgresRunRepository:
         await self._session.refresh(run)
         return run
 
-    async def get(self, run_id: int) -> Run | None:
+    async def get(self, run_id: int, *, user_id: int | None = None) -> Run | None:
+        stmt = select(Run).where(Run.id == run_id)
+        if user_id is not None:
+            stmt = stmt.where(Run.user_id == user_id)
         result = await self._session.execute(
-            select(Run)
-            .where(Run.id == run_id)
+            stmt
             .options(selectinload(Run.run_jobs).selectinload(RunJob.job))
         )
         return result.scalar_one_or_none()
 
-    async def list(self, query: PagedQuery, *, summary: bool = False) -> PagedResult[Run]:
+    async def list(
+        self,
+        query: PagedQuery,
+        *,
+        user_id: int | None = None,
+        summary: bool = False,
+    ) -> PagedResult[Run]:
+        # Full run payloads include every linked LLM response and can grow to
+        # many megabytes. Protect the API from accidental limit=100 requests
+        # while leaving lightweight summary pages at their requested size.
+        effective_query = query
+        if not summary and query.limit > MAX_FULL_RUN_LIST_LIMIT:
+            effective_query = PagedQuery(
+                page=query.page,
+                limit=MAX_FULL_RUN_LIST_LIMIT,
+            )
+
         stmt = select(Run)
+        if user_id is not None:
+            stmt = stmt.where(Run.user_id == user_id)
         count_stmt = select(func.count()).select_from(stmt.subquery())
         total: int = (await self._session.execute(count_stmt)).scalar_one()
         if summary:
             stmt = stmt.options(
                 load_only(
-                    Run.id,
-                    Run.prompt,
-                    Run.prompt_id,
-                    Run.status,
-                    Run.current_stage,
-                    Run.auto_export_enabled,
-                    Run.export_status,
-                    Run.export_error,
-                    Run.exported_at,
-                    Run.exported_sheet_url,
-                    Run.created_at,
-                    Run.updated_at,
+                    *run_summary_columns(),
+                    raiseload=True,
                 ),
                 selectinload(Run.run_jobs)
                 .load_only(RunJob.id, RunJob.run_id, RunJob.job_id, RunJob.stage)
@@ -62,10 +97,14 @@ class PostgresRunRepository:
                     Job.tokens_in,
                     Job.tokens_out,
                     Job.estimated_cost,
+                    Job.request_context_json,
                     Job.export_status,
                     Job.export_error,
                     Job.exported_at,
                     Job.exported_sheet_url,
+                    Job.auto_rebalance_portfolio,
+                    Job.auto_rebalance_sequence,
+                    Job.auto_rebalance_label,
                     Job.scheduled_at,
                     Job.created_at,
                     Job.updated_at,
@@ -75,13 +114,15 @@ class PostgresRunRepository:
             stmt = stmt.options(selectinload(Run.run_jobs).selectinload(RunJob.job))
 
         items_result = await self._session.execute(
-            stmt.order_by(Run.id.desc()).offset(query.offset).limit(query.limit)
+            stmt.order_by(Run.id.desc())
+            .offset(effective_query.offset)
+            .limit(effective_query.limit)
         )
         return PagedResult(
             items=list(items_result.scalars()),
             total=total,
-            page=query.page,
-            limit=query.limit,
+            page=effective_query.page,
+            limit=effective_query.limit,
         )
 
     async def get_latest_active_for_user(self, user_id: int) -> Run | None:

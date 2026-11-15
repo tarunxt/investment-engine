@@ -2,9 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { getSession } from 'next-auth/react';
 import { apiService, APIError } from '@/services/api';
-import { sessionStorage } from '@/services/session';
 import { AlertCircle, Loader2, CheckCircle2 } from 'lucide-react';
 
 export default function GoogleSheetsCallbackPage() {
@@ -51,12 +49,6 @@ export default function GoogleSheetsCallbackPage() {
     // Exchange code for tokens
     const exchangeCode = async () => {
       try {
-        const session = await getSession();
-        if (session?.accessToken) {
-          sessionStorage.setTokens(session.accessToken, session.refreshToken || '');
-        }
-
-         
         setMessage('Exchanging authorization code...');
 
         await apiService.googleSheetsExchangeCode(code);

@@ -2,6 +2,7 @@
 
 import { SessionProvider } from "next-auth/react";
 import { AuthProvider } from "@/providers/AuthProvider";
+import { ThemeProvider } from "@/providers/ThemeProvider";
 import { Suspense } from "react";
 
 function LoadingFallback() {
@@ -17,7 +18,9 @@ export function ClientProviders({ children }: { children: React.ReactNode }) {
     <SessionProvider>
       <Suspense fallback={<LoadingFallback />}>
         <AuthProvider>
-          {children}
+          <ThemeProvider>
+            {children}
+          </ThemeProvider>
         </AuthProvider>
       </Suspense>
     </SessionProvider>

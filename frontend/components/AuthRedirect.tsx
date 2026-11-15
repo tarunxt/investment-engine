@@ -2,7 +2,6 @@
 
 import { useAuth } from "@/hooks/useAuth";
 import { isClientAuthBypassed, resolveAuthRedirectTarget } from "@/lib/authRedirect";
-import { URLs } from "@/lib/urls";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect } from "react";
 
@@ -14,7 +13,7 @@ export function AuthRedirect({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (isClientAuthBypassed || (!loading && isAuthenticated)) {
-      router.replace(redirectTo || URLs.routes.console.dashboard());
+      router.replace(redirectTo || "/console/dashboard");
     }
   }, [isAuthenticated, loading, redirectTo, router]);
 

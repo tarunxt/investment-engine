@@ -1,3 +1,4 @@
+# Template rendered by deploy/no-docker/redeploy.sh
 [Unit]
 Description=Investor FastAPI backend
 After=network-online.target
@@ -5,13 +6,25 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=investor
-Group=investor
-WorkingDirectory=/srv/investor/backend
-EnvironmentFile=/etc/investor/backend.env
-ExecStart=/srv/investor/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 4
+User=__APP_USER__
+Group=__APP_USER__
+WorkingDirectory=__APP_ROOT__/backend
+Environment=APP_ROOT=__APP_ROOT__
+Environment=APP_USER=__APP_USER__
+EnvironmentFile=__BACKEND_ENV_FILE__
+ExecStartPre=+/bin/bash __APP_ROOT__/deploy/no-docker/scripts/sync-bullpen-operator-credentials.sh
+ExecStart=__APP_ROOT__/deploy/no-docker/scripts/run-backend.sh
 Restart=always
 RestartSec=5
+# Keep the interactive API responsive while planning workers are under memory
+# pressure.  MemoryLow is a reservation, not a pre-allocation.
+MemoryAccounting=true
+MemoryLow=1024M
+MemoryHigh=2048M
+MemoryMax=2560M
+MemorySwapMax=512M
+OOMScoreAdjust=-500
+CPUWeight=200
 TimeoutStartSec=60
 TimeoutStopSec=30
 KillSignal=SIGINT

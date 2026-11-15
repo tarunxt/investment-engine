@@ -44,51 +44,51 @@ export function PortfolioAnalysisNav({
   active?: ActiveTab;
   className?: string;
 }) {
+  const market = portfolio === 'zerodha' ? 'India' : 'US';
+  const currentFunction = TABS.find((item) => item.key === active)?.label;
+
   return (
-    <div className={cn('flex flex-wrap items-start gap-3', className)}>
-      {TABS.map((item) => (
-        <div key={item.key} className="flex min-w-[112px] flex-col items-stretch gap-1.5">
+    <div>
+      <p className="mb-2 text-sm text-gray-600">
+        Current market: <strong>{market}</strong>{currentFunction ? <> · Current function: <strong>{currentFunction}</strong></> : null}
+      </p>
+      <div role="group" aria-label="Portfolio market" className="mb-3 flex flex-wrap gap-2">
+        {(active === 'portfolio' ? [portfolio] : (['zerodha', 'indmoneyUs'] as const)).map((target) => (
           <Button
+            key={target}
+            asChild
+            variant="outline"
+            size="sm"
+            className={cn(portfolio === target && 'bg-gray-950 text-white hover:bg-gray-900 hover:text-white')}
+          >
+            <Link
+              href={ROUTES[target][active ?? 'portfolio']}
+              aria-label={`Open ${target === 'zerodha' ? 'India' : 'US'} ${currentFunction ?? 'Portfolio'}`}
+              aria-current={portfolio === target ? 'true' : undefined}
+            >
+              {target === 'zerodha' ? 'India' : 'US'}
+            </Link>
+          </Button>
+        ))}
+      </div>
+      <div role="group" aria-label="Portfolio function" className={cn('flex flex-wrap items-start gap-3', className)}>
+        {TABS.map((item) => (
+          <Button
+            key={item.key}
             asChild
             variant="outline"
             size="sm"
             className={cn(
-              'w-full justify-center',
-              active === item.key
-                ? 'bg-gray-950 text-white hover:bg-gray-900 hover:text-white'
-                : '',
+              'min-w-[112px] justify-center',
+              active === item.key ? 'bg-gray-950 text-white hover:bg-gray-900 hover:text-white' : '',
             )}
           >
-            <Link href={ROUTES[portfolio][item.key]}>
+            <Link href={ROUTES[portfolio][item.key]} aria-label={`${market} ${item.label}`} aria-current={active === item.key ? 'page' : undefined}>
               {item.label}
             </Link>
           </Button>
-
-          <div className="flex items-center justify-center gap-2 text-[10px] font-semibold uppercase tracking-[0.2em]">
-            <Link
-              href={ROUTES.zerodha[item.key]}
-              aria-current={portfolio === 'zerodha' ? 'page' : undefined}
-              className={cn(
-                'border-b border-transparent pb-0.5 text-gray-400 transition-colors hover:text-gray-700',
-                portfolio === 'zerodha' ? 'border-gray-950 text-gray-950' : '',
-              )}
-            >
-              Ind
-            </Link>
-            <span className="text-gray-300">|</span>
-            <Link
-              href={ROUTES.indmoneyUs[item.key]}
-              aria-current={portfolio === 'indmoneyUs' ? 'page' : undefined}
-              className={cn(
-                'border-b border-transparent pb-0.5 text-gray-400 transition-colors hover:text-gray-700',
-                portfolio === 'indmoneyUs' ? 'border-gray-950 text-gray-950' : '',
-              )}
-            >
-              US
-            </Link>
-          </div>
-        </div>
-      ))}
+        ))}
+      </div>
     </div>
   );
 }

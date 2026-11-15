@@ -8,13 +8,19 @@ from sqlalchemy.orm import Session
 
 from app.domains.jobs.models import Job
 from app.shared.pagination import PagedQuery, PagedResult
-from app.shared.types import JobId, JobStatus
+from app.shared.exceptions import ForbiddenException
+from app.shared.types import JobId, JobStatus, UserId
 from datetime import datetime
 
 
 class JobRepository(Protocol):
     async def create(self, job: Job) -> Job: ...
     async def get(self, job_id: JobId) -> Job | None: ...
+    async def get_for_user(self, job_id: JobId, user_id: UserId) -> Job | None: ...
+    async def cancel_for_user(self, job_id: JobId, user_id: UserId) -> tuple[Job | None, bool]: ...
+    async def list_for_user(self, user_id: UserId, query: PagedQuery,
+                            status: JobStatus | None = None,
+                            search: str | None = None) -> PagedResult[Job]: ...
     async def list(
         self,
         query: PagedQuery,
@@ -31,6 +37,10 @@ class JobRepository(Protocol):
         tokens_in: int | None = None,
         tokens_out: int | None = None,
         estimated_cost: float | None = None,
+        web_search_used: bool | None = None,
+        web_search_queries: list[str] | None = None,
+        web_sources: list[str] | None = None,
+        runtime_metadata_json: dict | None = None,
     ) -> None: ...
 
 
@@ -50,13 +60,62 @@ class PostgresJobRepository:
         )
         return result.scalar_one_or_none()
 
+    async def get_for_user(self, job_id: JobId, user_id: UserId) -> Job | None:
+        """User-facing access; unscoped get is reserved for internal execution."""
+        if user_id is None:
+            return None
+        result = await self._session.execute(
+            select(Job).where(Job.id == job_id, Job.user_id == user_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def cancel_for_user(self, job_id: JobId, user_id: UserId) -> tuple[Job | None, bool]:
+        """Serialize cancellation against completion; caller commits the transition.
+
+        Refresh under the row lock so a stale API identity cannot replace a
+        previously committed terminal output. Worker terminal writes use the same
+        row lock (and, after A11-002 integration, execution ownership).
+        """
+        if user_id is None:
+            return None, False
+        with self._session.no_autoflush:
+            result = await self._session.execute(
+                select(Job).where(Job.id == job_id, Job.user_id == user_id)
+                .with_for_update().execution_options(populate_existing=True)
+            )
+        job = result.scalar_one_or_none()
+        if job is None or job.status not in JobStatus.active():
+            return job, False
+        job.status = JobStatus.FAILED
+        job.error_message = "Cancelled by user"
+        if (job.export_status or "").lower() in {"", "pending", "queued", "processing"}:
+            job.export_status = "failed"
+            job.export_error = "Cancelled by user"
+        await self._session.flush()
+        return job, True
+
+    async def list_for_user(
+        self, user_id: UserId, query: PagedQuery,
+        status: JobStatus | None = None, search: str | None = None,
+    ) -> PagedResult[Job]:
+        if user_id is None:
+            raise ForbiddenException()
+        return await self._list(query, status, search, user_id=user_id)
+
     async def list(
-        self,
-        query: PagedQuery,
-        status: JobStatus | None = None,
+        self, query: PagedQuery, status: JobStatus | None = None,
         search: str | None = None,
     ) -> PagedResult[Job]:
+        """Internal access only. HTTP callers must use list_for_user."""
+        return await self._list(query, status, search)
+
+    async def _list(
+        self, query: PagedQuery, status: JobStatus | None = None,
+        search: str | None = None, *, user_id: UserId | None = None,
+    ) -> PagedResult[Job]:
         stmt = select(Job)
+        if user_id is not None:
+            stmt = stmt.where(Job.user_id == user_id)
         if status:
             stmt = stmt.where(Job.status == status)
         if search:
@@ -91,6 +150,10 @@ class PostgresJobRepository:
         tokens_in: int | None = None,
         tokens_out: int | None = None,
         estimated_cost: float | None = None,
+        web_search_used: bool | None = None,
+        web_search_queries: list[str] | None = None,
+        web_sources: list[str] | None = None,
+        runtime_metadata_json: dict | None = None,
     ) -> None:
         job = await self.get(job_id)
         if not job:
@@ -106,6 +169,14 @@ class PostgresJobRepository:
             job.tokens_out = tokens_out
         if estimated_cost is not None:
             job.estimated_cost = estimated_cost
+        if web_search_used is not None:
+            job.web_search_used = web_search_used
+        if web_search_queries is not None:
+            job.web_search_queries = web_search_queries
+        if web_sources is not None:
+            job.web_sources = web_sources
+        if runtime_metadata_json is not None:
+            job.runtime_metadata_json = runtime_metadata_json
         await self._session.flush()
 
 
@@ -120,6 +191,10 @@ class SyncJobRepository:
     def get(self, job_id: int) -> Job | None:
         return self._session.get(Job, job_id)
 
+    def get_fresh(self, job_id: int) -> Job | None:
+        """Re-read cancellation state changed by an API session during generation."""
+        return self._session.get(Job, job_id, populate_existing=True)
+
     def update_status(
         self,
         job: Job,
@@ -130,7 +205,21 @@ class SyncJobRepository:
         tokens_in: int | None = None,
         tokens_out: int | None = None,
         estimated_cost: float | None = None,
+        web_search_used: bool | None = None,
+        web_search_queries: list[str] | None = None,
+        web_sources: list[str] | None = None,
+        runtime_metadata_json: dict | None = None,
     ) -> None:
+        with self._session.no_autoflush:
+            current = self._session.execute(
+                select(Job).where(Job.id == job.id).with_for_update()
+                .execution_options(populate_existing=True)
+            ).scalar_one_or_none()
+        if current is None or current.status in JobStatus.terminal():
+            # A committed terminal result/cancellation wins over stale workers.
+            self._session.commit()
+            return
+        job = current
         job.status = status
         if response is not None:
             job.response = response
@@ -142,6 +231,30 @@ class SyncJobRepository:
             job.tokens_out = tokens_out
         if estimated_cost is not None:
             job.estimated_cost = estimated_cost
+        if web_search_used is not None:
+            job.web_search_used = web_search_used
+        if web_search_queries is not None:
+            job.web_search_queries = web_search_queries
+        if web_sources is not None:
+            job.web_sources = web_sources
+        if runtime_metadata_json is not None:
+            job.runtime_metadata_json = runtime_metadata_json
+        from app.core.config import settings
+        if settings.recommendation_audit_enabled:
+            from app.domains.recommendation_audit.capture import capture_terminal
+            try:
+                # Advisory capture must not turn a successful provider response into
+                # a failed/retried generation. Keep the existing job write outside
+                # the audit savepoint and expose the capture gap explicitly.
+                with self._session.begin_nested():
+                    capture_terminal(self._session, job)
+            except Exception as exc:
+                import logging
+                logging.getLogger(__name__).exception("Recommendation capture failed for job %s", job.id)
+                job.runtime_metadata_json = {
+                    **(job.runtime_metadata_json or {}),
+                    "recommendation_audit": {"status": "capture_failed", "error_type": type(exc).__name__},
+                }
         self._session.commit()
 
     def update_export_state(

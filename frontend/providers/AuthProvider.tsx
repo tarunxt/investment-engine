@@ -1,13 +1,18 @@
 "use client";
 
 import { AuthContextType, AuthContext, type User } from "@/hooks/useAuth";
-import { syncTokenToCookie, clearAuthCookies } from "@/services/cookies";
-import { useState, useEffect, useCallback } from "react";
-import { sessionStorage as customSessionStorage } from "@/services/session";
+import { clearAuthCookies } from "@/services/cookies";
+import { useState, useEffect, useLayoutEffect, useCallback, useRef } from "react";
 import { useSession, signIn, signOut as nextSignOut } from "next-auth/react";
 import { UserResponse } from "@/types/api";
 import { APIError, NetworkError, apiService } from "@/services/api";
 import { URLs } from "@/lib/urls";
+import { performLogout, logoutRedirect, logoutWarning } from "@/lib/logoutOutcome";
+import {
+  clearBrowserPrivateCacheOwner,
+  purgeBrowserPrivateDashboardCaches,
+  reconcileBrowserPrivateCacheOwner,
+} from "@/lib/privateDashboardCache";
 
 const devAuthDisabled =
   process.env.NEXT_PUBLIC_DISABLE_AUTH === "true" ||
@@ -31,17 +36,49 @@ const devUser: UserResponse = {
     timezone: "UTC",
     notification_preferences: "all",
     theme_preference: "light",
+    zerodha_buy_threshold: 2.5,
+    indmoney_buy_threshold: 2.5,
     created_at: new Date(0).toISOString(),
     updated_at: new Date(0).toISOString(),
   },
 };
 
-export function AuthProvider({ children }: { children: React.ReactNode }) {
+export function AuthProvider({
+  children,
+  initialUser = null,
+}: {
+  children: React.ReactNode;
+  initialUser?: UserResponse | null;
+}) {
   const { data: session, status, update } = useSession();
-  const [user, setUser] = useState<UserResponse | null>(devAuthDisabled ? devUser : null);
-  const [loading, setLoading] = useState(!devAuthDisabled);
+  const [user, setUser] = useState<UserResponse | null>(
+    devAuthDisabled ? devUser : initialUser,
+  );
+  const [loading, setLoading] = useState(!devAuthDisabled && !initialUser);
   const [error, setError] = useState<string | null>(null);
   const [errorDetails, setErrorDetails] = useState<string[]>([]);
+  const previousUserIdRef = useRef<number | null>(initialUser?.id ?? null);
+  const logoutRequestedRef = useRef(false);
+  // Evidence is scoped to this provider's current logout/retry flow only. It is
+  // neither browser-persisted nor accepted from session updates or URL fields.
+  const logoutServerConfirmedRef = useRef(false);
+  const logoutInFlightRef = useRef<Promise<void> | null>(null);
+
+  useEffect(() => {
+    const nextUserId = user?.id ?? null;
+    const previousUserId = previousUserIdRef.current;
+    if (
+      previousUserId !== null &&
+      nextUserId !== null &&
+      previousUserId !== nextUserId
+    ) {
+      purgeBrowserPrivateDashboardCaches();
+    }
+    if (nextUserId !== null) {
+      reconcileBrowserPrivateCacheOwner(nextUserId);
+    }
+    previousUserIdRef.current = nextUserId;
+  }, [user?.id]);
 
   const clearErrorState = useCallback(() => {
     setError(null);
@@ -101,130 +138,72 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  // Check if token is expired
-  const isTokenExpired = useCallback((): boolean => {
-    const expiryTime = customSessionStorage.getSessionExpiry();
-    if (!expiryTime) return true;
-
-    const now = Date.now();
-    const isExpired = now >= expiryTime;
-
-    if (isExpired) {
-      console.warn("Access token has expired");
-    }
-
-    return isExpired;
+  // Remove credentials left by pre-hardening clients. Auth.js's encrypted,
+  // HttpOnly cookie is now the only browser session credential.
+  useEffect(() => {
+    if (devAuthDisabled) return;
+    clearAuthCookies();
+    performance.mark("console-server-identity-visible");
+    performance.mark("auth-client-bootstrap-start");
   }, []);
 
-  // Refresh token or logout if expired
-  const handleTokenExpiry = useCallback(async () => {
-    const refreshToken = customSessionStorage.getRefreshToken();
-
-    if (!refreshToken) {
-      // No refresh token, must logout
-      await nextSignOut({ redirect: false });
-      customSessionStorage.clearSession();
-      clearAuthCookies();
-      setUser(null);
-      return;
-    }
-
-    try {
-      // Try to refresh the token
-      console.log("Token expired, attempting refresh...");
-
-      const data = await apiService.refreshToken();
-
-      if (data.access_token && data.refresh_token) {
-        // Update NextAuth session
-        await update();
-        console.log("Token refreshed successfully");
-      }
-    } catch (err) {
-      console.error("Token refresh failed, logging out:", err);
-      // Refresh failed, logout the user
-      await nextSignOut({ redirect: false });
-      customSessionStorage.clearSession();
-      clearAuthCookies();
-      setUser(null);
-    }
-  }, [update]);
-
-  // Sync NextAuth session with custom storage
+  // The server-provided user is authoritative for the first render. A delayed
+  // /api/auth/session request must never replace already validated children
+  // with a restoration screen.
   useEffect(() => {
     if (devAuthDisabled) {
       return;
     }
 
-    // Only sync when status is no longer loading
     if (status === "loading") {
       return;
     }
 
-    // Sync authenticated session
+    if (logoutRequestedRef.current) return;
+
     if (status === "authenticated" && session) {
-      // Get user data from session
-      const userData = session.userData || session.user;
-
-      if (userData) {
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        setUser(userData as UserResponse);
-
-        // Sync to existing session storage for backward compatibility
-        if (session.accessToken) {
-          customSessionStorage.setTokens(
-            session.accessToken as string,
-            session.refreshToken as string || ""
-          );
-          customSessionStorage.setUserData(userData as UserResponse);
-
-          // Store expiry time: now + expiresIn seconds
-          const expiryTime = Date.now() + (session.userData?.expiresIn || 900) * 1000;
-          customSessionStorage.setSessionExpiry(expiryTime);
-
-          syncTokenToCookie(session.accessToken as string);
+      const userData = session.userData as unknown as UserResponse | undefined;
+      performance.mark("auth-client-session-ready");
+      performance.measure(
+        "auth-client-bootstrap",
+        "auth-client-bootstrap-start",
+        "auth-client-session-ready",
+      );
+      const timer = window.setTimeout(() => {
+        if (logoutRequestedRef.current) return;
+        if (userData) {
+          setUser(userData);
         }
-      }
-    }
-    // Clear session when unauthenticated
-    else if (status === "unauthenticated") {
-      setUser(null);
-      customSessionStorage.clearSession();
+        setLoading(false);
+      }, 0);
+      return () => window.clearTimeout(timer);
+    } else if (status === "unauthenticated") {
+      performance.mark("auth-client-session-failed");
+      performance.measure(
+        "auth-client-bootstrap",
+        "auth-client-bootstrap-start",
+        "auth-client-session-failed",
+      );
+      purgeBrowserPrivateDashboardCaches();
+      clearBrowserPrivateCacheOwner();
       clearAuthCookies();
+      const timer = window.setTimeout(() => {
+        setUser(null);
+        setLoading(false);
+      }, 0);
+      return () => window.clearTimeout(timer);
     }
-
-    // Always ensure loading is false when status is not "loading"
-    setLoading(false);
   }, [session, status]);
 
-  // Check token expiry on mount and when user changes
-  useEffect(() => {
-    if (devAuthDisabled) {
-      return;
-    }
-
-    if (user && isTokenExpired()) {
-      queueMicrotask(() => {
-        handleTokenExpiry();
-      });
-    }
-  }, [user, isTokenExpired, handleTokenExpiry]);
-
-  // Set up visibility change listener to check token on tab focus
-  useEffect(() => {
-    if (devAuthDisabled) {
-      return;
-    }
-
-    const handleVisibilityChange = () => {
-      if (!document.hidden && user && isTokenExpired()) {
-        handleTokenExpiry();
-      }
-    };
-
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
-  }, [user, isTokenExpired, handleTokenExpiry]);
+  // Child pages begin private reads in passive effects. Register the already
+  // authenticated identity during commit, before any of those reads capture
+  // the singleton's session key. This also runs before StrictMode effect replay.
+  useLayoutEffect(() => {
+    apiService.setSessionGeneration(
+      logoutRequestedRef.current ? "anonymous" :
+        session?.generation || (user ? `server-user:${user.id}` : "anonymous"),
+    );
+  }, [session?.generation, user]);
 
   const login = useCallback(async (
     emailOrUsername: string,
@@ -321,35 +300,82 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [clearErrorState, login, normalizeAuthError, setStructuredError]);
 
-  const logout = useCallback(async () => {
-    if (devAuthDisabled) {
-      setUser(devUser);
-      clearErrorState();
-      setLoading(false);
-      window.location.href = "/console/dashboard";
-      return;
-    }
-
-    clearErrorState();
-    setLoading(true);
-
-    try {
-      // Call API logout if needed
-      const token = customSessionStorage.getAccessToken();
-      if (token) {
-        await apiService.logout().catch(console.error);
+  const logout = useCallback(() => {
+    if (logoutInFlightRef.current) return logoutInFlightRef.current;
+    let resolveDone!: () => void;
+    let rejectDone!: (error: unknown) => void;
+    const done = new Promise<void>((resolve, reject) => {
+      resolveDone = resolve;
+      rejectDone = reject;
+    });
+    logoutInFlightRef.current = done;
+    const execute = async () => {
+      if (devAuthDisabled) {
+        setUser(devUser);
+        clearErrorState();
+        setLoading(false);
+        window.location.href = "/console/dashboard";
+        return;
       }
-    } catch (err) {
-      console.error("Logout API error:", err);
-    } finally {
-      await nextSignOut({ redirect: false });
-      customSessionStorage.clearSession();
-      clearAuthCookies();
+
+      logoutRequestedRef.current = true;
+      apiService.beginLogout();
+      setUser(null);
+      clearErrorState();
+      setLoading(true);
+
+      const outcome = await performLogout({
+        previousServerRevocation: logoutServerConfirmedRef.current ? "confirmed" : "unconfirmed",
+        onServerConfirmed: () => { logoutServerConfirmedRef.current = true; },
+        // Authentication is owned by the server session, not a stale browser
+        // user projection. A retry retains prior acknowledged revocation and
+        // repeats only the unfinished local steps.
+        revoke: () => apiService.logout(),
+        signOut: () => nextSignOut({ redirect: false }),
+        cleanup: () => {
+          // Attempt every local cleanup even if one storage implementation fails.
+          const actions = [
+            purgeBrowserPrivateDashboardCaches,
+            clearBrowserPrivateCacheOwner,
+            () => apiService.setSessionGeneration("anonymous"),
+            clearAuthCookies,
+          ];
+          let failed = false;
+          for (const action of actions) {
+            try { action(); } catch { failed = true; }
+          }
+          if (failed) throw new Error("Local cleanup incomplete");
+        },
+      });
       setUser(null);
       setLoading(false);
-      window.location.href = "/login";
-    }
-  }, [clearErrorState]);
+      const destination = logoutRedirect(outcome);
+      if (destination) {
+        if (outcome.serverRevocation === "unconfirmed") {
+          setStructuredError(logoutWarning("server-revocation-unconfirmed") || "Server revocation unconfirmed.");
+        }
+        window.location.href = destination;
+      } else {
+        setStructuredError(
+          "Local sign-out could not be completed. Retry sign-out. " +
+            (outcome.serverRevocation === "confirmed"
+              ? "The server confirmed revocation of this session."
+              : "Server session revocation could not be confirmed."),
+        );
+      }
+    };
+    void execute().then(
+      () => {
+        if (logoutInFlightRef.current === done) logoutInFlightRef.current = null;
+        resolveDone();
+      },
+      (error) => {
+        if (logoutInFlightRef.current === done) logoutInFlightRef.current = null;
+        rejectDone(error);
+      },
+    );
+    return done;
+  }, [clearErrorState, setStructuredError]);
 
   const refreshAuth = useCallback(async () => {
     if (devAuthDisabled) {
@@ -359,8 +385,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    await update();
-  }, [clearErrorState, update]);
+    try {
+      const updatedSession = await update();
+      if (!updatedSession?.user) {
+        throw new Error("The authenticated session could not be verified.");
+      }
+      clearErrorState();
+    } catch (refreshError) {
+      const normalized = normalizeAuthError(
+        refreshError,
+        "Your session could not be verified. Reload or sign in again.",
+      );
+      setStructuredError(normalized.message, normalized.details);
+      setLoading(false);
+      throw refreshError;
+    }
+  }, [
+    clearErrorState,
+    normalizeAuthError,
+    setStructuredError,
+    update,
+  ]);
 
   const clearError = clearErrorState;
 

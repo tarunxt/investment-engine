@@ -1,0 +1,42 @@
+{
+  "result": "PASS",
+  "measurements": [
+    {
+      "width": 1180,
+      "height": 757,
+      "zoom": 1,
+      "navigationHeight": 541.5625,
+      "viewportHeight": 757
+    },
+    {
+      "width": 1165,
+      "height": 747,
+      "zoom": 1,
+      "navigationHeight": 531.5625,
+      "viewportHeight": 747
+    },
+    {
+      "width": 1165,
+      "height": 747,
+      "zoom": 0.67,
+      "navigationHeight": 899.5625,
+      "viewportHeight": 1114.9253731343283
+    },
+    {
+      "width": 390,
+      "height": 747,
+      "zoom": 1,
+      "navigationHeight": 455.25,
+      "viewportHeight": 747
+    },
+    {
+      "width": 390,
+      "height": 747,
+      "zoom": 0.67,
+      "navigationHeight": 823.25,
+      "viewportHeight": 1114.9253731343283
+    }
+  ],
+  "screenshots": "/tmp/credx-sidebar-screenshots",
+  "checks": "all root/child/directory destinations, two-column directory and return controls, modal focus containment/Escape restoration, group-state preservation, back/forward, matched row heights, single active fill, named groups, scroll, active route on transition, keyboard expand/collapse, focus and Escape restoration, compact account, bounded expanded panel, unchanged preferences, zero profile/logout/external requests"
+}

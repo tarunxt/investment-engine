@@ -15,6 +15,10 @@ const sidebarNavItems = [
     href: URLs.routes.profile.preferences(),
   },
   {
+    title: "Platform Cost Drivers",
+    href: URLs.routes.profile.costDrivers(),
+  },
+  {
     title: "Security",
     href: URLs.routes.profile.security(),
   },
@@ -44,7 +48,7 @@ export default function SettingsLayout({ children }: SettingsLayoutProps) {
         <aside className="-mx-4 lg:w-1/5">
           <nav
             className={cn(
-              "flex space-x-2 lg:flex-col lg:space-x-0 lg:space-y-1",
+              "flex flex-wrap gap-2 lg:flex-col lg:flex-nowrap lg:gap-1",
               "px-4"
             )}
           >
@@ -66,7 +70,7 @@ export default function SettingsLayout({ children }: SettingsLayoutProps) {
             ))}
           </nav>
         </aside>
-        <div className="flex-1 lg:max-w-2xl pl-3">{children}</div>
+        <div className="min-w-0 flex-1 pl-3 lg:max-w-none">{children}</div>
       </div>
     </div>
   );

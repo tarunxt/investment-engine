@@ -38,4 +38,9 @@ class IndMoneyUsPortfolioSnapshot(Base, TimestampMixin):
     total_return_percent: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     market_indices: Mapped[list[dict]] = mapped_column(JSON, nullable=False, default=list)
+    dashboard_top_holdings: Mapped[list[dict]] = mapped_column(
+        JSON,
+        nullable=False,
+        default=list,
+    )
     holdings: Mapped[list[dict]] = mapped_column(JSON, nullable=False, default=list)

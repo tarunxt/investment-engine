@@ -27,6 +27,11 @@ export default function ZerodhaCallbackPage({
         window.opener.postMessage(payload, window.location.origin);
       }
     };
+    const closePopupSoon = (delayMs: number) => {
+      if (window.opener && !window.opener.closed) {
+        window.setTimeout(() => window.close(), delayMs);
+      }
+    };
 
     if (status !== 'success' || !request_token) {
       const reason = message ?? 'Login was cancelled or failed.';
@@ -34,6 +39,7 @@ export default function ZerodhaCallbackPage({
       setErrorMsg(reason);
       setState('error');
       notifyHost({ type: 'zerodha_error', message: reason });
+      closePopupSoon(1_500);
       return;
     }
 
@@ -42,15 +48,14 @@ export default function ZerodhaCallbackPage({
       .then(() => {
         setState('success');
         notifyHost({ type: 'zerodha_connected' });
-        window.setTimeout(() => {
-          window.close();
-        }, 900);
+        closePopupSoon(900);
       })
       .catch((err: unknown) => {
         const msg = err instanceof Error ? err.message : 'Token exchange failed';
         setErrorMsg(msg);
         setState('error');
         notifyHost({ type: 'zerodha_error', message: msg });
+        closePopupSoon(1_500);
       });
   }, [params]);
 

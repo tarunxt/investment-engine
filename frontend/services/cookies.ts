@@ -70,22 +70,15 @@ export const deleteCookie = (name: string): void => {
 };
 
 /**
- * Sync access token to cookie for middleware
- * Called after login to make token available to server-side middleware
- */
-export const syncTokenToCookie = (accessToken: string): void => {
-  setCookie('app_access_token', accessToken, {
-    maxAge: 15 * 60, // 15 minutes
-    path: '/',
-    sameSite: 'lax',
-  });
-};
-
-/**
- * Clear auth cookies
- * Called on logout to clear token from middleware
+ * Purge browser-readable credentials left by pre-hardening releases.
  */
 export const clearAuthCookies = (): void => {
   deleteCookie('app_access_token');
   deleteCookie('app_refresh_token');
+  if (typeof window !== 'undefined') {
+    window.localStorage.removeItem('app_access_token');
+    window.localStorage.removeItem('app_refresh_token');
+    window.localStorage.removeItem('app_session_expires');
+    window.localStorage.removeItem('app_user');
+  }
 };

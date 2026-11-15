@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+from app.core.recovery import (
+    recovery_mode, manual_zerodha_orders_enabled, require_zerodha_write_allowed,
+)
+
 import hashlib
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from collections.abc import Mapping, Sequence
 
 import httpx
 
@@ -25,6 +30,24 @@ class ZerodhaService:
     @property
     def is_configured(self) -> bool:
         return bool(settings.zerodha_api_key and settings.zerodha_api_secret)
+
+    @property
+    def direct_market_orders_enabled(self) -> bool:
+        return bool(
+            (not recovery_mode() or manual_zerodha_orders_enabled())
+            and self.is_configured
+            and settings.zerodha_enable_direct_market_orders
+        )
+
+    @property
+    def order_submission_blocked_reason(self) -> str | None:
+        if recovery_mode() and not manual_zerodha_orders_enabled():
+            return (
+                "Order submission is disabled during analysis-only recovery. "
+                "No orders will be sent to Kite. Trading must be explicitly restored "
+                "by the operator before placing orders from Cred-X."
+            )
+        return None
 
     def get_login_url(self) -> str:
         return f"{self.LOGIN_BASE}?v=3&api_key={settings.zerodha_api_key}"
@@ -59,9 +82,14 @@ class ZerodhaService:
         *,
         access_token: str | None = None,
         data: dict[str, Any] | None = None,
+        params: Mapping[str, Any] | Sequence[tuple[str, Any]] | None = None,
         headers: dict[str, str] | None = None,
         timeout: float = 30.0,
     ) -> Any:
+        if method.upper() not in {"GET", "HEAD"} and not (
+            method.upper() == "POST" and path == "/session/token"
+        ):
+            require_zerodha_write_allowed(method.upper(), path, data)
         request_headers = dict(headers or {})
         if access_token:
             request_headers.update(self._auth_headers(access_token))
@@ -71,6 +99,7 @@ class ZerodhaService:
                 method,
                 f"{self.KITE_BASE}{path}",
                 data=data,
+                params=params,
                 headers=request_headers,
             )
             self._raise_for_kite(resp)
@@ -83,9 +112,14 @@ class ZerodhaService:
         *,
         access_token: str | None = None,
         data: dict[str, Any] | None = None,
+        params: Mapping[str, Any] | Sequence[tuple[str, Any]] | None = None,
         headers: dict[str, str] | None = None,
         timeout: float = 30.0,
     ) -> Any:
+        if method.upper() not in {"GET", "HEAD"} and not (
+            method.upper() == "POST" and path == "/session/token"
+        ):
+            require_zerodha_write_allowed(method.upper(), path, data)
         request_headers = dict(headers or {})
         if access_token:
             request_headers.update(self._auth_headers(access_token))
@@ -95,6 +129,7 @@ class ZerodhaService:
                 method,
                 f"{self.KITE_BASE}{path}",
                 data=data,
+                params=params,
                 headers=request_headers,
             )
             self._raise_for_kite(resp)
@@ -120,6 +155,19 @@ class ZerodhaService:
     async def get_orders(self, access_token: str) -> list:
         data = await self._request_async("GET", "/orders", access_token=access_token)
         return data or []
+
+    async def get_margins(self, access_token: str) -> dict[str, Any]:
+        data = await self._request_async("GET", "/user/margins", access_token=access_token)
+        return data or {}
+
+    async def get_quotes(
+        self, access_token: str, instruments: list[str]
+    ) -> dict[str, Any]:
+        params = [("i", instrument) for instrument in instruments]
+        data = await self._request_async(
+            "GET", "/quote", access_token=access_token, params=params
+        )
+        return data or {}
 
     async def get_holdings(self, access_token: str) -> list[dict[str, Any]]:
         data = await self._request_async(

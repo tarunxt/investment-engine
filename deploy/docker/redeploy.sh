@@ -102,14 +102,14 @@ fi
 
 echo "==> Build images"
 if [[ "$SCOPE" == "backend" ]]; then
-  compose build backend celery_worker celery_beat
+  compose build backend celery_worker celery_auto_live_worker celery_beat
 else
-  compose build backend frontend celery_worker celery_beat
+  compose build backend frontend celery_worker celery_auto_live_worker celery_beat
 fi
 
 echo "==> Start/update services"
 if [[ "$SCOPE" == "backend" ]]; then
-  compose up -d --no-deps backend celery_worker celery_beat
+  compose up -d --no-deps backend celery_worker celery_auto_live_worker celery_beat
 else
   compose up -d --remove-orphans
 fi
@@ -122,7 +122,7 @@ sleep 15
 
 echo "==> Container status"
 if [[ "$SCOPE" == "backend" ]]; then
-  compose ps backend celery_worker celery_beat
+  compose ps backend celery_worker celery_auto_live_worker celery_beat
 else
   compose ps
 fi

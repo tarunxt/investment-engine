@@ -8,25 +8,41 @@ import re
 
 from openai import OpenAI
 
+from app.domains.api_usage.metering import metered_call
 from app.core.config import settings
-from app.domains.ai_providers.base import AIProviderResponse, BaseAIProvider
+from app.domains.api_usage.recorder import record_provider_usage_call
+from app.domains.ai_providers.base import (
+    AIProviderResponse,
+    BaseAIProvider,
+    ProviderCallError,
+)
 from app.domains.ai_providers.tools import web_search as web_search_tool
+from app.domains.ai_providers.web_metadata import (
+    extract_web_search_sources,
+    merge_web_metadata,
+)
 
 logger = logging.getLogger("app")
 
 DEEPSEEK_PRICING_PER_1M_TOKENS = {
-    "deepseek-v4-flash": {"input": 0.14, "output": 0.28},
-    "deepseek-v4-pro": {"input": 0.435, "output": 0.87},
+    "deepseek-v4-flash": {
+        "cache_hit_input": 0.0028,
+        "cache_miss_input": 0.14,
+        "output": 0.28,
+    },
+    "deepseek-v4-pro": {
+        "cache_hit_input": 0.003625,
+        "cache_miss_input": 0.435,
+        "output": 0.87,
+    },
 }
+DEFAULT_DEEPSEEK_PRICING_PER_1M_TOKENS = DEEPSEEK_PRICING_PER_1M_TOKENS[
+    "deepseek-v4-flash"
+]
 
 SUPPORTED_MODELS = [
     "deepseek-v4-flash",
     "deepseek-v4-pro",
-    "deepseek-reasoner",
-    "deepseek-chat",
-    "deepseek-coder",
-    "deepseek-r1",
-    "deepseek-v3",
 ]
 
 current_date = datetime.datetime.now().strftime("%Y-%m-%d")
@@ -45,6 +61,8 @@ _SYSTEM_MESSAGE: dict = {
 
 _MAX_TOOL_ROUNDS = 8
 _MAX_DSML_RECOVERY_SEARCHES = 4
+_MAX_EMPTY_FINAL_RECOVERY_ATTEMPTS = 2
+_DISABLE_TOOL_MARKER = "[STAGE2_SHARED_EVIDENCE_ONLY]"
 
 
 def _looks_like_tool_trace(text: str) -> bool:
@@ -64,6 +82,83 @@ def _looks_like_valid_markdown_table(text: str) -> bool:
         return False
     has_separator = any(re.fullmatch(r"\|?[\s:\-|\t]+\|?", line) for line in pipe_lines)
     return has_separator
+
+
+def _requires_markdown_table_output(prompt: str) -> bool:
+    text = (prompt or "").lower()
+    return (
+        "return only one markdown table" in text
+        or "return a valid markdown table" in text
+        or "return only a markdown table" in text
+        or "table columns:" in text
+    )
+
+
+def _requires_json_output(prompt: str) -> bool:
+    text = (prompt or "").lower()
+    json_markers = (
+        "return strict json",
+        "return only valid json",
+        "return valid json",
+        "return json only",
+        "return strict json only",
+        "json schema",
+        "top-level \"markets\"",
+        "do not include markdown",
+    )
+    return any(marker in text for marker in json_markers)
+
+
+def _determine_output_kind(prompt: str) -> str:
+    if _requires_json_output(prompt):
+        return "json"
+    if _requires_markdown_table_output(prompt):
+        return "markdown_table"
+    return "plain"
+
+
+def _extract_json_value_from_text(text: str) -> object | None:
+    trimmed = (text or "").strip()
+    if not trimmed:
+        return None
+
+    candidates: list[str] = []
+
+    def register(candidate: str | None) -> None:
+        if not candidate:
+            return
+        normalized = candidate.strip()
+        if normalized and normalized not in candidates:
+            candidates.append(normalized)
+
+    for match in re.finditer(r"```(?:json)?\s*([\s\S]*?)```", trimmed, flags=re.IGNORECASE):
+        register(match.group(1))
+    register(trimmed)
+
+    object_start = trimmed.find("{")
+    object_end = trimmed.rfind("}")
+    if object_start >= 0 and object_end > object_start:
+        register(trimmed[object_start : object_end + 1])
+
+    array_start = trimmed.find("[")
+    array_end = trimmed.rfind("]")
+    if array_start >= 0 and array_end > array_start:
+        register(trimmed[array_start : array_end + 1])
+
+    for candidate in candidates:
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+
+    return None
+
+
+def _normalize_json_output_text(text: str) -> str | None:
+    parsed = _extract_json_value_from_text(text)
+    if parsed is None:
+        return None
+    return json.dumps(parsed, ensure_ascii=False)
 
 
 def _extract_dsml_web_search_calls(text: str) -> list[dict[str, int | str]]:
@@ -121,12 +216,16 @@ class DeepSeekProvider(BaseAIProvider):
         prompt: str,
         tool_trace: str,
         model: str,
-    ) -> tuple[str, int, int]:
+        output_kind: str,
+    ) -> tuple[str, dict[str, int], list[str], list[str]]:
+        empty_token_usage = self._token_usage_from_response_usage(None)
         search_calls = _extract_dsml_web_search_calls(tool_trace)
         if not search_calls:
-            return tool_trace, 0, 0
+            return tool_trace, empty_token_usage, [], []
 
         search_payloads: list[dict[str, str | int]] = []
+        search_queries: list[str] = []
+        search_sources: list[str] = []
         seen_queries: set[str] = set()
         for call in search_calls:
             query = str(call["query"]).strip()
@@ -140,6 +239,8 @@ class DeepSeekProvider(BaseAIProvider):
                     "max_results": int(call["max_results"]),
                 },
             )
+            search_queries.append(query)
+            search_sources.extend(extract_web_search_sources(result))
             search_payloads.append(
                 {
                     "query": query,
@@ -151,9 +252,25 @@ class DeepSeekProvider(BaseAIProvider):
                 break
 
         if not search_payloads:
-            return tool_trace, 0, 0
+            return tool_trace, empty_token_usage, [], []
 
-        recovery_response = self.client.chat.completions.create(
+        if output_kind == "json":
+            recovery_instruction = (
+                "Return ONLY valid JSON in the exact schema and shape requested by the user."
+            )
+        elif output_kind == "markdown_table":
+            recovery_instruction = (
+                "Return ONLY one valid markdown table with a header row, separator row, "
+                "and at least 5 data rows in the exact format requested by the user."
+            )
+        else:
+            recovery_instruction = (
+                "Return the clean final answer immediately in the exact format requested by the user."
+            )
+
+        recovery_response = metered_call(
+            self.client.chat.completions.create, provider=self.provider_name, meter_model=model,
+            phase="recovery", tariff_rates=DEEPSEEK_PRICING_PER_1M_TOKENS.get(model),
             model=model,
             messages=[
                 {
@@ -161,8 +278,7 @@ class DeepSeekProvider(BaseAIProvider):
                     "content": (
                         "You are given live web-search results already collected for the user. "
                         "Do not call tools. Do not output XML, DSML, or tool traces. "
-                        "Return ONLY one valid markdown table with a header row, separator row, "
-                        "and at least 5 data rows in the exact format requested by the user."
+                        f"{recovery_instruction}"
                     ),
                 },
                 {
@@ -179,43 +295,73 @@ class DeepSeekProvider(BaseAIProvider):
             tool_choice="none",
         )
         usage = getattr(recovery_response, "usage", None)
-        tokens_in = getattr(usage, "prompt_tokens", 0) or 0
-        tokens_out = getattr(usage, "completion_tokens", 0) or 0
+        token_usage = self._token_usage_from_response_usage(usage)
+        self._record_response_usage(recovery_response, model, token_usage)
         choices = getattr(recovery_response, "choices", []) or []
         recovered = tool_trace
         if choices:
-            recovered = (getattr(choices[0].message, "content", "") or "").strip() or tool_trace
-        return recovered, tokens_in, tokens_out
+            recovered = (
+                getattr(choices[0].message, "content", "") or ""
+            ).strip() or tool_trace
+        return recovered, token_usage, search_queries, search_sources
 
     def generate(self, *, prompt: str, model: str) -> AIProviderResponse:
         if model not in self.supported_models:
-            model = "deepseek-v4-flash"
+            raise ProviderCallError(
+                provider=self.provider_name,
+                requested_model=model,
+                actual_model=None,
+                execution_phase="capability_check",
+                safe_message=f"DeepSeek model '{model}' is not supported by this adapter.",
+                retryable=False,
+            )
 
         SYSTEM_MESSAGE = _SYSTEM_MESSAGE.copy()
+        if _DISABLE_TOOL_MARKER in (prompt or ""):
+            SYSTEM_MESSAGE["content"] = (
+                "Use only the user-supplied structured evidence packet. "
+                "Do not call tools or browse for additional evidence. "
+                "Return the exact output format requested by the user."
+            )
         # SYSTEM_MESSAGE["content"] = _SYSTEM_MESSAGE["content"].replace("{{current_date}}", current_date).replace("{{model}}", model)
+        output_kind = _determine_output_kind(prompt)
 
         messages: list[dict] = [
             SYSTEM_MESSAGE,
             {"role": "user", "content": prompt},
         ]
-        kwargs: dict = {
-            "model": model,
-            "messages": messages,
-            "tools": web_search_tool.TOOL_DEFINITIONS,
-            "tool_choice": "auto",
-        }
+        kwargs: dict = {"model": model, "messages": messages}
+        tools_enabled = _DISABLE_TOOL_MARKER not in (prompt or "")
+        if tools_enabled:
+            kwargs["tools"] = web_search_tool.TOOL_DEFINITIONS
+            kwargs["tool_choice"] = "auto"
+        else:
+            kwargs["tool_choice"] = "none"
 
         total_tokens_in = 0
         total_tokens_out = 0
+        total_cache_hit_tokens = 0
+        total_cache_miss_tokens = 0
         content = ""
+        web_search_used = False
+        web_search_queries: list[str] = []
+        web_sources: list[str] = []
 
-        logger.info(f"DeepSeek request with kwargs: {kwargs}")
+        logger.info("DeepSeek generation started")
         for round_num in range(_MAX_TOOL_ROUNDS):
-            response = self.client.chat.completions.create(**kwargs)
-            logger.info(f"DeepSeek response round {round_num + 1}: {response}")
+            response = metered_call(
+                self.client.chat.completions.create, provider=self.provider_name, meter_model=model,
+                phase="request" if round_num == 0 else "tool_round", tariff_rates=DEEPSEEK_PRICING_PER_1M_TOKENS.get(model),
+                **kwargs,
+            )
+            logger.info("DeepSeek response round %d received", round_num + 1)
             usage = getattr(response, "usage", None)
-            total_tokens_in += getattr(usage, "prompt_tokens", 0) or 0
-            total_tokens_out += getattr(usage, "completion_tokens", 0) or 0
+            token_usage = self._token_usage_from_response_usage(usage)
+            self._record_response_usage(response, model, token_usage)
+            total_tokens_in += token_usage["tokens_in"]
+            total_tokens_out += token_usage["tokens_out"]
+            total_cache_hit_tokens += token_usage["cache_hit_tokens"]
+            total_cache_miss_tokens += token_usage["cache_miss_tokens"]
 
             choices = getattr(response, "choices", []) or []
             if not choices:
@@ -263,59 +409,198 @@ class DeepSeekProvider(BaseAIProvider):
                 except json.JSONDecodeError:
                     args = {}
                 result = web_search_tool.execute(tc.function.name, args)
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tc.id,
-                    "content": result,
-                })
+                query = args.get("query")
+                web_search_used, web_search_queries, web_sources = merge_web_metadata(
+                    web_search_used,
+                    web_search_queries,
+                    web_sources,
+                    response_used=True,
+                    response_queries=[query] if isinstance(query, str) and query.strip() else None,
+                    response_sources=extract_web_search_sources(result),
+                )
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": result,
+                    }
+                )
 
             kwargs["messages"] = messages
 
         # If tool loop did not produce final content, force a final assistant turn
         # without tools so we don't silently return empty output.
         if not content:
-            final_response = self.client.chat.completions.create(
-                model=model,
-                messages=messages + [
-                    {
-                        "role": "system",
-                        "content": (
-                            "Stop calling tools now. Produce the final answer immediately "
-                            "in the exact format requested by the user."
-                        ),
-                    }
-                ],
-                tool_choice="none",
-            )
-            final_usage = getattr(final_response, "usage", None)
-            total_tokens_in += getattr(final_usage, "prompt_tokens", 0) or 0
-            total_tokens_out += getattr(final_usage, "completion_tokens", 0) or 0
-            final_choices = getattr(final_response, "choices", []) or []
-            if final_choices:
-                content = getattr(final_choices[0].message, "content", "") or ""
+            # DeepSeek can occasionally return HTTP 200 with an empty choice/content,
+            # especially after a tool round. Treat that as a transient provider
+            # response and make bounded no-tool recovery attempts before handing the
+            # job back to Celery's retry policy.
+            for recovery_attempt in range(_MAX_EMPTY_FINAL_RECOVERY_ATTEMPTS):
+                final_response = metered_call(
+                    self.client.chat.completions.create, provider=self.provider_name, meter_model=model,
+                    phase="empty_recovery", tariff_rates=DEEPSEEK_PRICING_PER_1M_TOKENS.get(model),
+                    model=model,
+                    messages=messages
+                    + [
+                        {
+                            "role": "system",
+                            "content": (
+                                "The previous generation returned no final content. "
+                                "Do not call tools. Produce the complete final answer now "
+                                "in the exact format requested by the user."
+                            ),
+                        }
+                    ],
+                    tool_choice="none",
+                )
+                final_usage = getattr(final_response, "usage", None)
+                final_token_usage = self._token_usage_from_response_usage(final_usage)
+                self._record_response_usage(final_response, model, final_token_usage)
+                total_tokens_in += final_token_usage["tokens_in"]
+                total_tokens_out += final_token_usage["tokens_out"]
+                total_cache_hit_tokens += final_token_usage["cache_hit_tokens"]
+                total_cache_miss_tokens += final_token_usage["cache_miss_tokens"]
+                final_choices = getattr(final_response, "choices", []) or []
+                if final_choices:
+                    content = (
+                        getattr(final_choices[0].message, "content", "") or ""
+                    ).strip()
+                if content:
+                    break
+                logger.warning(
+                    "DeepSeek returned empty final content on recovery attempt %d/%d",
+                    recovery_attempt + 1,
+                    _MAX_EMPTY_FINAL_RECOVERY_ATTEMPTS,
+                )
 
         cleaned = content.strip()
         if _looks_like_tool_trace(cleaned):
-            recovered, recovered_tokens_in, recovered_tokens_out = self._recover_from_dsml_tool_trace(
+            (
+                recovered,
+                recovered_token_usage,
+                recovered_queries,
+                recovered_sources,
+            ) = self._recover_from_dsml_tool_trace(
                 prompt=prompt,
                 tool_trace=cleaned,
                 model=model,
+                output_kind=output_kind,
             )
             cleaned = recovered.strip()
-            total_tokens_in += recovered_tokens_in
-            total_tokens_out += recovered_tokens_out
+            total_tokens_in += recovered_token_usage["tokens_in"]
+            total_tokens_out += recovered_token_usage["tokens_out"]
+            total_cache_hit_tokens += recovered_token_usage["cache_hit_tokens"]
+            total_cache_miss_tokens += recovered_token_usage["cache_miss_tokens"]
+            web_search_used, web_search_queries, web_sources = merge_web_metadata(
+                web_search_used,
+                web_search_queries,
+                web_sources,
+                response_used=bool(recovered_queries or recovered_sources),
+                response_queries=recovered_queries,
+                response_sources=recovered_sources,
+            )
 
-        needs_rewrite = _looks_like_tool_trace(cleaned) or not _looks_like_valid_markdown_table(cleaned)
-        if needs_rewrite:
-            rewrite_response = self.client.chat.completions.create(
+        if output_kind == "json":
+            normalized_json = _normalize_json_output_text(cleaned)
+            if normalized_json is not None:
+                cleaned = normalized_json
+
+            needs_rewrite = _looks_like_tool_trace(cleaned) or normalized_json is None
+            if needs_rewrite:
+                rewrite_response = metered_call(
+                    self.client.chat.completions.create, provider=self.provider_name, meter_model=model,
+                    phase="format_repair", tariff_rates=DEEPSEEK_PRICING_PER_1M_TOKENS.get(model),
+                    model=model,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": (
+                                "Convert the following assistant output into a clean final answer. "
+                                "Return ONLY valid JSON that matches the user's requested schema. "
+                                "No tool traces, no XML/DSML tags, no markdown, and no extra commentary."
+                            ),
+                        },
+                        {"role": "user", "content": prompt},
+                        {"role": "assistant", "content": cleaned},
+                    ],
+                    tool_choice="none",
+                )
+                rewrite_usage = getattr(rewrite_response, "usage", None)
+                rewrite_token_usage = self._token_usage_from_response_usage(rewrite_usage)
+                self._record_response_usage(rewrite_response, model, rewrite_token_usage)
+                total_tokens_in += rewrite_token_usage["tokens_in"]
+                total_tokens_out += rewrite_token_usage["tokens_out"]
+                total_cache_hit_tokens += rewrite_token_usage["cache_hit_tokens"]
+                total_cache_miss_tokens += rewrite_token_usage["cache_miss_tokens"]
+                rewrite_choices = getattr(rewrite_response, "choices", []) or []
+                if rewrite_choices:
+                    rewritten = (
+                        getattr(rewrite_choices[0].message, "content", "") or ""
+                    ).strip()
+                    cleaned = _normalize_json_output_text(rewritten) or rewritten
+        elif output_kind == "markdown_table":
+            # Only the current declared stock contracts opt into deterministic
+            # rendering. Unknown or invalid values still need the existing
+            # repair path; no facts are synthesized merely to avoid a call.
+            from app.domains.jobs.output_runtime import current_output_context, normalize_runtime_output
+
+            output_context = current_output_context()
+            deterministic = normalize_runtime_output(
+                cleaned, fragment="[STOCK_TABLE_TOP_UP]" in prompt,
+            )
+            if deterministic is not None and deterministic.safe_to_replace:
+                cleaned = deterministic.content
+            needs_rewrite = _looks_like_tool_trace(
+                cleaned
+            ) or not _looks_like_valid_markdown_table(cleaned)
+            if needs_rewrite:
+                rewrite_response = metered_call(
+                    self.client.chat.completions.create, provider=self.provider_name, meter_model=model,
+                    phase="format_repair", tariff_rates=DEEPSEEK_PRICING_PER_1M_TOKENS.get(model),
+                    model=model,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": (
+                                "Convert the following assistant output into a clean final answer. "
+                                + (
+                                    "Preserve all supplied rows and facts, and follow the exact columns and row coverage in the user's current request. "
+                                    if output_context is not None
+                                    else "Return ONLY a valid markdown table with proper header row, separator row, and 5 data rows. "
+                                )
+                                +
+                                "No tool traces, no XML/DSML tags, no extra commentary."
+                            ),
+                        },
+                        {"role": "user", "content": prompt},
+                        {"role": "assistant", "content": cleaned},
+                    ],
+                    tool_choice="none",
+                )
+                rewrite_usage = getattr(rewrite_response, "usage", None)
+                rewrite_token_usage = self._token_usage_from_response_usage(rewrite_usage)
+                self._record_response_usage(rewrite_response, model, rewrite_token_usage)
+                total_tokens_in += rewrite_token_usage["tokens_in"]
+                total_tokens_out += rewrite_token_usage["tokens_out"]
+                total_cache_hit_tokens += rewrite_token_usage["cache_hit_tokens"]
+                total_cache_miss_tokens += rewrite_token_usage["cache_miss_tokens"]
+                rewrite_choices = getattr(rewrite_response, "choices", []) or []
+                if rewrite_choices:
+                    cleaned = (
+                        getattr(rewrite_choices[0].message, "content", "") or ""
+                    ).strip()
+        elif _looks_like_tool_trace(cleaned):
+            rewrite_response = metered_call(
+                self.client.chat.completions.create, provider=self.provider_name, meter_model=model,
+                phase="format_repair", tariff_rates=DEEPSEEK_PRICING_PER_1M_TOKENS.get(model),
                 model=model,
                 messages=[
                     {
                         "role": "system",
                         "content": (
                             "Convert the following assistant output into a clean final answer. "
-                            "Return ONLY a valid markdown table with proper header row, separator row, and 5 data rows. "
-                            "No tool traces, no XML/DSML tags, no extra commentary."
+                            "Follow the original user request exactly. "
+                            "No tool traces, no XML/DSML tags, and no extra commentary."
                         ),
                     },
                     {"role": "user", "content": prompt},
@@ -324,39 +609,133 @@ class DeepSeekProvider(BaseAIProvider):
                 tool_choice="none",
             )
             rewrite_usage = getattr(rewrite_response, "usage", None)
-            total_tokens_in += getattr(rewrite_usage, "prompt_tokens", 0) or 0
-            total_tokens_out += getattr(rewrite_usage, "completion_tokens", 0) or 0
+            rewrite_token_usage = self._token_usage_from_response_usage(rewrite_usage)
+            self._record_response_usage(rewrite_response, model, rewrite_token_usage)
+            total_tokens_in += rewrite_token_usage["tokens_in"]
+            total_tokens_out += rewrite_token_usage["tokens_out"]
+            total_cache_hit_tokens += rewrite_token_usage["cache_hit_tokens"]
+            total_cache_miss_tokens += rewrite_token_usage["cache_miss_tokens"]
             rewrite_choices = getattr(rewrite_response, "choices", []) or []
             if rewrite_choices:
-                cleaned = (getattr(rewrite_choices[0].message, "content", "") or "").strip()
+                cleaned = (
+                    getattr(rewrite_choices[0].message, "content", "") or ""
+                ).strip()
 
         return AIProviderResponse(
             content=cleaned,
             tokens_in=total_tokens_in,
             tokens_out=total_tokens_out,
             cost=self._estimate_cost(
-                model=model, tokens_in=total_tokens_in, tokens_out=total_tokens_out
+                model=model,
+                tokens_in=total_tokens_in,
+                tokens_out=total_tokens_out,
+                cache_hit_tokens=total_cache_hit_tokens,
+                cache_miss_tokens=total_cache_miss_tokens,
             ),
             provider=self.provider_name,
             model=model,
+            web_search_used=web_search_used,
+            web_search_queries=web_search_queries,
+            web_sources=web_sources,
         )
 
     @staticmethod
-    def _estimate_cost(*, model: str, tokens_in: int, tokens_out: int) -> float:
-        pricing = DEEPSEEK_PRICING_PER_1M_TOKENS.get(model, {"input": 0.14, "output": 0.28})
+    def _usage_int(usage: object | None, field: str) -> int:
+        value = getattr(usage, field, 0) if usage is not None else 0
+        try:
+            return max(0, int(value or 0))
+        except (TypeError, ValueError):
+            return 0
+
+    @classmethod
+    def _token_usage_from_response_usage(cls, usage: object | None) -> dict[str, int]:
+        tokens_in = cls._usage_int(usage, "prompt_tokens")
+        tokens_out = cls._usage_int(usage, "completion_tokens")
+        cache_hit_tokens = cls._usage_int(usage, "prompt_cache_hit_tokens")
+        cache_miss_tokens = cls._usage_int(usage, "prompt_cache_miss_tokens")
+
+        # DeepSeek bills input tokens differently depending on context-cache hits.
+        # Older or proxied responses may omit one/both cache fields; keep totals
+        # consistent and conservatively treat unknown input tokens as cache misses.
+        if cache_hit_tokens or cache_miss_tokens:
+            known_input_tokens = cache_hit_tokens + cache_miss_tokens
+            if tokens_in > known_input_tokens:
+                cache_miss_tokens += tokens_in - known_input_tokens
+            elif tokens_in == 0:
+                tokens_in = known_input_tokens
+        else:
+            cache_miss_tokens = tokens_in
+
+        return {
+            "tokens_in": tokens_in,
+            "tokens_out": tokens_out,
+            "cache_hit_tokens": cache_hit_tokens,
+            "cache_miss_tokens": cache_miss_tokens,
+        }
+
+    def _record_response_usage(
+        self,
+        response: object,
+        model: str,
+        token_usage: dict[str, int],
+    ) -> None:
+        created = getattr(response, "created", None)
+        occurred_at = None
+        if isinstance(created, (int, float)):
+            occurred_at = datetime.datetime.fromtimestamp(
+                created, tz=datetime.timezone.utc
+            )
+        record_provider_usage_call(
+            provider=self.provider_name,
+            model=model,
+            provider_request_id=str(getattr(response, "id", "") or "") or None,
+            occurred_at=occurred_at,
+            tokens_in=token_usage["tokens_in"],
+            tokens_out=token_usage["tokens_out"],
+            cache_hit_tokens=token_usage["cache_hit_tokens"],
+            cache_miss_tokens=token_usage["cache_miss_tokens"],
+            actual_cost=self._estimate_cost(
+                model=model,
+                tokens_in=token_usage["tokens_in"],
+                tokens_out=token_usage["tokens_out"],
+                cache_hit_tokens=token_usage["cache_hit_tokens"],
+                cache_miss_tokens=token_usage["cache_miss_tokens"],
+            ),
+        )
+
+    @staticmethod
+    def _estimate_cost(
+        *,
+        model: str,
+        tokens_in: int,
+        tokens_out: int,
+        cache_hit_tokens: int = 0,
+        cache_miss_tokens: int | None = None,
+    ) -> float:
+        pricing = DEEPSEEK_PRICING_PER_1M_TOKENS.get(
+            model, DEFAULT_DEEPSEEK_PRICING_PER_1M_TOKENS
+        )
+        billable_cache_miss_tokens = (
+            max(0, tokens_in - cache_hit_tokens)
+            if cache_miss_tokens is None
+            else cache_miss_tokens
+        )
         return round(
-            (tokens_in / 1_000_000) * pricing["input"]
+            (cache_hit_tokens / 1_000_000) * pricing["cache_hit_input"]
+            + (billable_cache_miss_tokens / 1_000_000) * pricing["cache_miss_input"]
             + (tokens_out / 1_000_000) * pricing["output"],
             6,
         )
 
     @staticmethod
     def estimate_prompt_cost_usd(model: str, prompt: str) -> float:
-        pricing = DEEPSEEK_PRICING_PER_1M_TOKENS.get(model, {"input": 0.14, "output": 0.28})
+        pricing = DEEPSEEK_PRICING_PER_1M_TOKENS.get(
+            model, DEFAULT_DEEPSEEK_PRICING_PER_1M_TOKENS
+        )
         prompt_tokens = max(1, math.ceil(len(prompt) / 4))
         expected_output_tokens = 1800
         return round(
-            (prompt_tokens / 1_000_000) * pricing["input"]
+            (prompt_tokens / 1_000_000) * pricing["cache_miss_input"]
             + (expected_output_tokens / 1_000_000) * pricing["output"],
             6,
         )

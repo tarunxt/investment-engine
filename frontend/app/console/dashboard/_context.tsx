@@ -13,6 +13,7 @@ import {
 import { AlertCircle, CalendarClock, CheckCircle2, Clock3, Loader2 } from 'lucide-react';
 import { isRunInSwingTradeMarket } from '@/lib/runPresentation';
 import { inferRebalanceMarketFromPrompt } from '@/lib/rebalance';
+import { outputSourceJobsForPrompt, type OutputSourceSelection } from '@/lib/outputSourceJobs';
 import { apiService } from '@/services/api';
 import {
   type GoogleSheetsStatusResponse,
@@ -23,6 +24,7 @@ import {
   type RunResponse,
 } from '@/types/api';
 import { useRuns } from '@/hooks/useRuns';
+import { useSessionPromptDrafts } from '@/providers/SessionPromptDrafts';
 import { type SwingTradeMarket } from '@/lib/swingTrade';
 
 export const DASHBOARD_RUN_LIMIT = 50;
@@ -77,6 +79,9 @@ function toRunListItem(run: RunResponse): RunListItem {
     export_error: run.export_error,
     exported_at: run.exported_at,
     exported_sheet_url: run.exported_sheet_url,
+    auto_rebalance_portfolio: run.auto_rebalance_portfolio,
+    auto_rebalance_sequence: run.auto_rebalance_sequence,
+    auto_rebalance_label: run.auto_rebalance_label,
     created_at: run.created_at,
     updated_at: run.updated_at,
   };
@@ -97,7 +102,9 @@ interface DashboardContextValue {
 
   // Form state
   prompt: string;
+  hasUnsavedPromptDraft: boolean;
   setPrompt: React.Dispatch<React.SetStateAction<string>>;
+  setOutputSourceSelection: React.Dispatch<React.SetStateAction<OutputSourceSelection | null>>;
   providers: ProviderInfo[];
   scheduledAt: string;
   setScheduledAt: (val: string) => void;
@@ -149,7 +156,7 @@ interface DashboardContextValue {
 
 const DashboardContext = createContext<DashboardContextValue | null>(null);
 
-const MODEL_MIX_STORAGE_KEY = 'investor:model-mixes:v1';
+const MODEL_MIX_STORAGE_KEY = 'investment-engine:model-mixes:v1';
 const COMPATIBLE_MODEL_MIX_ID = 'compatible-models-system';
 
 interface ModelMix {
@@ -197,10 +204,14 @@ export function DashboardProvider({
     refresh: refreshRuns,
   } = useRuns({ limit: DASHBOARD_RUN_LIMIT });
 
+  const promptDrafts = useSessionPromptDrafts();
+  const promptDraftKey = runScopeMarket ? `${runScopeMarket}:${runScopeKind}` : null;
+  const [restoredPromptDraft] = useState(() => promptDraftKey ? promptDrafts?.get(promptDraftKey) : undefined);
   const [prompt, setPrompt] = useState(() =>
-    promptPreset ? promptPreset.buildPrompt(promptPreset.initialInvestmentAmount) : '',
+    restoredPromptDraft ?? (promptPreset ? promptPreset.buildPrompt(promptPreset.initialInvestmentAmount) : ''),
   );
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
+  const [outputSourceSelection, setOutputSourceSelection] = useState<OutputSourceSelection | null>(null);
   const [scheduledAt, setScheduledAt] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -373,7 +384,7 @@ export function DashboardProvider({
       const defaultTemplate = defaultTemplateName
         ? templates.find((tpl) => tpl.name === defaultTemplateName)
         : undefined;
-      if (defaultTemplate) {
+      if (defaultTemplate && restoredPromptDraft === undefined) {
         setSelectedTemplateId(String(defaultTemplate.id));
         setPrompt(defaultTemplate.body);
       }
@@ -384,7 +395,7 @@ export function DashboardProvider({
     }
 
     setIsLoading(false);
-  }, [defaultTemplateName, prompt, refreshGoogleSheetsStatus]);
+  }, [defaultTemplateName, prompt, refreshGoogleSheetsStatus, restoredPromptDraft]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -414,7 +425,7 @@ export function DashboardProvider({
   }, [prompt]);
 
   useEffect(() => {
-    if (!promptPreset) return;
+    if (!promptPreset || restoredPromptDraft !== undefined) return;
 
     const nextAmount = exportInvestmentAmount.trim() || promptPreset.initialInvestmentAmount;
     const previousAmount = presetAmountRef.current || promptPreset.initialInvestmentAmount;
@@ -435,7 +446,7 @@ export function DashboardProvider({
 
     presetAmountRef.current = nextAmount;
     presetPromptRef.current = nextGeneratedPrompt;
-  }, [exportInvestmentAmount, promptPreset]);
+  }, [exportInvestmentAmount, promptPreset, restoredPromptDraft]);
 
   const fetchTemplates = useCallback(async (q: string) => {
     templateControllerRef.current?.abort('New search started');
@@ -460,17 +471,22 @@ export function DashboardProvider({
   );
 
   const handlePromptChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setPrompt(e.target.value);
-  }, []);
+    const value = e.target.value;
+    if (promptDraftKey) promptDrafts?.set(promptDraftKey, value);
+    setPrompt(value);
+  }, [promptDraftKey, promptDrafts]);
 
   const handleTemplateChange = useCallback(
     (id: string) => {
       if (id === 'none') return;
       setSelectedTemplateId(id);
       const tpl = promptTemplates.find((p) => String(p.id) === id);
-      if (tpl) setPrompt(tpl.body);
+      if (tpl) {
+        if (promptDraftKey) promptDrafts?.set(promptDraftKey, tpl.body);
+        setPrompt(tpl.body);
+      }
     },
-    [promptTemplates],
+    [promptTemplates, promptDraftKey, promptDrafts],
   );
 
   const toggleTarget = useCallback((key: string) => {
@@ -658,6 +674,7 @@ export function DashboardProvider({
         const run = await apiService.createRun({
           prompt: trimmedPrompt,
           targets,
+          output_source_jobs: await outputSourceJobsForPrompt(trimmedPrompt, outputSourceSelection),
           scheduled_at: scheduledAt ? new Date(scheduledAt).toISOString() : null,
           allow_parallel: allowParallel,
           auto_export_enabled: autoExportEnabled,
@@ -680,6 +697,7 @@ export function DashboardProvider({
     },
     [
       prompt,
+      outputSourceSelection,
       runs,
       parseTargets,
       scheduledAt,
@@ -744,7 +762,9 @@ export function DashboardProvider({
         runScopeLabel,
         runScopeKind,
         prompt,
+        hasUnsavedPromptDraft: Boolean(promptDraftKey && promptDrafts?.has(promptDraftKey)),
         setPrompt,
+        setOutputSourceSelection,
         providers,
         scheduledAt,
         setScheduledAt,

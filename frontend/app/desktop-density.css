@@ -1,0 +1,80 @@
+/* Desktop density shared by every route, including body-portalled dialogs.
+ * Scale layout through rem units, not zoom/transform: fixed positioning,
+ * viewport bounds, pointer coordinates and browser zoom retain native behavior.
+ * Keep the small type tokens readable rather than shrinking them to 7-9px.
+ * Mobile/tablet and the user's stored preferences are intentionally untouched.
+ */
+@media (min-width: 1024px) {
+  :root {
+    font-size: 67%;
+    --text-xs: max(0.75rem, 11px);
+    --text-sm: max(0.875rem, 12px);
+    --text-base: max(1rem, 13px);
+    --text-lg: max(1.125rem, 14px);
+    --text-xl: max(1.25rem, 16px);
+    --text-2xl: max(1.5rem, 18px);
+    --text-3xl: max(1.875rem, 22px);
+    --text-4xl: max(2.25rem, 26px);
+    --text-5xl: max(3rem, 32px);
+    --text-6xl: max(3.75rem, 40px);
+  }
+
+  body {
+    font-size: var(--text-base);
+  }
+}
+
+/* Existing pixel-sized utility exceptions use the same desktop layout scale.
+ * Keep source route markup and responsive variants intact. Hairlines stay crisp. */
+@media (min-width: 1024px) {
+  [class~="gap-[7px]"] { gap: 0.4375rem; }
+  [class~="h-[18px]"] { height: 1.125rem; }
+  [class~="h-[300px]"] { height: 18.75rem; }
+  [class~="h-[68px]"] { height: 4.25rem; }
+  [class~="max-h-[550px]"] { max-height: 34.375rem; }
+  [class~="max-h-[650px]"] { max-height: 40.625rem; }
+  [class~="max-w-[1500px]"] { max-width: 93.75rem; }
+  [class~="max-w-[220px]"] { max-width: 13.75rem; }
+  [class~="max-w-[260px]"] { max-width: 16.25rem; }
+  [class~="max-w-[340px]"] { max-width: 21.25rem; }
+  [class~="max-w-[680px]"] { max-width: 42.5rem; }
+  [class~="max-w-[960px]"] { max-width: 60rem; }
+  [class~="min-h-[240px]"] { min-height: 15rem; }
+  [class~="min-h-[260px]"] { min-height: 16.25rem; }
+  [class~="min-h-[320px]"] { min-height: 20rem; }
+  [class~="min-h-[420px]"] { min-height: 26.25rem; }
+  [class~="min-h-[68px]"] { min-height: 4.25rem; }
+  [class~="min-h-[80px]"] { min-height: 5rem; }
+  [class~="min-w-[1000px]"] { min-width: 62.5rem; }
+  [class~="min-w-[1100px]"] { min-width: 68.75rem; }
+  [class~="min-w-[1120px]"] { min-width: 70rem; }
+  [class~="min-w-[112px]"] { min-width: 7rem; }
+  [class~="min-w-[1180px]"] { min-width: 73.75rem; }
+  [class~="min-w-[1380px]"] { min-width: 86.25rem; }
+  [class~="min-w-[140px]"] { min-width: 8.75rem; }
+  [class~="min-w-[160px]"] { min-width: 10rem; }
+  [class~="min-w-[1800px]"] { min-width: 112.5rem; }
+  [class~="min-w-[180px]"] { min-width: 11.25rem; }
+  [class~="min-w-[240px]"] { min-width: 15rem; }
+  [class~="min-w-[260px]"] { min-width: 16.25rem; }
+  [class~="min-w-[280px]"] { min-width: 17.5rem; }
+  [class~="min-w-[320px]"] { min-width: 20rem; }
+  [class~="min-w-[420px]"] { min-width: 26.25rem; }
+  [class~="min-w-[560px]"] { min-width: 35rem; }
+  [class~="min-w-[760px]"] { min-width: 47.5rem; }
+  [class~="mt-[14px]"] { margin-top: 0.875rem; }
+  [class~="pl-[27.5px]"] { padding-left: 1.71875rem; }
+  [class~="pt-[11px]"] { padding-top: 0.6875rem; }
+  [class~="rounded-[18px]"] { border-radius: 1.125rem; }
+  [class~="rounded-[20px]"] { border-radius: 1.25rem; }
+  [class~="rounded-[22px]"] { border-radius: 1.375rem; }
+  [class~="rounded-[24px]"] { border-radius: 1.5rem; }
+  [class~="rounded-[26px]"] { border-radius: 1.625rem; }
+  [class~="rounded-[28px]"] { border-radius: 1.75rem; }
+  [class~="rounded-[30px]"] { border-radius: 1.875rem; }
+  [class~="rounded-[32px]"] { border-radius: 2rem; }
+  [class~="rounded-[34px]"] { border-radius: 2.125rem; }
+  [class~="rounded-[36px]"] { border-radius: 2.25rem; }
+  [class~="rounded-[4px]"] { border-radius: 0.25rem; }
+  [class~="w-[18px]"] { width: 1.125rem; }
+}
