@@ -114,6 +114,9 @@ class IndMoneyUsPortfolioService:
         self,
         snapshot: IndMoneyUsPortfolioSnapshot,
     ) -> dict[str, Any]:
+        wallet = snapshot.wallet_balance
+        if wallet is None:
+            wallet = self._parse_wallet_balance(self._normalized_lines(snapshot.raw_text or ""))
         return {
             "id": snapshot.id,
             "snapshot_date": snapshot.snapshot_date,
@@ -124,7 +127,7 @@ class IndMoneyUsPortfolioService:
             "holdings_count": snapshot.holdings_count,
             "reported_holdings_count": snapshot.reported_holdings_count,
             "indices_count": snapshot.indices_count,
-            "wallet_balance": snapshot.wallet_balance,
+            "wallet_balance": wallet,
             "current_value": snapshot.current_value,
             "invested_value": snapshot.invested_value,
             "day_return_value": snapshot.day_return_value,
@@ -235,6 +238,18 @@ class IndMoneyUsPortfolioService:
             (index for index, line in enumerate(lines) if line.casefold() == "current value"),
             len(lines),
         )
+        header = lines[:current_value_idx]
+        # The web header renders the wallet as an icon: the pasted text contains
+        # only "My Portfolio", the USD amount and "Add money".
+        balances = [
+            self._parse_money(header[i - 1])
+            for i in range(2, len(header))
+            if header[i].casefold() == "add money"
+            and header[i - 2].casefold() == "my portfolio"
+            and re.fullmatch(r"[+-]?\$\s*(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.\d{2})?", header[i - 1])
+        ]
+        if balances:
+            return balances[0] if len(set(balances)) == 1 else None
         for index, line in enumerate(lines[:current_value_idx]):
             if line.casefold() != "wallet":
                 continue
