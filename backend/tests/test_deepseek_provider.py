@@ -150,6 +150,36 @@ class DeepSeekProviderTests(unittest.TestCase):
             second_call_kwargs["messages"][1]["content"],
         )
 
+    @patch("app.domains.ai_providers.deepseek.web_search_tool.execute")
+    @patch("app.domains.ai_providers.deepseek.OpenAI")
+    def test_dsml_recovery_discloses_missing_evidence(self, client_factory, execute):
+        client = client_factory.return_value
+        client.chat.completions.create.return_value = SimpleNamespace(usage=None, choices=[])
+        provider = DeepSeekProvider()
+        for query, reply in (
+            ("synthetic denied query", {"errors": ["unavailable"], "results": []}),
+            ("NIFTY 50 earnings announcements", {"query": "NIFTY 50 earnings announcements", "results": []}),
+        ):
+            with self.subTest(query=query):
+                execute.return_value = json.dumps(reply)
+                trace = (
+                    '<｜｜DSML｜｜invoke name="web_search">'
+                    f'<｜｜DSML｜｜parameter name="query" string="true">{query}</｜｜DSML｜｜parameter>'
+                    '</｜｜DSML｜｜invoke>'
+                )
+                _, _, queries, sources = provider._recover_from_dsml_tool_trace(
+                    prompt="Summarize current evidence", tool_trace=trace, model="deepseek-v4-flash",
+                    output_kind="json",
+                )
+                request = client.chat.completions.create.call_args.kwargs
+                self.assertEqual(request["tool_choice"], "none")
+                messages = json.dumps(request["messages"])
+                self.assertIn("No live search evidence", messages)
+                self.assertNotIn(query, messages)
+                self.assertNotIn("Collected search results JSON", messages)
+                self.assertEqual(queries, [query] if "query" in reply else [])
+                self.assertEqual(sources, [])
+
     @patch("app.domains.ai_providers.deepseek.OpenAI")
     def test_generate_uses_deepseek_cache_hit_pricing(self, openai_cls_mock):
         mock_client = MagicMock()
