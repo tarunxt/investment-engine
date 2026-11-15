@@ -52,7 +52,8 @@ function statusTone(status?: string | null) {
   const value = (status || "").toLowerCase();
   if (["failed", "cancelled", "interrupted"].includes(value))
     return "border-rose-200 bg-rose-50 text-rose-800";
-  if (["processing", "running", "partial", "completed with warnings", "finish unconfirmed"].includes(value))
+  if (["processing", "running"].includes(value)) return "border-yellow-300 bg-yellow-50 text-yellow-900";
+  if (["partial", "completed with warnings", "finish unconfirmed"].includes(value))
     return "border-amber-200 bg-amber-50 text-amber-800";
   if (["completed", "success"].includes(value))
     return "border-emerald-200 bg-emerald-50 text-emerald-800";
@@ -65,7 +66,8 @@ function stageCardTone(status?: string | null) {
   const value = (status || "").toLowerCase();
   if (["failed", "cancelled", "interrupted"].includes(value))
     return "border-rose-200 bg-rose-50/70";
-  if (["processing", "running", "partial", "completed with warnings", "finish unconfirmed"].includes(value))
+  if (["processing", "running"].includes(value)) return "border-yellow-300 bg-yellow-50 text-yellow-900";
+  if (["partial", "completed with warnings", "finish unconfirmed"].includes(value))
     return "border-amber-200 bg-amber-50/70";
   if (["completed", "success"].includes(value)) return "border-emerald-200 bg-emerald-50/70";
   if (["queued", "pending"].includes(value)) return "border-sky-200 bg-sky-50/70";

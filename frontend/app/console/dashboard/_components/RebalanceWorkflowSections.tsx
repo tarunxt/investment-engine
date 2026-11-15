@@ -7318,7 +7318,7 @@ ${zerodhaExecutionMode === "direct_market"
           });
           if (savedFinal?.saved === false) {
             updateStage(portfolio, "actionables", {
-              state: "idle", runStatus: "Completion unconfirmed", error: savedFinal.error,
+              runStatus: "Completion unconfirmed", error: savedFinal.error,
             });
           }
           await Promise.resolve().then(onDashboardRefresh).catch(error => console.error("Could not refresh dashboard after Actionables", error));

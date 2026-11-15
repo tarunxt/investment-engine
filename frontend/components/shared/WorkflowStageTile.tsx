@@ -157,7 +157,7 @@ export const LLM_STAGE_TILE_KEYS = new Set<WorkflowStageKey>([
 ]);
 
 export function getStageBackgroundClass(state: StageState) {
-  if (state === "running") return "bg-amber-50";
+  if (state === "running") return "bg-yellow-50";
   if (state === "queued") return "bg-sky-50";
   if (state === "completed") return "bg-emerald-50";
   if (state === "failed") return "bg-red-50";

@@ -61,6 +61,6 @@ test('actual timeline markup exposes warning in browser accessibility text and n
 
 test('saved processing without a live Actionables calculation is unconfirmed; running and terminal partial stage colours differ',()=>{
   assert.match(render({status:'processing',completed_at:null}),/Finish unconfirmed/);
-  assert.match(render({stage:'technical',status:'processing',completed_at:null}),/bg-amber-50/);
-  assert.match(render({stage:'rebalance',status:'partial'}),/bg-emerald-50/);
+  assert.match(render({stage:'technical',status:'processing',completed_at:null}),/bg-yellow-50/);
+  assert.match(render({stage:'rebalance',status:'partial'}),/bg-amber-50/);
 });
