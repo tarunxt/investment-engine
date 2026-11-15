@@ -780,7 +780,7 @@ export function stageOneCandidateOddsLookupId(
   return `stage-one-candidate-odds-${index}-${exactIdentity}`;
 }
 
-function useStageOneDialogFocus(onClose: () => void, childOpen = false, active = true) {
+function useDialogFocus(onClose: () => void, childOpen = false, active = true) {
   const root = useRef<HTMLDivElement>(null);
   const returnFocus = useRef<HTMLElement | null>(null);
   useEffect(() => {
@@ -821,7 +821,7 @@ export function StageOneOutputDialog({
     useState(false);
   const [returnsPerDayQuestion, setReturnsPerDayQuestion] =
     useState<BullpenQuestionRow | null>(null);
-  const dialogFocus = useStageOneDialogFocus(onClose, isReturnsPerDayFormulaDialogOpen || returnsPerDayQuestion !== null || state.mode === "all-scanned");
+  const dialogFocus = useDialogFocus(onClose, isReturnsPerDayFormulaDialogOpen || returnsPerDayQuestion !== null || state.mode === "all-scanned");
   const [latestOdds, setLatestOdds] = useState<
     Record<string, { yesOdds?: number | null; noOdds?: number | null }>
   >({});
@@ -1330,8 +1330,8 @@ export function AllScannedEventsDialog({
   const omittedRowCount = state.evidence.scanKnown ? Math.max(0, state.totalScanned - retainedRowCount) : 0;
   const [activeTab, setActiveTab] = useState<"events" | "analysis">("events");
   const [selectedFilterReason, setSelectedFilterReason] = useState<string | null>(null);
-  const dialogFocus = useStageOneDialogFocus(onClose, selectedFilterReason !== null);
-  const filterDetailFocus = useStageOneDialogFocus(() => setSelectedFilterReason(null), false, selectedFilterReason !== null);
+  const dialogFocus = useDialogFocus(onClose, selectedFilterReason !== null);
+  const filterDetailFocus = useDialogFocus(() => setSelectedFilterReason(null), false, selectedFilterReason !== null);
   const normalizedEventQuery = eventQuery.trim().toLowerCase();
   const matchingCandidates = normalizedEventQuery
     ? state.candidates.filter((candidate) =>
@@ -4021,23 +4021,16 @@ export function StageTwoLlmRunDetailsDialog({
   };
 
   const unknownStageEvidence = !state.run && !state.stage.timerStartedAt && Object.keys(state.stage.outputs).length === 0;
-  const diagnosticsReturnFocus = useRef<HTMLElement | null>(
-    typeof document !== "undefined" && document.activeElement instanceof HTMLElement ? document.activeElement : null,
-  );
-  useEffect(() => {
-    if (!unknownStageEvidence) return;
-    const target = diagnosticsReturnFocus.current;
-    return () => target?.focus();
-  }, [unknownStageEvidence]);
+  const diagnosticsFocus = useDialogFocus(onClose, false, unknownStageEvidence);
 
   if (unknownStageEvidence) {
     return (
-      <div data-testid="stage-two-llm-run-dialog" role="dialog" aria-modal="true" aria-label="Stage 2 LLM diagnostics" onKeyDown={(event) => { if (event.key === "Escape") onClose(); if (event.key === "Tab") event.preventDefault(); }} className="fixed inset-0 z-[150] flex items-center justify-center bg-slate-950/60 p-4">
+      <div {...diagnosticsFocus} data-testid="stage-two-llm-run-dialog" role="dialog" aria-modal="true" aria-label="Stage 2 LLM diagnostics" className="fixed inset-0 z-[150] flex items-center justify-center bg-slate-950/60 p-4">
         <div className="w-full max-w-xl rounded-3xl border border-slate-200 bg-white p-6 text-slate-950 shadow-xl">
           <h2 className="text-xl font-semibold">Stage 2 evidence unknown</h2>
           <p className="mt-3 text-sm">No saved run or stage evidence is available. LLM row counts, completion, runtime and position counts are unknown.</p>
           <p className="mt-2 text-xs text-slate-600">Source unavailable · observation age unknown. This view does not start or retry work.</p>
-          <Button autoFocus className="mt-4" onClick={onClose} aria-label="Close LLM run details">Close</Button>
+          <Button className="mt-4" onClick={onClose} aria-label="Close LLM run details">Close</Button>
         </div>
       </div>
     );
