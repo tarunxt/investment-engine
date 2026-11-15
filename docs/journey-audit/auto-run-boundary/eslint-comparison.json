@@ -1,0 +1,39 @@
+{
+  "baseline": {
+    "errors": 2,
+    "warnings": 22,
+    "messages": [
+      {
+        "rule": "react-hooks/set-state-in-effect",
+        "message": "Error: Calling setState synchronously within an effect can trigger cascading renders\n\nEffects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:\n* Update external systems with the latest state from React.\n* Subscribe for updates from some external system, calling setState in a callback function when external state changes.\n\nCalling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).\n\n/workspace/investment-engine/frontend/app/console/dashboard/_components/RebalanceWorkflowSections.tsx:2831:5\n  2829 |     if (owner === null) return;\n  2830 |     const hidden = readBasketColumnLayout(preferenceScope);\n> 2831 |     setColumnPreferences(current => Object.hasOwn(current, preferenceScope) ? current : { ...current, [preferenceScope]: hidden });\n       |     ^^^^^^^^^^^^^^^^^^^^ Avoid calling setState() directly within an effect\n  2832 |   }, [owner, preferenceScope]);\n  2833 |   useEffect(() => {\n  2834 |     if (owner !== null && Object.hasOwn(columnPreferences, preferenceScope)) {",
+        "line": 2831
+      },
+      {
+        "rule": "react-hooks/set-state-in-effect",
+        "message": "Error: Calling setState synchronously within an effect can trigger cascading renders\n\nEffects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:\n* Update external systems with the latest state from React.\n* Subscribe for updates from some external system, calling setState in a callback function when external state changes.\n\nCalling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).\n\n/workspace/investment-engine/frontend/app/console/dashboard/_components/RebalanceWorkflowSections.tsx:2941:34\n  2939 |   const [columnMenu, setColumnMenu] = useState<string[] | null>(null);\n  2940 |   const [renameColumn, setRenameColumn] = useState<string | null>(null);\n> 2941 |   useEffect(() => { if (!open) { setUnitsDetailId(null); setColumnMenu(null); } }, [open]);\n       |                                  ^^^^^^^^^^^^^^^^ Avoid calling setState() directly within an effect\n  2942 |   const unitsDetailOrder = unitsDetailId ? orders.find(order => order.id === unitsDetailId) : undefined;\n  2943 |\n  2944 |   const availableMargin = portfolioParameterMargin(detailsData.portfolioSnapshot, tradingViewMarket);",
+        "line": 2941
+      }
+    ]
+  },
+  "after": {
+    "errors": 2,
+    "warnings": 22,
+    "messages": [
+      {
+        "rule": "react-hooks/set-state-in-effect",
+        "message": "Error: Calling setState synchronously within an effect can trigger cascading renders\n\nEffects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:\n* Update external systems with the latest state from React.\n* Subscribe for updates from some external system, calling setState in a callback function when external state changes.\n\nCalling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).\n\n/workspace/investment-engine/frontend/app/console/dashboard/_components/RebalanceWorkflowSections.tsx:2832:5\n  2830 |     if (owner === null) return;\n  2831 |     const hidden = readBasketColumnLayout(preferenceScope);\n> 2832 |     setColumnPreferences(current => Object.hasOwn(current, preferenceScope) ? current : { ...current, [preferenceScope]: hidden });\n       |     ^^^^^^^^^^^^^^^^^^^^ Avoid calling setState() directly within an effect\n  2833 |   }, [owner, preferenceScope]);\n  2834 |   useEffect(() => {\n  2835 |     if (owner !== null && Object.hasOwn(columnPreferences, preferenceScope)) {",
+        "line": 2832
+      },
+      {
+        "rule": "react-hooks/set-state-in-effect",
+        "message": "Error: Calling setState synchronously within an effect can trigger cascading renders\n\nEffects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:\n* Update external systems with the latest state from React.\n* Subscribe for updates from some external system, calling setState in a callback function when external state changes.\n\nCalling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).\n\n/workspace/investment-engine/frontend/app/console/dashboard/_components/RebalanceWorkflowSections.tsx:2942:34\n  2940 |   const [columnMenu, setColumnMenu] = useState<string[] | null>(null);\n  2941 |   const [renameColumn, setRenameColumn] = useState<string | null>(null);\n> 2942 |   useEffect(() => { if (!open) { setUnitsDetailId(null); setColumnMenu(null); } }, [open]);\n       |                                  ^^^^^^^^^^^^^^^^ Avoid calling setState() directly within an effect\n  2943 |   const unitsDetailOrder = unitsDetailId ? orders.find(order => order.id === unitsDetailId) : undefined;\n  2944 |\n  2945 |   const availableMargin = portfolioParameterMargin(detailsData.portfolioSnapshot, tradingViewMarket);",
+        "line": 2942
+      }
+    ]
+  },
+  "component": {
+    "errors": 0,
+    "warnings": 0,
+    "messages": []
+  }
+}

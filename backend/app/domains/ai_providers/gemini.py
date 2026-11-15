@@ -6,10 +6,16 @@ from typing import Any
 from google import genai
 from google.genai import types
 
+from app.domains.api_usage.metering import ApiAttempt
 from app.core.config import get_gemini_api_keys
 from app.domains.ai_providers.base import (
     AIProviderResponse,
     BaseAIProvider,
+    ProviderCallError,
+)
+from app.domains.ai_providers.web_metadata import (
+    dedupe_strings,
+    merge_web_metadata,
 )
 
 MODEL_PRICING_PER_1M_TOKENS = {
@@ -37,10 +43,14 @@ REPAIR_PROMPT_MARKERS = (
     "[REBALANCE_TABLE_REPAIR]",
     "[STOCK_TABLE_REPAIR]",
 )
+DISABLE_SEARCH_PROMPT_MARKERS = (
+    "[STAGE2_SHARED_EVIDENCE_ONLY]",
+    *REPAIR_PROMPT_MARKERS,
+)
 
 
 def _should_disable_search(prompt: str) -> bool:
-    return any(marker in (prompt or "") for marker in REPAIR_PROMPT_MARKERS)
+    return any(marker in (prompt or "") for marker in DISABLE_SEARCH_PROMPT_MARKERS)
 
 
 def _thinking_config_for_model(model: str) -> types.ThinkingConfig | None:
@@ -99,6 +109,31 @@ def _should_rotate_key(exc: Exception) -> bool:
     return any(marker in msg for marker in transient_markers)
 
 
+def _extract_grounding_web_metadata(chunk: object) -> tuple[list[str], list[str]]:
+    queries: list[str] = []
+    sources: list[str] = []
+
+    for candidate in getattr(chunk, "candidates", None) or []:
+        grounding_metadata = getattr(candidate, "grounding_metadata", None)
+        if grounding_metadata is None:
+            continue
+
+        queries.extend(getattr(grounding_metadata, "web_search_queries", None) or [])
+
+        for grounding_chunk in getattr(grounding_metadata, "grounding_chunks", None) or []:
+            web_chunk = getattr(grounding_chunk, "web", None)
+            if web_chunk is None:
+                continue
+            uri = getattr(web_chunk, "uri", None)
+            title = getattr(web_chunk, "title", None)
+            if isinstance(uri, str) and uri.strip():
+                sources.append(uri)
+            elif isinstance(title, str) and title.strip():
+                sources.append(title)
+
+    return dedupe_strings(queries), dedupe_strings(sources)
+
+
 class GeminiProvider(BaseAIProvider):
     provider_name = "gemini"
 
@@ -123,25 +158,31 @@ class GeminiProvider(BaseAIProvider):
         prompt: str,
         model: str,
     ) -> AIProviderResponse:
+        if model not in self.supported_models:
+            raise ProviderCallError(
+                provider=self.provider_name,
+                requested_model=model,
+                actual_model=None,
+                execution_phase="capability_check",
+                safe_message=f"Gemini model '{model}' is not supported by this adapter.",
+                retryable=False,
+            )
+        self._last_usage_attempt_id = None
         last_error: Exception | None = None
         requested_model = (model or "").strip()
-        model_candidates = [requested_model] if requested_model else []
-        model_candidates.extend([m for m in SUPPORTED_MODELS if m != requested_model])
-
-        for model_name in model_candidates:
-            for api_key in self._api_keys:
-                try:
-                    self.client = genai.Client(
-                        api_key=api_key,
-                        http_options={"api_version": "v1alpha"},
-                    )
-                    return self._generate_once(prompt=prompt, model=model_name)
-                except Exception as exc:
-                    last_error = exc
-                    should_fallback = _should_rotate_key(exc)
-                    if not should_fallback:
-                        raise
-                    continue
+        for key_index, api_key in enumerate(self._api_keys):
+            try:
+                self.client = genai.Client(
+                    api_key=api_key,
+                    http_options={"api_version": "v1alpha"},
+                )
+                return self._generate_once(prompt=prompt, model=requested_model, usage_retry=key_index > 0)
+            except Exception as exc:
+                last_error = exc
+                should_retry_with_next_key = _should_rotate_key(exc)
+                if not should_retry_with_next_key:
+                    raise
+                continue
         if last_error:
             raise last_error
         raise RuntimeError("Gemini generation failed.")
@@ -151,6 +192,7 @@ class GeminiProvider(BaseAIProvider):
         *,
         prompt: str,
         model: str,
+        usage_retry: bool = False,
     ) -> AIProviderResponse:
         tools: list[types.Tool] = []
 
@@ -175,33 +217,53 @@ class GeminiProvider(BaseAIProvider):
         max_chars = MAX_RESPONSE_CHARS
 
         usage_metadata = None
+        web_search_used = False
+        web_search_queries: list[str] = []
+        web_sources: list[str] = []
 
-        stream = self.client.models.generate_content_stream(
-            model=model,
-            contents=contents,
-            config=config,
-        )
-
-        for chunk in stream:
-
-            text = getattr(chunk, "text", None)
-
-            if text:
-                full_text_parts.append(text)
-                if sum(len(part) for part in full_text_parts) > max_chars:
-                    raise ValueError(
-                        "Generated response exceeded safety output limit for this prompt. Please retry."
-                    )
-
-            metadata = getattr(
-                chunk,
-                "usage_metadata",
-                None,
+        with ApiAttempt(
+            provider=self.provider_name, model=model, request={"prompt": prompt},
+            phase="retry" if usage_retry else "request", retry=usage_retry,
+            parent_attempt_id=getattr(self, "_last_usage_attempt_id", None) if usage_retry else None,
+            tariff_rates=MODEL_PRICING_PER_1M_TOKENS.get(model),
+        ) as attempt:
+            self._last_usage_attempt_id = attempt.values["attempt_id"]
+            stream = self.client.models.generate_content_stream(
+                model=model,
+                contents=contents,
+                config=config,
             )
 
-            if metadata:
-                usage_metadata = metadata
+            for chunk in stream:
+                attempt.observe(chunk)
 
+                text = getattr(chunk, "text", None)
+
+                if text:
+                    full_text_parts.append(text)
+                    if sum(len(part) for part in full_text_parts) > max_chars:
+                        raise ValueError(
+                            "Generated response exceeded safety output limit for this prompt. Please retry."
+                        )
+
+                metadata = getattr(
+                    chunk,
+                    "usage_metadata",
+                    None,
+                )
+
+                if metadata:
+                    usage_metadata = metadata
+
+                chunk_queries, chunk_sources = _extract_grounding_web_metadata(chunk)
+                web_search_used, web_search_queries, web_sources = merge_web_metadata(
+                    web_search_used,
+                    web_search_queries,
+                    web_sources,
+                    response_used=bool(chunk_queries or chunk_sources),
+                    response_queries=chunk_queries,
+                    response_sources=chunk_sources,
+                )
         full_text = "".join(full_text_parts)
 
         tokens_in = int(
@@ -221,6 +283,16 @@ class GeminiProvider(BaseAIProvider):
             )
             or 0
         )
+        tool_use_prompt_tokens = int(
+            getattr(
+                usage_metadata,
+                "tool_use_prompt_token_count",
+                0,
+            )
+            or 0
+        )
+        if tool_use_prompt_tokens > 0:
+            web_search_used = True
 
         return AIProviderResponse(
             content=full_text.strip(),
@@ -233,6 +305,9 @@ class GeminiProvider(BaseAIProvider):
             ),
             provider=self.provider_name,
             model=model,
+            web_search_used=web_search_used,
+            web_search_queries=web_search_queries,
+            web_sources=web_sources,
         )
 
     @staticmethod

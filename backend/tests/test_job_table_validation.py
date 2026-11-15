@@ -43,6 +43,9 @@ class FakeRepo:
         tokens_in=None,
         tokens_out=None,
         estimated_cost=None,
+        web_search_used=None,
+        web_search_queries=None,
+        web_sources=None,
     ):
         job.status = status
         if response is not None:
@@ -55,6 +58,12 @@ class FakeRepo:
             job.tokens_out = tokens_out
         if estimated_cost is not None:
             job.estimated_cost = estimated_cost
+        if web_search_used is not None:
+            job.web_search_used = web_search_used
+        if web_search_queries is not None:
+            job.web_search_queries = web_search_queries
+        if web_sources is not None:
+            job.web_sources = web_sources
 
 
 class ExecuteAIJobTableValidationTests(unittest.TestCase):

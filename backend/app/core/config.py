@@ -1,12 +1,52 @@
 import os
+import re
 from datetime import datetime, timezone
-
-from pydantic_settings import BaseSettings
 from typing import Optional
+
+from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_TRUE_ENV_VALUES = {"1", "true", "t", "yes", "y", "on", "debug", "development", "dev"}
+_FALSE_ENV_VALUES = {"0", "false", "f", "no", "n", "off", "release", "prod", "production"}
 
 
 class Settings(BaseSettings):
     """Application configuration from environment variables."""
+
+    model_config = SettingsConfigDict(
+        env_file=".env", case_sensitive=False, extra="ignore", hide_input_in_errors=True,
+    )
+
+    # Keep aliases as separate fields so conflicting/blank legacy values cannot
+    # be silently hidden by AliasChoices. Never expose these in repr or dumps.
+    jwt_signing_key: Optional[SecretStr] = Field(default=None, repr=False, exclude=True)
+    jwt_secret: Optional[SecretStr] = Field(default=None, repr=False, exclude=True)
+    secret_key: Optional[SecretStr] = Field(default=None, repr=False, exclude=True)
+
+    @model_validator(mode="after")
+    def _require_private_jwt_signing_key(self) -> "Settings":
+        supplied = [
+            value.get_secret_value()
+            for value in (self.jwt_signing_key, self.jwt_secret, self.secret_key)
+            if value is not None
+        ]
+        if not supplied:
+            raise ValueError("JWT_SIGNING_KEY is required (private server-generated key)")
+        # A single explicit format avoids whitespace/encoding ambiguity. Format
+        # checks cannot establish randomness: generate 32 bytes with a CSPRNG.
+        if any(re.fullmatch(r"[0-9a-f]{64}", value) is None for value in supplied):
+            raise ValueError("JWT signing keys must encode 32 random bytes as 64 lowercase hex characters")
+        if any(
+            value == value[:size] * (64 // size)
+            for value in supplied for size in (1, 2, 4, 8, 16, 32)
+        ):
+            raise ValueError("JWT signing keys must not be repeated/default patterns")
+        if any(value != supplied[0] for value in supplied[1:]):
+            raise ValueError("Conflicting JWT_SIGNING_KEY, JWT_SECRET or SECRET_KEY configuration")
+        # Canonical > JWT_SECRET > SECRET_KEY, with all supplied names required
+        # to agree. No default or previous-key verification path is supported.
+        self.jwt_signing_key = SecretStr(supplied[0])
+        return self
 
     # Database
     database_url: str
@@ -14,6 +54,14 @@ class Settings(BaseSettings):
     # Redis
     redis_url: str
     
+    # Disabled by default; local review must opt in after schema checks.
+    recommendation_audit_enabled: bool = False
+    recommendation_audit_recovery_stored_only_enabled: bool = False
+    recommendation_audit_external_enabled: bool = False
+    recommendation_audit_fundamentals_enabled: bool = False
+    recommendation_audit_daily_cap_usd: float = Field(default=0, ge=0, le=100)
+    recommendation_audit_kite_incremental_cost_usd: float | None = Field(default=None, ge=0, le=100)
+
     # API Keys
     openai_api_key: Optional[str] = None
     gemini_api_key: Optional[str] = None
@@ -28,6 +76,10 @@ class Settings(BaseSettings):
     zerodha_api_key: Optional[str] = None
     zerodha_api_secret: Optional[str] = None
     zerodha_token_encryption_key: Optional[str] = None  # Fernet key for access_token at-rest encryption
+    zerodha_enable_direct_market_orders: bool = False  # Enable only when the server egress IP is Kite-whitelisted
+
+    # Operator-approved manual protected-order exception; automated writes stay blocked.
+    zerodha_recovery_manual_orders_enabled: bool = True
 
     # Google Sheets OAuth
     google_client_id: Optional[str] = None
@@ -55,15 +107,34 @@ class Settings(BaseSettings):
     smtp_port: Optional[int] = 587
     smtp_user: Optional[str] = None
     smtp_password: Optional[str] = None
-    emails_from_email: str = "noreply@example.com"
-    emails_from_name: str = "AI Investment Platform"
+    # Accept both documented SMTP_* names and the legacy EMAILS_* names already
+    # present on older production hosts. Keep the SMTP_* fields canonical in code.
+    smtp_from_email: str = Field(
+        default="noreply@example.com",
+        validation_alias=AliasChoices("SMTP_FROM_EMAIL", "EMAILS_FROM_EMAIL"),
+    )
+    smtp_from_name: str = Field(
+        default="AI Investment Platform",
+        validation_alias=AliasChoices("SMTP_FROM_NAME", "EMAILS_FROM_NAME"),
+    )
+    # Dedicated cross-account inbox monitored by the Stage 1 clustering webhook.
+    bullpen_stage1_completion_recipient: str = "tarunindian007@gmail.com"
     
     # Logging
     log_level: str = "INFO"
     
-    class Config:
-        env_file = ".env"
-        case_sensitive = False
+    @field_validator("debug", mode="before")
+    @classmethod
+    def _coerce_debug_flag(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+
+        normalized = value.strip().lower()
+        if normalized in _TRUE_ENV_VALUES:
+            return True
+        if normalized in _FALSE_ENV_VALUES:
+            return False
+        return value
 
 
 DATABASE_URL = os.getenv("DATABASE_URL", "")

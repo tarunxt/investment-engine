@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState, type ElementType } from 'react';
 import Link from 'next/link';
+import { recordedStageRunLabel, RUN_HIERARCHY_HELP } from '@/lib/runHierarchy';
+import type { AutoRebalanceStageResponse } from '@/types/api';
 import { useParams, usePathname, useRouter } from 'next/navigation';
 import {
   AlertCircle,
@@ -18,8 +20,15 @@ import { WSClient } from '@/services/websocket';
 import { URLs } from '@/lib/urls';
 import { type RunResponse } from '@/types/api';
 import { cn } from '@/lib/utils';
+import { formatUsdAsVerifiedInr } from '@/lib/fxPresentation';
 import InvestmentRecommendationTable from '@/components/InvestmentRecommendationTable';
-import { getJobSheetsPresentation, getRunDetailPathFromPrompt, getRunLabelFromPrompt } from '@/lib/runPresentation';
+import { OutputConsistencyNotice } from '@/components/OutputConsistencyNotice';
+import {
+  getAutoRebalanceRunDisplayLabel,
+  getJobSheetsPresentation,
+  getRunDetailPathFromPrompt,
+  getRunLabelFromPrompt,
+} from '@/lib/runPresentation';
 
 const STATUS_STYLES: Record<string, string> = {
   scheduled: 'bg-violet-50 text-violet-700 ring-violet-200',
@@ -87,10 +96,9 @@ function formatTokens(value?: number | null) {
   return value?.toLocaleString() ?? '0';
 }
 
-function formatCostInr(value?: number | null, usdInrRate = 83.5) {
+function formatCostInr(value?: number | null, usdInrRate = 0) {
   if (value == null || !Number.isFinite(value)) return 'Not captured';
-  const inr = value * usdInrRate;
-  return `₹${inr.toFixed(2)}`;
+  return formatUsdAsVerifiedInr(value, usdInrRate);
 }
 
 function hasKnownCost(value?: number | null): value is number {
@@ -124,12 +132,26 @@ export default function RunDetailPage() {
   const idParam = Array.isArray(params.id) ? params.id[0] : params.id;
   const runId = Number(idParam);
   const hasValidRunId = Number.isInteger(runId) && runId > 0;
+  const [parentHistoryError, setParentHistoryError] = useState<string | null>(null);
+  const [parentStages, setParentStages] = useState<{ portfolio: string; sequence: number; stages: AutoRebalanceStageResponse[] } | null>(null);
   const [run, setRun] = useState<RunResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [wsConnected, setWsConnected] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
-  const [usdInrRate, setUsdInrRate] = useState(83.5);
+  const [usdInrRate, setUsdInrRate] = useState(0);
+
+  useEffect(() => {
+    let active = true;
+    setParentHistoryError(null);
+    setParentStages(null);
+    if (run?.auto_rebalance_portfolio && run.auto_rebalance_sequence) {
+      void apiService.getAutoRebalanceHistoryDetail(run.auto_rebalance_portfolio, run.auto_rebalance_sequence)
+        .then(parent => { if (active) setParentStages({ portfolio: parent.portfolio, sequence: parent.sequence, stages: parent.stages }); })
+        .catch(reason => { if (active) setParentHistoryError(`Saved workflow history unavailable: ${reason instanceof Error ? reason.message : "Refresh to retry."}`); });
+    }
+    return () => { active = false; };
+  }, [run?.auto_rebalance_portfolio, run?.auto_rebalance_sequence]);
 
   const generationRef = useRef(0);
   const wsClientRef = useRef<WSClient | null>(null);
@@ -174,11 +196,13 @@ export default function RunDetailPage() {
     apiService
       .getApiUsageSummary()
       .then((summary) => {
-        if (summary.usd_inr_rate && summary.usd_inr_rate > 0) {
+        if (summary.fx_status === 'valid' && summary.usd_inr_rate && summary.usd_inr_rate > 0) {
           setUsdInrRate(summary.usd_inr_rate);
+        } else {
+          setUsdInrRate(0);
         }
       })
-      .catch(() => {});
+      .catch(() => setUsdInrRate(0));
 
     const client = new WSClient({
       url: URLs.runs.wsRun(runId),
@@ -287,7 +311,9 @@ export default function RunDetailPage() {
 
   const StatusIcon = STATUS_ICONS[run.status] ?? Clock3;
   const isActive = ACTIVE_STATUSES.has(run.status);
-  const runLabel = getRunLabelFromPrompt(run.id, run.prompt);
+  const runLabel = run.auto_rebalance_label
+    ? getAutoRebalanceRunDisplayLabel(run)
+    : getRunLabelFromPrompt(run.id, run.prompt);
   const runJobs = run.run_jobs ?? [];
   const knownCostJobs = runJobs.filter((rj) => hasKnownCost(rj.job.estimated_cost));
   const totalKnownCost = knownCostJobs.reduce((sum, rj) => sum + (rj.job.estimated_cost ?? 0), 0);
@@ -299,6 +325,16 @@ export default function RunDetailPage() {
 
   return (
     <div className="mx-auto flex flex-col gap-6">
+      <nav aria-label="Run hierarchy" className="flex flex-wrap gap-2 text-sm">
+        <Link href={URLs.routes.console.runs()} className="text-blue-700 underline">All runs</Link>
+        {run.auto_rebalance_portfolio && run.auto_rebalance_sequence ? <>
+          <span aria-hidden="true">/</span>
+          <Link href={URLs.routes.console.autoRebalanceRunDetail(run.auto_rebalance_portfolio === 'india' ? 'zerodha' : 'indmoneyUs', run.auto_rebalance_sequence)} className="text-blue-700 underline">Workflow · {run.auto_rebalance_label || `${run.auto_rebalance_portfolio === 'india' ? 'India' : 'IndMoney US'} Run #${run.auto_rebalance_sequence}`}</Link>
+        </> : null}
+        <span aria-hidden="true">/</span><span aria-current="page">{run.auto_rebalance_portfolio ? recordedStageRunLabel(run.id, parentStages?.portfolio === run.auto_rebalance_portfolio && parentStages?.sequence === run.auto_rebalance_sequence ? parentStages.stages : []) : 'Run details'} · Run #{run.id}</span>
+      </nav>
+      <p className="text-xs text-gray-500">{RUN_HIERARCHY_HELP}</p>
+      {parentHistoryError ? <div role="alert" className="text-sm text-amber-800">{parentHistoryError}</div> : null}
       {/* Header */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3">
@@ -311,7 +347,10 @@ export default function RunDetailPage() {
             Back
           </Button>
           <span className="text-gray-300">/</span>
-          <h1 className="text-lg font-semibold tracking-tight text-gray-950">{runLabel}</h1>
+          <div className="min-w-0">
+            <h1 className="text-lg font-semibold tracking-tight text-gray-950">{run.auto_rebalance_portfolio && run.auto_rebalance_sequence ? `Stage run #${run.id}` : runLabel}</h1>
+            {run.auto_rebalance_portfolio && run.auto_rebalance_sequence ? <p className="text-xs text-gray-500">Workflow #{run.auto_rebalance_sequence} · {runLabel}</p> : null}
+          </div>
           <span
             className={cn(
               'inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold capitalize ring-1',
@@ -437,7 +476,7 @@ export default function RunDetailPage() {
                     <span className="text-sm font-medium capitalize text-gray-950">
                       {job.provider}
                     </span>
-                    <span className="text-xs text-gray-400">{job.model}</span>
+                    <span className="text-xs text-gray-400">{job.model} · Provider job #{job.id} · Stage run #{run.id}</span>
                   </div>
                   <div className="flex items-center gap-3">
                     {job.tokens_in || job.tokens_out ? (
@@ -491,6 +530,10 @@ export default function RunDetailPage() {
                   </div>
                 </div>
                 <div className="max-w-full p-5">
+                  <OutputConsistencyNotice metadata={job.runtime_metadata_json} />
+                  {job.status === 'partial' && job.error_message ? (
+                    <p className="mb-3 border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">{job.error_message}</p>
+                  ) : null}
                   {job.status === 'failed' && job.error_message ? (
                     <div className="mb-4 border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
                       <p className="whitespace-pre-wrap leading-6">{job.error_message}</p>

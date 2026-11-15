@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.domains.zerodha.crypto import decrypt_token, encrypt_token
 from app.domains.zerodha.models import ZerodhaCredential, ZerodhaPortfolioSnapshot
+from app.shared.portfolio_summary import build_persisted_portfolio_summary
 
 
 class ZerodhaCredentialRepository:
@@ -177,6 +178,10 @@ class SyncZerodhaPortfolioSnapshotRepository:
 
     @staticmethod
     def _apply_snapshot(snapshot: ZerodhaPortfolioSnapshot, snapshot_data: dict) -> None:
+        top_holdings, invested_value = build_persisted_portfolio_summary(
+            snapshot_data["holdings"],
+            total_value=snapshot_data["holdings_market_value"],
+        )
         snapshot.captured_at = snapshot_data["captured_at"]
         snapshot.source = snapshot_data["source"]
         snapshot.holdings_count = snapshot_data["holdings_count"]
@@ -185,9 +190,11 @@ class SyncZerodhaPortfolioSnapshotRepository:
         snapshot.holdings_market_value = snapshot_data["holdings_market_value"]
         snapshot.holdings_pnl = snapshot_data["holdings_pnl"]
         snapshot.holdings_day_change_value = snapshot_data["holdings_day_change_value"]
-        snapshot.available_margin = snapshot_data.get("available_margin", 0.0)
+        snapshot.available_margin = snapshot_data["available_margin"]
         snapshot.positions_pnl = snapshot_data["positions_pnl"]
         snapshot.positions_m2m = snapshot_data["positions_m2m"]
+        snapshot.holdings_invested_value = invested_value
+        snapshot.dashboard_top_holdings = top_holdings
         snapshot.holdings = snapshot_data["holdings"]
         snapshot.net_positions = snapshot_data["net_positions"]
         snapshot.day_positions = snapshot_data["day_positions"]

@@ -1,0 +1,6 @@
+{
+  "timestamp": "2026-11-01T06:20:11.139Z",
+  "width": 1280,
+  "deviceScaleFactor": 1,
+  "text": "Portfolio Snapshots\n\nDaywise holdings and positions saved from your Zerodha account.\n\nSource: login · Holdings: 0\n\nViewing snapshot\n\n20 Oct 2026\n\nSnapshot time\n\n8:19 pm\n\nSYNC PORTFOLIO\nHOLDINGS VALUE\n\n₹2,000.00\n\nHOLDINGS P&L\n\n₹100.00\n\nAVAILABLE MARGIN\n\n₹500.00\n\nDAY CHANGE\n\n₹10.00\n\nNET POSITION M2M\n\n₹0.00\n\nDAILY HISTORY\n\nHoldings value trend across saved portfolio snapshots.\n\n₹2,000.00\n\n20 Oct 2026 · Saved 8:19 pm\n\n₹2,000.00\n₹2,000.50\n₹2,000.00\n20 Oct\nSNAPSHOT DETAIL\n\n20 Oct 2026\n\nCaptured 20 Oct 2026, 8:19 pm\n\nSource: Login\n\nHolding\n\t\nQty\n\t\nAvg\n\t\nLTP\n\t\nValue\n\t\nP&L\n\t\nDay\n\nNo holdings were returned for this day.\n\nNET POSITIONS\nSymbol\n\t\nProduct\n\t\nQty\n\t\nAvg\n\t\nLTP\n\t\nP&L\n\t\nM2M\n\nNo net positions for this snapshot.\n\nDAY POSITIONS\nSymbol\n\t\nBuy Qty\n\t\nSell Qty\n\t\nRealised\n\t\nUnrealised\n\t\nP&L\n\nNo day positions for this snapshot."
+}

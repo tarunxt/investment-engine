@@ -1,0 +1,236 @@
+"use client";
+
+import { Fragment, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { ArrowDown, ArrowUp, ArrowUpDown, Check, GripVertical, X } from "lucide-react";
+
+import { createBullpenQuestionRow, type BullpenQuestionLlmBreakdownItem, type BullpenQuestionRow } from "@/lib/bullpen-ai";
+import { buildBullpenMarketUrl } from "@/lib/bullpenMarketLinks";
+import { formatApiTimestamp } from "@/lib/datetime";
+import type { BullpenAutoLiveEventTrend, BullpenAutoLiveLlmOutput } from "@/types/api";
+import { arrangeClusterEvents, type ClusterMode } from "@/lib/bullpen-event-clusters";
+import { ClusterIdInput } from "./BullpenEventClusters";
+import { SportsRankingMetric } from "./SportsRankingMetric";
+import { BullpenReturnsPerDayHeaderInfo } from "./BullpenReturnsPerDayInfo";
+
+export type BullpenEventTrendDataColumnKey =
+  | "event"
+  | "deadline"
+  | "claimDate"
+  | "score"
+  | "tags"
+  | "ranking"
+  | "rating"
+  | "points"
+  | "bought"
+  | "currentOdds"
+  | "llmOdds"
+  | "returns"
+  | "scans"
+  | "position"
+  | "amount"
+  | "volume"
+  | "liquidity";
+export type BullpenEventTrendColumnKey = "active" | "clusterId" | BullpenEventTrendDataColumnKey;
+type SortDirection = "asc" | "desc";
+type Preferences = { order: BullpenEventTrendDataColumnKey[]; widths: Record<BullpenEventTrendDataColumnKey, number>; sort: { key: BullpenEventTrendDataColumnKey; direction: SortDirection } };
+
+export type BullpenEventTableSnapshot = BullpenAutoLiveEventTrend & {
+  claim_date?: string | null;
+  position_side?: string | null;
+  position_shares?: number | null;
+  position_exposure_usd?: number | null;
+  position_average_price_cents?: number | null;
+  amount_to_be_invested?: number | null;
+  volume_usd?: number | null;
+  liquidity_usd?: number | null;
+};
+
+type BullpenEventTableVariant = "trends" | "active-positions" | "fresh-opportunities";
+
+const STORAGE_KEY = "bullpen-event-trends-table-v1";
+const HELD_SIDE_ODDS_ALERT_THRESHOLD = 80;
+const RETURNS_PER_DAY_DIVIDER_THRESHOLD = 0.1;
+const isAboveReturnsDivider = (event: BullpenEventTableSnapshot) =>
+  typeof event.returns_per_day === "number" &&
+  Number.isFinite(event.returns_per_day) &&
+  event.returns_per_day > RETURNS_PER_DAY_DIVIDER_THRESHOLD;
+const columns: Array<{ key: BullpenEventTrendDataColumnKey; label: string; width: number }> = [
+  { key: "event", label: "Event", width: 330 }, { key: "deadline", label: "Deadline", width: 105 },
+  { key: "claimDate", label: "Claim date", width: 120 },
+  { key: "score", label: "Score", width: 90 },
+  { key: "tags", label: "tag(s)", width: 100 },
+  { key: "ranking", label: "Ranking", width: 230 },
+  { key: "rating", label: "Rating", width: 230 },
+  { key: "points", label: "Points", width: 230 },
+  { key: "bought", label: "Bought", width: 90 },
+  { key: "currentOdds", label: "Current Odds", width: 210 },
+  { key: "llmOdds", label: "LLM Odds", width: 125 }, { key: "returns", label: "Returns/day", width: 110 },
+  { key: "scans", label: "20 scans · newest to oldest", width: 420 },
+  { key: "position", label: "Position", width: 165 }, { key: "amount", label: "Trade amount", width: 120 },
+  { key: "volume", label: "Volume", width: 120 }, { key: "liquidity", label: "Liquidity", width: 120 },
+];
+export const BULLPEN_EVENT_TREND_COLUMN_OPTIONS: ReadonlyArray<{ key: BullpenEventTrendColumnKey; label: string }> = [
+  { key: "active", label: "Active (icon)" },
+  { key: "clusterId", label: "Cluster ID" },
+  ...columns
+    .filter(({ key }) => ["event", "deadline", "claimDate", "score", "tags", "ranking", "rating", "points", "bought", "currentOdds", "llmOdds", "returns", "scans"].includes(key))
+    .map(({ key, label }) => ({ key, label })),
+];
+export const DEFAULT_BULLPEN_EVENT_TREND_COLUMN_KEYS = BULLPEN_EVENT_TREND_COLUMN_OPTIONS.map(({ key }) => key);
+const columnKeysForVariant = (variant: BullpenEventTableVariant): BullpenEventTrendDataColumnKey[] => variant === "active-positions"
+  ? ["event", "deadline", "bought", "currentOdds", "llmOdds", "returns", "position"]
+  : variant === "fresh-opportunities"
+    ? ["event", "deadline", "currentOdds", "llmOdds", "returns", "amount", "volume", "liquidity"]
+    : ["event", "deadline", "claimDate", "score", "tags", "ranking", "rating", "points", "bought", "currentOdds", "llmOdds", "returns", "scans"];
+const defaultsForVariant = (variant: BullpenEventTableVariant): Preferences => ({
+  order: columnKeysForVariant(variant),
+  widths: Object.fromEntries(columns.map(({ key, width }) => [key, width])) as Record<BullpenEventTrendDataColumnKey, number>,
+  sort: { key: variant === "trends" ? "score" : "deadline", direction: variant === "trends" ? "desc" : "asc" },
+});
+const odds = (value?: number | null) => value == null ? "—" : `${value.toLocaleString("en-IN", { maximumFractionDigits: 2 })}%`;
+const cents = (value?: number | null) => value == null ? "—" : `${value.toLocaleString("en-IN", { maximumFractionDigits: 2 })}c`;
+const SPORTS_DELTA_SORT_KEYS = new Set<BullpenEventTrendDataColumnKey>(["ranking", "rating", "points"]);
+const isSportsDeltaSortKey = (key: BullpenEventTrendDataColumnKey) => SPORTS_DELTA_SORT_KEYS.has(key);
+const absoluteSportsMetricDelta = (
+  event: BullpenEventTableSnapshot,
+  key: "ranking" | "rating" | "points",
+) => {
+  const delta = event.sports_ranking?.[key]?.delta;
+  return typeof delta === "number" && Number.isFinite(delta) ? Math.abs(delta) : null;
+};
+const formatTime = (value?: string | null) => formatApiTimestamp(value, { emptyValue: "—", timeZone: "Asia/Kolkata", timeZoneName: "short", second: "2-digit" });
+const formatDeadline = (value?: string | null) => value ? formatApiTimestamp(value, { emptyValue: "—", timeZone: "Asia/Kolkata", timeZoneName: "short", year: undefined }) : "—";
+const scanColor = (score: number | null) => { if (score === null) return "rgb(203 213 225)"; const n = Math.max(0, Math.min(100, score)); const [a,b,p] = n <= 65 ? [[244,166,160],[255,255,255],(n-50)/15] : [[255,255,255],[82,183,126],(n-65)/35]; const progress = Math.max(0, Math.min(1,p)); return `rgb(${a.map((v,i) => Math.round(v + (b[i]-v)*progress)).join(" ")})`; };
+
+function PolymarketIcon({ className = "" }: { className?: string }) {
+  return <svg aria-hidden="true" className={className} viewBox="0 0 64 64" fill="none"><path d="M14 14L50 6V58L14 50V14Z" stroke="currentColor" strokeWidth="5" strokeLinejoin="round"/><path d="M16 16L50 32L16 48" stroke="currentColor" strokeWidth="5" strokeLinejoin="round"/></svg>;
+}
+
+function llmItem(output: BullpenAutoLiveLlmOutput): BullpenQuestionLlmBreakdownItem {
+  return { provider: output.provider, model: output.model, status: output.status, providerError: output.error, jobId: null, runId: null, timestamp: output.completed_at ?? null, llmYesOdds: output.llm_yes_odds ?? null, llmNoOdds: output.llm_no_odds ?? null, yesDefinition: null, deadlineEt: null, hoursRemaining: null, evidenceStatus: output.evidence_status ?? null, eventState: output.event_state ?? null, confidence: output.confidence ?? null, keyEvidence: output.key_evidence ?? [], redFlags: output.red_flags ?? [], preflightCommentary: output.preflight_commentary ?? null, internetSearchCommentary: output.internet_search_commentary ?? null, finalConclusion: output.final_conclusion ?? null, rationale: output.rationale ?? null, direction: output.direction === "YES_CAMP" || output.direction === "NO_CAMP" || output.direction === "UNCERTAIN" ? output.direction : null, rationaleOddsMismatch: output.rationale_odds_mismatch ?? false, rationaleOddsMismatchReason: output.rationale_odds_mismatch_reason ?? null, effectiveWeight: output.effective_weight ?? null, webSearchUsed: null, webSearchQueries: [], webSources: [], internetVerified: null, evidenceBlockUsed: false, staleFactDetected: false, invalidReason: output.invalid_reason ?? null, invalidStaleFact: false, staleFactReason: null };
+}
+
+function currentDaysUntilClose(closeTime: string | null | undefined) {
+  if (!closeTime) return null;
+  const closeDate = new Date(closeTime);
+  if (Number.isNaN(closeDate.getTime())) return null;
+  return Math.round(((closeDate.getTime() - Date.now()) / 86_400_000) * 10) / 10;
+}
+
+function questionFor(event: BullpenAutoLiveEventTrend, scanIndex = 0): BullpenQuestionRow {
+  const outputs = event.scan_llm_outputs?.[scanIndex] ?? [];
+  return createBullpenQuestionRow({ id: event.market_id, question: event.market_title, marketId: event.market_id, questionId: event.market_id, closeTime: event.close_time ?? null, category: "", yesOdds: event.current_yes_odds ?? null, noOdds: event.current_no_odds ?? null, volume: null, liquidity: null, sourceUrl: event.market_url ?? "", slug: null, marketUrl: event.market_url ?? null, outcomeLabels: ["Yes", "No"], outcomeCount: 2, isBinaryYesNo: true, daysUntilClose: currentDaysUntilClose(event.close_time), rules: null, marketContext: null, resolutionSource: null, llmYesOdds: scanIndex === 0 ? event.llm_yes_odds ?? null : null, llmNoOdds: scanIndex === 0 ? event.llm_no_odds ?? null : null, returnsPerDay: event.returns_per_day ?? null, llmCompletedAt: event.scan_timestamps[scanIndex] ?? null, llmBreakdown: outputs.map(llmItem) });
+}
+
+export const hasStrongestLatestLlmOdds = (event: BullpenAutoLiveEventTrend) => (event.scan_scores[0] ?? -1) >= 80;
+export const hasHeldSideLlmOddsBelowThreshold = (event: BullpenAutoLiveEventTrend) => {
+  if (!event.is_active_position) return false;
+  const activePositionSide = event.active_position_side?.trim().toUpperCase();
+  const heldSideLlmOdds = activePositionSide === "YES" ? event.llm_yes_odds : activePositionSide === "NO" ? event.llm_no_odds : null;
+  return heldSideLlmOdds != null && heldSideLlmOdds < HELD_SIDE_ODDS_ALERT_THRESHOLD;
+};
+export const hasHeldSideCurrentOddsBelowThreshold = (event: BullpenAutoLiveEventTrend) => {
+  if (!event.is_active_position) return false;
+  const activePositionSide = event.active_position_side?.trim().toUpperCase();
+  const heldSideCurrentOdds = activePositionSide === "YES" ? event.current_yes_odds : activePositionSide === "NO" ? event.current_no_odds : null;
+  return heldSideCurrentOdds != null && heldSideCurrentOdds <= HELD_SIDE_ODDS_ALERT_THRESHOLD;
+};
+export const hasHeldSideOddsBelowThreshold = (event: BullpenAutoLiveEventTrend) => hasHeldSideLlmOddsBelowThreshold(event) || hasHeldSideCurrentOddsBelowThreshold(event);
+export const hasUnavailableReturnsForCurrentPosition = (event: BullpenAutoLiveEventTrend) => event.returns_per_day == null && Boolean(event.is_active_position || event.is_claimable_position);
+export const isExpiredNotYetClaimablePosition = (event: BullpenAutoLiveEventTrend) => {
+  if (!event.is_active_position || event.is_claimable_position || !event.close_time) return false;
+  const closeTime = new Date(event.close_time).getTime();
+  return Number.isFinite(closeTime) && closeTime < Date.now();
+};
+
+export function BullpenEventTrendsTable({ events, variant = "trends", scanCount = 20, showStrongestOnly = false, visibleColumnKeys, clusters, clusterMode = 0, onClusterEdit, onScore, onLlm, onReturns, onClaimReturns, onReturnsFormula }: { events: BullpenEventTableSnapshot[]; variant?: BullpenEventTableVariant; scanCount?: number; showStrongestOnly?: boolean; visibleColumnKeys?: ReadonlySet<BullpenEventTrendColumnKey>; clusters?: ReadonlyMap<string, string>; clusterMode?: ClusterMode; onClusterEdit?: (marketId: string, eventName: string, value: string) => void; onScore?: (event: BullpenAutoLiveEventTrend) => void; onLlm?: (question: BullpenQuestionRow) => void; onReturns?: (question: BullpenQuestionRow) => void; onClaimReturns?: (event: BullpenEventTableSnapshot) => void; onReturnsFormula: () => void }) {
+  const defaults = useMemo(() => defaultsForVariant(variant), [variant]);
+  const visibleColumns = useMemo(() => columns.filter(({ key }) => defaults.order.includes(key)), [defaults]);
+  const storageKey = `${STORAGE_KEY}:${variant}`;
+  const [preferences, setPreferences] = useState(defaults);
+  const preferencesLoaded = useRef(false);
+  const [dragged, setDragged] = useState<BullpenEventTrendDataColumnKey | null>(null);
+  const [hovered, setHovered] = useState<{ event: BullpenAutoLiveEventTrend; index: number } | null>(null);
+  useEffect(() => { const timer = window.setTimeout(() => { try { const saved = JSON.parse(localStorage.getItem(storageKey) || "null") as Partial<Preferences> | null; if (saved?.order?.length === visibleColumns.length && saved.order.every(key => defaults.order.includes(key))) setPreferences({ order: saved.order, widths: { ...defaults.widths, ...saved.widths }, sort: saved.sort && defaults.order.includes(saved.sort.key) ? saved.sort : defaults.sort }); else setPreferences(defaults); } catch { setPreferences(defaults); } preferencesLoaded.current = true; }); return () => window.clearTimeout(timer); }, [defaults, storageKey, visibleColumns.length]);
+  useEffect(() => { if (preferencesLoaded.current) localStorage.setItem(storageKey, JSON.stringify(preferences)); }, [preferences, storageKey]);
+  const sorted = useMemo(() => events.filter(event => !showStrongestOnly || hasStrongestLatestLlmOdds(event) || event.is_active_position || event.is_claimable_position).sort((a,b) => { const key = preferences.sort.key; const direction = preferences.sort.direction === "asc" ? 1 : -1; if (isSportsDeltaSortKey(key)) { const metricKey = key as "ranking" | "rating" | "points"; const left = absoluteSportsMetricDelta(a, metricKey); const right = absoluteSportsMetricDelta(b, metricKey); if (left === null || right === null) { if (left === right) return a.market_title.localeCompare(b.market_title); return left === null ? 1 : -1; } return (left < right ? -1 : left > right ? 1 : a.market_title.localeCompare(b.market_title)) * direction; } const aExpiredNotYetClaimable = isExpiredNotYetClaimablePosition(a); const bExpiredNotYetClaimable = isExpiredNotYetClaimablePosition(b); if (aExpiredNotYetClaimable !== bExpiredNotYetClaimable) return aExpiredNotYetClaimable ? -1 : 1; const aClaimable = Boolean(a.is_claimable_position); const bClaimable = Boolean(b.is_claimable_position); if (aClaimable !== bClaimable) return aClaimable ? -1 : 1; const aReturnsUnavailable = hasUnavailableReturnsForCurrentPosition(a); const bReturnsUnavailable = hasUnavailableReturnsForCurrentPosition(b); if (aReturnsUnavailable !== bReturnsUnavailable) return aReturnsUnavailable ? -1 : 1; const value = (event: BullpenEventTableSnapshot): string | number => key === "event" ? event.market_title.toLocaleLowerCase() : key === "deadline" ? (event.close_time ? new Date(event.close_time).getTime() : Number.MAX_SAFE_INTEGER) : key === "claimDate" ? (event.claim_date ? Date.parse(event.claim_date) : Number.MAX_SAFE_INTEGER) : key === "score" ? event.score : key === "tags" ? event.sports_ranking?.tags.join(" ") ?? "" : key === "bought" ? event.position_average_price_cents ?? -1 : key === "currentOdds" ? event.current_yes_odds ?? -1 : key === "llmOdds" ? event.llm_yes_odds ?? -1 : key === "returns" ? event.returns_per_day ?? -1 : key === "position" ? event.position_exposure_usd ?? -1 : key === "amount" ? event.amount_to_be_invested ?? -1 : key === "volume" ? event.volume_usd ?? -1 : key === "liquidity" ? event.liquidity_usd ?? -1 : event.scan_scores.slice(0, scanCount).filter(v => v != null).length; const left=value(a), right=value(b); return (left < right ? -1 : left > right ? 1 : a.market_title.localeCompare(b.market_title)) * direction; }), [events, preferences.sort, scanCount, showStrongestOnly]);
+  const showClusters = variant === "trends" && Boolean(clusters && onClusterEdit);
+  const selectedColumnKeys = visibleColumnKeys ?? new Set<BullpenEventTrendColumnKey>(DEFAULT_BULLPEN_EVENT_TREND_COLUMN_KEYS);
+  const showActiveColumn = showClusters && selectedColumnKeys.has("active");
+  const showClusterColumn = showClusters && selectedColumnKeys.has("clusterId");
+  const renderedOrder = preferences.order.filter(key => selectedColumnKeys.has(key));
+  const displayed = useMemo(() => {
+    const arranged = arrangeClusterEvents(sorted, clusters ?? new Map(), showClusters ? clusterMode : 0);
+    if (variant !== "trends" || isSportsDeltaSortKey(preferences.sort.key)) return arranged;
+    // Preserve the selected order within each side of the display-only cutoff.
+    return [...arranged.filter(isAboveReturnsDivider), ...arranged.filter(event => !isAboveReturnsDivider(event))];
+  }, [sorted, clusters, clusterMode, showClusters, variant, preferences.sort.key]);
+  const returnsDividerIndex = variant === "trends"
+    ? displayed.findIndex(event => !isAboveReturnsDivider(event))
+    : -1;
+  const template = (showActiveColumn ? "28px " : "") + (showClusterColumn ? "92px " : "") + renderedOrder.map(key => `${preferences.widths[key]}px`).join(" ");
+  const sort = (key: BullpenEventTrendDataColumnKey) => setPreferences(p => ({ ...p, sort: { key, direction: p.sort.key === key && p.sort.direction === "asc" ? "desc" : "asc" } }));
+  const resize = (key: BullpenEventTrendDataColumnKey, event: ReactPointerEvent) => { event.preventDefault(); const startX=event.clientX, start=preferences.widths[key]; const move=(e: PointerEvent) => setPreferences(p => ({ ...p, widths: { ...p.widths, [key]: Math.max(72, start + e.clientX-startX) } })); const up=()=>{ window.removeEventListener("pointermove",move); window.removeEventListener("pointerup",up); }; window.addEventListener("pointermove",move); window.addEventListener("pointerup",up); };
+  const cell = (key: BullpenEventTrendDataColumnKey, event: BullpenEventTableSnapshot) => {
+    const fallbackSportsTag = event.sports_event_slug?.match(/^([a-z0-9]+)-/i)?.[1]?.toLowerCase();
+    const sportsTags = event.sports_ranking?.tags.length ? event.sports_ranking.tags : fallbackSportsTag ? [fallbackSportsTag] : [];
+    const activePositionSide = event.is_active_position ? event.active_position_side?.trim().toUpperCase() : null;
+    const heldSideBelowLlmThreshold = hasHeldSideLlmOddsBelowThreshold(event);
+    const heldSideCurrentOdds = activePositionSide === "YES" ? event.current_yes_odds : activePositionSide === "NO" ? event.current_no_odds : null;
+    const activeCurrentSideClass = heldSideCurrentOdds != null && heldSideCurrentOdds > HELD_SIDE_ODDS_ALERT_THRESHOLD
+      ? "rounded bg-green-600 px-1 py-0.5 font-black text-white ring-1 ring-green-200/80 shadow-sm dark:bg-green-400 dark:text-slate-950"
+      : "rounded bg-red-600 px-1 py-0.5 font-black text-white ring-1 ring-red-300 shadow-sm dark:bg-red-500 dark:text-white";
+    const activeSideClass = heldSideBelowLlmThreshold
+      ? "animate-pulse rounded bg-red-600 px-1 font-black text-white ring-2 ring-red-300 shadow-md shadow-red-950/60 dark:bg-red-500 dark:text-white dark:ring-red-200"
+      : "rounded bg-green-600 px-1 text-white ring-1 ring-green-200/80 shadow-sm shadow-green-950/30 dark:bg-green-400 dark:text-slate-950 dark:ring-green-100";
+    const activeSideTitle = activePositionSide
+      ? `Active Bullpen position: ${activePositionSide}${heldSideBelowLlmThreshold ? " - ALERT: held-side LLM odds are below 80%" : ""}`
+      : undefined;
+    if (key === "event") return <span className="flex min-w-0 items-center gap-2">{!showClusters && event.is_active_position && <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-green-600 text-white ring-2 ring-green-200/80 shadow-sm shadow-green-950/40 dark:bg-green-400 dark:text-slate-950 dark:ring-green-100" title={`Active Bullpen position: ${event.active_position_side ?? "unknown side"}`}><Check className="h-4 w-4 stroke-[4.5]" aria-label="Active Bullpen position" /></span>}<a className="truncate text-xs font-semibold hover:text-sky-700 hover:underline" title={`Open ${event.market_title} in Bullpen`} href={buildBullpenMarketUrl(event.market_id)} target="_blank" rel="noreferrer">{event.market_title}</a>{event.market_url && <a className="shrink-0 text-blue-600 hover:text-blue-800" title={`Open ${event.market_title} on Polymarket`} aria-label={`Open ${event.market_title} on Polymarket`} href={event.market_url} target="_blank" rel="noreferrer"><PolymarketIcon className="h-4 w-4" /></a>}</span>;
+    if (key === "deadline") return event.is_claimable_position ? <span className="inline-flex min-w-20 items-center justify-center rounded-lg bg-green-700 px-3 py-1.5 text-sm font-black uppercase tracking-wide text-white shadow-md ring-2 ring-green-300 dark:bg-green-500 dark:text-slate-950 dark:ring-green-200" title="This resolved winning position is available to claim now">Claim</span> : <span className="text-xs font-semibold" title={formatTime(event.close_time)}>{formatDeadline(event.close_time)}</span>;
+    if (key === "claimDate") return <span className="text-xs font-semibold" title="Best-guess claim availability; not a guaranteed settlement time">{formatDeadline(event.claim_date)}</span>;
+    if (key === "score") return onScore ? <button className="text-right text-xs font-bold underline decoration-dotted" onClick={() => onScore(event)}>{event.score.toFixed(2)}</button> : <span className="text-right text-xs font-bold">{event.score.toFixed(2)}</span>;
+    if (key === "tags") return sportsTags.length ? <span className="flex flex-wrap gap-1">{sportsTags.map(tag => <a key={tag} href={`/console/sports-rankings?code=${encodeURIComponent(tag)}`} target="_blank" rel="noreferrer" className="rounded-full bg-sky-100 px-2 py-1 text-[11px] font-bold text-sky-800 underline decoration-dotted" title={`Open ${tag} in Sports Rankings`}>{tag}</a>)}</span> : <span className="text-xs text-slate-400">—</span>;
+    if (key === "ranking" || key === "rating" || key === "points") {
+      return <SportsRankingMetric comparison={event.sports_ranking} metricKey={key} title={event.sports_event_title} />;
+    }
+    if (key === "bought") return <span className="text-xs font-semibold">{activePositionSide && event.position_average_price_cents != null ? <>{activePositionSide}<br/>{cents(event.position_average_price_cents)}</> : "—"}</span>;
+    if (key === "currentOdds") {
+      const quote = (side: "YES" | "NO") => {
+        const bid = side === "YES" ? event.current_yes_bid_cents : event.current_no_bid_cents;
+        const ask = side === "YES" ? event.current_yes_ask_cents : event.current_no_ask_cents;
+        const spread = side === "YES" ? event.current_yes_spread_cents : event.current_no_spread_cents;
+        const fallback = side === "YES" ? event.current_yes_odds : event.current_no_odds;
+        return bid != null || ask != null
+          ? `${side} ${cents(bid)} / ${cents(ask)}${spread == null ? "" : ` · Spread ${cents(spread)}`}`
+          : `${side} ${odds(fallback)}`;
+      };
+      return <span className="text-xs font-semibold"><span className={activePositionSide === "YES" ? activeCurrentSideClass : undefined} title={activePositionSide === "YES" ? "Invested side; green only when its executable bid is above 80c" : undefined}>{quote("YES")}</span><br/><span className={activePositionSide === "NO" ? activeCurrentSideClass : undefined} title={activePositionSide === "NO" ? "Invested side; green only when its executable bid is above 80c" : undefined}>{quote("NO")}</span></span>;
+    }
+    if (key === "llmOdds") {
+      if (event.llm_yes_odds == null && event.llm_no_odds == null) {
+        return event.scan_llm_outputs?.[0]?.length && onLlm ? <button className="text-left text-xs font-semibold text-slate-500 underline decoration-dotted" title="No valid LLM odds were produced. Open the saved model output and failure reason." onClick={() => onLlm(questionFor(event))}>Not covered<br/>in latest scan</button> : <span className="text-xs font-semibold text-slate-500" title="This event was not covered by an LLM in the latest scan.">Not covered<br/>in latest scan</span>;
+      }
+      const content = <><span className={activePositionSide === "YES" ? activeSideClass : undefined} title={activePositionSide === "YES" ? activeSideTitle : undefined}>Yes {odds(event.llm_yes_odds)}</span><br/><span className={activePositionSide === "NO" ? activeSideClass : undefined} title={activePositionSide === "NO" ? activeSideTitle : undefined}>No {odds(event.llm_no_odds)}</span></>;
+      return onLlm ? <button className="text-left text-xs font-semibold text-violet-700 underline" onClick={() => onLlm(questionFor(event))}>{content}</button> : <span className="text-xs font-semibold text-violet-700">{content}</span>;
+    }
+    if (key === "returns" && onClaimReturns) return <button className="text-left text-xs font-bold underline decoration-dotted" onClick={() => onClaimReturns(event)}>{odds(event.returns_per_day)}</button>;
+    if (key === "returns") return onReturns ? <button className="text-left text-xs font-bold underline decoration-dotted" disabled={event.returns_per_day == null} onClick={() => onReturns(questionFor(event))}>{odds(event.returns_per_day)}</button> : <span className="text-left text-xs font-bold">{odds(event.returns_per_day)}</span>;
+    if (key === "position") return <span className="text-xs font-semibold">{event.position_side ?? "—"}<br/>Shares {event.position_shares?.toLocaleString("en-IN", { maximumFractionDigits: 6 }) ?? "—"}<br/>Exposure {event.position_exposure_usd == null ? "—" : `$${event.position_exposure_usd.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`}<br/>Avg {event.position_average_price_cents == null ? "—" : `${event.position_average_price_cents.toLocaleString("en-IN", { maximumFractionDigits: 2 })}c`}</span>;
+    if (key === "amount") return <span className="text-xs font-semibold">{event.amount_to_be_invested == null ? "—" : `$${event.amount_to_be_invested.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`}</span>;
+    if (key === "volume") return <span className="text-xs">{event.volume_usd == null ? "—" : `$${event.volume_usd.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`}</span>;
+    if (key === "liquidity") return <span className="text-xs">{event.liquidity_usd == null ? "—" : `$${event.liquidity_usd.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`}</span>;
+    return <span className="flex gap-1.5">{event.scan_scores.slice(0, scanCount).map((score,i) => <button key={i} type="button" disabled={score == null || !onLlm} onMouseEnter={() => score != null && setHovered({event,index:i})} onMouseLeave={() => setHovered(null)} onFocus={() => score != null && setHovered({event,index:i})} onBlur={() => setHovered(null)} onClick={() => score != null && onLlm?.(questionFor(event,i))} aria-label={score == null ? `Scan ${i+1}: not covered` : `Open scan ${i+1} LLM details`} className={`flex h-5 w-5 items-center justify-center rounded-full border shadow-sm ${score != null && score >= 80 ? "border-[1.5px] border-black ring-1 ring-black/30 dark:border-white dark:ring-white/60" : "border-slate-700/60 ring-1 ring-slate-900/10 dark:border-slate-100/80 dark:ring-white/30"}`} style={{backgroundColor:scanColor(score)}}>{score != null && event.scan_sides?.[i] === "YES" ? <Check className="h-3.5 w-3.5 rounded-full bg-white/85 p-px stroke-[4.5] text-blue-800 shadow-sm"/> : score != null && event.scan_sides?.[i] === "NO" ? <X className="h-3.5 w-3.5 rounded-full bg-white/85 p-px stroke-[4.5] text-red-800 shadow-sm"/> : null}</button>)}</span>;
+  };
+  const selectedColumnWidth = renderedOrder.reduce((sum,key)=>sum+preferences.widths[key],0) + (showActiveColumn ? 40 : 0) + (showClusterColumn ? 104 : 0);
+  const sportsEvents = events.filter(event => event.sports_event_slug);
+  const rankedEvents = sportsEvents.filter(event => ["VALID", "NOT_COMPARABLE"].includes(event.sports_ranking?.status_code ?? "") && event.sports_ranking?.ranking?.team_a != null && event.sports_ranking?.ranking?.team_b != null).length;
+  const comparableEvents = sportsEvents.filter(event => event.sports_ranking?.comparable).length;
+  return <div className="relative overflow-x-auto px-4 py-2">
+    {sportsEvents.length > 0 && renderedOrder.includes("ranking") && <p className="mb-3 text-xs text-slate-600" aria-label="Sports ranking coverage">Current rankings: {rankedEvents}/{sportsEvents.length} events have both ranks · {comparableEvents} comparable · {sportsEvents.length - rankedEvents} need attention. Click a ranking for source, freshness and explanation.</p>}
+    <div style={{minWidth: selectedColumnWidth}}>
+    <div className="grid gap-3 border-b px-1 pb-2" style={{gridTemplateColumns:template}}>{showActiveColumn && <span aria-label="Active position" />}{showClusterColumn && <span className="self-center text-[10px] font-bold uppercase text-slate-500">Cluster ID</span>}{renderedOrder.map(key => { const item=columns.find(c=>c.key===key)!; const itemLabel = key === "scans" ? `${scanCount} ${scanCount === 1 ? "scan" : "scans"} · newest to oldest` : item.label; const clusterSortForced = showClusters && clusterMode !== 0 && !isSportsDeltaSortKey(preferences.sort.key); const active=(clusterSortForced ? "returns" : preferences.sort.key)===key; return <div key={key} draggable onDragStart={() => setDragged(key)} onDragOver={e=>e.preventDefault()} onDrop={()=>{ if(dragged && dragged!==key) setPreferences(p=>{const order=p.order.filter(k=>k!==dragged); order.splice(order.indexOf(key),0,dragged); return {...p,order};}); setDragged(null); }} className="relative flex items-center text-[10px] font-bold uppercase text-slate-500"><GripVertical className="mr-1 h-3 w-3 cursor-grab"/><button aria-label={isSportsDeltaSortKey(key) ? `Sort ${item.label} by absolute A minus B delta` : `Sort ${itemLabel}`} className="flex items-center gap-1" onClick={()=>sort(key)}>{itemLabel}{active ? (clusterSortForced ? "desc" : preferences.sort.direction) === "asc" ? <ArrowUp className="h-3 w-3"/> : <ArrowDown className="h-3 w-3"/> : <ArrowUpDown className="h-3 w-3 opacity-40"/>}</button>{key === "returns" && <BullpenReturnsPerDayHeaderInfo onOpen={onReturnsFormula} className="ml-1 h-4 w-4" />}<button aria-label={`Resize ${itemLabel} column`} className="absolute -right-1 h-full w-2 cursor-col-resize border-r border-transparent hover:border-slate-400" onPointerDown={e=>resize(key,e)}/></div>})}</div>
+    {displayed.map((event,rowIndex)=>{ const expiredNotYetClaimable = isExpiredNotYetClaimablePosition(event); const claimable = Boolean(event.is_claimable_position); const returnsUnavailable = hasUnavailableReturnsForCurrentPosition(event); const heldSideLlmBelowThreshold = hasHeldSideLlmOddsBelowThreshold(event); const heldSideCurrentBelowThreshold = hasHeldSideCurrentOddsBelowThreshold(event); const activeBelowOddsThreshold = hasHeldSideOddsBelowThreshold(event); const rowAlertTitle = activeBelowOddsThreshold ? `Active held-side odds alert: ${[heldSideLlmBelowThreshold ? "LLM odds below 80%" : null, heldSideCurrentBelowThreshold ? "current Bullpen odds below 80%" : null].filter(Boolean).join(" and ")}` : undefined; return <Fragment key={event.market_id}>{rowIndex === returnsDividerIndex && <div role="separator" aria-label="Returns/day cutoff: 0.1%" data-returns-divider="0.1" className="border-t-4 border-red-500" />}<div data-market-id={event.market_id} data-cluster-id={clusters?.get(event.market_id)} data-ranking-delta={absoluteSportsMetricDelta(event, "ranking") ?? undefined} data-rating-delta={absoluteSportsMetricDelta(event, "rating") ?? undefined} data-points-delta={absoluteSportsMetricDelta(event, "points") ?? undefined} data-expired-not-yet-claimable={expiredNotYetClaimable || undefined} data-claimable={claimable || undefined} data-returns-unavailable={returnsUnavailable || undefined} data-active-below-llm-threshold={heldSideLlmBelowThreshold || undefined} data-active-below-current-odds-threshold={heldSideCurrentBelowThreshold || undefined} data-active-below-odds-threshold={activeBelowOddsThreshold || undefined} title={rowAlertTitle} className={`grid items-center gap-3 border-b px-1 py-1.5 ${activeBelowOddsThreshold ? "bg-red-200 text-red-950 ring-2 ring-inset ring-red-600 shadow-sm shadow-red-950/30 dark:bg-red-800/70 dark:text-red-50 dark:ring-red-400" : expiredNotYetClaimable ? "bg-emerald-100 text-emerald-950 ring-1 ring-inset ring-emerald-400 dark:bg-emerald-400/20 dark:text-emerald-50 dark:ring-emerald-500" : claimable ? "bg-emerald-300 text-emerald-950 ring-2 ring-inset ring-emerald-600 dark:bg-emerald-700 dark:text-white dark:ring-emerald-400" : returnsUnavailable ? "bg-emerald-100 text-emerald-950 ring-1 ring-inset ring-emerald-400 dark:bg-emerald-400/20 dark:text-emerald-50 dark:ring-emerald-500" : "border-slate-200/70"}`} style={{gridTemplateColumns:template}}>{showActiveColumn && <span>{event.is_active_position && <span className="flex h-6 w-6 items-center justify-center rounded-full bg-green-600 text-white ring-2 ring-green-200" title={`Active Bullpen position: ${event.active_position_side ?? "unknown side"}`}><Check className="h-4 w-4 stroke-[4.5]" aria-label="Active Bullpen position" /></span>}</span>}{showClusterColumn && <ClusterIdInput key={`${event.market_id}:${clusters?.get(event.market_id) ?? ""}`} value={clusters?.get(event.market_id) ?? ""} eventName={event.market_title} onSave={value => onClusterEdit?.(event.market_id, event.market_title, value)} />}{renderedOrder.map(key=><div key={key} className="min-w-0">{cell(key,event)}</div>)}</div></Fragment>;})}
+    {!displayed.length && <p className="py-6 text-sm text-slate-500">{clusterMode !== 0 && sorted.length ? "No cluster-assigned events with valid Current Odds and Returns/day match this derived view. Click Cluster Top Events to return to all Stage 1 events." : "No events match the current filters."}</p>}
+  </div>{hovered && <div role="tooltip" className="pointer-events-none fixed bottom-5 right-5 z-[190] max-h-[55vh] w-[32rem] overflow-auto rounded-2xl border border-slate-300 bg-slate-950 p-4 text-white shadow-2xl"><p className="text-xs font-semibold">{formatTime(hovered.event.scan_timestamps[hovered.index])} · Strongest LLM side: {hovered.event.scan_sides[hovered.index] ?? "—"} · {odds(hovered.event.scan_scores[hovered.index])}</p><div className="mt-3 space-y-3">{(hovered.event.scan_llm_outputs?.[hovered.index] ?? []).map((output,index)=><div key={`${output.provider}-${output.model}-${index}`} className="border-t border-slate-700 pt-2"><p className="text-xs font-bold">{output.provider} · {output.model}</p><p className="text-xs text-emerald-300">Yes {odds(output.llm_yes_odds)} · No {odds(output.llm_no_odds)}{output.effective_weight != null ? ` · Weight ${output.effective_weight}` : ""}</p><p className="mt-1 whitespace-pre-wrap text-xs leading-5 text-slate-200">{output.final_conclusion || output.rationale || output.internet_search_commentary || output.preflight_commentary || output.invalid_reason || output.error || "No commentary saved."}</p></div>)}{!(hovered.event.scan_llm_outputs?.[hovered.index]?.length) && <p className="text-xs text-slate-300">This legacy scan retained its consensus score but not the individual model payload.</p>}</div><p className="mt-3 text-[10px] text-slate-400">Click the event circle to keep these details open.</p></div>}</div>;
+}

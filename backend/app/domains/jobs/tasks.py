@@ -1,3 +1,5 @@
+
+from app.core.recovery import recovery_mode, require_equity_analysis
 import json
 from datetime import date, datetime
 import re
@@ -11,8 +13,31 @@ from app.infrastructure.database.sync_session import SyncSessionLocal
 import app.infrastructure.database.all_models  # noqa: F401 — registers all ORM models with the mapper
 from app.core.config import settings
 from app.core.logging import WorkerLogHelper, get_logger
+from app.domains.ai_providers.availability import is_provider_capacity_error
+from app.domains.ai_providers.web_metadata import merge_web_metadata
+from app.domains.api_usage.recorder import (
+    reset_provider_usage_context,
+    provider_usage_phase,
+    set_provider_usage_context,
+)
+from app.domains.api_usage.metering import content_hash
+from app.domains.jobs.usage_identity import resolve_job_usage_identity
+from app.domains.jobs.output_runtime import (
+    OutputPreflightError, active_contract_hash, configure_output_context, contract_issue,
+    current_output_context, merge_swing_fragments, normalize_runtime_output,
+    output_validation_metadata, rebalance_serialization_instructions, reset_output_context,
+)
 from app.domains.jobs.repository import SyncJobRepository
 from app.domains.jobs.models import Job
+from app.domains.jobs.failure_diagnostics import (
+    build_failure_diagnostics,
+    merge_failure_diagnostics,
+)
+from app.domains.polymarket.bullpen_llm_execution import execute_bullpen_llm_target
+from app.domains.polymarket.event_preflight import prepare_polymarket_event_context
+from app.domains.runs.schemas import PolymarketEventRunContext
+from app.infrastructure.messaging.task_registry import register_job_task_sync
+from app.domains.jobs.stage_status import aggregate_stage_status
 from app.shared.types import JobStatus
 
 logger = get_logger("app.domains.jobs.tasks")
@@ -187,16 +212,24 @@ def _count_markdown_table_data_rows(content: str) -> int:
 
 
 def _requires_generic_table_output(prompt: str) -> bool:
+    if current_output_context() is not None:
+        return True
     text = (prompt or "").lower()
     return "return only one markdown table" in text or _requires_stock_recommendation_output(prompt)
 
 
 def _is_rebalance_output(prompt: str) -> bool:
+    context = current_output_context()
+    if context is not None:
+        return context.kind == "rebalance"
     text = (prompt or "").lower()
     return "[rebalance_flow:" in text or "recommended rebalance" in text
 
 
 def _requires_stock_recommendation_output(prompt: str) -> bool:
+    context = current_output_context()
+    if context is not None:
+        return context.kind == "swing"
     text = (prompt or "").lower()
     if _is_rebalance_output(prompt):
         return False
@@ -257,6 +290,13 @@ def _failed_job_has_exportable_partial_stock_rows(job: Job) -> bool:
 
 def _validate_stock_table_content(content: str) -> tuple[str, str | None, list[dict]]:
     """Validate stock recommendation output and return normalized markdown when possible."""
+    normalized = normalize_runtime_output(content, kind="swing")
+    if normalized is not None:
+        return (
+            normalized.content,
+            None if normalized.safe_to_replace else contract_issue(normalized),
+            [dict(row.values) for row in normalized.rows if row.valid],
+        )
     normalized_content = (content or "").strip()
     data_rows = _count_markdown_table_data_rows(normalized_content)
 
@@ -333,6 +373,8 @@ def _extract_rebalance_current_holdings_from_prompt(prompt: str) -> list[dict[st
     except ValueError:
         return []
     exchange_idx = headers.index("exchange") if "exchange" in headers else None
+    if exchange_idx is None and "market" in headers:
+        exchange_idx = headers.index("market")
 
     holdings: list[dict[str, str]] = []
     seen_symbols: set[str] = set()
@@ -382,6 +424,13 @@ def _rebalance_missing_current_holdings_issue(prompt: str, parsed_rows: list[dic
 
 def _validate_rebalance_table_content(content: str, prompt: str = "") -> tuple[str, str | None, list[dict]]:
     """Validate rebalance output and return canonical markdown when possible."""
+    normalized = normalize_runtime_output(content, kind="rebalance")
+    if normalized is not None:
+        return (
+            normalized.content,
+            None if normalized.safe_to_replace else contract_issue(normalized),
+            [dict(row.values) for row in normalized.rows if row.valid],
+        )
     normalized_content = (content or "").strip()
     data_rows = _count_markdown_table_data_rows(normalized_content)
     if data_rows < 1:
@@ -408,6 +457,7 @@ def _validate_rebalance_table_content(content: str, prompt: str = "") -> tuple[s
 
 
 def _build_rebalance_table_repair_prompt(prompt: str, previous_output: str, reason: str) -> str:
+    prompt += rebalance_serialization_instructions()
     return (
         f"{prompt}\n\n"
         "[REBALANCE_TABLE_REPAIR]\n"
@@ -416,8 +466,14 @@ def _build_rebalance_table_repair_prompt(prompt: str, previous_output: str, reas
         "Regenerate the FULL rebalance answer and return ONLY one markdown table with the exact rebalance columns from the original prompt.\n"
         "Requirements:\n"
         "- Include one complete decision row for EVERY current portfolio holding from the Latest Portfolio Snapshot; do not omit holdings and do not stop after a subset.\n"
-        "- Consider every stock from the supplied swing-trade tables as a possible fresh Buy New candidate, and include Buy New rows for the candidates that are stronger than existing holdings after threats/opportunity-cost review.\n"
+        "- Evaluate every stock from the supplied swing-trade tables. If its exchange/symbol identity is already in the Latest Portfolio Snapshot, include it only in that holding's single Hold, Buy/Add, Trim, or Sell All decision; never label it Buy New or add a second row for the SAME exchange/symbol. Keep different concrete venues separate. For a US snapshot labeled US, a matching symbol at a known US venue is the same existing holding, not a fresh candidate. The US snapshot supplies market only. Carry forward the exact listing exchange from the selected model outputs for the same security. Verify unresolved venues. Never copy US into Exchange Symbol or duplicate a holding under a country alias.\n"
+        "- Include EVERY selected Swing exchange/symbol, even when not selected for buying. For an unheld non-buy use Hold, all position/change/buy quantities and Total Buy Amount 0, and your original non-buy reason. Never invent a reason or omit the row.\n"
+        "- Consider Buy New only for candidates not already present in the Latest Portfolio Snapshot, after threats/opportunity-cost review.\n"
         "- Every row must include Exchange Symbol, Stock Symbol, Current Units, Action, Units Change, Final Units, price/risk fields, Upside Horizon (% return), Weeks, confidence, and all rationale columns.\n"
+        "- Put the action label only in Action; put the signed numeric unit delta only in Units Change; never swap these two columns.\n"
+        "- Current Units, Units Change, Final Units, Units to Buy, Price Per Unit, Total Buy Amount, Upside Horizon, Weeks, confidence, and rationale-score cells must be numeric-only.\n"
+        "- Entry Range must contain only the trade entry price/range (for example 145-148), not the technical setup narrative.\n"
+        "- Technical Setup must contain the setup narrative/label, not the entry price range.\n"
         "- Units Change must be numeric: negative for Sell All/Trim, positive for Buy/Add/Buy New, and 0 for Hold.\n"
         "- Final Units must equal Current Units + Units Change.\n"
         "- Do not output placeholder rows, separators only, notes, or prose before/after the table.\n"
@@ -428,6 +484,13 @@ def _build_rebalance_table_repair_prompt(prompt: str, previous_output: str, reas
 
 
 def _build_stock_table_repair_prompt(prompt: str, previous_output: str, reason: str) -> str:
+    context = current_output_context()
+    target_rows = (context.expected_rows if context else None) or _STOCK_TARGET_ROW_COUNT
+    allocation_rule = (
+        "- Keep numeric fields numeric-only and preserve the original market, currency, and allocation budget.\n"
+        if context is not None
+        else "- Keep numeric fields numeric-only and ensure the total allocation stays close to INR 50,000.\n"
+    )
     return (
         f"{prompt}\n\n"
         "[STOCK_TABLE_REPAIR]\n"
@@ -435,10 +498,10 @@ def _build_stock_table_repair_prompt(prompt: str, previous_output: str, reason: 
         f"Issue: {reason}.\n"
         "Regenerate the FULL answer and return ONLY one markdown table that follows the original title and exact column order.\n"
         "Requirements:\n"
-        "- Include exactly 5 unique stock recommendation rows.\n"
+        f"- Include exactly {target_rows} unique stock recommendation rows.\n"
         "- Every row must be complete with all columns populated.\n"
         "- Do not output placeholder rows, separators, notes, or any prose before/after the table.\n"
-        "- Keep numeric fields numeric-only and ensure the total allocation stays close to INR 50,000.\n"
+        f"{allocation_rule}"
         "- If some earlier rows were valid, you may reuse them, but the final table must be complete and self-contained.\n\n"
         "Previous invalid output:\n"
         f"{previous_output}"
@@ -449,13 +512,14 @@ def _build_stock_table_top_up_prompt(
     prompt: str,
     existing_rows: list[dict],
     missing_count: int,
+    original_output: str | None = None,
 ) -> str:
     existing_symbols = ", ".join(
         str(row.get("stock_symbol", "")).strip().upper()
         for row in existing_rows
         if str(row.get("stock_symbol", "")).strip()
     )
-    existing_table = _to_markdown_table_from_stocks(existing_rows) or ""
+    existing_table = original_output if original_output is not None else _to_markdown_table_from_stocks(existing_rows) or ""
     return (
         f"{prompt}\n\n"
         "[STOCK_TABLE_TOP_UP]\n"
@@ -615,7 +679,8 @@ def _publish_job_update(job: Job) -> None:
     r: _sync_redis.Redis | None = None
     try:
         status_val = job.status.value if hasattr(job.status, "value") else str(job.status)
-        payload = json.dumps({
+        from app.domains.jobs.public_projection import public_job_details
+        payload = json.dumps(public_job_details({
             "type": "job.updated",
             "job_id": job.id,
             "provider": job.provider,
@@ -626,12 +691,16 @@ def _publish_job_update(job: Job) -> None:
             "tokens_in": job.tokens_in,
             "tokens_out": job.tokens_out,
             "estimated_cost": job.estimated_cost,
+            "web_search_used": job.web_search_used,
+            "web_search_queries": job.web_search_queries,
+            "web_sources": job.web_sources,
+            "runtime_metadata_json": job.runtime_metadata_json,
             "export_status": job.export_status,
             "export_error": job.export_error,
             "exported_at": job.exported_at.isoformat() if job.exported_at else None,
             "exported_sheet_url": job.exported_sheet_url,
             "updated_at": job.updated_at.isoformat() if job.updated_at else None,
-        })
+        }))
         
         redis_url = settings.redis_url
         logger.info("Publishing WS update for job_id=%s to Redis at %s", job.id, redis_url)
@@ -670,16 +739,25 @@ def _classify_exc(exc: Exception, attempt: int = 0) -> tuple[bool, int]:
     Everything else retries after 30 s.
     """
 
+    if isinstance(exc, OutputPreflightError) or is_provider_capacity_error(exc):
+        return False, 0
+
     text = str(exc).lower()
     if any(
         marker in text
         for marker in (
             "returned malformed table output",
             "returned insufficient recommendations",
-            "returned empty output after generation",
+            "returned invalid output contract",
         )
     ):
         return False, 0
+
+    # An HTTP-success response with no generated content is transient. The
+    # provider already performs bounded in-call recovery; allow Celery to retry
+    # the whole idempotent job if those attempts are also empty.
+    if "returned empty output after generation" in text:
+        return (attempt < 3), 30 * (2 ** attempt)
 
     if attempt >= 3:
         return False, 0  # don't retry after max attempts
@@ -769,6 +847,41 @@ def _publish_run_update(
         _redis_publish(f"user_run_updates:{user_id}", payload)
 
 
+def _queue_run_completion_email_once(run_id: int, status: JobStatus) -> None:
+    """Queue a single completion email for this run/status using Redis SETNX."""
+    if recovery_mode():
+        return  # Do not enqueue emails or consume old outbox work.
+    if status not in {JobStatus.COMPLETED, JobStatus.PARTIAL, JobStatus.FAILED}:
+        return
+
+    dedupe_key = f"run_completion_email_sent:{run_id}:{status.value}"
+    redis_client: _sync_redis.Redis | None = None
+    try:
+        redis_client = _sync_redis.from_url(settings.redis_url, decode_responses=True)
+        if not redis_client.set(dedupe_key, "1", nx=True, ex=60 * 60 * 24 * 30):
+            return
+        from app.domains.runs.tasks import send_run_completion_email_task
+
+        send_run_completion_email_task.delay(run_id)  # type: ignore
+        logger.info("Queued run completion email for run %s", run_id)
+    except Exception:
+        logger.exception("Failed to queue run completion email for run %s", run_id)
+        if redis_client is not None:
+            try:
+                redis_client.delete(dedupe_key)
+            except Exception:
+                logger.exception(
+                    "Failed to release run completion email dedupe key for run %s",
+                    run_id,
+                )
+    finally:
+        if redis_client is not None:
+            try:
+                redis_client.close()
+            except Exception:
+                pass
+
+
 def _refresh_run_status(db, job_id: int) -> None:
     """Recalculate and persist Run.status when a child job reaches a terminal state."""
     try:
@@ -848,21 +961,7 @@ def _refresh_run_status(db, job_id: int) -> None:
                         "updated_at": updated_job.updated_at.isoformat() if updated_job.updated_at else None,
                     })
 
-            statuses = {j.status for j in stage_jobs}
-            active = {JobStatus.PENDING, JobStatus.PROCESSING, JobStatus.SCHEDULED}
-
-            if statuses & active:
-                # At least one child job is still running
-                new_status = JobStatus.PROCESSING
-            elif any(j.status == JobStatus.COMPLETED for j in stage_jobs):
-                # All terminal, at least one succeeded
-                new_status = JobStatus.COMPLETED
-            elif any(j.status == JobStatus.PARTIAL for j in stage_jobs):
-                # All terminal and at least one usable-but-incomplete model output exists.
-                new_status = JobStatus.PARTIAL
-            else:
-                # All terminal, all failed
-                new_status = JobStatus.FAILED
+            new_status = aggregate_stage_status(j.status for j in stage_jobs)
 
             if run.status != new_status:
                 run_repo.update_status(run, new_status)
@@ -877,11 +976,13 @@ def _refresh_run_status(db, job_id: int) -> None:
                     run.exported_sheet_url,
                 )
                 logger.info("Run %s status → %s", run_id, new_status.value)
+                _queue_run_completion_email_once(run_id, new_status)
 
             # Trigger auto-export per model as soon as a model completes, or when
             # a failed model still produced complete stock rows that can be exported.
             if (
-                updated_job is not None
+                not recovery_mode()
+                and updated_job is not None
                 and updated_job.status in {JobStatus.COMPLETED, JobStatus.PARTIAL, JobStatus.FAILED}
                 and auto_export_enabled
                 and export_spreadsheet_url
@@ -1011,12 +1112,20 @@ def _mark_failed(
     tokens_in: int | None = None,
     tokens_out: int | None = None,
     estimated_cost: float | None = None,
+    web_search_used: bool | None = None,
+    web_search_queries: list[str] | None = None,
+    web_sources: list[str] | None = None,
+    runtime_metadata_json: dict | None = None,
 ) -> None:
     try:
         db.rollback()
         job = repo.get(job_id)
         if job:
-            repo.update_status(
+            if job.status == JobStatus.FAILED and "cancelled" in (job.error_message or "").lower():
+                logger.info("Preserving cancellation for job %s", job_id)
+                return
+            _update_job_status(
+                repo,
                 job,
                 JobStatus.FAILED,
                 response=response,
@@ -1024,11 +1133,41 @@ def _mark_failed(
                 tokens_in=tokens_in,
                 tokens_out=tokens_out,
                 estimated_cost=estimated_cost,
+                web_search_used=web_search_used,
+                web_search_queries=web_search_queries,
+                web_sources=web_sources,
+                runtime_metadata_json=runtime_metadata_json,
             )
             _publish_job_update(job)
             _refresh_run_status(db, job_id)
     except Exception:
         logger.exception("Could not mark job %s as failed", job_id)
+
+
+def _update_job_status(repo, job, status, **kwargs) -> None:
+    try:
+        repo.update_status(job, status, **kwargs)
+        return
+    except TypeError as exc:
+        if "runtime_metadata_json" not in kwargs or "runtime_metadata_json" not in str(exc):
+            raise
+    runtime_metadata_json = kwargs.pop("runtime_metadata_json", None)
+    repo.update_status(job, status, **kwargs)
+    if runtime_metadata_json is not None:
+        try:
+            job.runtime_metadata_json = runtime_metadata_json
+        except Exception:
+            pass
+
+
+def _job_was_cancelled(repo: SyncJobRepository, job_id: int) -> bool:
+    get_fresh = getattr(repo, "get_fresh", None)
+    latest = get_fresh(job_id) if callable(get_fresh) else repo.get(job_id)
+    return bool(
+        latest
+        and latest.status == JobStatus.FAILED
+        and "cancelled" in (latest.error_message or "").lower()
+    )
 
 
 # ── Task ─────────────────────────────────────────────────────────────────────
@@ -1041,6 +1180,14 @@ def _mark_failed(
     queue="ai",
 )
 def execute_ai_job(self, job_id: int) -> None:
+    if recovery_mode():
+        # Validate before task registration, status writes, or provider work.
+        with SyncSessionLocal() as recovery_db:
+            recovery_job = SyncJobRepository(recovery_db).get(job_id)
+            require_equity_analysis(
+                getattr(recovery_job, "auto_rebalance_portfolio", None),
+                getattr(recovery_job, "request_context_json", None),
+            )
     from app.domains.ai_providers.factory import ProviderFactory
 
     db = SyncSessionLocal()
@@ -1050,37 +1197,214 @@ def execute_ai_job(self, job_id: int) -> None:
     tokens_in: int | None = None
     tokens_out: int | None = None
     estimated_cost: float | None = None
+    web_search_used: bool | None = None
+    web_search_queries: list[str] | None = None
+    web_sources: list[str] | None = None
+    runtime_metadata_json: dict | None = None
+    job: Job | None = None
+    provider_usage_token = None
+    output_context_token = None
+
+    def with_output_validation(metadata: dict | None) -> dict | None:
+        validation = output_validation_metadata(content)
+        return {**(metadata or {}), "deterministic_output": validation} if validation is not None else metadata
+
+    def failure_metadata(exc: Exception, *, retry_safe: bool) -> dict[str, object]:
+        return merge_failure_diagnostics(
+            with_output_validation(runtime_metadata_json),
+            build_failure_diagnostics(
+                exc,
+                provider=job.provider if job else None,
+                model=job.model if job else None,
+                job_id=job_id,
+                run_id=None,
+                task_id=self.request.id,
+                attempt=self.request.retries,
+                retry_safe=retry_safe,
+            ),
+        )
 
     try:
+        if self.request.id:
+            register_job_task_sync(job_id, self.request.id)
         job = repo.get(job_id)
         if not job:
             logger.warning("Job %s not found", job_id)
             return
-        if job.status == JobStatus.FAILED and (job.error_message or "").lower().find("cancelled") >= 0:
+        if job.status in {JobStatus.COMPLETED, JobStatus.PARTIAL, JobStatus.FAILED}:
+            logger.info("Skipping terminal job redelivery %s", job_id)
+            return
+        usage_dimensions = resolve_job_usage_identity(db, job)
+        if _job_was_cancelled(repo, job_id):
             logger.info("Skipping cancelled job %s", job_id)
             return
+        output_context_token = configure_output_context(job, usage_dimensions)
+        provider_usage_token = set_provider_usage_context(
+            user_id=getattr(job, "user_id", None),
+            job_id=job.id,
+            execution_id=getattr(self.request, "id", None),
+            job_attempt=getattr(self.request, "retries", None),
+            requested_provider=job.provider,
+            requested_model=job.model,
+            evidence_hash=content_hash(getattr(job, "request_context_json", None)),
+            schema_hash=active_contract_hash(),
+            **usage_dimensions,
+        )
 
         WorkerLogHelper.log_task_start("execute_ai_job", "n/a", job_id)
         repo.update_status(job, JobStatus.PROCESSING)
         _publish_job_update(job)
         _refresh_run_status(db, job_id)
 
+        prompt_to_execute = job.prompt + rebalance_serialization_instructions()
+        polymarket_event_context: PolymarketEventRunContext | None = None
+        request_context_json = getattr(job, "request_context_json", None)
+        if isinstance(request_context_json, dict):
+            request_kind = str(request_context_json.get("kind") or "").strip()
+            if request_kind == "polymarket_bullpen_event":
+                polymarket_event_context = PolymarketEventRunContext.model_validate(
+                    request_context_json
+                )
+                if polymarket_event_context.prepared_context is None:
+                    prepared_context = prepare_polymarket_event_context(
+                        polymarket_event_context
+                    )
+                    polymarket_event_context = polymarket_event_context.model_copy(
+                        update={"prepared_context": prepared_context}
+                    )
+                    job.request_context_json = polymarket_event_context.model_dump(
+                        mode="json"
+                    )
+                    try:
+                        from sqlalchemy import select as sa_select
+
+                        from app.domains.runs.models import RunJob
+
+                        run_job = db.execute(
+                            sa_select(RunJob).where(RunJob.job_id == job_id)
+                        ).scalar_one_or_none()
+                        if run_job is not None:
+                            sibling_jobs = db.execute(
+                                sa_select(Job)
+                                .join(RunJob, RunJob.job_id == Job.id)
+                                .where(RunJob.run_id == run_job.run_id)
+                            ).scalars().all()
+                            prepared_json = prepared_context.model_dump(mode="json")
+                            for sibling_job in sibling_jobs:
+                                if not isinstance(sibling_job.request_context_json, dict):
+                                    continue
+                                sibling_job.request_context_json = {
+                                    **sibling_job.request_context_json,
+                                    "prepared_context": prepared_json,
+                                }
+                            db.commit()
+                    except Exception:
+                        db.commit()
+
+                execution_result = execute_bullpen_llm_target(
+                    polymarket_event_context,
+                    provider_name=job.provider.strip().lower(),
+                    model_name=job.model,
+                    prepared_context=polymarket_event_context.prepared_context,
+                )
+                content = execution_result.response_text
+                tokens_in = execution_result.tokens_in
+                tokens_out = execution_result.tokens_out
+                estimated_cost = execution_result.estimated_cost
+                runtime_metadata_json = execution_result.runtime_metadata
+                web_search_used, web_search_queries, web_sources = merge_web_metadata(
+                    web_search_used,
+                    web_search_queries,
+                    web_sources,
+                    response_used=execution_result.web_search_used,
+                    response_queries=execution_result.web_search_queries,
+                    response_sources=execution_result.web_sources,
+                )
+                if _job_was_cancelled(repo, job_id):
+                    logger.info("Skipping completion update for cancelled job %s", job_id)
+                    return
+
+                final_status = (
+                    JobStatus.COMPLETED
+                    if execution_result.status == "completed"
+                    else JobStatus.FAILED
+                    if execution_result.status == "failed"
+                    else JobStatus.PARTIAL
+                )
+                error_message = None
+                if execution_result.status != "completed":
+                    error_message = (
+                        runtime_metadata_json.get("invalid_reason")
+                        if isinstance(runtime_metadata_json, dict)
+                        else None
+                    ) or (
+                        runtime_metadata_json.get("warnings", [None])[0]
+                        if isinstance(runtime_metadata_json, dict)
+                        and isinstance(runtime_metadata_json.get("warnings"), list)
+                        else None
+                    ) or (
+                        "Bullpen LLM execution completed with partial or blocked event results."
+                        if execution_result.status == "partial"
+                        else "Bullpen LLM execution failed before producing any usable estimate."
+                    )
+                _update_job_status(
+                    repo,
+                    job,
+                    final_status,
+                    response=content,
+                    error_message=error_message,
+                    tokens_in=tokens_in,
+                    tokens_out=tokens_out,
+                    estimated_cost=estimated_cost,
+                    web_search_used=web_search_used,
+                    web_search_queries=web_search_queries,
+                    web_sources=web_sources,
+                    runtime_metadata_json=runtime_metadata_json,
+                )
+                _publish_job_update(job)
+                _refresh_run_status(db, job_id)
+                WorkerLogHelper.log_task_complete(
+                    "execute_ai_job",
+                    "n/a",
+                    (monotonic() - started_at) * 1000,
+                    job_id,
+                )
+                return
+
         provider = ProviderFactory.create(job.provider)
-        result = provider.generate(prompt=job.prompt, model=job.model)
+        with provider_usage_phase("initial_generation"):
+            result = provider.generate(prompt=prompt_to_execute, model=job.model)
+        if _job_was_cancelled(repo, job_id):
+            return
         tokens_in = result.tokens_in
         tokens_out = result.tokens_out
         estimated_cost = result.cost
+        web_search_used, web_search_queries, web_sources = merge_web_metadata(
+            web_search_used,
+            web_search_queries,
+            web_sources,
+            response_used=result.web_search_used,
+            response_queries=result.web_search_queries,
+            response_sources=result.web_sources,
+        )
         content = (result.content or "").strip()
         if not content:
             raise RuntimeError(
                 f"{job.provider}/{job.model} returned empty output after generation"
             )
+        from app.domains.jobs.technical_prices import validate_technical_prices
+        validate_technical_prices(job.prompt, content)
         if _requires_generic_table_output(job.prompt):
             if _is_rebalance_output(job.prompt):
                 content, rebalance_table_issue, _parsed_rebalance_rows = _validate_rebalance_table_content(content, job.prompt)
                 for attempt in range(_MAX_STOCK_REPAIR_ATTEMPTS):
-                    if not rebalance_table_issue or rebalance_table_issue.startswith("partial rebalance table"):
+                    if not rebalance_table_issue or (
+                        _parsed_rebalance_rows and rebalance_table_issue.startswith("partial rebalance table")
+                    ):
                         break
+                    if _job_was_cancelled(repo, job_id):
+                        logger.info("Stopping cancelled rebalance repair job %s", job_id)
+                        return
                     logger.info(
                         "Repairing rebalance table for job %s because %s (attempt %s/%s)",
                         job_id,
@@ -1088,17 +1412,28 @@ def execute_ai_job(self, job_id: int) -> None:
                         attempt + 1,
                         _MAX_STOCK_REPAIR_ATTEMPTS,
                     )
-                    repair_result = provider.generate(
-                        prompt=_build_rebalance_table_repair_prompt(
-                            job.prompt,
-                            content,
-                            rebalance_table_issue,
-                        ),
-                        model=job.model,
-                    )
+                    with provider_usage_phase("row_repair" if rebalance_table_issue.startswith("partial rebalance table") else "format_repair"):
+                        repair_result = provider.generate(
+                            prompt=_build_rebalance_table_repair_prompt(
+                                job.prompt,
+                                content,
+                                rebalance_table_issue,
+                            ),
+                            model=job.model,
+                        )
+                    if _job_was_cancelled(repo, job_id):
+                        return
                     tokens_in = (tokens_in or 0) + repair_result.tokens_in
                     tokens_out = (tokens_out or 0) + repair_result.tokens_out
                     estimated_cost = round((estimated_cost or 0.0) + repair_result.cost, 6)
+                    web_search_used, web_search_queries, web_sources = merge_web_metadata(
+                        web_search_used,
+                        web_search_queries,
+                        web_sources,
+                        response_used=repair_result.web_search_used,
+                        response_queries=repair_result.web_search_queries,
+                        response_sources=repair_result.web_sources,
+                    )
                     repaired_content = (repair_result.content or "").strip()
                     if repaired_content:
                         content = repaired_content
@@ -1113,7 +1448,8 @@ def execute_ai_job(self, job_id: int) -> None:
                         )
                     )
                     if should_keep_partial_rebalance:
-                        repo.update_status(
+                        _update_job_status(
+                            repo,
                             job,
                             JobStatus.PARTIAL,
                             response=content,
@@ -1121,6 +1457,10 @@ def execute_ai_job(self, job_id: int) -> None:
                             tokens_in=tokens_in,
                             tokens_out=tokens_out,
                             estimated_cost=estimated_cost,
+                            web_search_used=web_search_used,
+                            web_search_queries=web_search_queries,
+                            web_sources=web_sources,
+                            runtime_metadata_json=with_output_validation(runtime_metadata_json),
                         )
                         _publish_job_update(job)
                         _refresh_run_status(db, job_id)
@@ -1136,6 +1476,9 @@ def execute_ai_job(self, job_id: int) -> None:
                 for attempt in range(_MAX_STOCK_REPAIR_ATTEMPTS):
                     if not stock_table_issue:
                         break
+                    if _job_was_cancelled(repo, job_id):
+                        logger.info("Stopping cancelled stock repair job %s", job_id)
+                        return
                     logger.info(
                         "Repairing stock table for job %s because %s (attempt %s/%s)",
                         job_id,
@@ -1143,13 +1486,16 @@ def execute_ai_job(self, job_id: int) -> None:
                         attempt + 1,
                         _MAX_STOCK_REPAIR_ATTEMPTS,
                     )
-                    missing_count = max(1, _STOCK_TARGET_ROW_COUNT - len(parsed_stocks))
+                    output_context = current_output_context()
+                    target_rows = (output_context.expected_rows if output_context else None) or _STOCK_TARGET_ROW_COUNT
+                    missing_count = max(1, target_rows - len(parsed_stocks))
                     use_top_up_prompt = _is_insufficient_stock_issue(stock_table_issue) and bool(parsed_stocks)
                     repair_prompt = (
                         _build_stock_table_top_up_prompt(
                             job.prompt,
                             parsed_stocks,
                             missing_count,
+                            original_output=content if output_context is not None else None,
                         )
                         if use_top_up_prompt
                         else _build_stock_table_repair_prompt(
@@ -1158,26 +1504,41 @@ def execute_ai_job(self, job_id: int) -> None:
                             stock_table_issue,
                         )
                     )
-                    repair_result = provider.generate(
-                        prompt=repair_prompt,
-                        model=job.model,
-                    )
+                    with provider_usage_phase("row_repair" if use_top_up_prompt else "format_repair"):
+                        repair_result = provider.generate(
+                            prompt=repair_prompt,
+                            model=job.model,
+                        )
+                    if _job_was_cancelled(repo, job_id):
+                        return
                     tokens_in = (tokens_in or 0) + repair_result.tokens_in
                     tokens_out = (tokens_out or 0) + repair_result.tokens_out
                     estimated_cost = round((estimated_cost or 0.0) + repair_result.cost, 6)
+                    web_search_used, web_search_queries, web_sources = merge_web_metadata(
+                        web_search_used,
+                        web_search_queries,
+                        web_sources,
+                        response_used=repair_result.web_search_used,
+                        response_queries=repair_result.web_search_queries,
+                        response_sources=repair_result.web_sources,
+                    )
                     repaired_content = (repair_result.content or "").strip()
                     if repaired_content:
                         if use_top_up_prompt:
-                            supplemental_rows = _parse_normalized_stock_rows(repaired_content)
-                            merged_rows = _merge_unique_stock_rows(parsed_stocks, supplemental_rows)
-                            merged_content = _to_markdown_table_from_stocks(merged_rows)
-                            content = (merged_content or repaired_content).strip()
+                            if output_context is not None:
+                                content = merge_swing_fragments(content, repaired_content)
+                            else:
+                                supplemental_rows = _parse_normalized_stock_rows(repaired_content)
+                                merged_rows = _merge_unique_stock_rows(parsed_stocks, supplemental_rows)
+                                merged_content = _to_markdown_table_from_stocks(merged_rows)
+                                content = (merged_content or repaired_content).strip()
                         else:
                             content = repaired_content
                     content, stock_table_issue, parsed_stocks = _validate_stock_table_content(content)
                 if stock_table_issue:
                     if _is_insufficient_stock_issue(stock_table_issue) and parsed_stocks:
-                        repo.update_status(
+                        _update_job_status(
+                            repo,
                             job,
                             JobStatus.PARTIAL,
                             response=content,
@@ -1185,6 +1546,10 @@ def execute_ai_job(self, job_id: int) -> None:
                             tokens_in=tokens_in,
                             tokens_out=tokens_out,
                             estimated_cost=estimated_cost,
+                            web_search_used=web_search_used,
+                            web_search_queries=web_search_queries,
+                            web_sources=web_sources,
+                            runtime_metadata_json=with_output_validation(runtime_metadata_json),
                         )
                         _publish_job_update(job)
                         _refresh_run_status(db, job_id)
@@ -1203,29 +1568,51 @@ def execute_ai_job(self, job_id: int) -> None:
             content = _sanitize_portfolio_event_content(job.prompt, content)
             retry_reason = _portfolio_event_retry_reason(job.prompt, content)
             if retry_reason:
+                if _job_was_cancelled(repo, job_id):
+                    logger.info("Stopping cancelled portfolio events job %s", job_id)
+                    return
                 logger.info("Retrying portfolio events job %s because %s", job_id, retry_reason)
-                repair_result = provider.generate(
-                    prompt=_build_portfolio_event_repair_prompt(job.prompt, content, retry_reason),
-                    model=job.model,
-                )
+                with provider_usage_phase("row_repair"):
+                    repair_result = provider.generate(
+                        prompt=_build_portfolio_event_repair_prompt(job.prompt, content, retry_reason),
+                        model=job.model,
+                    )
+                if _job_was_cancelled(repo, job_id):
+                    return
                 tokens_in = (tokens_in or 0) + repair_result.tokens_in
                 tokens_out = (tokens_out or 0) + repair_result.tokens_out
                 estimated_cost = round((estimated_cost or 0.0) + repair_result.cost, 6)
+                web_search_used, web_search_queries, web_sources = merge_web_metadata(
+                    web_search_used,
+                    web_search_queries,
+                    web_sources,
+                    response_used=repair_result.web_search_used,
+                    response_queries=repair_result.web_search_queries,
+                    response_sources=repair_result.web_sources,
+                )
                 repaired_content = (repair_result.content or "").strip()
                 if repaired_content:
                     content = _sanitize_portfolio_event_content(job.prompt, repaired_content)
-        latest = repo.get(job_id)
-        if latest and latest.status == JobStatus.FAILED and (latest.error_message or "").lower().find("cancelled") >= 0:
+        if _job_was_cancelled(repo, job_id):
             logger.info("Skipping completion update for cancelled job %s", job_id)
             return
 
-        repo.update_status(
+        from app.domains.jobs.partial_output import has_partial_output, PARTIAL_NOTICE
+        completion_metadata = with_output_validation(runtime_metadata_json)
+        partial_usage = has_partial_output(completion_metadata)
+        _update_job_status(
+            repo,
             job,
-            JobStatus.COMPLETED,
+            JobStatus.PARTIAL if partial_usage else JobStatus.COMPLETED,
+            error_message=PARTIAL_NOTICE if partial_usage else None,
             response=content,
             tokens_in=tokens_in,
             tokens_out=tokens_out,
             estimated_cost=estimated_cost,
+            web_search_used=web_search_used,
+            web_search_queries=web_search_queries,
+            web_sources=web_sources,
+            runtime_metadata_json=completion_metadata,
         )
         _publish_job_update(job)
         _refresh_run_status(db, job_id)
@@ -1233,7 +1620,7 @@ def execute_ai_job(self, job_id: int) -> None:
             "execute_ai_job", "n/a", (monotonic() - started_at) * 1000, job_id
         )
 
-    except MaxRetriesExceededError:
+    except MaxRetriesExceededError as exc:
         _mark_failed(
             db,
             repo,
@@ -1243,10 +1630,21 @@ def execute_ai_job(self, job_id: int) -> None:
             tokens_in=tokens_in,
             tokens_out=tokens_out,
             estimated_cost=estimated_cost,
+            web_search_used=web_search_used,
+            web_search_queries=web_search_queries,
+            web_sources=web_sources,
+            runtime_metadata_json=failure_metadata(exc, retry_safe=False),
         )
-        logger.error("Job %s exhausted all retries", job_id)
+        logger.exception("Job %s exhausted all retries", job_id)
 
     except Exception as exc:
+        try:
+            if _job_was_cancelled(repo, job_id):
+                return
+        except Exception:
+            # A failed database transaction cannot service another state read.
+            # Preserve the original failure for rollback/retry classification.
+            logger.warning("Cancellation state unavailable after failure for job %s", job_id)
         error_summary = str(exc).split('\n')[0][:200]
         WorkerLogHelper.log_task_error("execute_ai_job", "n/a", error_summary, job_id)
 
@@ -1262,6 +1660,10 @@ def execute_ai_job(self, job_id: int) -> None:
                 tokens_in=tokens_in,
                 tokens_out=tokens_out,
                 estimated_cost=estimated_cost,
+                web_search_used=web_search_used,
+                web_search_queries=web_search_queries,
+                web_sources=web_sources,
+                runtime_metadata_json=failure_metadata(exc, retry_safe=False),
             )
             return
 
@@ -1277,8 +1679,14 @@ def execute_ai_job(self, job_id: int) -> None:
                 tokens_in=tokens_in,
                 tokens_out=tokens_out,
                 estimated_cost=estimated_cost,
+                web_search_used=web_search_used,
+                web_search_queries=web_search_queries,
+                web_sources=web_sources,
+                runtime_metadata_json=failure_metadata(exc, retry_safe=retryable),
             )
-            logger.error("Job %s exhausted all retries after: %s", job_id, exc)
+            logger.exception("Job %s exhausted all retries after: %s", job_id, exc)
 
     finally:
+        reset_output_context(output_context_token)
+        reset_provider_usage_context(provider_usage_token)
         db.close()

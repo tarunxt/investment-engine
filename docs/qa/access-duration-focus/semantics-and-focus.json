@@ -1,0 +1,464 @@
+[
+  {
+    "width": 1180,
+    "zoom": 1,
+    "metrics": {
+      "width": 1180,
+      "dpr": 1,
+      "visualScale": 1,
+      "cssZoom": "1",
+      "transform": "none"
+    },
+    "mode": "fallback",
+    "semantics": "- dialog \"Synthetic rebalance stage with a deliberately long accessible title for keyboard and narrow layout verification\":\n  - banner:\n    - paragraph: Duration breakdown\n    - heading \"Synthetic rebalance stage with a deliberately long accessible title for keyboard and narrow layout verification\" [level=3]\n    - paragraph: Total wall-clock duration\n    - paragraph: 00:01:49\n    - paragraph: The complete execution window includes provider processing and queue time. Separate phases are shown only where timestamps were recorded.\n    - button \"Close duration breakdown\"\n  - term: Stage setup and request dispatch\n  - definition: Not recorded\n  - definition: This stage did not save a separate setup timestamp.\n  - term: LLM execution · Fixture provider / Exact fixture model\n  - definition: 00:01:49\n  - definition: The available timestamps cover the complete execution window, including provider processing and any queue time.\n  - term: Validation and persistence\n  - definition: Not recorded\n  - definition: This stage did not save a separate finalisation timestamp.\n  - group: How timing is measured",
+    "focus": [
+      "Open duration",
+      "Close duration breakdown",
+      "How timing is measured (reverse wrap)",
+      "Close duration breakdown (forward wrap)",
+      "How timing is measured",
+      "How timing is measured (rerender)",
+      "Close duration breakdown"
+    ]
+  },
+  {
+    "width": 1180,
+    "zoom": 1,
+    "metrics": {
+      "width": 1180,
+      "dpr": 1,
+      "visualScale": 1,
+      "cssZoom": "1",
+      "transform": "none"
+    },
+    "mode": "loaded",
+    "semantics": "- dialog \"Synthetic rebalance stage with a deliberately long accessible title for keyboard and narrow layout verification\":\n  - banner:\n    - paragraph: Duration breakdown\n    - heading \"Synthetic rebalance stage with a deliberately long accessible title for keyboard and narrow layout verification\" [level=3]\n    - paragraph: Total wall-clock duration\n    - paragraph: 00:01:49\n    - paragraph: The complete execution window includes provider processing and queue time. Separate phases are shown only where timestamps were recorded.\n    - button \"Close duration breakdown\"\n  - term: Stage setup and LLM dispatch\n  - definition: 00:00:09\n  - definition: Time between the stage starting and the first LLM job being created.\n  - term: LLM execution · Fixture provider / Exact fixture model\n  - definition: 00:01:30\n  - definition: \"Job #1 · completed · includes queue and provider processing time.\"\n  - term: LLM execution · Second provider / Second exact model\n  - definition: 00:01:20\n  - definition: \"Job #2 · completed · includes queue and provider processing time.\"\n  - term: Validation, aggregation and finalisation\n  - definition: 00:00:10\n  - definition: Time after the last LLM job update until the stage reached its recorded end.\n  - group: How timing is measured",
+    "focus": [
+      "Open duration",
+      "Close duration breakdown",
+      "How timing is measured (reverse wrap)",
+      "Close duration breakdown (forward wrap)",
+      "How timing is measured",
+      "How timing is measured (rerender)",
+      "Close duration breakdown"
+    ]
+  },
+  {
+    "width": 1180,
+    "zoom": 1,
+    "metrics": {
+      "width": 1180,
+      "dpr": 1,
+      "visualScale": 1,
+      "cssZoom": "1",
+      "transform": "none"
+    },
+    "mode": "failed",
+    "semantics": "- dialog \"Synthetic rebalance stage with a deliberately long accessible title for keyboard and narrow layout verification\":\n  - banner:\n    - paragraph: Duration breakdown\n    - heading \"Synthetic rebalance stage with a deliberately long accessible title for keyboard and narrow layout verification\" [level=3]\n    - paragraph: Total wall-clock duration\n    - paragraph: 00:01:49\n    - paragraph: The complete execution window includes provider processing and queue time. Separate phases are shown only where timestamps were recorded.\n    - button \"Close duration breakdown\"\n  - text: Detailed run timing could not be loaded. The recorded stage timing is shown below. Fixture read failure\n  - term: Stage setup and request dispatch\n  - definition: Not recorded\n  - definition: This stage did not save a separate setup timestamp.\n  - term: LLM execution · Fixture provider / Exact fixture model\n  - definition: 00:01:49\n  - definition: The available timestamps cover the complete execution window, including provider processing and any queue time.\n  - term: Validation and persistence\n  - definition: Not recorded\n  - definition: This stage did not save a separate finalisation timestamp.\n  - group: How timing is measured",
+    "focus": [
+      "Open duration",
+      "Close duration breakdown",
+      "How timing is measured (reverse wrap)",
+      "Close duration breakdown (forward wrap)",
+      "How timing is measured",
+      "How timing is measured (rerender)",
+      "Close duration breakdown"
+    ]
+  },
+  {
+    "width": 1180,
+    "zoom": 1,
+    "metrics": {
+      "width": 1180,
+      "dpr": 1,
+      "visualScale": 1,
+      "cssZoom": "1",
+      "transform": "none"
+    },
+    "mode": "loading",
+    "semantics": "- dialog \"Synthetic rebalance stage with a deliberately long accessible title for keyboard and narrow layout verification\":\n  - banner:\n    - paragraph: Duration breakdown\n    - heading \"Synthetic rebalance stage with a deliberately long accessible title for keyboard and narrow layout verification\" [level=3]\n    - paragraph: Total wall-clock duration\n    - paragraph: 00:01:49\n    - paragraph: The complete execution window includes provider processing and queue time. Separate phases are shown only where timestamps were recorded.\n    - button \"Close duration breakdown\"\n  - text: Loading detailed LLM timings…\n  - term: Stage setup and request dispatch\n  - definition: Not recorded\n  - definition: This stage did not save a separate setup timestamp.\n  - term: LLM execution · Fixture provider / Exact fixture model\n  - definition: 00:01:49\n  - definition: The available timestamps cover the complete execution window, including provider processing and any queue time.\n  - term: Validation and persistence\n  - definition: Not recorded\n  - definition: This stage did not save a separate finalisation timestamp.\n  - group: How timing is measured",
+    "focus": [
+      "Open duration",
+      "Close duration breakdown",
+      "How timing is measured (reverse wrap)",
+      "Close duration breakdown (forward wrap)",
+      "How timing is measured",
+      "How timing is measured (rerender)",
+      "Close duration breakdown"
+    ]
+  },
+  {
+    "width": 1180,
+    "zoom": 1,
+    "metrics": {
+      "width": 1180,
+      "dpr": 1,
+      "visualScale": 1,
+      "cssZoom": "1",
+      "transform": "none"
+    },
+    "mode": "empty",
+    "semantics": "- dialog \"Synthetic rebalance stage with a deliberately long accessible title for keyboard and narrow layout verification\":\n  - banner:\n    - paragraph: Duration breakdown\n    - heading \"Synthetic rebalance stage with a deliberately long accessible title for keyboard and narrow layout verification\" [level=3]\n    - paragraph: Total wall-clock duration\n    - paragraph: n/a\n    - paragraph: The complete execution window includes provider processing and queue time. Separate phases are shown only where timestamps were recorded.\n    - button \"Close duration breakdown\"\n  - term: Stage setup and request dispatch\n  - definition: Not recorded\n  - definition: This stage did not save a separate setup timestamp.\n  - term: LLM execution · Fixture provider / Exact fixture model\n  - definition: n/a\n  - definition: The available timestamps cover the complete execution window, including provider processing and any queue time.\n  - term: Validation and persistence\n  - definition: Not recorded\n  - definition: This stage did not save a separate finalisation timestamp.\n  - group: How timing is measured",
+    "focus": [
+      "Open duration",
+      "Close duration breakdown",
+      "How timing is measured (reverse wrap)",
+      "Close duration breakdown (forward wrap)",
+      "How timing is measured",
+      "How timing is measured (rerender)",
+      "Close duration breakdown"
+    ]
+  },
+  {
+    "width": 1180,
+    "zoom": 1,
+    "metrics": {
+      "width": 1180,
+      "dpr": 1,
+      "visualScale": 1,
+      "cssZoom": "1",
+      "transform": "none"
+    },
+    "mode": "active",
+    "semantics": "- dialog \"Synthetic rebalance stage with a deliberately long accessible title for keyboard and narrow layout verification\":\n  - banner:\n    - paragraph: Duration breakdown\n    - heading \"Synthetic rebalance stage with a deliberately long accessible title for keyboard and narrow layout verification\" [level=3]\n    - paragraph: Total wall-clock duration\n    - paragraph: 00:01:49\n    - paragraph: The complete execution window includes provider processing and queue time. Separate phases are shown only where timestamps were recorded.\n    - button \"Close duration breakdown\"\n  - term: Stage setup and request dispatch\n  - definition: Not recorded\n  - definition: This stage did not save a separate setup timestamp.\n  - term: LLM execution · Fixture provider / Exact fixture model\n  - definition: 00:01:49\n  - definition: The available timestamps cover the complete execution window, including provider processing and any queue time.\n  - term: Validation and persistence\n  - definition: Not recorded\n  - definition: This stage did not save a separate finalisation timestamp.\n  - group: How timing is measured",
+    "focus": [
+      "Open duration",
+      "Close duration breakdown",
+      "How timing is measured (reverse wrap)",
+      "Close duration breakdown (forward wrap)",
+      "How timing is measured",
+      "How timing is measured (rerender)",
+      "Close duration breakdown"
+    ]
+  },
+  {
+    "width": 1180,
+    "zoom": 1,
+    "metrics": {
+      "width": 1180,
+      "dpr": 1,
+      "visualScale": 1,
+      "cssZoom": "1",
+      "transform": "none"
+    },
+    "mode": "partial",
+    "semantics": "- dialog \"Synthetic rebalance stage with a deliberately long accessible title for keyboard and narrow layout verification\":\n  - banner:\n    - paragraph: Duration breakdown\n    - heading \"Synthetic rebalance stage with a deliberately long accessible title for keyboard and narrow layout verification\" [level=3]\n    - paragraph: Total wall-clock duration\n    - paragraph: 00:01:49\n    - paragraph: The complete execution window includes provider processing and queue time. Separate phases are shown only where timestamps were recorded.\n    - button \"Close duration breakdown\"\n  - term: Stage setup and LLM dispatch\n  - definition: 00:00:09\n  - definition: Time between the stage starting and the first LLM job being created.\n  - term: LLM execution · Fixture provider / Exact fixture model\n  - definition: 00:01:30\n  - definition: \"Job #1 · failed · includes queue and provider processing time.\"\n  - term: LLM execution · Second provider / Second exact model\n  - definition: 00:01:20\n  - definition: \"Job #2 · completed · includes queue and provider processing time.\"\n  - term: Validation, aggregation and finalisation\n  - definition: 00:00:10\n  - definition: Time after the last LLM job update until the stage reached its recorded end.\n  - group: How timing is measured",
+    "focus": [
+      "Open duration",
+      "Close duration breakdown",
+      "How timing is measured (reverse wrap)",
+      "Close duration breakdown (forward wrap)",
+      "How timing is measured",
+      "How timing is measured (rerender)",
+      "Close duration breakdown"
+    ]
+  },
+  {
+    "width": 390,
+    "zoom": 1,
+    "metrics": {
+      "width": 390,
+      "dpr": 1,
+      "visualScale": 1,
+      "cssZoom": "1",
+      "transform": "none"
+    },
+    "mode": "fallback",
+    "semantics": "- dialog \"Synthetic rebalance stage with a deliberately long accessible title for keyboard and narrow layout verification\":\n  - banner:\n    - paragraph: Duration breakdown\n    - heading \"Synthetic rebalance stage with a deliberately long accessible title for keyboard and narrow layout verification\" [level=3]\n    - paragraph: Total wall-clock duration\n    - paragraph: 00:01:49\n    - paragraph: The complete execution window includes provider processing and queue time. Separate phases are shown only where timestamps were recorded.\n    - button \"Close duration breakdown\"\n  - term: Stage setup and request dispatch\n  - definition: Not recorded\n  - definition: This stage did not save a separate setup timestamp.\n  - term: LLM execution · Fixture provider / Exact fixture model\n  - definition: 00:01:49\n  - definition: The available timestamps cover the complete execution window, including provider processing and any queue time.\n  - term: Validation and persistence\n  - definition: Not recorded\n  - definition: This stage did not save a separate finalisation timestamp.\n  - group: How timing is measured",
+    "focus": [
+      "Open duration",
+      "Close duration breakdown",
+      "How timing is measured (reverse wrap)",
+      "Close duration breakdown (forward wrap)",
+      "How timing is measured",
+      "How timing is measured (rerender)",
+      "Close duration breakdown"
+    ]
+  },
+  {
+    "width": 390,
+    "zoom": 1,
+    "metrics": {
+      "width": 390,
+      "dpr": 1,
+      "visualScale": 1,
+      "cssZoom": "1",
+      "transform": "none"
+    },
+    "mode": "loaded",
+    "semantics": "- dialog \"Synthetic rebalance stage with a deliberately long accessible title for keyboard and narrow layout verification\":\n  - banner:\n    - paragraph: Duration breakdown\n    - heading \"Synthetic rebalance stage with a deliberately long accessible title for keyboard and narrow layout verification\" [level=3]\n    - paragraph: Total wall-clock duration\n    - paragraph: 00:01:49\n    - paragraph: The complete execution window includes provider processing and queue time. Separate phases are shown only where timestamps were recorded.\n    - button \"Close duration breakdown\"\n  - term: Stage setup and LLM dispatch\n  - definition: 00:00:09\n  - definition: Time between the stage starting and the first LLM job being created.\n  - term: LLM execution · Fixture provider / Exact fixture model\n  - definition: 00:01:30\n  - definition: \"Job #1 · completed · includes queue and provider processing time.\"\n  - term: LLM execution · Second provider / Second exact model\n  - definition: 00:01:20\n  - definition: \"Job #2 · completed · includes queue and provider processing time.\"\n  - term: Validation, aggregation and finalisation\n  - definition: 00:00:10\n  - definition: Time after the last LLM job update until the stage reached its recorded end.\n  - group: How timing is measured",
+    "focus": [
+      "Open duration",
+      "Close duration breakdown",
+      "How timing is measured (reverse wrap)",
+      "Close duration breakdown (forward wrap)",
+      "How timing is measured",
+      "How timing is measured (rerender)",
+      "Close duration breakdown"
+    ]
+  },
+  {
+    "width": 390,
+    "zoom": 1,
+    "metrics": {
+      "width": 390,
+      "dpr": 1,
+      "visualScale": 1,
+      "cssZoom": "1",
+      "transform": "none"
+    },
+    "mode": "failed",
+    "semantics": "- dialog \"Synthetic rebalance stage with a deliberately long accessible title for keyboard and narrow layout verification\":\n  - banner:\n    - paragraph: Duration breakdown\n    - heading \"Synthetic rebalance stage with a deliberately long accessible title for keyboard and narrow layout verification\" [level=3]\n    - paragraph: Total wall-clock duration\n    - paragraph: 00:01:49\n    - paragraph: The complete execution window includes provider processing and queue time. Separate phases are shown only where timestamps were recorded.\n    - button \"Close duration breakdown\"\n  - text: Detailed run timing could not be loaded. The recorded stage timing is shown below. Fixture read failure\n  - term: Stage setup and request dispatch\n  - definition: Not recorded\n  - definition: This stage did not save a separate setup timestamp.\n  - term: LLM execution · Fixture provider / Exact fixture model\n  - definition: 00:01:49\n  - definition: The available timestamps cover the complete execution window, including provider processing and any queue time.\n  - term: Validation and persistence\n  - definition: Not recorded\n  - definition: This stage did not save a separate finalisation timestamp.\n  - group: How timing is measured",
+    "focus": [
+      "Open duration",
+      "Close duration breakdown",
+      "How timing is measured (reverse wrap)",
+      "Close duration breakdown (forward wrap)",
+      "How timing is measured",
+      "How timing is measured (rerender)",
+      "Close duration breakdown"
+    ]
+  },
+  {
+    "width": 390,
+    "zoom": 1,
+    "metrics": {
+      "width": 390,
+      "dpr": 1,
+      "visualScale": 1,
+      "cssZoom": "1",
+      "transform": "none"
+    },
+    "mode": "loading",
+    "semantics": "- dialog \"Synthetic rebalance stage with a deliberately long accessible title for keyboard and narrow layout verification\":\n  - banner:\n    - paragraph: Duration breakdown\n    - heading \"Synthetic rebalance stage with a deliberately long accessible title for keyboard and narrow layout verification\" [level=3]\n    - paragraph: Total wall-clock duration\n    - paragraph: 00:01:49\n    - paragraph: The complete execution window includes provider processing and queue time. Separate phases are shown only where timestamps were recorded.\n    - button \"Close duration breakdown\"\n  - text: Loading detailed LLM timings…\n  - term: Stage setup and request dispatch\n  - definition: Not recorded\n  - definition: This stage did not save a separate setup timestamp.\n  - term: LLM execution · Fixture provider / Exact fixture model\n  - definition: 00:01:49\n  - definition: The available timestamps cover the complete execution window, including provider processing and any queue time.\n  - term: Validation and persistence\n  - definition: Not recorded\n  - definition: This stage did not save a separate finalisation timestamp.\n  - group: How timing is measured",
+    "focus": [
+      "Open duration",
+      "Close duration breakdown",
+      "How timing is measured (reverse wrap)",
+      "Close duration breakdown (forward wrap)",
+      "How timing is measured",
+      "How timing is measured (rerender)",
+      "Close duration breakdown"
+    ]
+  },
+  {
+    "width": 390,
+    "zoom": 1,
+    "metrics": {
+      "width": 390,
+      "dpr": 1,
+      "visualScale": 1,
+      "cssZoom": "1",
+      "transform": "none"
+    },
+    "mode": "empty",
+    "semantics": "- dialog \"Synthetic rebalance stage with a deliberately long accessible title for keyboard and narrow layout verification\":\n  - banner:\n    - paragraph: Duration breakdown\n    - heading \"Synthetic rebalance stage with a deliberately long accessible title for keyboard and narrow layout verification\" [level=3]\n    - paragraph: Total wall-clock duration\n    - paragraph: n/a\n    - paragraph: The complete execution window includes provider processing and queue time. Separate phases are shown only where timestamps were recorded.\n    - button \"Close duration breakdown\"\n  - term: Stage setup and request dispatch\n  - definition: Not recorded\n  - definition: This stage did not save a separate setup timestamp.\n  - term: LLM execution · Fixture provider / Exact fixture model\n  - definition: n/a\n  - definition: The available timestamps cover the complete execution window, including provider processing and any queue time.\n  - term: Validation and persistence\n  - definition: Not recorded\n  - definition: This stage did not save a separate finalisation timestamp.\n  - group: How timing is measured",
+    "focus": [
+      "Open duration",
+      "Close duration breakdown",
+      "How timing is measured (reverse wrap)",
+      "Close duration breakdown (forward wrap)",
+      "How timing is measured",
+      "How timing is measured (rerender)",
+      "Close duration breakdown"
+    ]
+  },
+  {
+    "width": 390,
+    "zoom": 1,
+    "metrics": {
+      "width": 390,
+      "dpr": 1,
+      "visualScale": 1,
+      "cssZoom": "1",
+      "transform": "none"
+    },
+    "mode": "active",
+    "semantics": "- dialog \"Synthetic rebalance stage with a deliberately long accessible title for keyboard and narrow layout verification\":\n  - banner:\n    - paragraph: Duration breakdown\n    - heading \"Synthetic rebalance stage with a deliberately long accessible title for keyboard and narrow layout verification\" [level=3]\n    - paragraph: Total wall-clock duration\n    - paragraph: 00:01:49\n    - paragraph: The complete execution window includes provider processing and queue time. Separate phases are shown only where timestamps were recorded.\n    - button \"Close duration breakdown\"\n  - term: Stage setup and request dispatch\n  - definition: Not recorded\n  - definition: This stage did not save a separate setup timestamp.\n  - term: LLM execution · Fixture provider / Exact fixture model\n  - definition: 00:01:49\n  - definition: The available timestamps cover the complete execution window, including provider processing and any queue time.\n  - term: Validation and persistence\n  - definition: Not recorded\n  - definition: This stage did not save a separate finalisation timestamp.\n  - group: How timing is measured",
+    "focus": [
+      "Open duration",
+      "Close duration breakdown",
+      "How timing is measured (reverse wrap)",
+      "Close duration breakdown (forward wrap)",
+      "How timing is measured",
+      "How timing is measured (rerender)",
+      "Close duration breakdown"
+    ]
+  },
+  {
+    "width": 390,
+    "zoom": 1,
+    "metrics": {
+      "width": 390,
+      "dpr": 1,
+      "visualScale": 1,
+      "cssZoom": "1",
+      "transform": "none"
+    },
+    "mode": "partial",
+    "semantics": "- dialog \"Synthetic rebalance stage with a deliberately long accessible title for keyboard and narrow layout verification\":\n  - banner:\n    - paragraph: Duration breakdown\n    - heading \"Synthetic rebalance stage with a deliberately long accessible title for keyboard and narrow layout verification\" [level=3]\n    - paragraph: Total wall-clock duration\n    - paragraph: 00:01:49\n    - paragraph: The complete execution window includes provider processing and queue time. Separate phases are shown only where timestamps were recorded.\n    - button \"Close duration breakdown\"\n  - term: Stage setup and LLM dispatch\n  - definition: 00:00:09\n  - definition: Time between the stage starting and the first LLM job being created.\n  - term: LLM execution · Fixture provider / Exact fixture model\n  - definition: 00:01:30\n  - definition: \"Job #1 · failed · includes queue and provider processing time.\"\n  - term: LLM execution · Second provider / Second exact model\n  - definition: 00:01:20\n  - definition: \"Job #2 · completed · includes queue and provider processing time.\"\n  - term: Validation, aggregation and finalisation\n  - definition: 00:00:10\n  - definition: Time after the last LLM job update until the stage reached its recorded end.\n  - group: How timing is measured",
+    "focus": [
+      "Open duration",
+      "Close duration breakdown",
+      "How timing is measured (reverse wrap)",
+      "Close duration breakdown (forward wrap)",
+      "How timing is measured",
+      "How timing is measured (rerender)",
+      "Close duration breakdown"
+    ]
+  },
+  {
+    "width": 1180,
+    "zoom": 2,
+    "metrics": {
+      "width": 590,
+      "dpr": 2,
+      "visualScale": 1,
+      "cssZoom": "1",
+      "transform": "none"
+    },
+    "mode": "fallback",
+    "semantics": "- dialog \"Synthetic rebalance stage with a deliberately long accessible title for keyboard and narrow layout verification\":\n  - banner:\n    - paragraph: Duration breakdown\n    - heading \"Synthetic rebalance stage with a deliberately long accessible title for keyboard and narrow layout verification\" [level=3]\n    - paragraph: Total wall-clock duration\n    - paragraph: 00:01:49\n    - paragraph: The complete execution window includes provider processing and queue time. Separate phases are shown only where timestamps were recorded.\n    - button \"Close duration breakdown\"\n  - term: Stage setup and request dispatch\n  - definition: Not recorded\n  - definition: This stage did not save a separate setup timestamp.\n  - term: LLM execution · Fixture provider / Exact fixture model\n  - definition: 00:01:49\n  - definition: The available timestamps cover the complete execution window, including provider processing and any queue time.\n  - term: Validation and persistence\n  - definition: Not recorded\n  - definition: This stage did not save a separate finalisation timestamp.\n  - group: How timing is measured",
+    "focus": [
+      "Open duration",
+      "Close duration breakdown",
+      "How timing is measured (reverse wrap)",
+      "Close duration breakdown (forward wrap)",
+      "How timing is measured",
+      "How timing is measured (rerender)",
+      "Close duration breakdown"
+    ]
+  },
+  {
+    "width": 1180,
+    "zoom": 2,
+    "metrics": {
+      "width": 590,
+      "dpr": 2,
+      "visualScale": 1,
+      "cssZoom": "1",
+      "transform": "none"
+    },
+    "mode": "loaded",
+    "semantics": "- dialog \"Synthetic rebalance stage with a deliberately long accessible title for keyboard and narrow layout verification\":\n  - banner:\n    - paragraph: Duration breakdown\n    - heading \"Synthetic rebalance stage with a deliberately long accessible title for keyboard and narrow layout verification\" [level=3]\n    - paragraph: Total wall-clock duration\n    - paragraph: 00:01:49\n    - paragraph: The complete execution window includes provider processing and queue time. Separate phases are shown only where timestamps were recorded.\n    - button \"Close duration breakdown\"\n  - term: Stage setup and LLM dispatch\n  - definition: 00:00:09\n  - definition: Time between the stage starting and the first LLM job being created.\n  - term: LLM execution · Fixture provider / Exact fixture model\n  - definition: 00:01:30\n  - definition: \"Job #1 · completed · includes queue and provider processing time.\"\n  - term: LLM execution · Second provider / Second exact model\n  - definition: 00:01:20\n  - definition: \"Job #2 · completed · includes queue and provider processing time.\"\n  - term: Validation, aggregation and finalisation\n  - definition: 00:00:10\n  - definition: Time after the last LLM job update until the stage reached its recorded end.\n  - group: How timing is measured",
+    "focus": [
+      "Open duration",
+      "Close duration breakdown",
+      "How timing is measured (reverse wrap)",
+      "Close duration breakdown (forward wrap)",
+      "How timing is measured",
+      "How timing is measured (rerender)",
+      "Close duration breakdown"
+    ]
+  },
+  {
+    "width": 1180,
+    "zoom": 2,
+    "metrics": {
+      "width": 590,
+      "dpr": 2,
+      "visualScale": 1,
+      "cssZoom": "1",
+      "transform": "none"
+    },
+    "mode": "failed",
+    "semantics": "- dialog \"Synthetic rebalance stage with a deliberately long accessible title for keyboard and narrow layout verification\":\n  - banner:\n    - paragraph: Duration breakdown\n    - heading \"Synthetic rebalance stage with a deliberately long accessible title for keyboard and narrow layout verification\" [level=3]\n    - paragraph: Total wall-clock duration\n    - paragraph: 00:01:49\n    - paragraph: The complete execution window includes provider processing and queue time. Separate phases are shown only where timestamps were recorded.\n    - button \"Close duration breakdown\"\n  - text: Detailed run timing could not be loaded. The recorded stage timing is shown below. Fixture read failure\n  - term: Stage setup and request dispatch\n  - definition: Not recorded\n  - definition: This stage did not save a separate setup timestamp.\n  - term: LLM execution · Fixture provider / Exact fixture model\n  - definition: 00:01:49\n  - definition: The available timestamps cover the complete execution window, including provider processing and any queue time.\n  - term: Validation and persistence\n  - definition: Not recorded\n  - definition: This stage did not save a separate finalisation timestamp.\n  - group: How timing is measured",
+    "focus": [
+      "Open duration",
+      "Close duration breakdown",
+      "How timing is measured (reverse wrap)",
+      "Close duration breakdown (forward wrap)",
+      "How timing is measured",
+      "How timing is measured (rerender)",
+      "Close duration breakdown"
+    ]
+  },
+  {
+    "width": 1180,
+    "zoom": 2,
+    "metrics": {
+      "width": 590,
+      "dpr": 2,
+      "visualScale": 1,
+      "cssZoom": "1",
+      "transform": "none"
+    },
+    "mode": "loading",
+    "semantics": "- dialog \"Synthetic rebalance stage with a deliberately long accessible title for keyboard and narrow layout verification\":\n  - banner:\n    - paragraph: Duration breakdown\n    - heading \"Synthetic rebalance stage with a deliberately long accessible title for keyboard and narrow layout verification\" [level=3]\n    - paragraph: Total wall-clock duration\n    - paragraph: 00:01:49\n    - paragraph: The complete execution window includes provider processing and queue time. Separate phases are shown only where timestamps were recorded.\n    - button \"Close duration breakdown\"\n  - text: Loading detailed LLM timings…\n  - term: Stage setup and request dispatch\n  - definition: Not recorded\n  - definition: This stage did not save a separate setup timestamp.\n  - term: LLM execution · Fixture provider / Exact fixture model\n  - definition: 00:01:49\n  - definition: The available timestamps cover the complete execution window, including provider processing and any queue time.\n  - term: Validation and persistence\n  - definition: Not recorded\n  - definition: This stage did not save a separate finalisation timestamp.\n  - group: How timing is measured",
+    "focus": [
+      "Open duration",
+      "Close duration breakdown",
+      "How timing is measured (reverse wrap)",
+      "Close duration breakdown (forward wrap)",
+      "How timing is measured",
+      "How timing is measured (rerender)",
+      "Close duration breakdown"
+    ]
+  },
+  {
+    "width": 1180,
+    "zoom": 2,
+    "metrics": {
+      "width": 590,
+      "dpr": 2,
+      "visualScale": 1,
+      "cssZoom": "1",
+      "transform": "none"
+    },
+    "mode": "empty",
+    "semantics": "- dialog \"Synthetic rebalance stage with a deliberately long accessible title for keyboard and narrow layout verification\":\n  - banner:\n    - paragraph: Duration breakdown\n    - heading \"Synthetic rebalance stage with a deliberately long accessible title for keyboard and narrow layout verification\" [level=3]\n    - paragraph: Total wall-clock duration\n    - paragraph: n/a\n    - paragraph: The complete execution window includes provider processing and queue time. Separate phases are shown only where timestamps were recorded.\n    - button \"Close duration breakdown\"\n  - term: Stage setup and request dispatch\n  - definition: Not recorded\n  - definition: This stage did not save a separate setup timestamp.\n  - term: LLM execution · Fixture provider / Exact fixture model\n  - definition: n/a\n  - definition: The available timestamps cover the complete execution window, including provider processing and any queue time.\n  - term: Validation and persistence\n  - definition: Not recorded\n  - definition: This stage did not save a separate finalisation timestamp.\n  - group: How timing is measured",
+    "focus": [
+      "Open duration",
+      "Close duration breakdown",
+      "How timing is measured (reverse wrap)",
+      "Close duration breakdown (forward wrap)",
+      "How timing is measured",
+      "How timing is measured (rerender)",
+      "Close duration breakdown"
+    ]
+  },
+  {
+    "width": 1180,
+    "zoom": 2,
+    "metrics": {
+      "width": 590,
+      "dpr": 2,
+      "visualScale": 1,
+      "cssZoom": "1",
+      "transform": "none"
+    },
+    "mode": "active",
+    "semantics": "- dialog \"Synthetic rebalance stage with a deliberately long accessible title for keyboard and narrow layout verification\":\n  - banner:\n    - paragraph: Duration breakdown\n    - heading \"Synthetic rebalance stage with a deliberately long accessible title for keyboard and narrow layout verification\" [level=3]\n    - paragraph: Total wall-clock duration\n    - paragraph: 00:01:49\n    - paragraph: The complete execution window includes provider processing and queue time. Separate phases are shown only where timestamps were recorded.\n    - button \"Close duration breakdown\"\n  - term: Stage setup and request dispatch\n  - definition: Not recorded\n  - definition: This stage did not save a separate setup timestamp.\n  - term: LLM execution · Fixture provider / Exact fixture model\n  - definition: 00:01:49\n  - definition: The available timestamps cover the complete execution window, including provider processing and any queue time.\n  - term: Validation and persistence\n  - definition: Not recorded\n  - definition: This stage did not save a separate finalisation timestamp.\n  - group: How timing is measured",
+    "focus": [
+      "Open duration",
+      "Close duration breakdown",
+      "How timing is measured (reverse wrap)",
+      "Close duration breakdown (forward wrap)",
+      "How timing is measured",
+      "How timing is measured (rerender)",
+      "Close duration breakdown"
+    ]
+  },
+  {
+    "width": 1180,
+    "zoom": 2,
+    "metrics": {
+      "width": 590,
+      "dpr": 2,
+      "visualScale": 1,
+      "cssZoom": "1",
+      "transform": "none"
+    },
+    "mode": "partial",
+    "semantics": "- dialog \"Synthetic rebalance stage with a deliberately long accessible title for keyboard and narrow layout verification\":\n  - banner:\n    - paragraph: Duration breakdown\n    - heading \"Synthetic rebalance stage with a deliberately long accessible title for keyboard and narrow layout verification\" [level=3]\n    - paragraph: Total wall-clock duration\n    - paragraph: 00:01:49\n    - paragraph: The complete execution window includes provider processing and queue time. Separate phases are shown only where timestamps were recorded.\n    - button \"Close duration breakdown\"\n  - term: Stage setup and LLM dispatch\n  - definition: 00:00:09\n  - definition: Time between the stage starting and the first LLM job being created.\n  - term: LLM execution · Fixture provider / Exact fixture model\n  - definition: 00:01:30\n  - definition: \"Job #1 · failed · includes queue and provider processing time.\"\n  - term: LLM execution · Second provider / Second exact model\n  - definition: 00:01:20\n  - definition: \"Job #2 · completed · includes queue and provider processing time.\"\n  - term: Validation, aggregation and finalisation\n  - definition: 00:00:10\n  - definition: Time after the last LLM job update until the stage reached its recorded end.\n  - group: How timing is measured",
+    "focus": [
+      "Open duration",
+      "Close duration breakdown",
+      "How timing is measured (reverse wrap)",
+      "Close duration breakdown (forward wrap)",
+      "How timing is measured",
+      "How timing is measured (rerender)",
+      "Close duration breakdown"
+    ]
+  }
+]

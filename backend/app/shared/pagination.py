@@ -26,10 +26,16 @@ class PagedResult(Generic[T]):
         return max(1, (self.total + self.limit - 1) // self.limit)
 
     def to_dict(self) -> dict:
+        # Keep both names during the API contract transition. Existing backend
+        # consumers use ``limit`` while the typed frontend pagination guard uses
+        # ``size``. Omitting ``size`` makes otherwise-valid /runs responses fail
+        # schema validation and aborts automated-rebalance stages before their
+        # result hydration can complete.
         return {
             "items": self.items,
             "total": self.total,
             "page": self.page,
             "limit": self.limit,
+            "size": self.limit,
             "pages": self.pages,
         }

@@ -6,8 +6,16 @@ import type {
   ZerodhaThreatAnalysis,
 } from "@/types/api";
 import type { SwingTradeMarket } from "@/lib/swingTrade";
+import { deduplicateStageRunInputs } from "@/lib/rebalanceStageInputs";
 
 export type RebalancePortfolioKey = "zerodha" | "indmoneyUs";
+
+// Shared by the prompt producer and the input preview's section extraction.
+export const REBALANCE_INPUT_SECTION_MARKERS = {
+  portfolio: "## 1. Latest Portfolio Snapshot",
+  swing: "## 2. Completed Swing Trade Runs Explicitly Selected",
+  threats: "## 3. Latest Threats Report",
+} as const;
 
 type PortfolioSnapshot =
   | ZerodhaPortfolioSnapshotDetail
@@ -15,42 +23,34 @@ type PortfolioSnapshot =
   | null;
 type ThreatAnalysis = ZerodhaThreatAnalysis | IndMoneyUsThreatAnalysis | null;
 
-const SWING_COLUMN_LEGEND = [
-  "LLM=LLM Name + Model",
-  "Ex=Exchange Symbol",
-  "Sym=Stock Symbol",
-  "Name=Stock Name",
-  "Setup=Technical Setup",
-  "Entry=Entry Range",
-  "SL=Stop Loss",
-  "Tgt=Target",
-  "Src=Analyst Source",
-  "Units=Units to Buy",
-  "Px=Price per Unit",
-  "Amt=Total Buy Amount",
-  "Upside=Upside Horizon (%)",
-  "Wks=Weeks",
-  "Conf=Confidence Score (0-100)",
-  "Notes=Rationale Cruxx",
-  "TechMT=Rationale - Technical Setup (Medium Term)",
-  "TechLT=Rationale - Technical Setup (Long Term)",
-  "FundST=Rationale - Fundamentals Short Term",
-  "FundMLT=Rationale - Fundamentals Medium/Long Term",
-  "TechST=Rationale Technical Setup Short Term 1–3 Months",
-  "Run=Run #",
-  "Date=Run Date",
-  "Time=Run Time",
-  "LLMShort=LLM",
-].join(" | ");
+export function assertIndmoneyHoldingsSnapshot(snapshot: IndMoneyUsPortfolioSnapshotDetail | null) {
+  const instruction = "Open INDmoney > My US Stocks and paste the complete Current Holdings section, including quantities. The Explore page is not a portfolio snapshot.";
+  if (!snapshot?.holdings.length || snapshot.parse_status === "unparsed") {
+    throw new Error(`No INDmoney holdings could be parsed. ${instruction}`);
+  }
+  if (snapshot.reported_holdings_count != null && snapshot.reported_holdings_count !== snapshot.holdings.length) {
+    throw new Error(`The INDmoney holdings snapshot is incomplete. ${instruction}`);
+  }
+  const symbols = new Set<string>();
+  for (const holding of snapshot.holdings) {
+    const symbol = holding.symbol.trim().toUpperCase();
+    if (!symbol || symbols.has(symbol) || typeof holding.quantity !== "number" || !Number.isFinite(holding.quantity) || holding.quantity < 0) {
+      throw new Error(`INDmoney holdings have missing quantities or ambiguous symbols. ${instruction}`);
+    }
+    symbols.add(symbol);
+  }
+}
 
-const SWING_TABLE_HEADER_MARKERS = [
-  "llm name",
-  "exchange symbol",
-  "stock symbol",
-  "technical setup",
-  "confidence score",
-  "rationale",
-];
+export function assertZerodhaNumericExposure(snapshot: ZerodhaPortfolioSnapshotDetail | null) {
+  if (!snapshot) return; // Existing no-portfolio workflow remains supported.
+  const finite = (value: unknown) => typeof value === "number" && Number.isFinite(value);
+  if (!finite(snapshot.available_margin) || !Array.isArray(snapshot.holdings) || !Array.isArray(snapshot.positions?.net)
+      || snapshot.holdings_count !== snapshot.holdings.length
+      || !snapshot.holdings.every(holding => [holding.quantity, holding.t1_quantity, holding.last_price].every(finite))
+      || !snapshot.positions.net.every(position => [position.quantity, position.last_price, position.value].every(finite))) {
+    throw new Error("Zerodha snapshot has unknown numeric exposure or available margin. Use a complete portfolio snapshot before analysis.");
+  }
+}
 
 const MARKET_COPY: Record<
   SwingTradeMarket,
@@ -224,6 +224,15 @@ function parseApiDate(value?: string | null) {
   return Number.isFinite(parsed.getTime()) ? parsed : null;
 }
 
+// Capture age is evidence about a saved record, never proof of price freshness.
+export function describeRebalanceSourceAge(value: string | null | undefined, now: Date) {
+  const parsed = parseApiDate(value);
+  if (!parsed) return `source timestamp: ${value || "unknown"}; age: unknown`;
+  const elapsed = now.getTime() - parsed.getTime();
+  if (!Number.isFinite(elapsed) || elapsed < 0) return `source timestamp: ${value}; age: unknown (future or invalid reference time)`;
+  return `source timestamp: ${value}; age: ${elapsed} ms at ${now.toISOString()}`;
+}
+
 function formatDateTimeForMarket(date: Date, market: SwingTradeMarket) {
   const timeZone = MARKET_COPY[market].timezone;
   const local = date.toLocaleString("en-IN", {
@@ -304,15 +313,19 @@ Convert my current portfolio into the best possible aggressive 1–3 month swing
 
 Inputs you will receive in this prompt:
 1. Latest portfolio snapshot with current units.
-2. Consolidated LLM swing-trade recommendation tables from all completed ${copy.label} swing-trade runs created after the previous market close.
+2. Consolidated LLM swing-trade recommendation tables from the completed ${copy.label} swing-trade runs explicitly selected for this input bundle. Selections may be historical; inspect their source timestamps.
 3. Latest Threats report output.
 
+[REBALANCE_UNIVERSE_V1]
 Capital / Portfolio Rules:
 - MANDATORY coverage: output exactly one decision row for EVERY stock currently present in the Latest Portfolio Snapshot, even if the decision is Hold. Never omit a current holding because it is weak, unchanged, small, low-conviction, or already discussed in threats.
 - Review existing holdings and decide whether each one is Hold, Buy/Add, Trim, or Sell All.
-- Evaluate EVERY stock appearing in the attached swing-trade recommendation tables as a possible fresh Buy New candidate.
+- Evaluate EVERY stock appearing in the attached swing-trade recommendation tables. If its exchange/symbol identity is already in the Latest Portfolio Snapshot, include it only in that holding's single Hold, Buy/Add, Trim, or Sell All decision; never label it Buy New or add a second row. For a US snapshot labeled US, a matching symbol at a known US venue is the same existing holding, not a fresh candidate. For a US snapshot, the Market column identifies the country only. Carry the listing exchange from the selected Swing output for the same security and share class into Exchange Symbol. If no selected output identifies its venue, verify the listing before assigning one. Never output US as an exchange or emit a second row for a market alias. Keep conflicting concrete listings distinct.
+- Consider Buy New only for candidates not already present in the Latest Portfolio Snapshot.
 - Include Buy New rows for the swing-trade candidates that are stronger than existing portfolio names after considering current portfolio concentration, threats, catalysts, momentum, and opportunity cost.
-- If a swing-trade candidate is not selected for fresh buy, exclude it; but all current holdings must still have one row.
+- Output one decision row for EVERY exact exchange/symbol identity in the union of current holdings and ALL supplied Swing tables, including candidates not selected for fresh buy. Never omit a candidate.
+- For an unheld candidate not selected for purchase, use Hold with Current Units, Units Change, Final Units, Units to Buy and Total Buy Amount all 0; provide your actual non-buy reason in Rationale Cruxx. This is a non-buy decision, not a holding or executable order.
+- Preserve each source exchange/symbol identity. NSE and BSE listings remain separate; an association to a held company is context only, never permission to reuse another venue’s quote.
 - Use aggressive but sensible swing-trade logic.
 - Prefer liquid ${exchangeExamples} stocks with strong volume, momentum, catalyst, and relative strength.
 - Do not recommend too many names just for diversification.
@@ -356,9 +369,13 @@ Formatting Rules:
 - Rationale Score rule: every row MUST include a non-blank numeric value in every Score Rationale / rationale-score column. Use only one of these 7 integer choices: -3 (minus three)=very bearish, -2 (minus two)=bearish, -1 (minus one)=slightly bearish, 0=neutral, 1=slightly bullish, 2=bullish, 3=very bullish. Do not return blanks, dashes, N/A, decimals, ranges, percentages, words, or values outside these integers. Each rationale score must justify its adjacent rationale.
 - Before finalizing the table, audit every Score Rationale cell; if any score is missing, infer the best -3 to 3 score from the adjacent rationale and fill it. A table with blank rationale scores is invalid.
 
-- Before writing the final table, internally build the complete current-holding symbol checklist from the Latest Portfolio Snapshot and verify every symbol appears exactly once in the output table.
+- Before writing the final table, internally build the complete holdings-plus-all-Swing exact exchange/symbol checklist from the Latest Portfolio Snapshot and verify every symbol appears exactly once in the output table.
 - Rank rows by action priority: Sell All / Trim first, then Buy New / Add, then Hold.
 - Keep rationale concise but meaningful.
+- Put the action label only in Action; put the signed numeric unit delta only in Units Change; never swap these two columns.
+- Current Units, Units Change, Final Units, Units to Buy, Price Per Unit, Total Buy Amount, Upside Horizon, Weeks, confidence, and rationale-score cells must be numeric-only.
+- Entry Range must contain only the trade entry price/range (example: 145-148), not the setup narrative.
+- Technical Setup must contain the chart/setup narrative or label, not the entry price range.
 - Upside Horizon (% return) must be numeric percent value only (example: 12.5).
 - Weeks must be a numeric average of the expected target-achievement range (example: for 6-8 weeks, write 7).
 - Mention key reason clearly: breakout, weak momentum, better opportunity, sector tailwind, earnings catalyst, overextension, support breach, consolidation, etc.
@@ -366,8 +383,7 @@ Formatting Rules:
 - For Sell All, Units Change must equal negative Current Units and Final Units must be 0.
 - For Hold, Units Change must be 0 and Final Units must equal Current Units.
 - Do not include any stock unless it is from my current holdings or from the attached LLM recommendation tables.
-- Output as many complete rows as you can. A complete table with every current holding is preferred, but a partial table with the generated rows is acceptable when some rows cannot be completed.
-- Never omit the table solely because some rows are unavailable; partial rows can still be used by later stages.
+- Include every current holding when possible. If some rows cannot be completed, return all usable rows and identify the missing holdings. Never invent values for missing holdings.
 - Use only factual/current market intelligence available online and the provided LLM tables.
 - Use numeric-only values in cells for all numeric fields (no ${copy.currency}/% text in values).
 - Be decisive. Avoid vague comments.
@@ -391,71 +407,26 @@ function asMarkdownTable(
   ].join("\n");
 }
 
-function normalizeTableCell(value: string) {
-  return value
-    .toLowerCase()
-    .replace(/\s+/g, " ")
-    .replace(/[+()–—-]/g, " ")
-    .trim();
+function preserveSwingRecommendationResponse(response?: string | null) {
+  // Historical and current outputs may have different schemas. Keep each
+  // source's headers, scores, repeated rows and prose with its original cells.
+  return response?.trim() ? response : "_No response captured yet._";
 }
 
-function isMarkdownSeparatorRow(line: string) {
-  const trimmed = line.trim();
-  return /^\|?[\s:|\-]+\|?$/.test(trimmed) && trimmed.includes("---");
-}
-
-function isSwingRecommendationHeader(line: string) {
-  const normalized = normalizeTableCell(line);
-  return SWING_TABLE_HEADER_MARKERS.every((marker) =>
-    normalized.includes(marker),
-  );
-}
-
-function isSwingRecommendationTitle(line: string) {
-  const normalized = line.toLowerCase();
-  return (
-    normalized.startsWith("##") &&
-    normalized.includes("how to invest") &&
-    normalized.includes("generated by")
-  );
-}
-
-function compactSwingRecommendationResponse(response?: string | null) {
-  if (!response?.trim()) return "_No response captured yet._";
-
-  const compactedLines: string[] = [];
-  const seenContentLines = new Set<string>();
-  let previousWasBlank = false;
-
-  for (const rawLine of response.split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (
-      isSwingRecommendationTitle(line) ||
-      isSwingRecommendationHeader(line) ||
-      isMarkdownSeparatorRow(line)
-    ) {
-      continue;
-    }
-
-    if (!line) {
-      if (!previousWasBlank && compactedLines.length > 0) {
-        compactedLines.push("");
-      }
-      previousWasBlank = true;
-      continue;
-    }
-
-    const compactLine = line.replace(/\s+/g, " ");
-    const normalizedLine = normalizeTableCell(compactLine);
-    if (seenContentLines.has(normalizedLine)) {
-      continue;
-    }
-    seenContentLines.add(normalizedLine);
-    compactedLines.push(compactLine);
-    previousWasBlank = false;
-  }
-
-  return compactedLines.join("\n").trim() || "_No response captured yet._";
+export function formatRebalanceFunds(market: SwingTradeMarket, snapshot: PortfolioSnapshot) {
+  const field = market === "india" ? "available_margin" : "wallet_balance";
+  const value = snapshot && field in snapshot
+    ? (snapshot as unknown as Record<string, unknown>)[field] : undefined;
+  const amount = typeof value === "number" && Number.isFinite(value) ? String(value) : "Unknown (missing or invalid)";
+  return [
+    "Funds context contract: rebalance-funds/v1",
+    `Source: ${market === "india" ? "Zerodha" : "INDmoney US"} portfolio snapshot.${field}; currency: ${market === "india" ? "INR" : "USD"}; stored value: ${amount}`,
+    `Snapshot date: ${snapshot?.snapshot_date ?? "Unknown"}; captured at: ${snapshot?.captured_at ?? "Unknown"}. Snapshot values are not a live funds refresh.`,
+    market === "india"
+      ? "Available margin is not verified cash or a deployable budget. Snapshot ingestion can default unavailable margin to zero; a stored zero does not prove broker-confirmed zero. Wallet cash and buying power are unknown."
+      : "Wallet balance is the captured wallet value, not verified buying power or a deployable budget. Buying power and margin are unknown.",
+    "Budget policy: no deployable-budget rule is established by this contract. Do not equate cash, margin or buying power, infer a budget from holdings value, or treat Swing ideation capital as actual funds. Funded sizing remains unverified; existing order eligibility and affordability checks remain required.",
+  ].join("\n");
 }
 
 function formatPortfolioSnapshot(
@@ -469,23 +440,27 @@ function formatPortfolioSnapshot(
     const rows = indiaSnapshot.holdings.map((holding) => [
       holding.exchange,
       holding.tradingsymbol,
-      holding.quantity,
+      holding.quantity != null && holding.t1_quantity != null ? holding.quantity + holding.t1_quantity : null,
       holding.average_price,
       holding.last_price,
-      holding.market_value,
+      holding.quantity != null && holding.t1_quantity != null && holding.last_price != null ? (holding.quantity + holding.t1_quantity) * holding.last_price : null,
       holding.pnl,
       holding.day_change_percentage,
+      holding.t1_quantity,
+      holding.quantity,
     ]);
-    return `Snapshot date: ${indiaSnapshot.snapshot_date}; captured at: ${indiaSnapshot.captured_at}\n\n${asMarkdownTable(
+    return `Snapshot date: ${indiaSnapshot.snapshot_date}; captured at: ${indiaSnapshot.captured_at}\nCurrent Units includes settled + T1 exposure. T1 is not automatically sellable; order eligibility is separately checked. Exposure Market Value is total exposure times the captured last price.\n\n${asMarkdownTable(
       [
         "Exchange",
         "Stock Symbol",
         "Current Units",
         "Average Price",
         "Last Price",
-        "Market Value",
+        "Exposure Market Value (settled + T1)",
         "PnL",
         "Day Change %",
+        "T1 Units",
+        "Settled Units",
       ],
       rows,
     )}`;
@@ -506,7 +481,7 @@ function formatPortfolioSnapshot(
     ]);
     return `Snapshot date: ${usSnapshot.snapshot_date}; captured at: ${usSnapshot.captured_at}\n\n${asMarkdownTable(
       [
-        "Exchange",
+        "Market",
         "Stock Symbol",
         "Company Name",
         "Current Units",
@@ -559,13 +534,13 @@ function formatSwingRuns(
   market: SwingTradeMarket,
   displayMode: "full" | "summary",
 ) {
-  const previousCloseLine = `Previous market close cutoff: ${formatPreviousMarketClose(
+  const previousCloseLine = `Estimated weekday close cutoff (exchange holidays and early closes are not validated): ${formatPreviousMarketClose(
     market,
     previousClose,
   )}`;
 
   if (runs.length === 0) {
-    return `${previousCloseLine}\n\n_No completed ${MARKET_COPY[market].label} swing-trade runs found after previous market close._`;
+    return `${previousCloseLine}\n\n_No completed ${MARKET_COPY[market].label} swing-trade runs selected._`;
   }
 
   if (displayMode === "summary") {
@@ -580,7 +555,7 @@ function formatSwingRuns(
       const jobs = run.run_jobs
         .map((link) => {
           const job = link.job;
-          return `### ${getSwingRunLabel(run, market)} | ${job.provider}/${job.model} | ${job.status}\n${compactSwingRecommendationResponse(
+          return `### ${getSwingRunLabel(run, market)} | Job #${job.id} | ${job.provider}/${job.model} | ${job.status}\n${preserveSwingRecommendationResponse(
             job.response,
           )}`;
         })
@@ -593,7 +568,7 @@ function formatSwingRuns(
 
   return [
     previousCloseLine,
-    `Columns for all compacted swing rows: ${SWING_COLUMN_LEGEND}`,
+    "Each source response below retains its own headers and column order; do not interpret one source using another source’s schema.",
     formattedRuns,
   ].join("\n\n");
 }
@@ -605,6 +580,7 @@ export function buildRebalanceInputBundle({
   threats,
   previousClose,
   swingDisplayMode = "full",
+  now = new Date(),
 }: {
   market: SwingTradeMarket;
   portfolio: PortfolioSnapshot;
@@ -612,20 +588,33 @@ export function buildRebalanceInputBundle({
   threats: ThreatAnalysis;
   previousClose: Date;
   swingDisplayMode?: "full" | "summary";
+  now?: Date;
 }) {
+  if (market === "us") assertIndmoneyHoldingsSnapshot(portfolio as IndMoneyUsPortfolioSnapshotDetail | null);
+  if (market === "india") assertZerodhaNumericExposure(portfolio as ZerodhaPortfolioSnapshotDetail | null);
   const copy = MARKET_COPY[market];
+  const uniqueSwingRuns = deduplicateStageRunInputs(swingRuns, { market, stage: "swing" });
   return `# Inputs considered at current time
 
 Market: ${copy.label}
-Previous market close cutoff: ${formatPreviousMarketClose(market, previousClose)}
-Generated at: ${new Date().toISOString()}
+Estimated weekday close cutoff (exchange holidays and early closes are not validated): ${formatPreviousMarketClose(market, previousClose)}
+Generated at: ${now.toISOString()}
+Capture and creation ages below describe saved records. Price as-of freshness and exchange-session age are unknown unless independently validated against source price timestamps and an exchange calendar. A recent capture does not prove current prices. Explicit selections may be historical.
 
-## 1. Latest Portfolio Snapshot
+${REBALANCE_INPUT_SECTION_MARKERS.portfolio}
+Portfolio capture: ${describeRebalanceSourceAge(portfolio?.captured_at, now)}
+Price as-of and exchange-session age: unknown; capture time does not prove price freshness.
 ${formatPortfolioSnapshot(market, portfolio)}
 
-## 2. Completed Swing Trade Runs After Previous Market Close
-${formatSwingRuns(swingRuns, previousClose, market, swingDisplayMode)}
+${formatRebalanceFunds(market, portfolio)}
 
-## 3. Latest Threats Report
+${REBALANCE_INPUT_SECTION_MARKERS.swing}
+${uniqueSwingRuns.map((run) => `Swing run #${run.id} creation: ${describeRebalanceSourceAge(run.created_at, now)}`).join("\n")}
+Explicit selections may be historical. Run creation does not prove price freshness.
+${formatSwingRuns(uniqueSwingRuns, previousClose, market, swingDisplayMode)}
+
+${REBALANCE_INPUT_SECTION_MARKERS.threats}
+Threat report creation: ${describeRebalanceSourceAge(threats?.created_at, now)}
+Report creation does not prove underlying price freshness.
 ${formatPortfolioThreats(threats)}`;
 }

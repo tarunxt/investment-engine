@@ -1,20 +1,382 @@
-from datetime import datetime
-from typing import Optional
+from __future__ import annotations
 
-from pydantic import BaseModel, field_validator
+from datetime import datetime
+from typing import Any, Optional
+
+from pydantic import BaseModel, Field, field_validator, model_validator
+from typing import Literal
 
 from app.domains.jobs.schemas import JobResponse
+from app.domains.jobs.output_sources import MAX_OUTPUT_SOURCE_JOBS, OutputSourceJobReference
+from app.domains.polymarket.stage2_models import (
+    EvidencePacketV2,
+    Stage2MarketContext,
+)
 from app.shared.types import JobStatus
+from app.shared.exceptions import ValidationException
+from app.domains.jobs.resource_policy import MAX_PROMPT_CHARS, MAX_TARGETS, validate_prompt
+from app.domains.jobs.resource_validation import MODEL_IDENTIFIER_MAX_CHARS
+from app.domains.runs.side_effect_policy import RunSideEffectPolicy
 
 
 class RunModelTarget(BaseModel):
+    provider: str = Field(max_length=MODEL_IDENTIFIER_MAX_CHARS)
+    model: str = Field(max_length=MODEL_IDENTIFIER_MAX_CHARS)
+
+
+class PolymarketEventEvidenceOptions(BaseModel):
+    require_fresh_internet_evidence: bool = True
+    allow_evidence_grounded_non_web_models: bool = False
+
+
+class PolymarketEventQuestionPayload(BaseModel):
+    question_ref: str
+    question_id: str
+    market_id: str | None = None
+    condition_id: str | None = None
+    question: str
+    close_time: str | None = None
+    closing_time: str | None = None
+    close_time_et: str | None = None
+    current_time_utc: str
+    current_time_et: str
+    deadline_et: str | None = None
+    hours_remaining: float | None = None
+    deadline_source: str | None = None
+    title_date_hint: str | None = None
+    title_deadline_et_assumption: str | None = None
+    category: str
+    outcomes: list[str] = Field(default_factory=list)
+    current_yes_odds: float | None = None
+    current_no_odds: float | None = None
+    market_url: str | None = None
+    slug: str | None = None
+    market_slug: str | None = None
+    event_slug: str | None = None
+    polymarket_rules: str | None = None
+    polymarket_market_context: str | None = None
+    polymarket_resolution_source: str | None = None
+    preflight_evidence_block: str | None = None
+    evidence_packet_v2: EvidencePacketV2 | None = None
+    stage2_context: Stage2MarketContext | None = None
+
+
+class PolymarketEventRunContext(BaseModel):
+    kind: Literal["polymarket_bullpen_event"] = "polymarket_bullpen_event"
+    prompt_template: str
+    question_payload: list[PolymarketEventQuestionPayload]
+    evidence_options: PolymarketEventEvidenceOptions = Field(
+        default_factory=PolymarketEventEvidenceOptions
+    )
+    execution_options: BullpenLlmExecutionOptions = Field(
+        default_factory=lambda: BullpenLlmExecutionOptions()
+    )
+    prepared_context: PreparedPolymarketEventContext | None = None
+
+
+BullpenLlmExecutionMode = Literal["chunked_parallel", "single_combined"]
+
+
+class BullpenLlmExecutionOptions(BaseModel):
+    execution_mode: BullpenLlmExecutionMode = "chunked_parallel"
+    events_per_prompt: int = Field(default=20, ge=1, le=100)
+    max_concurrent_requests: int = Field(default=6, ge=1)
+    target_count: int = Field(default=1, ge=1)
+    prompt_template_hash: str | None = None
+
+    @field_validator("events_per_prompt", mode="before")
+    @classmethod
+    def validate_events_per_prompt(cls, value: object) -> int:
+        if isinstance(value, bool):
+            raise ValueError("events_per_prompt must be an integer from 1 to 100")
+        if isinstance(value, float):
+            if not value.is_integer():
+                raise ValueError("events_per_prompt must be an integer from 1 to 100")
+            value = int(value)
+        if isinstance(value, str):
+            normalized = value.strip()
+            if not normalized:
+                raise ValueError("events_per_prompt must be an integer from 1 to 100")
+            if any(char in normalized for char in {".", "e", "E"}):
+                raise ValueError("events_per_prompt must be an integer from 1 to 100")
+            try:
+                value = int(normalized)
+            except ValueError as exc:
+                raise ValueError(
+                    "events_per_prompt must be an integer from 1 to 100"
+                ) from exc
+        if not isinstance(value, int):
+            raise ValueError("events_per_prompt must be an integer from 1 to 100")
+        return value
+
+
+class PreparedPolymarketEventContext(BaseModel):
+    question_payload: list[PolymarketEventQuestionPayload] = Field(default_factory=list)
+    runtime_metadata: dict[str, object] = Field(default_factory=dict)
+
+
+class AutoRebalanceRunReservationRequest(BaseModel):
+    side_effect_policy: RunSideEffectPolicy | None = None
+    portfolio: str
+
+    @field_validator("portfolio")
+    @classmethod
+    def normalize_portfolio(cls, value: str) -> str:
+        normalized = value.strip()
+        if normalized not in {"india", "indmoney_us"}:
+            raise ValueError("portfolio must be india or indmoney_us")
+        return normalized
+
+
+class AutoRebalanceRunReservationResponse(BaseModel):
+    side_effect_policy: RunSideEffectPolicy | None = None
+    portfolio: str
+    sequence: int
+    label: str
+
+
+class AutoRebalanceCompletionEmailRequest(BaseModel):
+    portfolio: str
+    sequence: int
+    label: str
+    completed_at: datetime
+    total_cost_inr: float | None = None
+    total_llm_time: str | None = None
+    stages_completed: list[str] = Field(default_factory=list)
+
+    @field_validator("portfolio")
+    @classmethod
+    def normalize_portfolio(cls, value: str) -> str:
+        normalized = value.strip()
+        if normalized not in {"india", "indmoney_us"}:
+            raise ValueError("portfolio must be india or indmoney_us")
+        return normalized
+
+    @field_validator("sequence")
+    @classmethod
+    def sequence_positive(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("sequence must be positive")
+        return value
+
+    @field_validator("label")
+    @classmethod
+    def label_not_empty(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("label is required")
+        return normalized[:128]
+
+
+AutoRebalanceStageKey = Literal[
+    "sync", "threats", "swing", "rebalance", "technical", "actionables"
+]
+
+
+class AutoRebalanceStageUpdateRequest(BaseModel):
+    status: Literal[
+        "queued",
+        "processing",
+        "completed",
+        "partial",
+        "failed",
+        "skipped",
+        "paused",
+        "cancelled",
+        "interrupted",
+    ]
+    run_id: int | None = Field(default=None, ge=1)
+    job_id: int | None = Field(default=None, ge=1)
+    summary: dict[str, Any] = Field(default_factory=dict)
+    error_message: str | None = Field(default=None, max_length=10_000)
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+
+
+class AutoRebalanceStageResponse(BaseModel):
+    stage: AutoRebalanceStageKey
+    status: str
+    run_id: int | None = None
+    job_id: int | None = None
+    summary: dict[str, Any] = Field(default_factory=dict)
+    error_message: str | None = None
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    provider_count: int = 0
+    completed_provider_count: int = 0
+    partial_provider_count: int = 0
+    failed_provider_count: int = 0
+    estimated_cost: float = 0
+
+
+class OutputProvenanceIdentity(BaseModel):
+    provider: str
+    model: str | None = None
+
+
+class OutputProvenanceResponse(BaseModel):
+    source: Literal["api_usage_attempt_events"]
+    identities: list[OutputProvenanceIdentity] = Field(default_factory=list)
+    observed_from: datetime | None = None
+    observed_to: datetime | None = None
+
+
+class AutoRebalanceJobDetailResponse(BaseModel):
+    id: int
     provider: str
     model: str
+    status: str
+    prompt: str
+    response: str | None = None
+    error_message: str | None = None
+    tokens_in: int | None = None
+    tokens_out: int | None = None
+    estimated_cost: float | None = None
+    web_search_used: bool | None = None
+    web_search_queries: list[str] | None = None
+    web_sources: list[str] | None = None
+    runtime_metadata_json: dict[str, Any] | None = None
+    output_provenance: OutputProvenanceResponse | None = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class AutoRebalanceRunDetailResponse(BaseModel):
+    id: int
+    status: str
+    prompt: str
+    created_at: datetime
+    updated_at: datetime
+    jobs: list[AutoRebalanceJobDetailResponse] = Field(default_factory=list)
+
+
+class AutoRebalanceHistoryItemResponse(BaseModel):
+    side_effect_policy: RunSideEffectPolicy | None = None
+    portfolio: str
+    sequence: int
+    label: str
+    status: str
+    current_stage: AutoRebalanceStageKey | None = None
+    error_message: str | None = None
+    created_at: datetime
+    updated_at: datetime
+    completed_at: datetime | None = None
+    total_estimated_cost: float = 0
+    stages: list[AutoRebalanceStageResponse] = Field(default_factory=list)
+
+
+class AutoRebalanceHistoryListResponse(BaseModel):
+    items: list[AutoRebalanceHistoryItemResponse] = Field(default_factory=list)
+    total: int = 0
+
+
+class AutoRebalanceHistoryDetailResponse(AutoRebalanceHistoryItemResponse):
+    runs: list[AutoRebalanceRunDetailResponse] = Field(default_factory=list)
+    standalone_jobs: list[AutoRebalanceJobDetailResponse] = Field(default_factory=list)
+
+
+FinalActionableMarket = Literal["india", "us"]
+FinalActionableCoverageStatus = Literal[
+    "suggested",
+    "not_mentioned",
+    "not_in_input_universe",
+    "run_failed",
+    "parse_failed",
+]
+
+
+class FinalActionableHistoryCreateItem(BaseModel):
+    workflow_id: int | None = Field(default=None, ge=1)
+    auto_rebalance_sequence: int | None = Field(default=None, ge=1)
+    rebalance_run_id: int = Field(ge=1)
+    market: FinalActionableMarket
+    stock_symbol: str = Field(min_length=1, max_length=64)
+    stock_name: str | None = Field(default=None, max_length=255)
+    covered_at: datetime
+    action: str | None = Field(default=None, max_length=32)
+    score: float | None = None
+    consensus_numerator: int | None = Field(default=None, ge=0)
+    consensus_denominator: int | None = Field(default=None, ge=0)
+    historical_current_units: float | None = None
+    historical_current_value: float | None = None
+    action_units: float | None = None
+    amount: float | None = None
+    technical_scan_run_id: int | None = Field(default=None, ge=1)
+    formula_version: str = Field(default="score-matrix-v1", min_length=1, max_length=64)
+    formula_inputs_json: dict[str, Any] | None = None
+    source_run_ids_json: list[int] = Field(default_factory=list)
+    snapshot_json: dict[str, Any] | None = None
+    coverage_status: FinalActionableCoverageStatus = "suggested"
+
+    @field_validator("stock_symbol")
+    @classmethod
+    def normalize_stock_symbol(cls, value: str) -> str:
+        normalized = value.strip().upper()
+        if not normalized:
+            raise ValueError("stock_symbol is required")
+        return normalized
+
+
+class FinalActionableHistoryBulkCreateRequest(BaseModel):
+    items: list[FinalActionableHistoryCreateItem] = Field(min_length=1, max_length=500)
+
+
+class FinalActionableHistoryBulkCreateResponse(BaseModel):
+    inserted: int
+    skipped: int
+    coverage_inserted: int = 0
+
+
+class FinalActionableHistoryItemResponse(BaseModel):
+    id: int
+    workflow_id: int | None = None
+    auto_rebalance_sequence: int | None = None
+    rebalance_run_id: int
+    market: FinalActionableMarket
+    stock_symbol: str
+    stock_name: str | None = None
+    covered_at: datetime
+    action: str | None = None
+    score: float | None = None
+    consensus_numerator: int | None = None
+    consensus_denominator: int | None = None
+    historical_current_units: float | None = None
+    historical_current_value: float | None = None
+    action_units: float | None = None
+    amount: float | None = None
+    technical_scan_run_id: int | None = None
+    formula_version: str
+    formula_inputs_json: dict[str, Any] | None = None
+    source_run_ids_json: list[int] | None = None
+    snapshot_json: dict[str, Any] | None = None
+    coverage_status: FinalActionableCoverageStatus
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class FinalActionableHistoryListResponse(BaseModel):
+    items: list[FinalActionableHistoryItemResponse] = Field(default_factory=list)
+    next_cursor: str | None = None
+    has_more: bool = False
+
+
+class FinalActionableHistoryBackfillResponse(BaseModel):
+    status: Literal["queued", "already_queued"]
+    task_id: str | None = None
+
+
+from app.domains.recommendation_audit.schemas import AuditRunContext
 
 
 class RunCreate(BaseModel):
-    prompt: str
-    targets: list[RunModelTarget]
+    recommendation_audit: AuditRunContext | None = None
+    prompt: str = Field(max_length=MAX_PROMPT_CHARS)
+    targets: list[RunModelTarget] = Field(min_length=1, max_length=MAX_TARGETS)
+    polymarket_event_context: PolymarketEventRunContext | None = None
+    output_source_jobs: list[OutputSourceJobReference] | None = Field(default=None, max_length=MAX_OUTPUT_SOURCE_JOBS)
     prompt_id: Optional[int] = None
     scheduled_at: Optional[datetime] = None
     # Auto-export settings
@@ -24,6 +386,17 @@ class RunCreate(BaseModel):
     export_investment_amount: Optional[str] = None
     export_title: Optional[str] = None
     allow_parallel: bool = False
+    auto_rebalance_portfolio: Optional[str] = None
+    auto_rebalance_sequence: Optional[int] = None
+    auto_rebalance_label: Optional[str] = None
+
+    @field_validator("prompt")
+    @classmethod
+    def bounded_prompt(cls, value):
+        try:
+            return validate_prompt(value)
+        except ValidationException as exc:
+            raise ValueError(exc.message) from None
 
     @field_validator("targets")
     @classmethod
@@ -31,6 +404,31 @@ class RunCreate(BaseModel):
         if not v:
             raise ValueError("At least one (provider, model) target is required.")
         return v
+
+    @field_validator("auto_rebalance_portfolio")
+    @classmethod
+    def normalize_auto_rebalance_portfolio(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if normalized not in {"india", "indmoney_us"}:
+            raise ValueError("auto_rebalance_portfolio must be india or indmoney_us")
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_auto_rebalance_metadata(self) -> "RunCreate":
+        if self.output_source_jobs is not None and self.polymarket_event_context is not None:
+            raise ValueError("Equity output sources cannot be combined with Polymarket context")
+        metadata_values = [
+            self.auto_rebalance_portfolio,
+            self.auto_rebalance_sequence,
+            self.auto_rebalance_label,
+        ]
+        if any(value is not None for value in metadata_values) and not all(
+            value is not None for value in metadata_values
+        ):
+            raise ValueError("auto rebalance metadata requires portfolio, sequence, and label")
+        return self
 
 
 class RunJobResponse(BaseModel):
@@ -61,8 +459,18 @@ class RunResponse(BaseModel):
     export_error: Optional[str] = None
     exported_at: Optional[datetime] = None
     exported_sheet_url: Optional[str] = None
+    auto_rebalance_portfolio: Optional[str] = None
+    auto_rebalance_sequence: Optional[int] = None
+    auto_rebalance_label: Optional[str] = None
     created_at: datetime
     updated_at: datetime
+
+    @model_validator(mode="after")
+    def reflect_partial_jobs(self):
+        statuses = {link.job.status for link in self.run_jobs}
+        if self.status in {JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.PARTIAL} and JobStatus.PARTIAL in statuses and not statuses.intersection({JobStatus.PENDING, JobStatus.PROCESSING, JobStatus.SCHEDULED}):
+            self.status = JobStatus.PARTIAL
+        return self
 
     model_config = {"from_attributes": True}
 
@@ -76,10 +484,14 @@ class RunListJobResponse(BaseModel):
     tokens_in: Optional[int] = None
     tokens_out: Optional[int] = None
     estimated_cost: Optional[float] = None
+    request_context_json: Optional[dict[str, Any]] = None
     export_status: Optional[str] = None
     export_error: Optional[str] = None
     exported_at: Optional[datetime] = None
     exported_sheet_url: Optional[str] = None
+    auto_rebalance_portfolio: Optional[str] = None
+    auto_rebalance_sequence: Optional[int] = None
+    auto_rebalance_label: Optional[str] = None
     scheduled_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
@@ -109,6 +521,9 @@ class RunListItem(BaseModel):
     export_error: Optional[str] = None
     exported_at: Optional[datetime] = None
     exported_sheet_url: Optional[str] = None
+    auto_rebalance_portfolio: Optional[str] = None
+    auto_rebalance_sequence: Optional[int] = None
+    auto_rebalance_label: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 

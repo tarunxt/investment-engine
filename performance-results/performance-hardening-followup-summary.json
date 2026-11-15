@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-07-26T13:58:56Z",
+  "branch": "codex/performance-hardening-followup",
+  "baseline": {
+    "commit": "675b7e5fe294af01f8958bf4e4b7ecc60b5a6704",
+    "backendSuite": {
+      "passed": 594,
+      "failed": 43,
+      "representativeFailuresReproducedOnPristineMain": 7
+    },
+    "publicProductionLogin": {
+      "samplesPerProfile": 7,
+      "authenticatedCoverage": false,
+      "desktopFirstVisitP75": {
+        "ttfbMs": 86.9,
+        "fcpMs": 560,
+        "lcpMs": 560,
+        "usableMs": 562.3
+      },
+      "throttledMobileFirstVisitP75": {
+        "ttfbMs": 78.1,
+        "fcpMs": 1652,
+        "lcpMs": 1652,
+        "usableMs": 2064.8,
+        "tbtMs": 53
+      }
+    }
+  },
+  "candidate": {
+    "productionBundler": "webpack",
+    "backendSuite": {
+      "passed": 595,
+      "failed": 43
+    },
+    "frontendTests": {
+      "passed": 298,
+      "failed": 0
+    },
+    "targetedBackendHardeningTests": {
+      "passed": 29,
+      "failed": 0
+    },
+    "deploymentAndScopeTests": {
+      "passed": 55,
+      "failed": 0,
+      "executableFailureInjectionCases": 11
+    },
+    "standaloneArtifact": {
+      "packagedBytesApprox": 15728640,
+      "runtimeVerificationSeconds": 1.38,
+      "initialJavascript": {
+        "login": {
+          "transferredBytes": 192441,
+          "decodedBytes": 613395
+        },
+        "dashboard": {
+          "transferredBytes": 230242,
+          "decodedBytes": 739227
+        },
+        "bullpenAi": {
+          "transferredBytes": 233791,
+          "decodedBytes": 747781
+        },
+        "automatedRebalance": {
+          "transferredBytes": 625166,
+          "decodedBytes": 1966146
+        }
+      }
+    },
+    "fixtureResponseBytes": {
+      "dashboardSummary": 2746,
+      "runsSummary100": 67144,
+      "bullpenAutoLiveRuns50": 106641,
+      "threatHistory100": 45503,
+      "runAuditList100": 123140
+    }
+  },
+  "productionValidation": {
+    "status": "blocked",
+    "missingSecrets": [
+      "PERF_TEST_EMAIL",
+      "PERF_TEST_PASSWORD"
+    ],
+    "authenticatedSampleSetsCompleted": 0,
+    "requiredAuthenticatedSampleSets": 2,
+    "frontendOnlyDeploymentsCompleted": 0,
+    "requiredFrontendOnlyDeployments": 2,
+    "mergeAllowed": false
+  }
+}

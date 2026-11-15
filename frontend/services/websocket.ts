@@ -1,6 +1,3 @@
-import { sessionStorage } from '@/services/session';
-import { apiService } from '@/services/api';
-
 type MessageHandler = (data: Record<string, unknown>) => void;
 type StatusHandler = (connected: boolean) => void;
 
@@ -16,37 +13,20 @@ const devAuthDisabled =
   process.env.NEXT_PUBLIC_DISABLE_AUTH === 'true' ||
   process.env.NODE_ENV === 'development';
 
-/**
- * Decode the stored JWT and proactively refresh it if it expires within 60 s.
- * Returns null if no token exists or if a required refresh fails (caller should not reconnect).
- */
-async function getFreshToken(): Promise<string | null> {
-  const token = sessionStorage.getAccessToken();
-  if (!token) return devAuthDisabled ? 'dev' : null;
-
-  try {
-    const [, payload] = token.split('.');
-    const { exp } = JSON.parse(atob(payload)) as { exp: number };
-    if ((exp * 1000) - Date.now() < 60_000) {
-      // Token expires within 60 s — refresh before connecting
-      try {
-        await apiService.refreshToken();
-      } catch {
-        // Refresh failed (e.g. refresh token also expired) — cannot connect
-        return null;
-      }
-      return sessionStorage.getAccessToken();
-    }
-  } catch {
-    // JWT malformed or atob failed — use the token as-is and let the server decide
-  }
-
-  return token;
+async function getWebSocketTicket(): Promise<string | null> {
+  const response = await fetch('/backend-api/auth/websocket-ticket', {
+    method: 'POST',
+    cache: 'no-store',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!response.ok) return devAuthDisabled ? 'dev' : null;
+  const payload = await response.json() as { ticket?: string };
+  return payload.ticket?.trim() || null;
 }
 
 /**
  * Lightweight WebSocket client with:
- * - Proactive token refresh before each connect attempt
+ * - One-time, short-lived server-issued ticket before each connect attempt
  * - Exponential backoff reconnect (stops on clean close or auth failure)
  * - Automatic ping-frame filtering
  */
@@ -87,10 +67,10 @@ export class WSClient {
   private async _doConnect(): Promise<void> {
     if (this.destroyed) return;
 
-    const token = await getFreshToken();
-    if (!token || this.destroyed) return; // no valid token — stop reconnecting
+    const ticket = await getWebSocketTicket();
+    if (!ticket || this.destroyed) return;
 
-    const ws = new WebSocket(`${this.url}?token=${encodeURIComponent(token)}`);
+    const ws = new WebSocket(`${this.url}?token=${encodeURIComponent(ticket)}`);
     this.ws = ws;
 
     ws.onopen = () => {

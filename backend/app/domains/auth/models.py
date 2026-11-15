@@ -4,7 +4,7 @@ import enum
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, Column, DateTime, Enum, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Column, DateTime, Enum, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.infrastructure.database.base import Base, TimestampMixin
@@ -56,6 +56,14 @@ class User(Base, TimestampMixin):
         return f"<User {self.email}>"
 
 
+class AuthRefreshIntent(Base):
+    __tablename__ = "auth_refresh_intents"
+    token_digest = Column(String(64), primary_key=True)
+    family_id = Column(String(64), ForeignKey("auth_session_families.id", ondelete="CASCADE"), nullable=False, index=True)
+    nonce_digest = Column(String(64), nullable=False)
+    started = Column(Boolean, nullable=False, default=False)
+
+
 class UserProfile(Base, TimestampMixin):
     __tablename__ = "user_profiles"
 
@@ -67,6 +75,8 @@ class UserProfile(Base, TimestampMixin):
     timezone: Mapped[str] = mapped_column(String(50), default="UTC", nullable=False)
     notification_preferences: Mapped[str] = mapped_column(String(500), default="all", nullable=False)
     theme_preference: Mapped[str] = mapped_column(String(20), default="light", nullable=False)
+    zerodha_buy_threshold: Mapped[float] = mapped_column(Float, default=2.5, nullable=False)
+    indmoney_buy_threshold: Mapped[float] = mapped_column(Float, default=2.5, nullable=False)
     google_sheets_master_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     user: Mapped[User] = relationship(back_populates="profile")
@@ -86,6 +96,16 @@ class UserSession(Base):
     is_active = Column(Boolean, default=True, nullable=False)
 
     user = relationship("User", back_populates="sessions")
+
+
+class AuthSessionFamily(Base):
+    __tablename__ = "auth_session_families"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
+    refresh_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
 
 class APIKey(Base):

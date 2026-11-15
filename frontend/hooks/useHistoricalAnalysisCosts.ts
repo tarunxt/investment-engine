@@ -36,6 +36,7 @@ function buildHistoricalCostMapInr(
   usdInrRate: number,
 ) {
   const costs: Record<string, number> = {};
+  if (!Number.isFinite(usdInrRate) || usdInrRate <= 0) return costs;
 
   const captureCost = (
     provider: string | null | undefined,

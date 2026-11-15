@@ -22,6 +22,7 @@ import { Button } from '@/components/ui/button';
 import { useHistoricalAnalysisCosts } from '@/hooks/useHistoricalAnalysisCosts';
 import { useUsdInrRate } from '@/hooks/useUsdInrRate';
 import { formatApiTimestamp } from '@/lib/datetime';
+import { formatUsdAsVerifiedInr } from '@/lib/fxPresentation';
 import { URLs } from '@/lib/urls';
 import { apiService, APIError } from '@/services/api';
 import {
@@ -56,11 +57,7 @@ function formatInr(value: number | null | undefined) {
 }
 
 function formatInrCost(value: number, usdInrRate: number) {
-  return new Intl.NumberFormat('en-IN', {
-    style: 'currency',
-    currency: 'INR',
-    maximumFractionDigits: 2,
-  }).format(value * usdInrRate);
+  return formatUsdAsVerifiedInr(value, usdInrRate);
 }
 
 function hasKnownCost(value: number | null | undefined): value is number {
@@ -326,7 +323,7 @@ export default function ZerodhaThreatsPage() {
     latestSnapshot?.holdings_market_value ?? 0,
   );
   const topHoldings = [...(latestSnapshot?.holdings ?? [])]
-    .sort((left, right) => right.market_value - left.market_value)
+    .sort((left, right) => (right.market_value ?? -Infinity) - (left.market_value ?? -Infinity))
     .slice(0, 5);
   const severityCounts = countSeverities(displayedAnalysis?.report?.tables ?? []);
   const urgentSection = findSection(displayedAnalysis, 'urgent_actionables');
@@ -414,7 +411,7 @@ export default function ZerodhaThreatsPage() {
                 <div className="mt-1 text-sm text-white">{latestSnapshot?.snapshot_date ?? status?.last_portfolio_snapshot_date ?? '-'}</div>
               </div>
               <div>
-                <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">Holdings Value</div>
+                <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">Settled Holdings Value (excludes T1)</div>
                 <div className="mt-1 text-sm text-white">{formatInr(latestSnapshot?.holdings_market_value)}</div>
               </div>
               <div>

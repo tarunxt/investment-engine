@@ -1,9 +1,23 @@
-import { URLs } from "@/lib/urls";
-import { sessionStorage } from "@/services/session";
-import { syncTokenToCookie } from "@/services/cookies";
+import { recoverIndmoneyWallet } from "@/lib/indmoneyWallet";
+import type { VerifiedUsListing } from "@/lib/usSecurityIdentity";
+import type { UsVendorDisplayQuotes, ZerodhaDisplayQuoteResponse } from "@/types/api";
+import type { LogoutResponse } from "@/lib/logoutOutcome";
+import type { StockSourceObservationPage } from "@/types/api";
+
+import type { BasketScoreHistory } from "@/lib/basketDisplayCalculations";
+import { resolveApiReadTransportCandidates, URLs } from "@/lib/urls";
+import { deriveApiErrorMessage } from "@/lib/apiErrors";
+import {
+  ApiReadCircuitBreaker,
+  getApiReadAttemptBudget,
+} from "@/lib/apiReadCircuitBreaker";
+import { isBullpenTradeAnalysisListResponse } from "@/lib/bullpenTradeAnalysisFallback";
+import { PrivateRequestDeduplicator } from "@/lib/privateRequestDeduplicator";
+import { loadFullRunHistory } from "@/lib/fullRunHistory";
 import { signOut } from "next-auth/react";
 import {
   ApiUsageSummaryResponse,
+  LlmCostHistoryResponse,
   GoogleSheetsAdminConfigResponse,
   GoogleSheetsAdminConfigUpdateRequest,
   GoogleSheetsAuthUrlResponse,
@@ -27,9 +41,54 @@ import {
   IndMoneyUsThreatHistoryResponse,
   IndMoneyUsThreatLatestResponse,
   IndMoneyUsThreatRunResponse,
+  BullpenAutoLiveSettings,
+  BullpenAutoLiveSettingsUpdate,
+  BullpenAutoLiveRun,
+  BullpenAutoLiveConsoleRunDetail,
+  BullpenAutoLiveHistoryPage,
+  BullpenAutoLiveEventTrendsResponse,
+  BullpenAutoLiveRunOrdersResponse,
+  BullpenAutoLiveRunOnceRequest,
+  BullpenWorkflowRunNowRequest,
+  BullpenWorkflowRunNowResponse,
+  BullpenAutoLiveDecision,
+  BullpenAutoLivePersistedStatus,
+  BullpenAutoLiveState,
+  BullpenAutoLiveSummaryResponse,
+  Bullpen008Bootstrap,
+  Bullpen008EventTrendsResponse,
+  Bullpen008HistoryPage,
+  Bullpen008KillResponse,
+  Bullpen008Run,
+  Bullpen008Settings,
+  Bullpen008SettingsUpdate,
+  Bullpen008StageOutput,
+  Bullpen008State,
+  BullpenRunAuditDetailResponse,
+  BullpenRunAuditFeedbackCreateRequest,
+  BullpenRunAuditFeedbackDetail,
+  BullpenRunAuditFeedbackSummary,
+  BullpenRunAuditFinding,
+  BullpenRunAuditListResponse,
+  BullpenRunAuditManualCheck,
+  BullpenRunAuditManualCheckUpdateRequest,
+  BullpenRunAuditMaterializeResponse,
+  BullpenRunAuditRemark,
+  BullpenRunAuditRemarkCreateRequest,
+  BullpenRunAuditSectionResponse,
+  DashboardSummaryResponse,
+  BullpenTradeAnalysisDetailResponse,
+  BullpenTradeAnalysisListResponse,
   PolymarketBotState,
+  PolymarketManualInvestOrderRequest,
+  PolymarketManualInvestResponse,
+  PolymarketLiveLimitUpdate,
+  PolymarketTrackedAccountCreate,
+  PolymarketTrackedAccountUpdate,
   PolymarketDiscoveryDebugReport,
   PolymarketDiscoveryDebugRequest,
+  TradingBotsSummaryResponse,
+  TradingBotsOverviewResponse,
   JobCreate,
   JobResponse,
   LoginResponse,
@@ -37,13 +96,26 @@ import {
   PromptCreate,
   PromptResponse,
   PromptUpdate,
+  PortfolioAnalysisHistoryItem,
   PortfolioEventRunRequest,
   ProviderInfo,
   PaginatedResponse,
   RegisterResponse,
-  RefreshTokenResponse,
   RunCreate,
   RunListItem,
+  AutoRebalanceRunReservationResponse,
+  AutoRebalanceCompletionEmailRequest,
+  AutoRebalanceHistoryDetailResponse,
+  AutoRebalanceHistoryListResponse,
+  AutoRebalancePortfolioKey,
+  AutoRebalanceStageKey,
+  AutoRebalanceStageResponse,
+  AutoRebalanceStageUpdateRequest,
+  FinalActionableHistoryBackfillResponse,
+  FinalActionableHistoryBulkCreateRequest,
+  FinalActionableHistoryBulkCreateResponse,
+  FinalActionableHistoryListResponse,
+  HistoricalScoreEvidenceResponse,
   RunResponse,
   UpdatePasswordRequest,
   UpdateProfileRequest,
@@ -58,20 +130,40 @@ import {
   ZerodhaPortfolioSnapshotDetail,
   ZerodhaPortfolioSyncResponse,
   ZerodhaOrder,
+  ZerodhaPrepareBasketRequest,
+  ZerodhaPrepareBasketResponse,
   ZerodhaPlaceOrderRequest,
   ZerodhaPlaceOrderResponse,
+  ZerodhaProtectedMarketRequest,
+  ZerodhaProtectedMarketResponse,
+  ZerodhaSequencedProtectedMarketRequest,
+  ZerodhaSequencedProtectedMarketResponse,
   ZerodhaThreatAnalysis,
   ZerodhaThreatHistoryResponse,
   ZerodhaThreatLatestResponse,
   ZerodhaThreatRunResponse,
   ZerodhaStatusResponse,
 } from "@/types/api";
-import { IApiService } from "./api.types";
+import { IApiService, type ApiRequestControl } from "./api.types";
 
 const devAuthDisabled =
   process.env.NEXT_PUBLIC_DISABLE_AUTH === "true" ||
   process.env.NODE_ENV === "development";
 const apiDebugEnabled = process.env.NEXT_PUBLIC_API_DEBUG === "true";
+const DEFAULT_API_REQUEST_TIMEOUT_MS = 20_000;
+const DEFAULT_API_READ_TOTAL_TIMEOUT_MS = 5_000;
+const DEFAULT_API_READ_PRIMARY_ATTEMPT_TIMEOUT_MS = 1_500;
+const CAPTURED_DETAILS_READ_TIMEOUT_MS = 20_000;
+const FINAL_ACTIONABLE_HISTORY_READ_TIMEOUT_MS = 20_000;
+// Stored portfolio history uses the BFF's bounded 18s database-read budget.
+const PORTFOLIO_HISTORY_READ_TIMEOUT_MS = 20_000;
+// History can use the backend's 12-second database deadline and the BFF's
+// 14-second transport budget. The generic five-second browser cap cuts these
+// valid reads off before either layer can return its result or bounded error.
+const BULLPEN_HISTORY_READ_TIMEOUT_MS = 20_000;
+const SLOW_API_REQUEST_THRESHOLD_MS = 2_000;
+const BULLPEN_RUN_START_SECONDARY_DELAY_MS = 250;
+const BULLPEN_RUN_START_TERTIARY_DELAY_MS = 750;
 
 export class APIError extends Error {
   constructor(
@@ -79,7 +171,7 @@ export class APIError extends Error {
     public message: string,
     public details?: unknown,
   ) {
-    super(message);
+    super(message || "API request failed");
     this.name = "APIError";
   }
 }
@@ -95,139 +187,617 @@ export class NetworkError extends Error {
   }
 }
 
-// Helper function to get auth token
-async function getAuthToken(): Promise<string | null> {
-  return sessionStorage.getAccessToken();
+export class RequestTimeoutError extends NetworkError {
+  constructor(
+    method: string,
+    url: string,
+    public timeoutMs: number,
+  ) {
+    super(method, url, `Request timed out after ${timeoutMs}ms`);
+    this.name = "RequestTimeoutError";
+  }
 }
 
-// Flag to prevent infinite refresh loops
-let isRefreshing = false;
-let refreshPromise: Promise<boolean> | null = null;
+export class InvalidAPIResponseError extends Error {
+  constructor(
+    public method: string,
+    public url: string,
+    public reason: string,
+  ) {
+    super(`Invalid response from ${url} (${method}). ${reason}`);
+    this.name = "InvalidAPIResponseError";
+  }
+}
+
+const AUTO_REBALANCE_START_RECONCILIATION_DELAYS_MS = [0, 750, 1_500, 3_000, 6_000] as const;
+
+type AnalysisHistoryResponse = {
+  history: PortfolioAnalysisHistoryItem[];
+};
+
+function matchesAutoRebalanceAnalysis(
+  item: PortfolioAnalysisHistoryItem,
+  data?: PortfolioEventRunRequest,
+) {
+  if (
+    !data?.auto_rebalance_portfolio ||
+    typeof data.auto_rebalance_sequence !== "number"
+  ) {
+    return false;
+  }
+  return (
+    item.auto_rebalance_portfolio === data.auto_rebalance_portfolio &&
+    item.auto_rebalance_sequence === data.auto_rebalance_sequence &&
+    (!data.auto_rebalance_label ||
+      !item.auto_rebalance_label ||
+      item.auto_rebalance_label === data.auto_rebalance_label)
+  );
+}
+
+async function reconcileTimedOutAutoRebalanceStart<TResponse>(
+  error: unknown,
+  data: PortfolioEventRunRequest | undefined,
+  loadHistory: () => Promise<AnalysisHistoryResponse>,
+  buildResponse: (item: PortfolioAnalysisHistoryItem) => Promise<TResponse>,
+): Promise<TResponse> {
+  if (
+    !(error instanceof RequestTimeoutError) ||
+    !data?.auto_rebalance_portfolio ||
+    typeof data.auto_rebalance_sequence !== "number"
+  ) {
+    throw error;
+  }
+
+  for (const delayMs of AUTO_REBALANCE_START_RECONCILIATION_DELAYS_MS) {
+    if (delayMs > 0) {
+      await new Promise<void>((resolve) => globalThis.setTimeout(resolve, delayMs));
+    }
+    try {
+      const history = await loadHistory();
+      const match = history.history.find((item) =>
+        matchesAutoRebalanceAnalysis(item, data),
+      );
+      if (match) {
+        return await buildResponse(match);
+      }
+    } catch {
+      // The queueing request may still be committing. Keep reconciling until the
+      // bounded grace period ends, then surface the original timeout.
+    }
+  }
+  throw error;
+}
+
+type ApiRequestOptions = RequestInit & {
+  skipAuth?: boolean;
+  skipUnauthorizedRefresh?: boolean;
+  logoutRequest?: boolean;
+} & ApiRequestControl;
+
+type RequestAbortContext = {
+  signal: AbortSignal;
+  didTimeout: () => boolean;
+  cleanup: () => void;
+};
+
+function createRequestAbortContext(
+  callerSignal: AbortSignal | null | undefined,
+  timeoutMs: number,
+): RequestAbortContext {
+  const controller = new AbortController();
+  let timedOut = false;
+
+  const abortForCaller = () => controller.abort();
+  if (callerSignal?.aborted) {
+    abortForCaller();
+  } else {
+    callerSignal?.addEventListener("abort", abortForCaller, { once: true });
+  }
+
+  const timeoutId = globalThis.setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+
+  return {
+    signal: controller.signal,
+    didTimeout: () => timedOut,
+    cleanup: () => {
+      globalThis.clearTimeout(timeoutId);
+      callerSignal?.removeEventListener("abort", abortForCaller);
+    },
+  };
+}
+
+function isRetryableReadError(error: unknown) {
+  if (
+    error instanceof RequestTimeoutError ||
+    error instanceof NetworkError ||
+    error instanceof InvalidAPIResponseError
+  ) {
+    return true;
+  }
+  return error instanceof APIError && (error.status === 429 || error.status >= 500);
+}
+
+function getReadFallbackReason(error: unknown) {
+  if (error instanceof RequestTimeoutError) return "timeout";
+  if (error instanceof InvalidAPIResponseError) return "invalid_response";
+  if (error instanceof NetworkError) return "network_error";
+  if (error instanceof APIError) return `http_${error.status}`;
+  if (error instanceof Error) return error.name || "error";
+  return "unknown_error";
+}
+
+function isAmbiguousBullpenRunStartError(error: unknown) {
+  return (
+    error instanceof RequestTimeoutError ||
+    error instanceof NetworkError ||
+    error instanceof InvalidAPIResponseError ||
+    (error instanceof APIError && (error.status === 429 || error.status >= 500))
+  );
+}
+
+function isBullpenAutoLiveRunResponse(
+  value: unknown,
+  expectedRunId?: string,
+): value is BullpenAutoLiveRun {
+  const validStatuses = new Set([
+    "running",
+    "confirming",
+    "completed",
+    "partial_success",
+    "failed",
+    "skipped",
+  ]);
+  if (
+    !isRecord(value) ||
+    typeof value.id !== "string" ||
+    !validStatuses.has(String(value.status)) ||
+    typeof value.triggered_by !== "string" ||
+    typeof value.dry_run !== "boolean" ||
+    typeof value.started_at !== "string" ||
+    typeof value.summary !== "string" ||
+    !Array.isArray(value.stage_results)
+  ) {
+    return false;
+  }
+  return expectedRunId === undefined || value.id === expectedRunId;
+}
+
+function logBullpenRunStartFallback(input: {
+  runId: string;
+  fromStage: "primary" | "secondary";
+  toStage: "secondary" | "tertiary";
+  approach: string;
+  reason: string;
+}) {
+  console.warn(
+    JSON.stringify({
+      event: "bullpen_auto_live_run_start_fallback_triggered",
+      run_id: input.runId,
+      from_stage: input.fromStage,
+      to_stage: input.toStage,
+      approach: input.approach,
+      reason: input.reason,
+    }),
+  );
+}
+
+function waitForBoundedFallback(delayMs: number) {
+  return new Promise<void>((resolve) => globalThis.setTimeout(resolve, delayMs));
+}
+
+function logReadFallback(input: {
+  url: string;
+  fromStage: string;
+  toStage: string;
+  toTransport: string;
+  reason: string;
+}) {
+  const parsed = new URL(
+    input.url,
+    typeof window === "undefined" ? "http://localhost" : window.location.origin,
+  );
+  console.warn(
+    JSON.stringify({
+      event: "api_read_fallback_triggered",
+      method: "GET",
+      resource: `${parsed.pathname}${parsed.search}`,
+      from_stage: input.fromStage,
+      to_stage: input.toStage,
+      to_transport: input.toTransport,
+      reason: input.reason,
+    }),
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function isNullableString(value: unknown) {
+  return value === null || typeof value === "string";
+}
+
+function isZerodhaStatusResponse(value: unknown): value is ZerodhaStatusResponse {
+  if (!isRecord(value) || typeof value.connected !== "boolean") return false;
+  return (
+    isNullableString(value.login_time) &&
+    isNullableString(value.expires_at) &&
+    (value.last_portfolio_sync_at === undefined ||
+      isNullableString(value.last_portfolio_sync_at)) &&
+    (value.last_portfolio_snapshot_date === undefined ||
+      isNullableString(value.last_portfolio_snapshot_date))
+  );
+}
+
+function isThreatLatestResponse(
+  value: unknown,
+): value is ZerodhaThreatLatestResponse | IndMoneyUsThreatLatestResponse {
+  if (!isRecord(value) || !("analysis" in value)) return false;
+  if (value.analysis === null) return true;
+  return (
+    isRecord(value.analysis) &&
+    typeof value.analysis.job_id === "number" &&
+    typeof value.analysis.status === "string" &&
+    typeof value.analysis.provider === "string" &&
+    typeof value.analysis.model === "string"
+  );
+}
+
+function isPaginatedResponse<T>(value: unknown): value is PaginatedResponse<T> {
+  return (
+    isRecord(value) &&
+    Array.isArray(value.items) &&
+    typeof value.total === "number" &&
+    Number.isFinite(value.total) &&
+    typeof value.page === "number" &&
+    Number.isFinite(value.page) &&
+    typeof value.size === "number" &&
+    Number.isFinite(value.size) &&
+    typeof value.pages === "number" &&
+    Number.isFinite(value.pages)
+  );
+}
+
+function hasHeader(headers: Record<string, string>, headerName: string) {
+  const normalizedHeaderName = headerName.toLowerCase();
+  return Object.keys(headers).some(
+    (key) => key.toLowerCase() === normalizedHeaderName,
+  );
+}
+
+function createCorrelationId() {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+
+  return `web-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
+const apiReadCircuitBreaker = new ApiReadCircuitBreaker();
 
 /**
  * API Service - Wrapper around URL resolver for making API calls
  */
 class apiServiceClass implements IApiService {
+  private readonly readDeduplicator = new PrivateRequestDeduplicator();
+  private logoutInProgress = false;
+
+  beginLogout() {
+    this.logoutInProgress = true;
+    this.readDeduplicator.setSessionGeneration("anonymous");
+  }
+
+  setSessionGeneration(generation: string) {
+    this.readDeduplicator.setSessionGeneration(generation);
+  }
+
+  async parseErrorResponse(response: Response): Promise<unknown> {
+    const text = await response.text();
+    if (!text.trim()) {
+      return {
+        message:
+          response.statusText ||
+          `Request failed with status ${response.status}`,
+      };
+    }
+
+    try {
+      return JSON.parse(text);
+    } catch {
+      return text;
+    }
+  }
+
   async fetch<T>(
     url: string,
-    options: RequestInit & { token?: string; _retry?: boolean } = {},
+    options: ApiRequestOptions = {},
   ): Promise<T> {
     const method = options.method || "GET";
+    const timeoutMs = options.timeoutMs ?? DEFAULT_API_REQUEST_TIMEOUT_MS;
+    const startedAt =
+      typeof performance !== "undefined" ? performance.now() : Date.now();
+    let abortContext: RequestAbortContext | null = null;
     // Start a collapsed group to keep the console clean
     this.groupCollapsed(`🚀 API Request: ${method} ${url}`);
 
     try {
-      let token = options.token;
-      if (!token) {
-        token = (await getAuthToken()) || undefined;
+      if (this.logoutInProgress && !options.logoutRequest) {
+        throw new APIError(401, "Sign-out is in progress.");
       }
-
       const headers: Record<string, string> = {
         "Content-Type": "application/json",
         ...((options.headers as Record<string, string>) || {}),
       };
 
-      if (token) {
-        headers.Authorization = `Bearer ${token}`;
-        this.log("Auth: Token attached");
+      if (!hasHeader(headers, "X-Correlation-ID")) {
+        headers["X-Correlation-ID"] = createCorrelationId();
       }
 
-      this.log("Config:", { url, method, headers, body: options.body });
+      const {
+        skipAuth: _skipAuth,
+        skipUnauthorizedRefresh: _skipUnauthorizedRefresh,
+        logoutRequest: _logoutRequest,
+        timeoutMs: _timeoutMs,
+        validate: _validate,
+        signal: callerSignal,
+        ...requestInit
+      } = options;
+      void _skipAuth;
+      void _skipUnauthorizedRefresh;
+      void _logoutRequest;
+      void _timeoutMs;
+      void _validate;
+      abortContext = createRequestAbortContext(callerSignal, timeoutMs);
 
-      const response = await fetch(url, { ...options, headers });
+      this.log("Config:", {
+        url,
+        method,
+        timeoutMs,
+        hasBody: Boolean(options.body),
+      });
 
+      const response = await fetch(url, {
+        ...requestInit,
+        headers,
+        signal: abortContext.signal,
+      });
+
+      if (this.logoutInProgress && !options.logoutRequest) {
+        throw new APIError(401, "Sign-out is in progress.");
+      }
       if (!response.ok) {
-        // Handle 401 Unauthorized with Retry Logic
-        if (response.status === 401 && !options._retry && !devAuthDisabled) {
-          this.info("⚠️ 401 Unauthorized: Attempting token refresh...");
-
-          if (!isRefreshing) {
-            isRefreshing = true;
-            refreshPromise = this.refreshToken()
-              .then(() => {
-                this.log("✅ Token refreshed successfully");
-                return true;
-              })
-              .catch(async (err) => {
-                this.error("❌ Token refresh failed:", err);
-                if (typeof window !== "undefined") {
-                  sessionStorage.clearSession();
-                  await signOut({ redirect: true, callbackUrl: "/login" });
-                }
-                return false;
-              })
-              .finally(() => {
-                refreshPromise = null;
-                isRefreshing = false;
-              });
-          }
-
-          const refreshed = await refreshPromise;
-          if (refreshed) {
-            await new Promise(resolve => setTimeout(resolve, 50));
-            this.groupEnd(); // Close current group before retrying to prevent nesting
-            return this.fetch<T>(url, { ...options, _retry: true, token: undefined });
+        // The same-origin BFF already performed the one permitted server-side
+        // refresh within this request's absolute deadline. A remaining 401 is
+        // an expired/revoked Auth.js session, so redirect instead of exposing
+        // or refreshing a bearer credential in browser JavaScript.
+        if (
+          response.status === 401 &&
+          !options.skipUnauthorizedRefresh &&
+          !devAuthDisabled &&
+          !this.logoutInProgress
+        ) {
+          if (typeof window !== "undefined") {
+            // Navigation stays here so an already-running generic sign-out
+            // cannot overwrite the dedicated logout warning/retry flow.
+            await signOut({ redirect: false, callbackUrl: "/login" });
+            if (!this.logoutInProgress) window.location.href = "/login";
           }
         }
 
         // Handle other errors
-        const errorData = await response.json().catch(() => ({
-          message: response.statusText,
-        }));
+        const errorData = await this.parseErrorResponse(response);
+        const fallbackMessage =
+          response.statusText || `Request failed with status ${response.status}`;
+        const errorMessage = deriveApiErrorMessage(errorData, fallbackMessage);
 
-        this.error(`❌ API Error ${response.status}:`, errorData);
-        throw new APIError(response.status, errorData.message || errorData.detail, errorData);
+        this.error(`API request failed with HTTP ${response.status}.`, {
+          method,
+          url,
+        });
+        throw new APIError(response.status, errorMessage, errorData);
       }
 
-      const data = await response.json();
-      this.log("✅ API Response Success:", data);
-      return data;
+      let data: unknown;
+      try {
+        data = await response.json();
+      } catch {
+        throw new InvalidAPIResponseError(
+          method,
+          url,
+          "Response body was not valid JSON.",
+        );
+      }
+      if (options.validate && !options.validate(data)) {
+        throw new InvalidAPIResponseError(
+          method,
+          url,
+          "Response body did not match the expected schema.",
+        );
+      }
+      const durationMs = Math.round(
+        (typeof performance !== "undefined" ? performance.now() : Date.now()) -
+          startedAt,
+      );
+      this.log("Response received:", {
+        method,
+        url,
+        status: response.status,
+        durationMs,
+      });
+      if (process.env.NODE_ENV === "development") {
+        console.debug("[api timing]", { method, status: response.status, durationMs });
+      }
+      if (durationMs >= SLOW_API_REQUEST_THRESHOLD_MS) {
+        this.warn("Slow API request:", { method, url, durationMs });
+      }
+      if (this.logoutInProgress && !options.logoutRequest) {
+        throw new APIError(401, "Sign-out is in progress.");
+      }
+      return data as T;
 
     } catch (err: unknown) {
+      const durationMs = Math.round(
+        (typeof performance !== "undefined" ? performance.now() : Date.now()) -
+          startedAt,
+      );
+      if (abortContext?.didTimeout()) {
+        if (process.env.NODE_ENV === "development") {
+          console.debug("[api timing]", { method, status: "timeout", durationMs });
+        }
+        this.warn(`API request timed out after ${timeoutMs}ms.`, {
+          method,
+          url,
+          durationMs,
+        });
+        throw new RequestTimeoutError(method, url, timeoutMs);
+      }
+
       if (err instanceof Error && (err.name === 'AbortError' || err.name === 'CanceledError')) {
-        this.log("Request canceled:", (err as { reason?: string }).reason || err.message);
+        this.log("Request canceled:", { method, url });
         throw err;
       }
 
-      if (!(err instanceof APIError) && !(err instanceof NetworkError)) {
+      if (
+        !(err instanceof APIError) &&
+        !(err instanceof NetworkError) &&
+        !(err instanceof InvalidAPIResponseError)
+      ) {
         const message = err instanceof Error ? err.message : String(err);
         this.error("❌ Network or Unexpected Error:", message);
         throw new NetworkError(method, url, message);
       }
       throw err;
     } finally {
+      abortContext?.cleanup();
       this.groupEnd();
     }
   }
 
   // HTTP methods
-  get<T>(url: string, options?: RequestInit): Promise<T> {
-    return this.fetch<T>(url, { method: "GET", ...options });
+  private async getAcrossTransports<T>(
+    url: string,
+    options: ApiRequestOptions = {},
+  ): Promise<T> {
+    const candidates = apiReadCircuitBreaker.order(
+      resolveApiReadTransportCandidates(url),
+    );
+    const totalBudgetMs =
+      options.timeoutMs ?? DEFAULT_API_READ_TOTAL_TIMEOUT_MS;
+    const startedAt =
+      typeof performance !== "undefined" ? performance.now() : Date.now();
+    let lastError: unknown = null;
+
+    for (let index = 0; index < candidates.length; index += 1) {
+      const candidate = candidates[index];
+      const now =
+        typeof performance !== "undefined" ? performance.now() : Date.now();
+      const attemptBudgetMs = getApiReadAttemptBudget({
+        startedAt,
+        now,
+        candidateStage: candidate.stage,
+        candidateCount: candidates.length,
+        totalBudgetMs,
+        primaryAttemptBudgetMs: DEFAULT_API_READ_PRIMARY_ATTEMPT_TIMEOUT_MS,
+      });
+      if (attemptBudgetMs <= 0) {
+        break;
+      }
+      try {
+        const result = await this.fetch<T>(candidate.url, {
+          method: "GET",
+          ...options,
+          timeoutMs: attemptBudgetMs,
+        });
+        apiReadCircuitBreaker.recordSuccess(candidate);
+        return result;
+      } catch (error) {
+        lastError = error;
+        if (isRetryableReadError(error)) {
+          apiReadCircuitBreaker.recordFailure(candidate);
+        }
+        const nextCandidate = candidates[index + 1];
+        if (
+          !nextCandidate ||
+          options.signal?.aborted ||
+          !isRetryableReadError(error)
+        ) {
+          throw error;
+        }
+
+        logReadFallback({
+          url,
+          fromStage: candidate.stage,
+          toStage: nextCandidate.stage,
+          toTransport: nextCandidate.transport,
+          reason: getReadFallbackReason(error),
+        });
+      }
+    }
+
+    throw lastError ?? new RequestTimeoutError("GET", url, totalBudgetMs);
   }
 
-  post<T>(url: string, data?: unknown): Promise<T> {
+  get<T>(url: string, options: ApiRequestOptions = {}): Promise<T> {
+    // A caller-owned abort signal must retain independent cancellation
+    // semantics. Unsignalled dashboard reads can safely share one in-flight
+    // request, preventing mount/refresh fan-out from duplicating work.
+    if (options.signal) {
+      return this.getAcrossTransports<T>(url, options);
+    }
+
+    return this.readDeduplicator.run(
+      {
+        method: "GET",
+        url,
+        headers: options.headers as Record<string, string> | undefined,
+        signal: options.signal,
+      },
+      () => this.getAcrossTransports<T>(url, options),
+    );
+  }
+
+  post<T>(
+    url: string,
+    data?: unknown,
+    options: ApiRequestOptions = {},
+  ): Promise<T> {
     return this.fetch<T>(url, {
+      ...options,
       method: "POST",
       body: data ? JSON.stringify(data) : undefined,
     });
   }
 
-  put<T>(url: string, data?: unknown): Promise<T> {
+  put<T>(
+    url: string,
+    data?: unknown,
+    options: ApiRequestOptions = {},
+  ): Promise<T> {
     return this.fetch<T>(url, {
+      ...options,
       method: "PUT",
       body: data ? JSON.stringify(data) : undefined,
     });
   }
 
-  patch<T>(url: string, data?: unknown): Promise<T> {
+  patch<T>(
+    url: string,
+    data?: unknown,
+    options: ApiRequestOptions = {},
+  ): Promise<T> {
     return this.fetch<T>(url, {
+      ...options,
       method: "PATCH",
       body: data ? JSON.stringify(data) : undefined,
     });
   }
 
-  delete<T>(url: string): Promise<T> {
+  delete<T>(url: string, options: ApiRequestOptions = {}): Promise<T> {
     return this.fetch<T>(url, {
+      ...options,
       method: "DELETE",
     });
   }
@@ -286,7 +856,10 @@ class apiServiceClass implements IApiService {
     password: string;
     full_name?: string;
   }): Promise<RegisterResponse> {
-    return this.post<RegisterResponse>(URLs.auth.register(), data);
+    return this.post<RegisterResponse>(URLs.auth.register(), data, {
+      skipAuth: true,
+      skipUnauthorizedRefresh: true,
+    });
   }
 
   /**
@@ -297,57 +870,17 @@ class apiServiceClass implements IApiService {
     username?: string;
     password: string;
   }): Promise<LoginResponse> {
-    return this.post<LoginResponse>(URLs.auth.login(), data);
+    return this.post<LoginResponse>(URLs.auth.login(), data, {
+      skipAuth: true,
+      skipUnauthorizedRefresh: true,
+    });
   }
 
   /**
    * Logout user
    */
-  logout(): Promise<void> {
-    return this.post<void>(URLs.auth.logout(), {});
-  }
-
-  /**
-   * Refresh access token
-   */
-  async refreshToken(): Promise<RefreshTokenResponse> {
-    const refreshToken = sessionStorage.getRefreshToken();
-    if (!refreshToken) {
-      throw new Error("No refresh token available");
-    }
-
-    this.group("Refreshing access token");
-    this.log("Current refresh token:", refreshToken);
-
-    // Make refresh call WITHOUT Authorization header since we're using refresh token in body
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-    };
-
-    const response = await fetch(URLs.auth.refresh(), {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ refresh_token: refreshToken }),
-    });
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({
-        message: response.statusText,
-      }));
-      this.error("Refresh token request failed:", error);
-      throw new APIError(response.status, error.message || error.detail, error);
-    }
-
-    const data = await response.json() as RefreshTokenResponse;
-    this.log("Received new tokens:", data);
-    this.groupEnd();
-
-    if (data.access_token && data.refresh_token) {
-      sessionStorage.setTokens(data.access_token, data.refresh_token);
-      syncTokenToCookie(data.access_token);
-    }
-
-    return data;
+  logout(): Promise<LogoutResponse> {
+    return this.post<LogoutResponse>(URLs.auth.logout(), {}, { skipUnauthorizedRefresh: true, logoutRequest: true });
   }
 
   /**
@@ -367,8 +900,8 @@ class apiServiceClass implements IApiService {
   /**
    * Get user profile
    */
-  getProfile(): Promise<UpdateProfileRequest> {
-    return this.get<UpdateProfileRequest>(URLs.auth.getProfile());
+  getProfile(): Promise<import("@/types/api").ProfilePreferencesResponse> {
+    return this.get<import("@/types/api").ProfilePreferencesResponse>(URLs.auth.getProfile());
   }
 
   /**
@@ -382,7 +915,10 @@ class apiServiceClass implements IApiService {
    * Forgot password
    */
   forgotPassword(data: { email: string }): Promise<{ message: string }> {
-    return this.post<{ message: string }>(URLs.auth.forgotPassword(), data);
+    return this.post<{ message: string }>(URLs.auth.forgotPassword(), data, {
+      skipAuth: true,
+      skipUnauthorizedRefresh: true,
+    });
   }
 
   /**
@@ -393,7 +929,10 @@ class apiServiceClass implements IApiService {
     new_password: string;
     confirm_password: string;
   }): Promise<{ message: string }> {
-    return this.post<{ message: string }>(URLs.auth.resetPassword(), data);
+    return this.post<{ message: string }>(URLs.auth.resetPassword(), data, {
+      skipAuth: true,
+      skipUnauthorizedRefresh: true,
+    });
   }
 
   // ===== User Endpoints (Admin) =====
@@ -486,25 +1025,159 @@ class apiServiceClass implements IApiService {
     return this.post<RunResponse>(URLs.runs.create(), data);
   }
 
-  getRuns(params?: { page?: number; limit?: number; summary?: boolean }): Promise<PaginatedResponse<RunListItem>> {
+  reserveAutoRebalanceRunLabel(portfolio: AutoRebalancePortfolioKey, analysisOnly = false): Promise<AutoRebalanceRunReservationResponse> {
+    return this.post<AutoRebalanceRunReservationResponse>(URLs.runs.autoRebalanceLabel(), { portfolio, ...(analysisOnly ? { side_effect_policy: { version: 1, mode: "analysis_only" } } : {}) });
+  }
+
+  queueAutoRebalanceCompletionEmail(data: AutoRebalanceCompletionEmailRequest): Promise<{ status: string }> {
+    return this.post<{ status: string }>(URLs.runs.autoRebalanceCompletionEmail(), data);
+  }
+
+  getFinalActionableHistory(params: {
+    market: "india" | "us";
+    symbol: string;
+    limit?: number;
+    cursor?: string | null;
+  }): Promise<FinalActionableHistoryListResponse> {
+    const query = new URLSearchParams({
+      market: params.market,
+      symbol: params.symbol,
+      limit: String(params.limit ?? 50),
+    });
+    if (params.cursor) query.set("cursor", params.cursor);
+    return this.get<FinalActionableHistoryListResponse>(
+      `${URLs.runs.finalActionableHistory()}?${query.toString()}`,
+      { timeoutMs: FINAL_ACTIONABLE_HISTORY_READ_TIMEOUT_MS },
+    );
+  }
+
+  getStockSourceObservations(params: { market: "india" | "us"; symbol: string; cursor?: string | null }): Promise<StockSourceObservationPage> {
+    const query = new URLSearchParams({ market: params.market, symbol: params.symbol });
+    if (params.cursor) query.set("cursor", params.cursor);
+    return this.get<StockSourceObservationPage>(`${URLs.runs.create()}/final-actionables/stock-observations?${query}`, { timeoutMs: FINAL_ACTIONABLE_HISTORY_READ_TIMEOUT_MS });
+  }
+
+  getBasketScoreHistory(params: { market: "india" | "us"; symbols: string[]; days: number; as_of?: string }): Promise<BasketScoreHistory> {
+    const query = new URLSearchParams({ market: params.market, days: String(params.days) });
+    params.symbols.forEach(symbol => query.append("symbols", symbol));
+    if (params.as_of) query.set("as_of", params.as_of);
+    return this.get<BasketScoreHistory>(`${URLs.runs.create()}/final-actionables/score-history?${query}`, { timeoutMs: FINAL_ACTIONABLE_HISTORY_READ_TIMEOUT_MS });
+  }
+
+  getHistoricalScoreEvidence(params: { run_id: number; market: "india" | "us"; symbol: string; exchange: string; covered_at: string; history_id?: number }): Promise<HistoricalScoreEvidenceResponse> {
+    const query = new URLSearchParams(Object.entries(params).map(([key, value]) => [key, String(value)]));
+    return this.get<HistoricalScoreEvidenceResponse>(`${URLs.runs.create()}/recommendation-audit/historical-score?${query}`, { timeoutMs: FINAL_ACTIONABLE_HISTORY_READ_TIMEOUT_MS });
+  }
+
+  saveFinalActionableHistory(
+    data: FinalActionableHistoryBulkCreateRequest,
+  ): Promise<FinalActionableHistoryBulkCreateResponse> {
+    return this.post<FinalActionableHistoryBulkCreateResponse>(
+      URLs.runs.finalActionableHistory(),
+      data,
+    );
+  }
+
+  queueFinalActionableHistoryBackfill(): Promise<FinalActionableHistoryBackfillResponse> {
+    return this.post<FinalActionableHistoryBackfillResponse>(
+      URLs.runs.finalActionableHistoryBackfill(),
+      {},
+    );
+  }
+
+  private getPortfolioHistory<T>(url: string, options: ApiRequestOptions = {}): Promise<T> {
+    // One browser request; the BFF owns the bounded backend transport fallback.
+    // Share only active reads within the existing authenticated session scope.
+    return this.readDeduplicator.run({ method: "GET", url, signal: options.signal }, () => this.fetch<T>(url, {
+      method: "GET", cache: "no-store", timeoutMs: PORTFOLIO_HISTORY_READ_TIMEOUT_MS, ...options,
+    }));
+  }
+
+  getAutoRebalanceHistory(
+    portfolio: AutoRebalancePortfolioKey,
+    params?: { limit?: number; offset?: number },
+    options: ApiRequestControl = {},
+  ): Promise<AutoRebalanceHistoryListResponse> {
+    const suffix = (params?.limit ? `&limit=${params.limit}` : "") +
+      (params?.offset ? `&offset=${params.offset}` : "");
+    return this.getPortfolioHistory<AutoRebalanceHistoryListResponse>(
+      `${URLs.runs.autoRebalanceHistory(portfolio)}${suffix}`,
+      options,
+    );
+  }
+
+  getAutoRebalanceHistoryDetail(
+    portfolio: AutoRebalancePortfolioKey,
+    sequence: number,
+  ): Promise<AutoRebalanceHistoryDetailResponse> {
+    return this.get<AutoRebalanceHistoryDetailResponse>(
+      URLs.runs.autoRebalanceHistoryDetail(portfolio, sequence),
+    );
+  }
+
+  updateAutoRebalanceStage(
+    portfolio: AutoRebalancePortfolioKey,
+    sequence: number,
+    stage: AutoRebalanceStageKey,
+    data: AutoRebalanceStageUpdateRequest,
+  ): Promise<AutoRebalanceStageResponse> {
+    return this.patch<AutoRebalanceStageResponse>(
+      URLs.runs.autoRebalanceStage(portfolio, sequence, stage),
+      data,
+    );
+  }
+
+  getRuns(params?: { page?: number; limit?: number; summary?: boolean }, options: ApiRequestControl = {}): Promise<PaginatedResponse<RunListItem>> {
     const qs = new URLSearchParams();
     if (params?.page) qs.set("page", String(params.page));
     if (params?.limit) qs.set("limit", String(params.limit));
     if (params?.summary) qs.set("summary", "true");
     const query = qs.toString();
-    return this.get<PaginatedResponse<RunListItem>>(`${URLs.runs.list()}${query ? `?${query}` : ""}`);
+    const url = `${URLs.runs.list()}${query ? `?${query}` : ""}`;
+    // The BFF owns bounded fallback for history. Avoid a second browser-level
+    // race abandoning its primary transport at 1.5s while DB work continues.
+    if (params?.summary) return this.getPortfolioHistory<PaginatedResponse<RunListItem>>(url, {
+      validate: isPaginatedResponse<RunListItem>, ...options,
+    });
+    return this.get<PaginatedResponse<RunListItem>>(url, {
+      validate: isPaginatedResponse<RunListItem>, ...options,
+    });
   }
 
-  getFullRuns(params?: { page?: number; limit?: number }): Promise<PaginatedResponse<RunResponse>> {
+  getAllFullRuns(): Promise<RunResponse[]> {
+    // Share only active reads, using the existing session-scoped deduplicator.
+    // No settled history is cached, so an explicit refresh always reads anew.
+    const identity = { method: "GET", url: `${URLs.runs.list()}?view=hydrated-history` };
+    const sessionKey = this.readDeduplicator.key(identity);
+    return this.readDeduplicator.run(identity, () => loadFullRunHistory(this, () => {
+      if (this.readDeduplicator.key(identity) !== sessionKey) {
+        throw new Error("The session changed while loading run history. Please retry.");
+      }
+    }));
+  }
+
+  getFullRuns(
+    params?: { page?: number; limit?: number },
+    options?: ApiRequestControl,
+  ): Promise<PaginatedResponse<RunResponse>> {
     const qs = new URLSearchParams();
     if (params?.page) qs.set("page", String(params.page));
     if (params?.limit) qs.set("limit", String(params.limit));
     const query = qs.toString();
-    return this.get<PaginatedResponse<RunResponse>>(`${URLs.runs.list()}${query ? `?${query}` : ""}`);
+    return this.get<PaginatedResponse<RunResponse>>(
+      `${URLs.runs.list()}${query ? `?${query}` : ""}`,
+      {
+        ...options,
+        validate: isPaginatedResponse<RunResponse>,
+      },
+    );
   }
 
-  getRun(id: number): Promise<RunResponse> {
-    return this.get<RunResponse>(URLs.runs.get(id));
+  getRun(id: number, options?: ApiRequestControl): Promise<RunResponse> {
+    return this.get<RunResponse>(URLs.runs.get(id), {
+      timeoutMs: CAPTURED_DETAILS_READ_TIMEOUT_MS,
+      ...options,
+    });
   }
 
   cancelRun(id: number): Promise<RunResponse> {
@@ -531,6 +1204,10 @@ class apiServiceClass implements IApiService {
     return this.get<JobResponse>(URLs.jobs.get(id));
   }
 
+  cancelJob(id: number): Promise<JobResponse> {
+    return this.post<JobResponse>(URLs.jobs.cancel(id), {});
+  }
+
   // ===== Provider Endpoints =====
 
   getProviders({ signal, prompt }: { signal?: AbortSignal; prompt?: string }): Promise<ProviderInfo[]> {
@@ -538,7 +1215,10 @@ class apiServiceClass implements IApiService {
     if (prompt?.trim()) qs.set("prompt", prompt.trim());
     const query = qs.toString();
     const url = `${URLs.providers.list()}${query ? `?${query}` : ""}`;
-    return this.get<ProviderInfo[]>(url, { signal });
+    return this.get<ProviderInfo[]>(url, {
+      signal,
+      timeoutMs: CAPTURED_DETAILS_READ_TIMEOUT_MS,
+    });
   }
 
   getApiUsageSummary(params?: {
@@ -553,6 +1233,25 @@ class apiServiceClass implements IApiService {
     const query = qs.toString();
     return this.get<ApiUsageSummaryResponse>(
       `${URLs.apiUsage.summary()}${query ? `?${query}` : ''}`,
+    );
+  }
+
+  getDashboardSummary(): Promise<DashboardSummaryResponse> {
+    return this.get<DashboardSummaryResponse>(URLs.dashboard.summary());
+  }
+
+
+  getLlmCostHistory(params: {
+    provider: string;
+    day_limit?: number;
+    run_limit?: number;
+  }): Promise<LlmCostHistoryResponse> {
+    const qs = new URLSearchParams();
+    qs.set('provider', params.provider);
+    if (params.day_limit) qs.set('day_limit', String(params.day_limit));
+    if (params.run_limit) qs.set('run_limit', String(params.run_limit));
+    return this.get<LlmCostHistoryResponse>(
+      `${URLs.apiUsage.llmCostHistory()}?${qs.toString()}`,
     );
   }
 
@@ -594,7 +1293,9 @@ class apiServiceClass implements IApiService {
   // ===== Zerodha Endpoints =====
 
   zerodhaLoginUrl(): Promise<ZerodhaLoginUrlResponse> {
-    return this.get<ZerodhaLoginUrlResponse>(URLs.zerodha.loginUrl());
+    return this.get<ZerodhaLoginUrlResponse>(URLs.zerodha.loginUrl(), {
+      timeoutMs: CAPTURED_DETAILS_READ_TIMEOUT_MS,
+    });
   }
 
   zerodhaCallback(request_token: string): Promise<ZerodhaStatusResponse> {
@@ -602,11 +1303,26 @@ class apiServiceClass implements IApiService {
   }
 
   zerodhaStatus(): Promise<ZerodhaStatusResponse> {
-    return this.get<ZerodhaStatusResponse>(URLs.zerodha.status());
+    return this.get<ZerodhaStatusResponse>(URLs.zerodha.status(), {
+      validate: isZerodhaStatusResponse,
+      timeoutMs: CAPTURED_DETAILS_READ_TIMEOUT_MS,
+    });
+  }
+
+  zerodhaDisplayQuotes(instruments: string[], signal?: AbortSignal): Promise<ZerodhaDisplayQuoteResponse> {
+    const query = new URLSearchParams();
+    instruments.forEach(instrument => query.append("instruments", instrument));
+    return this.get<ZerodhaDisplayQuoteResponse>(`${URLs.zerodha.portfolio()}/quotes?${query}`, { skipUnauthorizedRefresh: true, signal });
+  }
+
+  zerodhaQuoteCapabilities(): Promise<{ upstox_ltp_enabled: boolean }> {
+    return this.get<{ upstox_ltp_enabled: boolean }>(`${URLs.zerodha.portfolio()}/quote-capabilities`, { skipUnauthorizedRefresh: true });
   }
 
   zerodhaPortfolioOverview(): Promise<ZerodhaPortfolioOverviewResponse> {
-    return this.get<ZerodhaPortfolioOverviewResponse>(URLs.zerodha.portfolio());
+    return this.get<ZerodhaPortfolioOverviewResponse>(URLs.zerodha.portfolio(), {
+      timeoutMs: CAPTURED_DETAILS_READ_TIMEOUT_MS,
+    });
   }
 
   zerodhaPortfolioSnapshot(snapshotDate: string): Promise<ZerodhaPortfolioSnapshotDetail> {
@@ -614,15 +1330,33 @@ class apiServiceClass implements IApiService {
   }
 
   zerodhaSyncPortfolio(): Promise<ZerodhaPortfolioSyncResponse> {
-    return this.post<ZerodhaPortfolioSyncResponse>(URLs.zerodha.portfolioSync(), {});
+    // A 401 from this broker-specific endpoint means the Kite token has not
+    // propagated (or expired); it must not sign the user out of Cred-X.
+    return this.post<ZerodhaPortfolioSyncResponse>(
+      URLs.zerodha.portfolioSync(),
+      {},
+      { skipUnauthorizedRefresh: true },
+    );
   }
 
   zerodhaOrders(): Promise<{ data: ZerodhaOrder[] }> {
     return this.get<{ data: ZerodhaOrder[] }>(URLs.zerodha.orders());
   }
 
+  zerodhaPrepareBasketOrders(data: ZerodhaPrepareBasketRequest): Promise<ZerodhaPrepareBasketResponse> {
+    return this.post<ZerodhaPrepareBasketResponse>(URLs.zerodha.prepareBasketOrders(), data);
+  }
+
   zerodhaPlaceOrder(data: ZerodhaPlaceOrderRequest): Promise<ZerodhaPlaceOrderResponse> {
     return this.post<ZerodhaPlaceOrderResponse>(URLs.zerodha.orders(), data);
+  }
+
+  zerodhaPlaceProtectedMarketOrders(data: ZerodhaProtectedMarketRequest): Promise<ZerodhaProtectedMarketResponse> {
+    return this.post<ZerodhaProtectedMarketResponse>(URLs.zerodha.placeProtectedMarketOrders(), data, { timeoutMs: 190_000 });
+  }
+
+  zerodhaPlaceProtectedMarketOrdersSequenced(data: ZerodhaSequencedProtectedMarketRequest): Promise<ZerodhaSequencedProtectedMarketResponse> {
+    return this.post<ZerodhaSequencedProtectedMarketResponse>(URLs.zerodha.placeProtectedMarketOrdersSequenced(), data, { timeoutMs: 190_000 });
   }
 
   zerodhaDisconnect(): Promise<{ message: string }> {
@@ -630,7 +1364,9 @@ class apiServiceClass implements IApiService {
   }
 
   zerodhaEventsLatest(): Promise<ZerodhaEventsLatestResponse> {
-    return this.get<ZerodhaEventsLatestResponse>(URLs.zerodha.eventsLatest());
+    return this.get<ZerodhaEventsLatestResponse>(URLs.zerodha.eventsLatest(), {
+      timeoutMs: CAPTURED_DETAILS_READ_TIMEOUT_MS,
+    });
   }
 
   zerodhaEventsHistory(params?: { limit?: number }): Promise<ZerodhaEventsHistoryResponse> {
@@ -639,19 +1375,55 @@ class apiServiceClass implements IApiService {
     const query = qs.toString();
     return this.get<ZerodhaEventsHistoryResponse>(
       `${URLs.zerodha.eventsHistory()}${query ? `?${query}` : ''}`,
+      { timeoutMs: CAPTURED_DETAILS_READ_TIMEOUT_MS },
     );
   }
 
   zerodhaEventJob(jobId: number): Promise<ZerodhaEventsAnalysis> {
-    return this.get<ZerodhaEventsAnalysis>(URLs.zerodha.eventJob(jobId));
+    return this.get<ZerodhaEventsAnalysis>(URLs.zerodha.eventJob(jobId), {
+      timeoutMs: CAPTURED_DETAILS_READ_TIMEOUT_MS,
+    });
   }
 
-  zerodhaRunEvents(data?: PortfolioEventRunRequest): Promise<ZerodhaEventsRunResponse> {
-    return this.post<ZerodhaEventsRunResponse>(URLs.zerodha.eventsRun(), data ?? {});
+  async zerodhaRunEvents(
+    data?: PortfolioEventRunRequest,
+  ): Promise<ZerodhaEventsRunResponse> {
+    try {
+      return await this.post<ZerodhaEventsRunResponse>(
+        URLs.zerodha.eventsRun(),
+        data ?? {},
+      );
+    } catch (error) {
+      return reconcileTimedOutAutoRebalanceStart(
+        error,
+        data,
+        () => this.zerodhaEventsHistory({ limit: 50 }),
+        async (item) => {
+          const analysis = await this.zerodhaEventJob(item.job_id);
+          if (!analysis.snapshot_date || !analysis.captured_at) {
+            throw new Error(
+              "Queued Zerodha events job is missing snapshot metadata.",
+            );
+          }
+          return {
+            job_id: analysis.job_id,
+            status: analysis.status,
+            provider: analysis.provider,
+            model: analysis.model,
+            snapshot_date: analysis.snapshot_date,
+            captured_at: analysis.captured_at,
+            created_at: analysis.created_at,
+          };
+        },
+      );
+    }
   }
 
   zerodhaThreatsLatest(): Promise<ZerodhaThreatLatestResponse> {
-    return this.get<ZerodhaThreatLatestResponse>(URLs.zerodha.threatsLatest());
+    return this.get<ZerodhaThreatLatestResponse>(URLs.zerodha.threatsLatest(), {
+      timeoutMs: CAPTURED_DETAILS_READ_TIMEOUT_MS,
+      validate: isThreatLatestResponse,
+    });
   }
 
   zerodhaThreatsHistory(params?: { limit?: number }): Promise<ZerodhaThreatHistoryResponse> {
@@ -660,29 +1432,75 @@ class apiServiceClass implements IApiService {
     const query = qs.toString();
     return this.get<ZerodhaThreatHistoryResponse>(
       `${URLs.zerodha.threatsHistory()}${query ? `?${query}` : ''}`,
+      { timeoutMs: CAPTURED_DETAILS_READ_TIMEOUT_MS },
     );
   }
 
   zerodhaThreatJob(jobId: number): Promise<ZerodhaThreatAnalysis> {
-    return this.get<ZerodhaThreatAnalysis>(URLs.zerodha.threatJob(jobId));
+    return this.get<ZerodhaThreatAnalysis>(URLs.zerodha.threatJob(jobId), {
+      timeoutMs: CAPTURED_DETAILS_READ_TIMEOUT_MS,
+    });
   }
 
-  zerodhaRunThreats(data?: PortfolioEventRunRequest): Promise<ZerodhaThreatRunResponse> {
-    return this.post<ZerodhaThreatRunResponse>(URLs.zerodha.threatsRun(), data ?? {});
+  async zerodhaRunThreats(
+    data?: PortfolioEventRunRequest,
+  ): Promise<ZerodhaThreatRunResponse> {
+    try {
+      return await this.post<ZerodhaThreatRunResponse>(
+        URLs.zerodha.threatsRun(),
+        data ?? {},
+      );
+    } catch (error) {
+      return reconcileTimedOutAutoRebalanceStart(
+        error,
+        data,
+        () => this.zerodhaThreatsHistory({ limit: 50 }),
+        async (item) => {
+          const analysis = await this.zerodhaThreatJob(item.job_id);
+          if (!analysis.snapshot_date || !analysis.captured_at) {
+            throw new Error(
+              "Queued Zerodha threats job is missing snapshot metadata.",
+            );
+          }
+          return {
+            job_id: analysis.job_id,
+            status: analysis.status,
+            provider: analysis.provider,
+            model: analysis.model,
+            snapshot_date: analysis.snapshot_date,
+            captured_at: analysis.captured_at,
+            created_at: analysis.created_at,
+          };
+        },
+      );
+    }
   }
 
-  indmoneyUsPortfolioOverview(): Promise<IndMoneyUsPortfolioOverviewResponse> {
-    return this.get<IndMoneyUsPortfolioOverviewResponse>(URLs.indmoneyUs.portfolio());
+  async indmoneyUsPortfolioOverview(): Promise<IndMoneyUsPortfolioOverviewResponse> {
+    const overview = await this.get<IndMoneyUsPortfolioOverviewResponse>(URLs.indmoneyUs.portfolio(), { cache: "no-store" });
+    if (!overview.latest) return overview;
+    const latest = recoverIndmoneyWallet(overview.latest);
+    return { ...overview, latest, history: overview.history.map(row => row.id === latest.id ? { ...row, wallet_balance: latest.wallet_balance } : row) };
   }
 
   indmoneyUsPortfolioSnapshot(snapshotId: number): Promise<IndMoneyUsPortfolioSnapshotDetail> {
-    return this.get<IndMoneyUsPortfolioSnapshotDetail>(URLs.indmoneyUs.portfolioSnapshot(snapshotId));
+    return this.get<IndMoneyUsPortfolioSnapshotDetail>(URLs.indmoneyUs.portfolioSnapshot(snapshotId)).then(recoverIndmoneyWallet);
   }
 
   indmoneyUsCreatePortfolioSnapshot(
     data: IndMoneyUsPortfolioSnapshotCreateRequest,
   ): Promise<IndMoneyUsPortfolioSnapshotDetail> {
-    return this.post<IndMoneyUsPortfolioSnapshotDetail>(URLs.indmoneyUs.portfolio(), data);
+    return this.post<IndMoneyUsPortfolioSnapshotDetail>(URLs.indmoneyUs.portfolio(), data).then(recoverIndmoneyWallet);
+  }
+
+  indmoneyVerifiedListings(): Promise<{ listings: VerifiedUsListing[]; reason: string | null }> {
+    return this.get(`${URLs.indmoneyUs.displayListings()}`, { skipUnauthorizedRefresh: true });
+  }
+
+  indmoneyDisplayQuotes(instruments: string[]): Promise<UsVendorDisplayQuotes> {
+    const query = new URLSearchParams();
+    instruments.forEach(instrument => query.append("instruments", instrument));
+    return this.get<UsVendorDisplayQuotes>(`${URLs.indmoneyUs.displayQuotes()}?${query}`, { skipUnauthorizedRefresh: true });
   }
 
   indmoneyUsCurrentPrices(
@@ -692,7 +1510,9 @@ class apiServiceClass implements IApiService {
   }
 
   indmoneyUsEventsLatest(): Promise<IndMoneyUsEventsLatestResponse> {
-    return this.get<IndMoneyUsEventsLatestResponse>(URLs.indmoneyUs.eventsLatest());
+    return this.get<IndMoneyUsEventsLatestResponse>(URLs.indmoneyUs.eventsLatest(), {
+      timeoutMs: CAPTURED_DETAILS_READ_TIMEOUT_MS,
+    });
   }
 
   indmoneyUsEventsHistory(params?: { limit?: number }): Promise<IndMoneyUsEventsHistoryResponse> {
@@ -701,19 +1521,63 @@ class apiServiceClass implements IApiService {
     const query = qs.toString();
     return this.get<IndMoneyUsEventsHistoryResponse>(
       `${URLs.indmoneyUs.eventsHistory()}${query ? `?${query}` : ''}`,
+      { timeoutMs: CAPTURED_DETAILS_READ_TIMEOUT_MS },
     );
   }
 
   indmoneyUsEventJob(jobId: number): Promise<IndMoneyUsEventsAnalysis> {
-    return this.get<IndMoneyUsEventsAnalysis>(URLs.indmoneyUs.eventJob(jobId));
+    return this.get<IndMoneyUsEventsAnalysis>(URLs.indmoneyUs.eventJob(jobId), {
+      timeoutMs: CAPTURED_DETAILS_READ_TIMEOUT_MS,
+    });
   }
 
-  indmoneyUsRunEvents(data?: PortfolioEventRunRequest): Promise<IndMoneyUsEventsRunResponse> {
-    return this.post<IndMoneyUsEventsRunResponse>(URLs.indmoneyUs.eventsRun(), data ?? {});
+  async indmoneyUsRunEvents(
+    data?: PortfolioEventRunRequest,
+  ): Promise<IndMoneyUsEventsRunResponse> {
+    try {
+      return await this.post<IndMoneyUsEventsRunResponse>(
+        URLs.indmoneyUs.eventsRun(),
+        data ?? {},
+      );
+    } catch (error) {
+      return reconcileTimedOutAutoRebalanceStart(
+        error,
+        data,
+        () => this.indmoneyUsEventsHistory({ limit: 50 }),
+        async (item) => {
+          const analysis = await this.indmoneyUsEventJob(item.job_id);
+          if (
+            analysis.snapshot_id == null ||
+            !analysis.snapshot_date ||
+            !analysis.captured_at
+          ) {
+            throw new Error(
+              "Queued INDmoney events job is missing snapshot metadata.",
+            );
+          }
+          return {
+            job_id: analysis.job_id,
+            status: analysis.status,
+            provider: analysis.provider,
+            model: analysis.model,
+            snapshot_id: analysis.snapshot_id,
+            snapshot_date: analysis.snapshot_date,
+            captured_at: analysis.captured_at,
+            created_at: analysis.created_at,
+          };
+        },
+      );
+    }
   }
 
   indmoneyUsThreatsLatest(): Promise<IndMoneyUsThreatLatestResponse> {
-    return this.get<IndMoneyUsThreatLatestResponse>(URLs.indmoneyUs.threatsLatest());
+    return this.get<IndMoneyUsThreatLatestResponse>(
+      URLs.indmoneyUs.threatsLatest(),
+      {
+        timeoutMs: CAPTURED_DETAILS_READ_TIMEOUT_MS,
+        validate: isThreatLatestResponse,
+      },
+    );
   }
 
   indmoneyUsThreatsHistory(params?: { limit?: number }): Promise<IndMoneyUsThreatHistoryResponse> {
@@ -722,19 +1586,60 @@ class apiServiceClass implements IApiService {
     const query = qs.toString();
     return this.get<IndMoneyUsThreatHistoryResponse>(
       `${URLs.indmoneyUs.threatsHistory()}${query ? `?${query}` : ''}`,
+      { timeoutMs: CAPTURED_DETAILS_READ_TIMEOUT_MS },
     );
   }
 
   indmoneyUsThreatJob(jobId: number): Promise<IndMoneyUsThreatAnalysis> {
-    return this.get<IndMoneyUsThreatAnalysis>(URLs.indmoneyUs.threatJob(jobId));
+    return this.get<IndMoneyUsThreatAnalysis>(URLs.indmoneyUs.threatJob(jobId), {
+      timeoutMs: CAPTURED_DETAILS_READ_TIMEOUT_MS,
+    });
   }
 
-  indmoneyUsRunThreats(data?: PortfolioEventRunRequest): Promise<IndMoneyUsThreatRunResponse> {
-    return this.post<IndMoneyUsThreatRunResponse>(URLs.indmoneyUs.threatsRun(), data ?? {});
+  async indmoneyUsRunThreats(
+    data?: PortfolioEventRunRequest & { expected_snapshot_id?: number },
+  ): Promise<IndMoneyUsThreatRunResponse> {
+    try {
+      return await this.post<IndMoneyUsThreatRunResponse>(
+        URLs.indmoneyUs.threatsRun(),
+        data ?? {},
+      );
+    } catch (error) {
+      return reconcileTimedOutAutoRebalanceStart(
+        error,
+        data,
+        () => this.indmoneyUsThreatsHistory({ limit: 50 }),
+        async (item) => {
+          const analysis = await this.indmoneyUsThreatJob(item.job_id);
+          if (
+            analysis.snapshot_id == null ||
+            !analysis.snapshot_date ||
+            !analysis.captured_at
+          ) {
+            throw new Error(
+              "Queued INDmoney threats job is missing snapshot metadata.",
+            );
+          }
+          if (data?.expected_snapshot_id != null && analysis.snapshot_id !== data.expected_snapshot_id) {
+            throw new Error("Queued INDmoney threats job uses a different snapshot than the reviewed source.");
+          }
+          return {
+            job_id: analysis.job_id,
+            status: analysis.status,
+            provider: analysis.provider,
+            model: analysis.model,
+            snapshot_id: analysis.snapshot_id,
+            snapshot_date: analysis.snapshot_date,
+            captured_at: analysis.captured_at,
+            created_at: analysis.created_at,
+          };
+        },
+      );
+    }
   }
 
-  polymarketState(): Promise<PolymarketBotState> {
-    return this.get<PolymarketBotState>(URLs.polymarket.state());
+  polymarketState(options?: ApiRequestControl): Promise<PolymarketBotState> {
+    return this.get<PolymarketBotState>(URLs.polymarket.state(), options);
   }
 
   polymarketStart(): Promise<PolymarketBotState> {
@@ -765,8 +1670,32 @@ class apiServiceClass implements IApiService {
     return this.post<PolymarketBotState>(URLs.polymarket.liveDoctor());
   }
 
-  polymarketLiveBalanceRefresh(): Promise<PolymarketBotState> {
-    return this.post<PolymarketBotState>(URLs.polymarket.liveBalanceRefresh());
+  polymarketLiveBalanceRefresh(
+    options?: ApiRequestControl,
+  ): Promise<PolymarketBotState> {
+    return this.post<PolymarketBotState>(
+      URLs.polymarket.liveBalanceRefresh(),
+      undefined,
+      options,
+    );
+  }
+
+  polymarketLiveRedeem(data?: {
+    conditionIds?: string[];
+  }): Promise<PolymarketBotState> {
+    const conditionIds = Array.isArray(data?.conditionIds)
+      ? Array.from(
+          new Set(
+            data.conditionIds
+              .map((value) => value.trim())
+              .filter((value) => value.length > 0),
+          ),
+        )
+      : [];
+    return this.post<PolymarketBotState>(
+      URLs.polymarket.liveRedeem(),
+      conditionIds.length > 0 ? { condition_ids: conditionIds } : undefined,
+    );
   }
 
   polymarketLiveEmergencyStop(): Promise<PolymarketBotState> {
@@ -775,6 +1704,10 @@ class apiServiceClass implements IApiService {
 
   polymarketLiveResetEmergencyStop(): Promise<PolymarketBotState> {
     return this.post<PolymarketBotState>(URLs.polymarket.liveResetEmergencyStop());
+  }
+
+  polymarketUpdateLiveLimits(data: PolymarketLiveLimitUpdate): Promise<PolymarketBotState> {
+    return this.patch<PolymarketBotState>(URLs.polymarket.liveLimits(), data);
   }
 
   polymarketLiveTradeConfirm(tradeId: string): Promise<PolymarketBotState> {
@@ -789,10 +1722,875 @@ class apiServiceClass implements IApiService {
     return this.post<PolymarketBotState>(URLs.polymarket.liveRejectAll());
   }
 
+  polymarketManualInvest(data: {
+    orders: PolymarketManualInvestOrderRequest[];
+  }, options?: ApiRequestControl): Promise<PolymarketManualInvestResponse> {
+    return this.post<PolymarketManualInvestResponse>(
+      URLs.polymarket.manualInvest(),
+      data,
+      options,
+    );
+  }
+
+  polymarketAddTrackedAccount(data: PolymarketTrackedAccountCreate): Promise<PolymarketBotState> {
+    return this.post<PolymarketBotState>(URLs.polymarket.trackedAccounts(), data);
+  }
+
+  polymarketUpdateTrackedAccount(
+    accountId: string,
+    data: PolymarketTrackedAccountUpdate,
+  ): Promise<PolymarketBotState> {
+    return this.patch<PolymarketBotState>(URLs.polymarket.trackedAccount(accountId), data);
+  }
+
+  polymarketRefreshTrackedAccountNetWorth(accountId: string): Promise<PolymarketBotState> {
+    return this.post<PolymarketBotState>(URLs.polymarket.trackedAccountNetWorthRefresh(accountId));
+  }
+
+  polymarketDeleteTrackedAccount(accountId: string): Promise<PolymarketBotState> {
+    return this.delete<PolymarketBotState>(URLs.polymarket.trackedAccount(accountId));
+  }
+
   polymarketDiscoveryDebug(
     data: PolymarketDiscoveryDebugRequest,
   ): Promise<PolymarketDiscoveryDebugReport> {
     return this.post<PolymarketDiscoveryDebugReport>(URLs.polymarket.discoveryDebug(), data);
+  }
+
+  getBullpenAutoLiveStatus(
+    options?: ApiRequestControl,
+  ): Promise<BullpenAutoLivePersistedStatus> {
+    return this.get<BullpenAutoLivePersistedStatus>(
+      URLs.bullpenAutoLive.status(),
+      { cache: "no-store", ...options },
+    );
+  }
+
+  getBullpen008Bootstrap(
+    options?: ApiRequestControl,
+  ): Promise<Bullpen008Bootstrap> {
+    return this.get<Bullpen008Bootstrap>(URLs.bullpen008.bootstrap(), {
+      cache: "no-store",
+      ...options,
+    });
+  }
+
+  getBullpen008Settings(
+    options?: ApiRequestControl,
+  ): Promise<Bullpen008Settings> {
+    return this.get<Bullpen008Settings>(URLs.bullpen008.settings(), {
+      cache: "no-store",
+      ...options,
+    });
+  }
+
+  updateBullpen008Settings(
+    data: Bullpen008SettingsUpdate,
+  ): Promise<Bullpen008Settings> {
+    return this.put<Bullpen008Settings>(URLs.bullpen008.settings(), data);
+  }
+
+  startBullpen008Scheduler(): Promise<Bullpen008State> {
+    return this.post<Bullpen008State>(URLs.bullpen008.schedulerStart());
+  }
+
+  stopBullpen008Scheduler(): Promise<Bullpen008State> {
+    return this.post<Bullpen008State>(URLs.bullpen008.schedulerStop());
+  }
+
+  pauseBullpen008Scheduler(): Promise<Bullpen008State> {
+    return this.post<Bullpen008State>(URLs.bullpen008.schedulerPause());
+  }
+
+  resumeBullpen008Scheduler(): Promise<Bullpen008State> {
+    return this.post<Bullpen008State>(URLs.bullpen008.schedulerResume());
+  }
+
+  emergencyStopBullpen008(): Promise<Bullpen008State> {
+    return this.post<Bullpen008State>(URLs.bullpen008.emergencyStop());
+  }
+
+  clearBullpen008EmergencyStop(): Promise<Bullpen008State> {
+    return this.post<Bullpen008State>(URLs.bullpen008.clearEmergencyStop());
+  }
+
+  killBullpen008Run(): Promise<Bullpen008KillResponse> {
+    return this.post<Bullpen008KillResponse>(URLs.bullpen008.kill());
+  }
+
+  runBullpen008Once(idempotencyKey?: string): Promise<Bullpen008Run> {
+    return this.post<Bullpen008Run>(
+      URLs.bullpen008.runOnce(),
+      idempotencyKey ? { idempotency_key: idempotencyKey } : undefined,
+    );
+  }
+
+  getBullpen008Runs(
+    params: { limit?: number; offset?: number } = {},
+    options?: ApiRequestControl,
+  ): Promise<Bullpen008HistoryPage> {
+    const query = new URLSearchParams();
+    if (params.limit) query.set("limit", String(params.limit));
+    if (params.offset) query.set("offset", String(params.offset));
+    const suffix = query.size > 0 ? `?${query.toString()}` : "";
+    return this.get<Bullpen008HistoryPage>(
+      `${URLs.bullpen008.runs()}${suffix}`,
+      { cache: "no-store", ...options },
+    );
+  }
+
+  getBullpen008HistoryEventTrends(
+    options?: ApiRequestControl,
+  ): Promise<Bullpen008EventTrendsResponse> {
+    return this.get<Bullpen008EventTrendsResponse>(
+      URLs.bullpen008.historyEventTrends(),
+      { cache: "no-store", ...options },
+    );
+  }
+
+  getBullpen008Run(
+    runId: string,
+    options?: ApiRequestControl,
+  ): Promise<Bullpen008Run> {
+    return this.get<Bullpen008Run>(URLs.bullpen008.run(runId), {
+      cache: "no-store",
+      ...options,
+    });
+  }
+
+  retryBullpen008Run(runId: string, idempotencyKey?: string): Promise<Bullpen008Run> {
+    return this.post<Bullpen008Run>(
+      URLs.bullpen008.retryRun(runId),
+      idempotencyKey ? { idempotency_key: idempotencyKey } : undefined,
+    );
+  }
+
+  getBullpen008Stage(
+    runId: string,
+    stageNumber: number,
+    options?: ApiRequestControl,
+  ): Promise<Bullpen008StageOutput> {
+    return this.get<Bullpen008StageOutput>(
+      URLs.bullpen008.stage(runId, stageNumber),
+      { cache: "no-store", ...options },
+    );
+  }
+
+  getBullpenAutoLiveSummary(
+    options?: ApiRequestControl,
+  ): Promise<BullpenAutoLiveSummaryResponse> {
+    return this.get<BullpenAutoLiveSummaryResponse>(
+      URLs.bullpenAutoLive.summary(),
+      { cache: "no-store", ...options },
+    );
+  }
+
+  getBullpenAutoLiveDashboardSummary(
+    options?: ApiRequestControl,
+    workspaceProfile?: "bullpen007" | "bullpen-sports",
+  ): Promise<BullpenAutoLiveSummaryResponse> {
+    return this.get<BullpenAutoLiveSummaryResponse>(
+      URLs.bullpenAutoLive.dashboardSummary(workspaceProfile),
+      { cache: "no-store", ...options },
+    );
+  }
+
+  getBullpenAutoLiveState(): Promise<BullpenAutoLiveState> {
+    return this.get<BullpenAutoLiveState>(
+      URLs.bullpenAutoLive.state(),
+      { cache: "no-store" },
+    );
+  }
+
+  recordBullpenHourlyRebalanceResult(
+    status: "completed" | "failed",
+    detail?: string,
+  ): Promise<BullpenAutoLiveState> {
+    return this.post<BullpenAutoLiveState>(
+      URLs.bullpenAutoLive.hourlyRebalanceResult(),
+      { status, detail },
+    );
+  }
+
+  getBullpenAutoLiveSettings(
+    options?: ApiRequestControl,
+    profile?: string,
+  ): Promise<BullpenAutoLiveSettings> {
+    return this.get<BullpenAutoLiveSettings>(
+      URLs.bullpenAutoLive.settings(profile),
+      { cache: "no-store", ...options },
+    );
+  }
+
+  updateBullpenAutoLiveSettings(
+    data: BullpenAutoLiveSettingsUpdate,
+    profile?: string,
+  ): Promise<BullpenAutoLiveSettings> {
+    return this.put<BullpenAutoLiveSettings>(
+      URLs.bullpenAutoLive.settings(profile),
+      data,
+    );
+  }
+
+  updateBullpenAutoLiveEventTrendsScanCount(
+    scanCount: number,
+  ): Promise<BullpenAutoLiveSettings> {
+    return this.put<BullpenAutoLiveSettings>(
+      URLs.bullpenAutoLive.historyEventTrendsScanCount(),
+      { event_trends_scan_count: scanCount },
+    );
+  }
+
+  resetBullpenAutoLiveSettings(): Promise<BullpenAutoLiveSettings> {
+    return this.post<BullpenAutoLiveSettings>(URLs.bullpenAutoLive.resetSettings());
+  }
+
+  getBullpenAutoLiveRuns(
+    options?: ApiRequestControl,
+    includeDetails = false,
+  ): Promise<BullpenAutoLiveRun[]> {
+    return this.get<BullpenAutoLiveRun[]>(
+      URLs.bullpenAutoLive.runs(includeDetails),
+      { cache: "no-store", ...options },
+    );
+  }
+
+  getBullpenAutoLiveHistory(
+    params: {
+      page?: number;
+      size?: number;
+      workspaceProfile?: "bullpen007" | "bullpen-sports";
+    } = {},
+    options?: ApiRequestControl,
+  ): Promise<BullpenAutoLiveHistoryPage> {
+    const query = new URLSearchParams();
+    if (params.page) query.set("page", String(params.page));
+    if (params.size) query.set("size", String(params.size));
+    if (params.workspaceProfile) {
+      query.set("workspace_profile", params.workspaceProfile);
+    }
+    const suffix = query.size > 0 ? `?${query.toString()}` : "";
+    return this.get<BullpenAutoLiveHistoryPage>(
+      `${URLs.bullpenAutoLive.history()}${suffix}`,
+      { cache: "no-store", timeoutMs: BULLPEN_HISTORY_READ_TIMEOUT_MS, ...options },
+    );
+  }
+
+  getBullpenAutoLiveHistoryEventTrends(
+    params: {
+      workspaceProfile?: "bullpen007" | "bullpen-sports";
+      timeoutSeconds?: number;
+    } = {},
+    options?: ApiRequestControl,
+  ): Promise<BullpenAutoLiveEventTrendsResponse> {
+    const query = new URLSearchParams();
+    if (params.workspaceProfile) {
+      query.set("workspace_profile", params.workspaceProfile);
+    }
+    if (params.timeoutSeconds) {
+      query.set("proxy_timeout_seconds", String(params.timeoutSeconds));
+    }
+    const suffix = query.size > 0 ? `?${query.toString()}` : "";
+    return this.get<BullpenAutoLiveEventTrendsResponse>(
+      `${URLs.bullpenAutoLive.historyEventTrends()}${suffix}`,
+      { cache: "no-store", ...options },
+    );
+  }
+
+  getBullpenAutoLiveRun(
+    runId: string,
+    options?: ApiRequestControl,
+  ): Promise<BullpenAutoLiveRun> {
+    return this.get<BullpenAutoLiveRun>(
+      URLs.bullpenAutoLive.run(runId),
+      { cache: "no-store", ...options },
+    );
+  }
+
+  async getBullpenAutoLiveRunConsole(
+    runId: string,
+    options?: ApiRequestControl,
+  ): Promise<BullpenAutoLiveConsoleRunDetail> {
+    try {
+      return await this.get<BullpenAutoLiveConsoleRunDetail>(
+        URLs.bullpenAutoLive.runConsole(runId),
+        { cache: "no-store", ...options },
+      );
+    } catch (error) {
+      if (
+        options?.signal?.aborted ||
+        (error instanceof APIError && error.status < 500) ||
+        (!(error instanceof APIError) && !(error instanceof NetworkError))
+      ) {
+        throw error;
+      }
+
+      // Stage 1 is durable scan evidence and must remain readable even when
+      // the heavier exact-run decision join is delayed by database pressure.
+      const run = await this.getBullpenAutoLiveStageOneRun(runId, options);
+      const generatedAt = new Date().toISOString();
+      return {
+        run,
+        decisions: [],
+        visible_decision_ids: [],
+        visible_decision_ids_truncated: false,
+        generated_at: generatedAt,
+        as_of: run.completed_at ?? run.started_at ?? generatedAt,
+        projection_version: 2,
+        projection_available: true,
+        decisions_limit: 0,
+        decisions_truncated: false,
+      };
+    }
+  }
+
+  getBullpenAutoLiveStageOneRun(
+    runId: string,
+    options?: ApiRequestControl,
+  ): Promise<BullpenAutoLiveRun> {
+    return this.get<BullpenAutoLiveRun>(
+      URLs.bullpenAutoLive.runStageOne(runId),
+      { cache: "no-store", ...options },
+    );
+  }
+
+  getBullpenAutoLiveRunDecisions(
+    runId: string,
+    options?: ApiRequestControl,
+  ): Promise<BullpenAutoLiveDecision[]> {
+    return this.get<BullpenAutoLiveDecision[]>(
+      URLs.bullpenAutoLive.runDecisions(runId),
+      { cache: "no-store", ...options },
+    );
+  }
+
+  getBullpenAutoLiveRunOrders(
+    runId: string,
+  ): Promise<BullpenAutoLiveRunOrdersResponse> {
+    return this.get<BullpenAutoLiveRunOrdersResponse>(
+      URLs.bullpenAutoLive.runOrders(runId),
+      { cache: "no-store" },
+    );
+  }
+
+  reconcileBullpenAutoLiveRunOrders(
+    runId: string,
+  ): Promise<BullpenAutoLiveRunOrdersResponse> {
+    return this.post<BullpenAutoLiveRunOrdersResponse>(
+      URLs.bullpenAutoLive.reconcileRunOrders(runId),
+    );
+  }
+
+  retryBullpenAutoLiveExitsAndContinueBuys(
+    runId: string,
+  ): Promise<BullpenAutoLiveRunOrdersResponse> {
+    return this.post<BullpenAutoLiveRunOrdersResponse>(
+      URLs.bullpenAutoLive.retryExitsAndContinueBuys(runId),
+    );
+  }
+
+  getBullpenAutoLiveDecisions(
+    options?: ApiRequestControl,
+  ): Promise<BullpenAutoLiveDecision[]> {
+    return this.get<BullpenAutoLiveDecision[]>(
+      URLs.bullpenAutoLive.decisions(),
+      { cache: "no-store", ...options },
+    );
+  }
+
+  retryBullpenAutoLiveOrder(
+    intentId: string,
+  ): Promise<BullpenAutoLiveRunOrdersResponse> {
+    return this.post<BullpenAutoLiveRunOrdersResponse>(
+      URLs.bullpenAutoLive.retryOrder(intentId),
+    );
+  }
+
+  cancelBullpenAutoLiveOrder(
+    intentId: string,
+  ): Promise<BullpenAutoLiveRunOrdersResponse> {
+    return this.post<BullpenAutoLiveRunOrdersResponse>(
+      URLs.bullpenAutoLive.cancelOrder(intentId),
+    );
+  }
+
+  getBullpenTradeAnalysis(params?: {
+    status?: string;
+    finalTag?: string;
+    fromDate?: string;
+    toDate?: string;
+    strategyVersion?: string;
+    category?: string;
+    topic?: string;
+  }): Promise<BullpenTradeAnalysisListResponse> {
+    const query = new URLSearchParams();
+    if (params?.status) query.set("status", params.status);
+    if (params?.finalTag) query.set("final_tag", params.finalTag);
+    if (params?.fromDate) query.set("from_date", params.fromDate);
+    if (params?.toDate) query.set("to_date", params.toDate);
+    if (params?.strategyVersion) {
+      query.set("strategy_version", params.strategyVersion);
+    }
+    if (params?.category) query.set("category", params.category);
+    if (params?.topic) query.set("topic", params.topic);
+    const baseUrl = URLs.bullpenTradeAnalysis.list();
+    const url = query.size > 0 ? `${baseUrl}?${query.toString()}` : baseUrl;
+    return this.get<BullpenTradeAnalysisListResponse>(url, {
+      cache: "no-store",
+      validate: isBullpenTradeAnalysisListResponse,
+    });
+  }
+
+  getBullpenTradeAnalysisDetail(
+    tradeId: string,
+  ): Promise<BullpenTradeAnalysisDetailResponse> {
+    return this.get<BullpenTradeAnalysisDetailResponse>(
+      URLs.bullpenTradeAnalysis.detail(tradeId),
+    );
+  }
+
+  recomputeBullpenTradeAnalysis(
+    tradeId: string,
+  ): Promise<BullpenTradeAnalysisDetailResponse> {
+    return this.post<BullpenTradeAnalysisDetailResponse>(
+      URLs.bullpenTradeAnalysis.recompute(tradeId),
+    );
+  }
+
+  getBullpenRunAudits(params?: {
+    page?: number;
+    limit?: number;
+    status?: string;
+    triggeredBy?: string;
+    dryLiveMode?: string;
+    fromDate?: string;
+    toDate?: string;
+    stageFailure?: string;
+    auditStatus?: string;
+    findingSeverity?: string;
+    feedbackGenerated?: boolean;
+    runIdSearch?: string;
+  }): Promise<BullpenRunAuditListResponse> {
+    const query = new URLSearchParams();
+    if (params?.page) query.set("page", String(params.page));
+    if (params?.limit) query.set("limit", String(params.limit));
+    if (params?.status) query.set("status", params.status);
+    if (params?.triggeredBy) query.set("triggered_by", params.triggeredBy);
+    if (params?.dryLiveMode) query.set("dry_live_mode", params.dryLiveMode);
+    if (params?.fromDate) query.set("from_date", params.fromDate);
+    if (params?.toDate) query.set("to_date", params.toDate);
+    if (params?.stageFailure) query.set("stage_failure", params.stageFailure);
+    if (params?.auditStatus) query.set("audit_status", params.auditStatus);
+    if (params?.findingSeverity) {
+      query.set("finding_severity", params.findingSeverity);
+    }
+    if (typeof params?.feedbackGenerated === "boolean") {
+      query.set("feedback_generated", String(params.feedbackGenerated));
+    }
+    if (params?.runIdSearch) query.set("run_id_search", params.runIdSearch);
+    const baseUrl = URLs.bullpenRunAudit.list();
+    const url = query.size > 0 ? `${baseUrl}?${query.toString()}` : baseUrl;
+    return this.get<BullpenRunAuditListResponse>(url, { cache: "no-store" });
+  }
+
+  getBullpenRunAuditDetail(
+    runId: string,
+  ): Promise<BullpenRunAuditDetailResponse> {
+    return this.get<BullpenRunAuditDetailResponse>(
+      URLs.bullpenRunAudit.detail(runId),
+      { cache: "no-store" },
+    );
+  }
+
+  materializeBullpenRunAudit(
+    runId: string,
+  ): Promise<BullpenRunAuditMaterializeResponse> {
+    return this.post<BullpenRunAuditMaterializeResponse>(
+      URLs.bullpenRunAudit.materialize(runId),
+    );
+  }
+
+  getBullpenRunAuditSection(
+    runId: string,
+    section: string,
+  ): Promise<BullpenRunAuditSectionResponse> {
+    return this.get<BullpenRunAuditSectionResponse>(
+      URLs.bullpenRunAudit.section(runId, section),
+      { cache: "no-store" },
+    );
+  }
+
+  getBullpenRunAuditFindings(runId: string): Promise<BullpenRunAuditFinding[]> {
+    return this.get<BullpenRunAuditFinding[]>(
+      URLs.bullpenRunAudit.findings(runId),
+      { cache: "no-store" },
+    );
+  }
+
+  addBullpenRunAuditRemark(
+    runId: string,
+    data: BullpenRunAuditRemarkCreateRequest,
+  ): Promise<BullpenRunAuditRemark> {
+    return this.post<BullpenRunAuditRemark>(
+      URLs.bullpenRunAudit.remarks(runId),
+      data,
+    );
+  }
+
+  updateBullpenRunAuditManualCheck(
+    runId: string,
+    data: BullpenRunAuditManualCheckUpdateRequest,
+  ): Promise<BullpenRunAuditManualCheck> {
+    return this.post<BullpenRunAuditManualCheck>(
+      URLs.bullpenRunAudit.manualChecks(runId),
+      data,
+    );
+  }
+
+  createBullpenRunAuditFeedback(
+    runId: string,
+    data: BullpenRunAuditFeedbackCreateRequest,
+  ): Promise<BullpenRunAuditFeedbackSummary> {
+    return this.post<BullpenRunAuditFeedbackSummary>(
+      URLs.bullpenRunAudit.feedback(runId),
+      data,
+    );
+  }
+
+  getBullpenRunAuditFeedback(
+    runId: string,
+  ): Promise<BullpenRunAuditFeedbackSummary[]> {
+    return this.get<BullpenRunAuditFeedbackSummary[]>(
+      URLs.bullpenRunAudit.feedback(runId),
+      { cache: "no-store" },
+    );
+  }
+
+  getBullpenRunAuditFeedbackDetail(
+    runId: string,
+    feedbackId: number,
+  ): Promise<BullpenRunAuditFeedbackDetail> {
+    return this.get<BullpenRunAuditFeedbackDetail>(
+      URLs.bullpenRunAudit.feedbackDetail(runId, feedbackId),
+      { cache: "no-store" },
+    );
+  }
+
+  exportBullpenRunAudit(runId: string): Promise<Record<string, unknown>> {
+    return this.get<Record<string, unknown>>(
+      URLs.bullpenRunAudit.export(runId),
+      { cache: "no-store" },
+    );
+  }
+
+  runBullpenAutoLiveOnce(
+    data?: BullpenAutoLiveRunOnceRequest,
+  ): Promise<BullpenAutoLiveRun> {
+    const clientRunId =
+      data?.client_run_id?.trim() ||
+      (typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `auto-run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`);
+    const request: BullpenAutoLiveRunOnceRequest = {
+      ...(data ?? {}),
+      client_run_id: clientRunId,
+    };
+
+    return this.post<BullpenAutoLiveRun>(
+      URLs.bullpenAutoLive.runOnce(),
+      request,
+      {
+        validate: (value) =>
+          isBullpenAutoLiveRunResponse(value, clientRunId),
+      },
+    ).catch(async (primaryError: unknown) => {
+      if (!isAmbiguousBullpenRunStartError(primaryError)) {
+        throw primaryError;
+      }
+
+      logBullpenRunStartFallback({
+        runId: clientRunId,
+        fromStage: "primary",
+        toStage: "secondary",
+        approach: "read_durable_run_by_id",
+        reason: getReadFallbackReason(primaryError),
+      });
+      await waitForBoundedFallback(BULLPEN_RUN_START_SECONDARY_DELAY_MS);
+
+      try {
+        return await this.getBullpenAutoLiveRun(clientRunId, {
+          timeoutMs: 5_000,
+          validate: (value) =>
+            isBullpenAutoLiveRunResponse(value, clientRunId),
+        });
+      } catch (secondaryError) {
+        logBullpenRunStartFallback({
+          runId: clientRunId,
+          fromStage: "secondary",
+          toStage: "tertiary",
+          approach: "match_durable_run_history",
+          reason: getReadFallbackReason(secondaryError),
+        });
+      }
+
+      await waitForBoundedFallback(BULLPEN_RUN_START_TERTIARY_DELAY_MS);
+      try {
+        const runs = await this.getBullpenAutoLiveRuns({
+          timeoutMs: 5_000,
+          validate: (value) =>
+            Array.isArray(value) &&
+            value.every((run) => isBullpenAutoLiveRunResponse(run)),
+        });
+        const recoveredRun = runs.find((run) => run.id === clientRunId);
+        if (recoveredRun && isBullpenAutoLiveRunResponse(recoveredRun, clientRunId)) {
+          return recoveredRun;
+        }
+      } catch {
+        // Preserve the primary mutation error after all bounded, read-only
+        // reconciliation paths have failed. Never issue a second POST.
+      }
+
+      throw primaryError;
+    });
+  }
+
+  queueBullpenWorkflowRunNow(
+    data: BullpenWorkflowRunNowRequest,
+  ): Promise<BullpenWorkflowRunNowResponse> {
+    const clientRequestId =
+      data.client_request_id?.trim() ||
+      (typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `workflow-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`);
+    return this.post<BullpenWorkflowRunNowResponse>(
+      URLs.bullpenAutoLive.workflowRunNow(),
+      { ...data, client_request_id: clientRequestId },
+    );
+  }
+
+  startBullpenAutoLive(): Promise<BullpenAutoLiveState> {
+    return this.post<BullpenAutoLiveState>(URLs.bullpenAutoLive.start());
+  }
+
+  stopBullpenAutoLive(): Promise<BullpenAutoLiveState> {
+    return this.post<BullpenAutoLiveState>(URLs.bullpenAutoLive.stop());
+  }
+
+  pauseBullpenAutoLive(): Promise<BullpenAutoLiveState> {
+    return this.post<BullpenAutoLiveState>(URLs.bullpenAutoLive.pause());
+  }
+
+  resumeBullpenAutoLive(): Promise<BullpenAutoLiveState> {
+    return this.post<BullpenAutoLiveState>(URLs.bullpenAutoLive.resume());
+  }
+
+  emergencyStopBullpenAutoLive(): Promise<BullpenAutoLiveState> {
+    return this.post<BullpenAutoLiveState>(URLs.bullpenAutoLive.emergencyStop());
+  }
+
+  clearEmergencyStopBullpenAutoLive(): Promise<BullpenAutoLiveState> {
+    return this.post<BullpenAutoLiveState>(URLs.bullpenAutoLive.clearEmergencyStop());
+  }
+
+  bullpenAiAutoLiveSummary(): Promise<BullpenAutoLiveSummaryResponse> {
+    return this.getBullpenAutoLiveSummary();
+  }
+
+  bullpenAiAutoLiveState(): Promise<BullpenAutoLiveState> {
+    return this.getBullpenAutoLiveState();
+  }
+
+  bullpenAiAutoLiveSettings(): Promise<BullpenAutoLiveSettings> {
+    return this.getBullpenAutoLiveSettings();
+  }
+
+  bullpenAiAutoLiveUpdateSettings(
+    data: BullpenAutoLiveSettingsUpdate,
+  ): Promise<BullpenAutoLiveSettings> {
+    return this.updateBullpenAutoLiveSettings(data);
+  }
+
+  bullpenAiAutoLiveResetSettings(): Promise<BullpenAutoLiveSettings> {
+    return this.resetBullpenAutoLiveSettings();
+  }
+
+  bullpenAiAutoLiveRuns(): Promise<BullpenAutoLiveRun[]> {
+    return this.getBullpenAutoLiveRuns();
+  }
+
+  bullpenAiAutoLiveRunOrders(
+    runId: string,
+  ): Promise<BullpenAutoLiveRunOrdersResponse> {
+    return this.getBullpenAutoLiveRunOrders(runId);
+  }
+
+  bullpenAiAutoLiveReconcileRunOrders(
+    runId: string,
+  ): Promise<BullpenAutoLiveRunOrdersResponse> {
+    return this.reconcileBullpenAutoLiveRunOrders(runId);
+  }
+
+  bullpenAiAutoLiveDecisions(): Promise<BullpenAutoLiveDecision[]> {
+    return this.getBullpenAutoLiveDecisions();
+  }
+
+  bullpenAiAutoLiveRetryOrder(
+    intentId: string,
+  ): Promise<BullpenAutoLiveRunOrdersResponse> {
+    return this.retryBullpenAutoLiveOrder(intentId);
+  }
+
+  bullpenAiAutoLiveCancelOrder(
+    intentId: string,
+  ): Promise<BullpenAutoLiveRunOrdersResponse> {
+    return this.cancelBullpenAutoLiveOrder(intentId);
+  }
+
+  bullpenAiTradeAnalysis(params?: {
+    status?: string;
+    finalTag?: string;
+    fromDate?: string;
+    toDate?: string;
+    strategyVersion?: string;
+    category?: string;
+    topic?: string;
+  }): Promise<BullpenTradeAnalysisListResponse> {
+    return this.getBullpenTradeAnalysis(params);
+  }
+
+  bullpenAiTradeAnalysisDetail(
+    tradeId: string,
+  ): Promise<BullpenTradeAnalysisDetailResponse> {
+    return this.getBullpenTradeAnalysisDetail(tradeId);
+  }
+
+  bullpenAiTradeAnalysisRecompute(
+    tradeId: string,
+  ): Promise<BullpenTradeAnalysisDetailResponse> {
+    return this.recomputeBullpenTradeAnalysis(tradeId);
+  }
+
+  bullpenAiAutoLiveRunOnce(
+    data?: BullpenAutoLiveRunOnceRequest,
+  ): Promise<BullpenAutoLiveRun> {
+    return this.runBullpenAutoLiveOnce(data);
+  }
+
+  bullpenAiAutoLiveStart(): Promise<BullpenAutoLiveState> {
+    return this.startBullpenAutoLive();
+  }
+
+  bullpenAiAutoLiveStop(): Promise<BullpenAutoLiveState> {
+    return this.stopBullpenAutoLive();
+  }
+
+  bullpenAiAutoLivePause(): Promise<BullpenAutoLiveState> {
+    return this.pauseBullpenAutoLive();
+  }
+
+  bullpenAiAutoLiveResume(): Promise<BullpenAutoLiveState> {
+    return this.resumeBullpenAutoLive();
+  }
+
+  bullpenAiAutoLiveEmergencyStop(): Promise<BullpenAutoLiveState> {
+    return this.emergencyStopBullpenAutoLive();
+  }
+
+  bullpenAiAutoLiveClearEmergencyStop(): Promise<BullpenAutoLiveState> {
+    return this.clearEmergencyStopBullpenAutoLive();
+  }
+
+  getTradingBotsSummary(): Promise<TradingBotsSummaryResponse> {
+    return this.get<TradingBotsSummaryResponse>(URLs.tradingBots.summary());
+  }
+
+  polymarketDirectState(): Promise<PolymarketBotState> {
+    return this.get<PolymarketBotState>(URLs.polymarketDirect.state());
+  }
+
+  polymarketDirectStart(): Promise<PolymarketBotState> {
+    return this.post<PolymarketBotState>(URLs.polymarketDirect.start());
+  }
+
+  polymarketDirectStop(): Promise<PolymarketBotState> {
+    return this.post<PolymarketBotState>(URLs.polymarketDirect.stop());
+  }
+
+  polymarketDirectPause(): Promise<PolymarketBotState> {
+    return this.post<PolymarketBotState>(URLs.polymarketDirect.pause());
+  }
+
+  polymarketDirectResume(): Promise<PolymarketBotState> {
+    return this.post<PolymarketBotState>(URLs.polymarketDirect.resume());
+  }
+
+  polymarketDirectLiveUnlock(): Promise<PolymarketBotState> {
+    return this.post<PolymarketBotState>(URLs.polymarketDirect.liveUnlock());
+  }
+
+  polymarketDirectLiveLock(): Promise<PolymarketBotState> {
+    return this.post<PolymarketBotState>(URLs.polymarketDirect.liveLock());
+  }
+
+  polymarketDirectLiveDoctor(): Promise<PolymarketBotState> {
+    return this.post<PolymarketBotState>(URLs.polymarketDirect.liveDoctor());
+  }
+
+  polymarketDirectLiveBalanceRefresh(): Promise<PolymarketBotState> {
+    return this.post<PolymarketBotState>(URLs.polymarketDirect.liveBalanceRefresh());
+  }
+
+  polymarketDirectLiveRedeem(): Promise<PolymarketBotState> {
+    return this.post<PolymarketBotState>(URLs.polymarketDirect.liveRedeem());
+  }
+
+  polymarketDirectLiveEmergencyStop(): Promise<PolymarketBotState> {
+    return this.post<PolymarketBotState>(URLs.polymarketDirect.liveEmergencyStop());
+  }
+
+  polymarketDirectLiveResetEmergencyStop(): Promise<PolymarketBotState> {
+    return this.post<PolymarketBotState>(URLs.polymarketDirect.liveResetEmergencyStop());
+  }
+
+  polymarketDirectUpdateLiveLimits(data: PolymarketLiveLimitUpdate): Promise<PolymarketBotState> {
+    return this.patch<PolymarketBotState>(URLs.polymarketDirect.liveLimits(), data);
+  }
+
+  polymarketDirectLiveTradeConfirm(tradeId: string): Promise<PolymarketBotState> {
+    return this.post<PolymarketBotState>(URLs.polymarketDirect.liveTradeConfirm(tradeId));
+  }
+
+  polymarketDirectLiveTradeReject(tradeId: string): Promise<PolymarketBotState> {
+    return this.post<PolymarketBotState>(URLs.polymarketDirect.liveTradeReject(tradeId));
+  }
+
+  polymarketDirectLiveRejectAll(): Promise<PolymarketBotState> {
+    return this.post<PolymarketBotState>(URLs.polymarketDirect.liveRejectAll());
+  }
+
+  polymarketDirectAddTrackedAccount(data: PolymarketTrackedAccountCreate): Promise<PolymarketBotState> {
+    return this.post<PolymarketBotState>(URLs.polymarketDirect.trackedAccounts(), data);
+  }
+
+  polymarketDirectUpdateTrackedAccount(
+    accountId: string,
+    data: PolymarketTrackedAccountUpdate,
+  ): Promise<PolymarketBotState> {
+    return this.patch<PolymarketBotState>(URLs.polymarketDirect.trackedAccount(accountId), data);
+  }
+
+  polymarketDirectDeleteTrackedAccount(accountId: string): Promise<PolymarketBotState> {
+    return this.delete<PolymarketBotState>(URLs.polymarketDirect.trackedAccount(accountId));
+  }
+
+  polymarketDirectDiscoveryDebug(
+    data: PolymarketDiscoveryDebugRequest,
+  ): Promise<PolymarketDiscoveryDebugReport> {
+    return this.post<PolymarketDiscoveryDebugReport>(URLs.polymarketDirect.discoveryDebug(), data);
+  }
+
+  getTradingBotsOverview(): Promise<TradingBotsOverviewResponse> {
+    return this.get<TradingBotsOverviewResponse>(URLs.tradingBots.overview());
   }
 
   googleSheetsAuthUrl(): Promise<GoogleSheetsAuthUrlResponse> {

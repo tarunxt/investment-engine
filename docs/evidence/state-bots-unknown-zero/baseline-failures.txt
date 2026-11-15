@@ -1,0 +1,88 @@
+✖ Bullpen auto-run workflow view exposes Stage 1 output candidates (154.754192ms)
+✖ Bullpen auto-run workflow view exposes Stage 1 active Bullpen positions (51.103398ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 0
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 490.592089
+
+✖ failing tests:
+
+test at ../../tmp/state-bots-baseline/tests/bullpen-auto-run-progress.test.mjs:880:1
+✖ Bullpen auto-run workflow view exposes Stage 1 output candidates (154.754192ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    {
+  +   bestAskCents: null,
+  +   bestBidCents: null,
+      closeTime: '2026-06-25T12:30:00Z',
+  +   conditionId: null,
+      currentNoOdds: 67.5,
+      currentYesOdds: 32.5,
+  +   eventDescription: null,
+      filterReasons: [],
+      forceInclude: true,
+  +   forceIncludedPosition: false,
+      liquidityUsd: 450,
+  +   marketContext: null,
+      marketId: null,
+      marketUrl: 'https://polymarket.com/event/no',
+  +   preflightEvidenceBlock: null,
+      question: 'Will the event resolve No?',
+      questionId: null,
+  +   resolutionSource: null,
+  +   returnsPerDay: null,
+  +   rules: null,
+      scanStatus: 'passed',
+  +   selected: null,
+      slug: 'event-no',
+  +   spreadCents: null,
+      theme: 'Politics',
+      volumeUsd: 1200.5
+    }
+  
+      at TestContext.<anonymous> (file:///tmp/state-bots-baseline/tests/bullpen-auto-run-progress.test.mjs:930:10)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: { questionId: null, marketId: null, conditionId: null, question: 'Will the event resolve No?', marketUrl: 'https://polymarket.com/event/no', slug: 'event-no', closeTime: '2026-06-25T12:30:00Z', theme: 'Politics', currentYesOdds: 32.5, currentNoOdds: 67.5, volumeUsd: 1200.5, liquidityUsd: 450, bestBidCents: null, bestAskCents: null, spreadCents: null, returnsPerDay: null, forceInclude: true, forceIncludedPosition: false, selected: null, rules: null, eventDescription: null, marketContext: null, resolutionSource: null, preflightEvidenceBlock: null, scanStatus: 'passed', filterReasons: [] },
+    expected: { questionId: null, marketId: null, question: 'Will the event resolve No?', marketUrl: 'https://polymarket.com/event/no', slug: 'event-no', closeTime: '2026-06-25T12:30:00Z', theme: 'Politics', currentYesOdds: 32.5, currentNoOdds: 67.5, volumeUsd: 1200.5, liquidityUsd: 450, forceInclude: true, scanStatus: 'passed', filterReasons: [] },
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at ../../tmp/state-bots-baseline/tests/bullpen-auto-run-progress.test.mjs:954:1
+✖ Bullpen auto-run workflow view exposes Stage 1 active Bullpen positions (51.103398ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  ... Skipped lines
+  
+    {
+      averagePriceCents: 42.5,
+      classification: null,
+      closeTime: '2026-06-25T12:30:00Z',
+      conditionId: '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
+  ...
+      positionKey: 'market-1::YES',
+  +   returnsPerDay: null,
+      shares: 12.5,
+      side: 'YES',
+      slug: 'rates-fall',
+      theme: 'Macro'
+    }
+  
+      at TestContext.<anonymous> (file:///tmp/state-bots-baseline/tests/bullpen-auto-run-progress.test.mjs:1001:10)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: { positionKey: 'market-1::YES', marketId: 'market-1', marketTitle: 'Will rates fall?', marketUrl: 'https://polymarket.com/event/rates-fall', slug: 'rates-fall', theme: 'Macro', side: 'YES', shares: 12.5, exposureUsd: 37.5, averagePriceCents: 42.5, currentYesOdds: 55, currentNoOdds: 45, closeTime: '2026-06-25T12:30:00Z', conditionId: '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef', isClaimable: false, classification: null, returnsPerDay: null },
+    expected: { positionKey: 'market-1::YES', marketId: 'market-1', marketTitle: 'Will rates fall?', marketUrl: 'https://polymarket.com/event/rates-fall', slug: 'rates-fall', theme: 'Macro', side: 'YES', shares: 12.5, exposureUsd: 37.5, averagePriceCents: 42.5, currentYesOdds: 55, currentNoOdds: 45, closeTime: '2026-06-25T12:30:00Z', conditionId: '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef', isClaimable: false, classification: null },
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }

@@ -3,15 +3,21 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy import select
+from starlette.concurrency import run_in_threadpool
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.logging import get_logger
-from app.core.security import AuthUtils, JWTUtils, PasswordUtils
-from app.domains.auth.dependencies import get_current_user, require_admin
+from app.core.recovery import recovery_mode
+from app.core.security import JWTUtils, PasswordUtils
+from app.domains.auth.dependencies import get_current_user, require_admin, security
+from app.domains.auth.session_lifecycle import SessionLifecycle, subject
+from app.domains.auth.session_store import SqlSessionFamilies
 from app.domains.auth.models import ActivityLog, User, UserProfile, UserRole
 from app.domains.auth.schemas import (
+    GoogleSignInRequest,
     ForgotPasswordRequest,
     LoginResponse,
     RefreshTokenRequest,
@@ -19,9 +25,15 @@ from app.domains.auth.schemas import (
     ResetPasswordRequest,
     UpdatePasswordRequest,
     UpdateProfileRequest,
+    ProfilePreferencesResponse,
     UserLoginRequest,
     UserRegisterRequest,
     UserResponse,
+    WebSocketTicketResponse,
+)
+from app.domains.auth.websocket_tickets import (
+    WEBSOCKET_TICKET_TTL_SECONDS,
+    issue_websocket_ticket,
 )
 from app.domains.auth.tasks import send_reset_password_email_task
 from app.infrastructure.database.session import get_async_db
@@ -29,6 +41,33 @@ from app.shared.exceptions import NotFoundException, ValidationException
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 logger = get_logger(__name__)
+
+
+@router.get("/google/config")
+async def google_config(db: AsyncSession = Depends(get_async_db)):
+    from app.domains.auth.google_signin import google_signin_client_id
+
+    client_id = await google_signin_client_id(db)
+    return {"client_id": client_id, "enabled": bool(client_id)}
+
+
+@router.post("/google", response_model=LoginResponse)
+async def google_login(request: GoogleSignInRequest, db: AsyncSession = Depends(get_async_db)):
+    from app.domains.auth.google_signin import (
+        google_signin_client_id, resolve_google_user, verify_google_identity,
+    )
+
+    client_id = await google_signin_client_id(db)
+    email = await run_in_threadpool(verify_google_identity, request.credential, client_id)
+    user = await resolve_google_user(db, email)
+    user.last_login = datetime.utcnow()
+    db.add(ActivityLog(user_id=user.id, action="login", details="User logged in with Google"))
+    tokens = await SessionLifecycle(SqlSessionFamilies(db)).issue(user)
+    await db.commit()
+    return LoginResponse(
+        access_token=tokens["access_token"], refresh_token=tokens["refresh_token"],
+        token_type="bearer", user=UserResponse.model_validate(user), expires_in=900,
+    )
 
 
 @router.post("/register", response_model=RegisterResponse, status_code=status.HTTP_201_CREATED)
@@ -80,11 +119,11 @@ async def register(request: UserRegisterRequest, db: AsyncSession = Depends(get_
 async def login(request: UserLoginRequest, db: AsyncSession = Depends(get_async_db)):
     if request.email:
         result = await db.execute(
-            select(User).where(User.email == request.email).options(selectinload(User.profile))
+            select(User).where(User.email == request.email).options(selectinload(User.profile)).with_for_update(of=User)
         )
     elif request.username:
         result = await db.execute(
-            select(User).where(User.username == request.username).options(selectinload(User.profile))
+            select(User).where(User.username == request.username).options(selectinload(User.profile)).with_for_update(of=User)
         )
     else:
         raise ValidationException("Either email or username is required")
@@ -97,9 +136,8 @@ async def login(request: UserLoginRequest, db: AsyncSession = Depends(get_async_
 
     user.last_login = datetime.utcnow()
     db.add(ActivityLog(user_id=user.id, action="login", details="User logged in"))
+    tokens = await SessionLifecycle(SqlSessionFamilies(db)).issue(user)
     await db.commit()
-
-    tokens = AuthUtils.create_tokens(user.id, user.email, user.role.value)
     return LoginResponse(
         access_token=tokens["access_token"],
         refresh_token=tokens["refresh_token"],
@@ -111,22 +149,8 @@ async def login(request: UserLoginRequest, db: AsyncSession = Depends(get_async_
 
 @router.post("/refresh", response_model=LoginResponse)
 async def refresh_token(request: RefreshTokenRequest, db: AsyncSession = Depends(get_async_db)):
-    payload = JWTUtils.verify_token(request.refresh_token)
-    if not payload or payload.get("type") != "refresh":
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired refresh token")
-
-    sub = payload.get("sub")
-    if not sub:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Invalid token payload")
-
-    result = await db.execute(
-        select(User).where(User.id == int(sub)).options(selectinload(User.profile))
-    )
-    user = result.scalar_one_or_none()
-    if not user or not user.is_active:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="User not found or inactive")
-
-    tokens = AuthUtils.create_tokens(user.id, user.email, user.role.value)
+    user, tokens = await SessionLifecycle(SqlSessionFamilies(db)).rotate(request.refresh_token, request.intent_nonce)
+    await db.commit()
     return LoginResponse(
         access_token=tokens["access_token"],
         refresh_token=tokens["refresh_token"],
@@ -136,14 +160,55 @@ async def refresh_token(request: RefreshTokenRequest, db: AsyncSession = Depends
     )
 
 
+@router.post("/refresh-intent")
+async def claim_refresh_intent(request: RefreshTokenRequest, db: AsyncSession = Depends(get_async_db)):
+    from app.domains.auth.refresh_intent import RefreshIntents
+    nonce = await RefreshIntents(SqlSessionFamilies(db)).claim(request.refresh_token)
+    await db.commit()
+    return {"intent_nonce": nonce}
+
+
 @router.post("/logout")
 async def logout(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_db),
 ):
+    payload = JWTUtils.verify_access_token(credentials.credentials) if credentials else None
+    if not payload:
+        raise HTTPException(401, detail="Not authenticated")
+    await SessionLifecycle(SqlSessionFamilies(db)).revoke_current(payload)
     db.add(ActivityLog(user_id=current_user.id, action="logout", details="User logged out"))
     await db.commit()
-    return {"message": "Logged out successfully"}
+    return {"message": "Logged out successfully", "session_revocation": "confirmed"}
+
+
+@router.post("/logout-refresh")
+async def logout_refresh(request: RefreshTokenRequest, db: AsyncSession = Depends(get_async_db)):
+    # Revocation needs no replacement credentials and must not compete for a
+    # refresh intent when access has expired. A signed, unexpired family-bound
+    # refresh credential can only revoke its own family, never authorize data.
+    payload = JWTUtils.verify_refresh_token(request.refresh_token)
+    if payload is None:
+        raise HTTPException(401, detail="Not authenticated")
+    await SessionLifecycle(SqlSessionFamilies(db)).revoke_current(payload)
+    db.add(ActivityLog(user_id=subject(payload), action="logout", details="User logged out"))
+    await db.commit()
+    return {"message": "Logged out successfully", "session_revocation": "confirmed"}
+
+
+@router.post("/websocket-ticket", response_model=WebSocketTicketResponse)
+async def create_websocket_ticket(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    current_user: User = Depends(get_current_user),
+):
+    payload = JWTUtils.verify_access_token(credentials.credentials) if credentials else None
+    if not payload or "sid" not in payload:
+        raise HTTPException(401, detail="Not authenticated")
+    return WebSocketTicketResponse(
+        ticket=await issue_websocket_ticket(current_user.id, payload["sid"], payload["exp"]),
+        expires_in=WEBSOCKET_TICKET_TTL_SECONDS,
+    )
 
 
 @router.get("/me", response_model=UserResponse)
@@ -180,7 +245,7 @@ async def reset_password(
         select(User).where(
             User.reset_password_token == request.token,
             User.reset_password_expires > datetime.utcnow(),
-        )
+        ).with_for_update(of=User).execution_options(populate_existing=True)
     )
     user = result.scalar_one_or_none()
     if not user:
@@ -189,6 +254,7 @@ async def reset_password(
     user.password_hash = PasswordUtils.hash_password(request.new_password)
     user.reset_password_token = None
     user.reset_password_expires = None
+    await SessionLifecycle(SqlSessionFamilies(db)).revoke_all(user.id)
     db.add(ActivityLog(user_id=user.id, action="reset_password", details="Password reset via token"))
     await db.commit()
 
@@ -201,6 +267,9 @@ async def update_password(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_db),
 ):
+    current_user = await SqlSessionFamilies(db).lock_user(current_user.id)
+    if current_user is None or not current_user.is_active:
+        raise HTTPException(401, detail="Not authenticated")
     if not PasswordUtils.verify_password(request.current_password, current_user.password_hash):
         raise ValidationException("Current password is incorrect")
     if request.new_password != request.confirm_password:
@@ -209,13 +278,14 @@ async def update_password(
         raise ValidationException("New password must be different from current password")
 
     current_user.password_hash = PasswordUtils.hash_password(request.new_password)
+    await SessionLifecycle(SqlSessionFamilies(db)).revoke_all(current_user.id)
     db.add(ActivityLog(user_id=current_user.id, action="change_password", details="Password changed"))
     await db.commit()
 
     return {"message": "Password updated successfully"}
 
 
-@router.get("/profile", response_model=UpdateProfileRequest)
+@router.get("/profile", response_model=ProfilePreferencesResponse)
 async def get_profile(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_db),
@@ -226,13 +296,16 @@ async def get_profile(
     profile = result.scalar_one_or_none()
     if not profile:
         raise NotFoundException("User profile not found")
-    return UpdateProfileRequest(
+    return ProfilePreferencesResponse(
+        preferences_writable=not recovery_mode(),
         full_name=current_user.full_name,
         avatar_url=profile.avatar_url,
         bio=profile.bio,
         timezone=profile.timezone,
         notification_preferences=profile.notification_preferences,
         theme_preference=profile.theme_preference,
+        zerodha_buy_threshold=profile.zerodha_buy_threshold,
+        indmoney_buy_threshold=profile.indmoney_buy_threshold,
     )
 
 
@@ -253,7 +326,15 @@ async def update_profile(
         profile = UserProfile(user_id=current_user.id)
         db.add(profile)
 
-    for field in ("avatar_url", "bio", "timezone", "notification_preferences", "theme_preference"):
+    for field in (
+        "avatar_url",
+        "bio",
+        "timezone",
+        "notification_preferences",
+        "theme_preference",
+        "zerodha_buy_threshold",
+        "indmoney_buy_threshold",
+    ):
         val = getattr(request, field)
         if val is not None:
             setattr(profile, field, val)

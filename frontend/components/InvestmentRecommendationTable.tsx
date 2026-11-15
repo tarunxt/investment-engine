@@ -227,7 +227,14 @@ function buildEmptyCanonicalRow(headers: readonly CanonicalHeader[]): CanonicalR
 
 function canonicalHeadersForSource(source: Record<string, unknown>): readonly CanonicalHeader[] {
   const mappedHeaders = Object.keys(source).map((key) => HEADER_ALIAS_TO_EXACT[normalizeHeader(key)]);
-  return mappedHeaders.some((header) => REBALANCE_HEADER_ORDER.includes(header as RebalanceHeader))
+  // Stock identity, prices and rationales are shared by both schemas. Only
+  // position/action columns distinguish Rebalance from a Swing recommendation.
+  return mappedHeaders.some((header) =>
+    header === 'Current Units' ||
+    header === 'Action (Buy/Add/Sell All/Trim/Hold/Buy New)' ||
+    header === 'Units Change' ||
+    header === 'Final Units',
+  )
     ? REBALANCE_HEADER_ORDER
     : SWING_HEADER_ORDER;
 }
@@ -275,16 +282,19 @@ function isHeaderLikeRow(row: string[], headers: string[]): boolean {
   return matches >= Math.max(3, Math.floor(headers.length / 2));
 }
 
-function parseJsonContent(content: string): JsonRecommendationPayload | JsonRecommendationRow[] | null {
+function parseJsonContent(content: string): {
+  data: JsonRecommendationPayload | JsonRecommendationRow[] | null;
+  error?: unknown;
+} {
   const trimmed = content.trim();
   if (!trimmed || !/^(?:```json\s*|```[\s\S]*[{[]|[{[])/i.test(trimmed)) {
-    return null;
+    return { data: null };
   }
 
   try {
     const parsed = JSON.parse(trimmed.replace(/```json/gi, '').replace(/```/g, '').trim()) as unknown;
     if (Array.isArray(parsed)) {
-      return parsed as JsonRecommendationRow[];
+      return { data: parsed as JsonRecommendationRow[] };
     }
     if (
       parsed &&
@@ -292,12 +302,13 @@ function parseJsonContent(content: string): JsonRecommendationPayload | JsonReco
       'stocks' in parsed &&
       Array.isArray((parsed as JsonRecommendationPayload).stocks)
     ) {
-      return parsed as JsonRecommendationPayload;
+      return { data: parsed as JsonRecommendationPayload };
     }
-    return null;
+    return { data: null };
   } catch (error) {
-    console.error('Error parsing investment recommendation data:', error);
-    return null;
+    // A failed JSON probe may still be a valid Markdown recommendation table.
+    // Report it only if the supported fallbacks also fail.
+    return { data: null, error };
   }
 }
 
@@ -417,6 +428,108 @@ function toDisplayProvider(provider?: string): string {
     .join(' ');
 }
 
+function parseNumericText(value: unknown): number | null {
+  const match = String(value ?? '')
+    .replace(/,/g, '')
+    .match(/-?\d+(?:\.\d+)?/);
+  if (!match) return null;
+  const parsed = Number(match[0]);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizeRebalanceAction(value: unknown): string | null {
+  const text = formatCellValue(value);
+  const normalized = text.toLowerCase().replace(/[^a-z]+/g, ' ').trim();
+  if (!normalized) return null;
+  if (normalized.includes('sell all') || normalized === 'sell') return 'Sell All';
+  if (normalized.includes('trim') || normalized.includes('reduce')) return 'Trim';
+  if (normalized.includes('buy new') || normalized.includes('new buy')) return 'Buy New';
+  if (normalized.includes('add') || normalized.includes('buy more')) return 'Add more';
+  if (normalized.includes('hold')) return 'Hold';
+  return null;
+}
+
+function formatNormalizedNumber(value: number): string {
+  return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(10)));
+}
+
+function normalizeRebalanceDerivedCells(row: CanonicalRow) {
+  if (!REBALANCE_HEADER_ORDER.some((header) => row[header])) return;
+
+  const originalActionCell = row['Action (Buy/Add/Sell All/Trim/Hold/Buy New)'];
+  let action = normalizeRebalanceAction(originalActionCell);
+  const unitsChangeAction = normalizeRebalanceAction(row['Units Change']);
+  if (!action && unitsChangeAction) {
+    row['Action (Buy/Add/Sell All/Trim/Hold/Buy New)'] = unitsChangeAction;
+    row['Units Change'] = originalActionCell;
+    action = unitsChangeAction;
+  } else if (action) {
+    row['Action (Buy/Add/Sell All/Trim/Hold/Buy New)'] = action;
+  }
+
+  let currentUnits = parseNumericText(row['Current Units']);
+  let unitsChange = parseNumericText(row['Units Change']);
+  let finalUnits = parseNumericText(row['Final Units']);
+  const unitsToBuy = parseNumericText(row['Units to Buy']);
+
+  if (action === 'Buy New' && currentUnits === null) {
+    currentUnits = 0;
+    row['Current Units'] = '0';
+  }
+
+  if (action === 'Hold') {
+    if (unitsChange === null) {
+      unitsChange = 0;
+      row['Units Change'] = '0';
+    }
+    if (finalUnits === null && currentUnits !== null) {
+      finalUnits = currentUnits;
+      row['Final Units'] = formatNormalizedNumber(finalUnits);
+    }
+  }
+
+  if (action === 'Sell All' && currentUnits !== null) {
+    if (unitsChange === null) {
+      unitsChange = -Math.abs(currentUnits);
+      row['Units Change'] = formatNormalizedNumber(unitsChange);
+    }
+    if (finalUnits === null) {
+      finalUnits = 0;
+      row['Final Units'] = '0';
+    }
+  }
+
+  if (
+    (action === 'Add more' || action === 'Buy New') &&
+    (unitsChange === null || unitsChange === 0) &&
+    currentUnits !== null &&
+    finalUnits !== null &&
+    finalUnits > currentUnits
+  ) {
+    unitsChange = finalUnits - currentUnits;
+    row['Units Change'] = formatNormalizedNumber(unitsChange);
+  }
+
+  if ((action === 'Add more' || action === 'Buy New') && unitsChange === null && unitsToBuy !== null) {
+    unitsChange = Math.abs(unitsToBuy);
+    row['Units Change'] = formatNormalizedNumber(unitsChange);
+  }
+
+  if (action === 'Trim' && unitsChange === null && unitsToBuy !== null) {
+    unitsChange = -Math.abs(unitsToBuy);
+    row['Units Change'] = formatNormalizedNumber(unitsChange);
+  }
+
+  if (finalUnits === null && currentUnits !== null && unitsChange !== null) {
+    finalUnits = currentUnits + unitsChange;
+    row['Final Units'] = formatNormalizedNumber(finalUnits);
+  }
+
+  if (!row['Units to Buy'] && unitsChange !== null && unitsChange > 0) {
+    row['Units to Buy'] = formatNormalizedNumber(unitsChange);
+  }
+}
+
 function buildCanonicalRow(
   source: Record<string, unknown>,
   context: { provider?: string; model?: string; runNumber?: number; runCreatedAt?: string },
@@ -452,6 +565,8 @@ function buildCanonicalRow(
   if (runTime) {
     row['Run Time'] = runTime;
   }
+
+  normalizeRebalanceDerivedCells(row);
 
   return row;
 }
@@ -615,10 +730,14 @@ export function parseInvestmentRecommendationContent(
   context: { provider?: string; model?: string; runNumber?: number; runCreatedAt?: string } = {},
 ): CanonicalTable | null {
   const parsedJson = parseJsonContent(content);
-  if (parsedJson) {
-    return normalizeJsonTable(parsedJson, context);
+  if (parsedJson.data) {
+    return normalizeJsonTable(parsedJson.data, context);
   }
-  return normalizeMarkdownRecommendationTable(content, context) ?? parseHeaderlessCanonicalRows(content, context);
+  const table = normalizeMarkdownRecommendationTable(content, context) ?? parseHeaderlessCanonicalRows(content, context);
+  if (!table && parsedJson.error) {
+    console.error('Error parsing investment recommendation data:', parsedJson.error);
+  }
+  return table;
 }
 
 export default function InvestmentRecommendationTable({

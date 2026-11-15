@@ -18,6 +18,8 @@ export function CreateJobCard({
   defaultExpanded = true,
   runActionLabel = 'Run S1',
   runButtonClassName,
+  submitBlockedReason = null,
+  showEstimateReadiness = false,
 }: {
   promptAside?: ReactNode;
   title?: string;
@@ -25,6 +27,8 @@ export function CreateJobCard({
   defaultExpanded?: boolean;
   runActionLabel?: string;
   runButtonClassName?: string;
+  submitBlockedReason?: string | null;
+  showEstimateReadiness?: boolean;
 } = {}) {
   const {
     prompt,
@@ -58,9 +62,15 @@ export function CreateJobCard({
       </CardHeader>
       {showContent ? (
         <CardContent>
-          <form onSubmit={handleSubmit} className="grid gap-5 xl:grid-cols-2">
+          <form onSubmit={(event) => {
+            if (submitBlockedReason) {
+              event.preventDefault();
+              return;
+            }
+            void handleSubmit(event);
+          }} className="grid gap-5 xl:grid-cols-2">
             <div className="space-y-5">
-              <RunModeFields />
+              <RunModeFields showEstimateReadiness={showEstimateReadiness} />
             </div>
             <div className="space-y-5">
               <TemplateField />
@@ -69,10 +79,11 @@ export function CreateJobCard({
             </div>
 
             {submitError && <p className="text-sm text-red-700 xl:col-span-2">{submitError}</p>}
+            {submitBlockedReason && <p role="alert" className="text-sm text-red-700 xl:col-span-2">{submitBlockedReason}</p>}
 
             <Button
               type="submit"
-              disabled={submitting || !prompt.trim() || selectedTargets.size === 0}
+              disabled={Boolean(submitBlockedReason) || submitting || !prompt.trim() || selectedTargets.size === 0}
               className={cn(
                 'w-full xl:col-span-2',
                 !scheduledAt && runButtonClassName,

@@ -14,6 +14,7 @@ from app.domains.jobs.models import Job
 from app.domains.jobs.repository import PostgresJobRepository
 from app.domains.jobs.use_cases.create_job import CreateJobCommand, CreateJobUseCase
 from app.domains.portfolio_events.common import ensure_event_table_covers_prompt_holdings
+from app.domains.portfolio_events.job_projection import portfolio_analysis_job_projection
 from app.domains.portfolio_events.schemas import (
     PortfolioAnalysisHistoryItemResponse,
     PortfolioEventRunRequest,
@@ -63,11 +64,11 @@ async def get_latest_events_analysis(
 
 @router.get("/history", response_model=ZerodhaEventsHistoryResponse)
 async def get_events_history(
-    limit: int = Query(default=100, ge=1, le=500),
+    limit: int = Query(default=100, ge=1, le=100),
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
-    jobs = await _get_events_jobs(db, current_user.id, limit)
+    jobs = await _get_events_jobs(db, current_user.id, limit, include_details=False)
     return ZerodhaEventsHistoryResponse(history=[_serialize_events_history_item(job) for job in jobs])
 
 
@@ -90,7 +91,7 @@ async def run_events_analysis(
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
-    provider, model = _resolve_events_target(body)
+    provider, model = await _resolve_events_target(body, db)
 
     snapshot_repo = ZerodhaPortfolioSnapshotRepository(db)
     latest_snapshot = await snapshot_repo.get_latest_by_user(current_user.id)
@@ -115,12 +116,19 @@ async def run_events_analysis(
                 provider=provider,
                 model=model,
                 user_id=UserId(current_user.id),
+                auto_rebalance_portfolio=(
+                    body.auto_rebalance_portfolio if body else None
+                ),
+                auto_rebalance_sequence=(
+                    body.auto_rebalance_sequence if body else None
+                ),
+                auto_rebalance_label=body.auto_rebalance_label if body else None,
             )
         )
     finally:
         await redis.aclose()
 
-    job = await PostgresJobRepository(db).get(result.job_id)
+    job = await PostgresJobRepository(db).get_for_user(result.job_id, UserId(current_user.id))
     if not job:
         raise HTTPException(500, detail="Events analysis job could not be loaded after creation")
 
@@ -141,9 +149,13 @@ async def run_events_analysis(
     )
 
 
-def _resolve_events_target(body: PortfolioEventRunRequest | None) -> tuple[str, str]:
-    return resolve_portfolio_analysis_target(
+async def _resolve_events_target(
+    body: PortfolioEventRunRequest | None,
+    db: AsyncSession,
+) -> tuple[str, str]:
+    return await resolve_portfolio_analysis_target(
         body,
+        db=db,
         default_provider=EVENT_ANALYSIS_PROVIDER,
         default_model=EVENT_ANALYSIS_MODEL,
         analysis_label="events",
@@ -155,9 +167,12 @@ async def _get_latest_events_job(db: AsyncSession, user_id: int) -> Job | None:
     return jobs[0] if jobs else None
 
 
-async def _get_events_jobs(db: AsyncSession, user_id: int, limit: int) -> list[Job]:
+async def _get_events_jobs(
+    db: AsyncSession, user_id: int, limit: int, *, include_details: bool = True,
+) -> list[Job]:
     result = await db.execute(
         select(Job)
+        .options(portfolio_analysis_job_projection(include_details=include_details))
         .where(
             Job.user_id == user_id,
             Job.prompt.ilike(f"%{EVENT_JOB_MARKER}%"),

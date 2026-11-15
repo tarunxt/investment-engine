@@ -3,6 +3,9 @@ name: Inspect Production AI Config
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   inspect:
     name: Inspect backend provider config
@@ -20,17 +23,54 @@ jobs:
           command_timeout: 900s
           script: |
             set -euo pipefail
-            APP="${{ secrets.APP_PATH }}"
+            APP="${{ vars.EC2_APP_PATH || '/srv/investment-engine' }}"
+            LEGACY_APP="/srv/investor"
+            if [[ ! -d "$APP" && -d "$LEGACY_APP" ]]; then
+              APP="$LEGACY_APP"
+            fi
             BACKEND_ENV_FILE="/etc/investor/backend.env"
+            APP_SERVICE_USER="${{ vars.EC2_APP_USER || 'investment-engine' }}"
+            if ! id "$APP_SERVICE_USER" >/dev/null 2>&1 && id investor >/dev/null 2>&1; then
+              APP_SERVICE_USER="investor"
+            fi
+            resolve_systemd_service_name() {
+              local preferred="$1"
+              local fallback="$2"
+
+              if systemctl is-active --quiet "$preferred" >/dev/null 2>&1 || systemctl is-enabled --quiet "$preferred" >/dev/null 2>&1; then
+                printf '%s\n' "$preferred"
+                return
+              fi
+
+              if systemctl is-active --quiet "$fallback" >/dev/null 2>&1 || systemctl is-enabled --quiet "$fallback" >/dev/null 2>&1; then
+                printf '%s\n' "$fallback"
+                return
+              fi
+
+              if systemctl cat "$preferred" >/dev/null 2>&1; then
+                printf '%s\n' "$preferred"
+                return
+              fi
+
+              printf '%s\n' "$fallback"
+            }
+
+            BACKEND_SERVICE_NAME="$(
+              resolve_systemd_service_name "investor-backend" "investment-engine-backend"
+            )"
+
+            echo "==> App root"
+            sudo test -d "$APP/backend"
+            echo "$APP"
 
             echo "==> Backend env file presence"
             sudo test -f "$BACKEND_ENV_FILE"
             sudo ls -l "$BACKEND_ENV_FILE"
 
             echo "==> Provider key presence in env file"
-            sudo bash -lc '
+            sudo env BACKEND_ENV_FILE="$BACKEND_ENV_FILE" bash -lc '
               for key in OPENAI_API_KEY ANTHROPIC_API_KEY GEMINI_API_KEY GEMINI_API_KEY_FALLBACK GEMINI_API_KEY_FALLBACK_2 GEMINI_API_KEY_FALLBACK_3 DEEPSEEK_API_KEY; do
-                line="$(grep -E "^${key}=" /etc/investor/backend.env || true)"
+                line="$(grep -E "^${key}=" "$BACKEND_ENV_FILE" || true)"
                 value="${line#*=}"
                 if [[ -n "$line" && -n "$value" ]]; then
                   echo "$key=present"
@@ -41,7 +81,7 @@ jobs:
             '
 
             echo "==> Provider availability from backend runtime"
-            sudo -u investor -H bash -lc "
+            sudo -u "$APP_SERVICE_USER" -H bash -lc "
               cd '$APP/backend'
               source .venv/bin/activate
               set -a
@@ -67,4 +107,4 @@ jobs:
             "
 
             echo "==> Recent backend logs"
-            sudo journalctl -u investor-backend -n 50 --no-pager
+            sudo journalctl -u "$BACKEND_SERVICE_NAME" -n 50 --no-pager

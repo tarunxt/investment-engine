@@ -1,0 +1,59 @@
+name: Inspect Rankings Runtime
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/fix-ranking-errors]
+    paths: [.github/workflows/inspect-ranking-runtime.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Inspect database availability and bounded error diagnostics
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          command_timeout: 180s
+          script: |
+            set -eu
+            df -h /
+            free -h
+            uptime
+            sudo pg_lsclusters || true
+            sudo systemctl list-jobs --no-pager
+            sudo systemctl show 'postgresql@*' --property=Id,ActiveState,SubState,Result,TimeoutStopUSec --no-pager
+            sudo systemctl show postgresql@18-main --property=MemoryCurrent,MemoryPeak,MemoryHigh,MemoryMax,OOMPolicy,Restart,KillSignal --no-pager
+            sudo journalctl -k --since '-40 minutes' --no-pager | grep -E 'oom-kill|Killed process|Out of memory|Memory cgroup out of memory' | tail -n 12 || true
+            sudo journalctl -u investor-celery-auto-live-worker --since '-30 minutes' -o cat --no-pager | grep -E 'Task app\..*(received|succeeded|raised|retry)|exited with|WorkerLostError' | tail -n 25 || true
+            sudo cat /var/log/postgresql/postgresql-18-main.log | python3 -c '
+            import re,sys
+            for line in sys.stdin:
+                if "Failed process was running:" in line:
+                    print({"time":line[:23],"query_columns":re.findall(r"\b[a-z_][a-z_0-9]*\.[a-z_][a-z_0-9]*\b",line),"query_length":len(line)})'
+            for setting in shared_buffers work_mem maintenance_work_mem max_connections max_parallel_workers_per_gather; do
+              echo "$setting"
+              sudo -u postgres /usr/lib/postgresql/18/bin/postgres -D /var/lib/postgresql/18/main -c config_file=/etc/postgresql/18/main/postgresql.conf -C "$setting"
+            done
+            ps -eo comm,pid,ppid,etime,args | awk '$1 == "postgres" {print}'
+            sudo journalctl -u 'postgresql@*' --since '-40 minutes' -n 80 -o cat --no-pager
+            sudo tail -n 300 /var/log/postgresql/postgresql-*-main.log | grep -E 'LOG:.*(shutdown|shut down|ready to accept|checkpoint|starting PostgreSQL)|FATAL:.*(shutdown|shutting down)|PANIC:' | tail -n 35 || true
+            sudo systemctl show investor-backend investor-celery-worker investor-celery-auto-live-worker --property=Id,ActiveState,MemoryCurrent,TasksCurrent --no-pager
+            sudo -u postgres psql -X -d postgres -P pager=off -c "SHOW max_connections; SELECT state, wait_event_type, wait_event, count(*) FROM pg_stat_activity GROUP BY 1,2,3 ORDER BY 4 DESC;" || true
+            sudo journalctl -u investor-backend -u postgresql --since '-20 minutes' -n 15000 -o cat --no-pager | python3 -c '
+            import collections,json,re,sys
+            counts=collections.Counter()
+            errors=[]
+            for line in sys.stdin:
+                for kind in re.findall(r"\b[A-Za-z]+(?:Error|Timeout)\b",line): counts[kind]+=1
+                if re.search(r"remaining connection slots|too many clients|QueuePool limit|No space left|database system is|out of shared memory|CannotConnectNowError|TooManyConnectionsError|ConnectionRefusedError|could not (?:connect|write|open)|server closed the connection",line,re.I):
+                    line=re.sub(r"(?:postgres|redis|https?)[^\s]*://[^\s]+","[redacted-url]",line)
+                    errors.append(line.strip()[:450])
+            print(json.dumps({"exception_counts":counts,"database_errors":errors[-30:]},indent=2))'
+            curl -sS --max-time 8 http://127.0.0.1:8000/health/ready || true

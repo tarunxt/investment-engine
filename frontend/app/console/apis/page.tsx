@@ -1,9 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
-import { ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ChevronLeft, ChevronRight, RefreshCw, X } from 'lucide-react';
 import { apiService } from '@/services/api';
-import { ApiUsageSummaryResponse } from '@/types/api';
+import { ApiUsageItem, ApiUsageSummaryResponse, LlmCostHistoryResponse } from '@/types/api';
+
+import { CombinedLlmCostChart, COMBINED_LLM_PROVIDERS, CombinedLlmProviderKey, CombinedLlmVisibility } from './CombinedLlmCostChart';
 
 type Period = 'day' | 'week' | 'month' | 'custom';
 
@@ -57,6 +59,246 @@ function formatSelectedDayLabel(isoDate: string, todayIso: string) {
   return `${formatCalendarDate(isoDate)}${isoDate === todayIso ? ' (Today)' : ''}`;
 }
 
+
+type CostHistoryTab = 'day-wise' | 'all-runs';
+
+const LLM_PROVIDER_BY_NAME: Record<string, string> = {
+  OpenAI: 'openai',
+  Anthropic: 'anthropic',
+  DeepSeek: 'deepseek',
+};
+
+function getLlmProviderKey(item: ApiUsageItem) {
+  if (item.category !== 'LLM') return null;
+  if (item.gemini_key_index) return 'gemini';
+  return LLM_PROVIDER_BY_NAME[item.name] ?? null;
+}
+
+function formatInr(value: number) {
+  return `₹${value.toFixed(4)}`;
+}
+
+function formatUsd(value: number) {
+  return `$${value.toFixed(value < 0.01 && value > 0 ? 6 : 2)}`;
+}
+
+function formatConvertedCost(inr: number | null, usd: number) {
+  return inr == null ? `${formatUsd(usd)} (FX unavailable)` : formatInr(inr);
+}
+
+function formatInteger(value: number) {
+  return new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 }).format(value);
+}
+
+function formatFxTimestamp(value: string | null | undefined) {
+  if (!value) return null;
+  const timestamp = new Date(value);
+  return Number.isFinite(timestamp.getTime())
+    ? timestamp.toLocaleString('en-IN', { timeZone: API_TIMEZONE })
+    : null;
+}
+
+function formatHistoryTimestamp(value: string, timeZone: string) {
+  return new Intl.DateTimeFormat('en-IN', {
+    timeZone,
+    year: 'numeric',
+    month: 'short',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).format(new Date(value));
+}
+
+function LlmCostHistoryModal({
+  history,
+  loading,
+  error,
+  activeTab,
+  onTabChange,
+  onClose,
+  onSeeMoreDays,
+  onSeeMoreRuns,
+}: {
+  history: LlmCostHistoryResponse | null;
+  loading: boolean;
+  error: string | null;
+  activeTab: CostHistoryTab;
+  onTabChange: (tab: CostHistoryTab) => void;
+  onClose: () => void;
+  onSeeMoreDays: () => void;
+  onSeeMoreRuns: () => void;
+}) {
+  const timezone = history?.timezone ?? API_TIMEZONE;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 py-6" onClick={onClose}>
+      <div className="max-h-[90vh] w-full max-w-4xl overflow-hidden border border-gray-200 bg-white shadow-xl" onClick={(event) => event.stopPropagation()}>
+        <div className="flex items-start justify-between border-b border-gray-200 px-5 py-4">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-950">LLM Cost History</h2>
+            <p className="text-sm text-gray-600">
+              {history?.name ?? 'LLM'} cost history across Asia/Kolkata calendar days. Provider-ledger totals take precedence over job estimates.
+            </p>
+            {history?.fx_status === 'valid' && history.usd_inr_rate != null ? (
+              <p className="text-xs text-gray-500">
+                USD/INR: {history.usd_inr_rate.toFixed(4)} · {history.fx_source ?? 'verified source'}
+                {formatFxTimestamp(history.fx_as_of) ? ` · as of ${formatFxTimestamp(history.fx_as_of)}` : ''}
+              </p>
+            ) : history ? (
+              <p className="text-xs font-medium text-amber-700">
+                INR conversion {history.fx_status}; native USD costs are shown.
+              </p>
+            ) : null}
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close LLM cost history"
+            className="inline-flex size-9 items-center justify-center text-gray-500 hover:bg-gray-50 hover:text-gray-900"
+          >
+            <X className="size-5" />
+          </button>
+        </div>
+
+        <div className="border-b border-gray-200 px-5 pt-3">
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => onTabChange('day-wise')}
+              className={`border-b-2 px-3 py-2 text-sm font-medium ${
+                activeTab === 'day-wise'
+                  ? 'border-indigo-600 text-indigo-700'
+                  : 'border-transparent text-gray-500 hover:text-gray-900'
+              }`}
+            >
+              Day-wise
+            </button>
+            <button
+              type="button"
+              onClick={() => onTabChange('all-runs')}
+              className={`border-b-2 px-3 py-2 text-sm font-medium ${
+                activeTab === 'all-runs'
+                  ? 'border-indigo-600 text-indigo-700'
+                  : 'border-transparent text-gray-500 hover:text-gray-900'
+              }`}
+            >
+              All runs
+            </button>
+          </div>
+        </div>
+
+        <div className="max-h-[65vh] overflow-y-auto p-5">
+          {error ? (
+            <div role="alert" className="mb-4 border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error} History is unverified; this is not a no-runs result.</div>
+          ) : null}
+
+          {history && (loading || error) ? (
+            <p role="status" className="mb-4 text-sm text-amber-700">Showing previously loaded history; {loading ? 'refreshing…' : 'the latest request failed and these values may be out of date.'}</p>
+          ) : null}
+
+          {loading && !history ? (
+            <div className="py-10 text-center text-sm text-gray-500">Loading LLM cost history...</div>
+          ) : !history || (history.days.length === 0 && history.runs.length === 0 && (error || loading)) ? (
+            <p role="status" className="py-10 text-center text-sm text-gray-500">Cost history is unavailable. Close and reopen history to retry.</p>
+          ) : activeTab === 'day-wise' ? (
+            <>
+              <table className="min-w-full text-sm">
+                <thead className="bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-500">
+                  <tr>
+                    <th className="px-4 py-3">Date</th>
+                    <th className="px-4 py-3">Requests</th>
+                    <th className="px-4 py-3">Tokens In</th>
+                    <th className="px-4 py-3">Tokens Out</th>
+                    <th className="px-4 py-3">Incurred Cost</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {history.days.length === 0 ? (
+                    <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-500">{error || loading ? 'Day-wise history is unverified.' : 'No daily history recorded for this LLM yet.'}</td></tr>
+                  ) : history.days.map((day) => (
+                    <tr key={day.date}>
+                      <td className="px-4 py-3 font-medium text-gray-900">
+                        {formatCalendarDate(day.date)}
+                        {day.date === getTodayIso(timezone) ? <span className="ml-1 text-xs text-indigo-600">Today</span> : null}
+                      </td>
+                      <td className="px-4 py-3 text-gray-700">{day.requests}</td>
+                      <td className="px-4 py-3 text-gray-700">{day.tokens_in}</td>
+                      <td className="px-4 py-3 text-gray-700">{day.tokens_out}</td>
+                      <td className="px-4 py-3 font-semibold text-gray-900">
+                        {formatConvertedCost(day.estimated_cost_inr, day.estimated_cost)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {history?.has_more_days ? (
+                <div className="mt-4 flex justify-center">
+                  <button
+                    type="button"
+                    onClick={onSeeMoreDays}
+                    disabled={loading}
+                    className="border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {loading ? 'Loading...' : 'See more'}
+                  </button>
+                </div>
+              ) : null}
+            </>
+          ) : (
+            <>
+              <table className="min-w-full text-sm">
+                <thead className="bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-500">
+                  <tr>
+                    <th className="px-4 py-3">Timestamp</th>
+                    <th className="px-4 py-3">Job</th>
+                    <th className="px-4 py-3">Model</th>
+                    <th className="px-4 py-3">Status</th>
+                    <th className="px-4 py-3">Incurred Cost</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {history && history.runs.length > 0 ? (
+                    history.runs.map((run) => (
+                      <tr key={run.job_id}>
+                        <td className="px-4 py-3 text-gray-800">{formatHistoryTimestamp(run.timestamp, timezone)}</td>
+                        <td className="px-4 py-3 font-medium text-gray-900">#{run.job_id}</td>
+                        <td className="px-4 py-3 text-gray-700">{run.model}</td>
+                        <td className="px-4 py-3 text-gray-700">{run.status}</td>
+                        <td className="px-4 py-3 font-semibold text-gray-900">
+                          {formatConvertedCost(run.estimated_cost_inr, run.estimated_cost)}
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={5} className="px-4 py-8 text-center text-gray-500">
+                        {error || loading ? 'Run history is unverified.' : 'No runs recorded for this LLM yet.'}
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+              {history?.has_more_runs ? (
+                <div className="mt-4 flex justify-center">
+                  <button
+                    type="button"
+                    onClick={onSeeMoreRuns}
+                    disabled={loading}
+                    className="border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {loading ? 'Loading...' : 'See more'}
+                  </button>
+                </div>
+              ) : null}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function ApisPage() {
   const [data, setData] = useState<ApiUsageSummaryResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -66,6 +308,24 @@ export default function ApisPage() {
   const [customEnd, setCustomEnd] = useState('');
   const [showAllGeminiKeys, setShowAllGeminiKeys] = useState(false);
   const [selectedDate, setSelectedDate] = useState(() => getTodayIso(API_TIMEZONE));
+  const costHistoryRequest = useRef(0);
+  const [costHistoryProvider, setCostHistoryProvider] = useState<string | null>(null);
+  const [costHistory, setCostHistory] = useState<LlmCostHistoryResponse | null>(null);
+  const [costHistoryLoading, setCostHistoryLoading] = useState(false);
+  const [costHistoryError, setCostHistoryError] = useState<string | null>(null);
+  const [costHistoryTab, setCostHistoryTab] = useState<CostHistoryTab>('day-wise');
+  const [costHistoryDayLimit, setCostHistoryDayLimit] = useState(10);
+  const [costHistoryRunLimit, setCostHistoryRunLimit] = useState(10);
+  const [combinedCostHistories, setCombinedCostHistories] = useState<Partial<Record<CombinedLlmProviderKey, LlmCostHistoryResponse>>>({});
+  const [combinedCostLoading, setCombinedCostLoading] = useState(true);
+  const [combinedCostFailures, setCombinedCostFailures] = useState<CombinedLlmProviderKey[]>([]);
+  const combinedCostRequest = useRef(0);
+  const [combinedCostVisibility, setCombinedCostVisibility] = useState<CombinedLlmVisibility>({
+    openai: true,
+    anthropic: true,
+    gemini: true,
+    deepseek: true,
+  });
 
   const todayIso = getTodayIso(API_TIMEZONE);
   const isViewingToday = selectedDate >= todayIso;
@@ -109,6 +369,96 @@ export default function ApisPage() {
     void load();
   }, [load]);
 
+  const loadCombinedCostHistories = useCallback(async () => {
+    const request = ++combinedCostRequest.current;
+    setCombinedCostLoading(true);
+    const failures: CombinedLlmProviderKey[] = [];
+    await Promise.allSettled(COMBINED_LLM_PROVIDERS.map(async (provider) => {
+      try {
+        const history = await apiService.getLlmCostHistory({
+          provider: provider.key, day_limit: 30, run_limit: 1,
+        });
+        if (request !== combinedCostRequest.current) return;
+        setCombinedCostHistories((previous) => ({ ...previous, [provider.key]: history }));
+        setCombinedCostFailures((previous) => previous.filter((key) => key !== provider.key));
+      } catch {
+        if (request !== combinedCostRequest.current) return;
+        failures.push(provider.key);
+        setCombinedCostFailures((previous) => Array.from(new Set([...previous, provider.key])));
+      }
+    }));
+    if (request !== combinedCostRequest.current) return;
+    setCombinedCostFailures(failures);
+    setCombinedCostLoading(false);
+  }, []);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void loadCombinedCostHistories();
+    return () => { combinedCostRequest.current += 1; };
+  }, [loadCombinedCostHistories]);
+
+  const loadCostHistory = useCallback(async (provider: string, dayLimit: number, runLimit: number) => {
+    const request = ++costHistoryRequest.current;
+    setCostHistoryLoading(true);
+    setCostHistoryError(null);
+    try {
+      const res = await apiService.getLlmCostHistory({
+        provider,
+        day_limit: dayLimit,
+        run_limit: runLimit,
+      });
+      if (request !== costHistoryRequest.current) return;
+      setCostHistory(res);
+    } catch (err) {
+      if (request !== costHistoryRequest.current) return;
+      setCostHistoryError(err instanceof Error ? err.message : 'Failed to load LLM cost history');
+    } finally {
+      if (request === costHistoryRequest.current) setCostHistoryLoading(false);
+    }
+  }, []);
+
+  const openCostHistory = useCallback((provider: string) => {
+    const initialDayLimit = 10;
+    const initialRunLimit = 10;
+    setCostHistoryProvider(provider);
+    setCostHistory(null);
+    setCostHistoryTab('day-wise');
+    setCostHistoryDayLimit(initialDayLimit);
+    setCostHistoryRunLimit(initialRunLimit);
+    void loadCostHistory(provider, initialDayLimit, initialRunLimit);
+  }, [loadCostHistory]);
+
+  const closeCostHistory = useCallback(() => {
+    costHistoryRequest.current += 1;
+    setCostHistoryProvider(null);
+    setCostHistory(null);
+    setCostHistoryError(null);
+  }, []);
+
+  const seeMoreDays = useCallback(() => {
+    if (!costHistoryProvider) return;
+    const nextLimit = costHistoryDayLimit + 10;
+    setCostHistoryDayLimit(nextLimit);
+    void loadCostHistory(costHistoryProvider, nextLimit, costHistoryRunLimit);
+  }, [costHistoryDayLimit, costHistoryProvider, costHistoryRunLimit, loadCostHistory]);
+
+  const seeMoreRuns = useCallback(() => {
+    if (!costHistoryProvider) return;
+    const nextLimit = costHistoryRunLimit + 10;
+    setCostHistoryRunLimit(nextLimit);
+    void loadCostHistory(costHistoryProvider, costHistoryDayLimit, nextLimit);
+  }, [costHistoryDayLimit, costHistoryProvider, costHistoryRunLimit, loadCostHistory]);
+
+  const updateCombinedCostVisibility = useCallback((provider: CombinedLlmProviderKey, visible: boolean) => {
+    setCombinedCostVisibility((current) => ({ ...current, [provider]: visible }));
+  }, []);
+
+  const refreshAll = useCallback(() => {
+    void load();
+    void loadCombinedCostHistories();
+  }, [load, loadCombinedCostHistories]);
+
   const summaryLabel =
     period === 'day'
       ? formatSelectedDayLabel(selectedDate, todayIso)
@@ -120,24 +470,29 @@ export default function ApisPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold text-gray-950">APIs</h1>
           <p className="text-sm text-gray-600">
             Per-API usage summary: {summaryLabel} in {data?.timezone ?? API_TIMEZONE}.
           </p>
-          {data?.usd_inr_rate ? (
+          {data?.fx_status === 'valid' && data.usd_inr_rate ? (
             <p className="text-xs text-gray-500">
-              USD/INR: {data.usd_inr_rate.toFixed(4)}
+              USD/INR: {data.usd_inr_rate.toFixed(4)} · {data.fx_source ?? 'verified source'}
+              {formatFxTimestamp(data.fx_as_of) ? ` · as of ${formatFxTimestamp(data.fx_as_of)}` : ''}
+            </p>
+          ) : data ? (
+            <p className="text-xs font-medium text-amber-700">
+              INR conversion {data.fx_status ?? 'unavailable'}; native USD costs are shown.
             </p>
           ) : null}
         </div>
         <button
-          onClick={() => void load()}
-          className="inline-flex items-center border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50"
+          onClick={refreshAll}
+          className="inline-flex min-h-9 items-center rounded-md border border-indigo-600 bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
         >
           <RefreshCw className={`mr-2 size-4 ${loading ? 'animate-spin' : ''}`} />
-          Refresh
+          Refresh usage summary and cost trend
         </button>
       </div>
 
@@ -202,9 +557,10 @@ export default function ApisPage() {
       </div>
 
       {error ? (
-        <div className="border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
+        <div role="alert" className="border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error} Usage for the selected period is unverified; this is not a zero-usage result. Use Refresh usage summary and cost trend to retry.</div>
       ) : null}
 
+      {error && data?.items.length ? <p role="status" className="text-xs text-amber-800">Showing previously loaded summary for {data.period_label}; the latest request failed and values may be out of date.</p> : null}
       <div className="overflow-x-auto border border-gray-200 bg-white">
         {data ? (
           <div className="flex items-center justify-end border-b border-gray-100 px-4 py-2">
@@ -226,7 +582,7 @@ export default function ApisPage() {
               <th className="px-4 py-3">Requests</th>
               <th className="px-4 py-3">Tokens In</th>
               <th className="px-4 py-3">Tokens Out</th>
-              <th className="px-4 py-3">Est. Cost</th>
+              <th className="px-4 py-3">Cost</th>
               <th className="px-4 py-3">Limit / Day</th>
               <th className="px-4 py-3">Notes</th>
             </tr>
@@ -238,6 +594,8 @@ export default function ApisPage() {
                   Loading API usage...
                 </td>
               </tr>
+            ) : error && !data?.items.length ? (
+              <tr><td colSpan={9} className="px-4 py-8 text-center text-red-700">API usage is unavailable. Use Refresh usage summary and cost trend to retry.</td></tr>
             ) : data && data.items.length > 0 ? (
               data.items
                 .filter((item) => {
@@ -245,7 +603,9 @@ export default function ApisPage() {
                   if (showAllGeminiKeys) return true;
                   return !item.gemini_key_hidden_default || !!item.gemini_key_in_use || !!item.gemini_key_consumed;
                 })
-                .map((item) => (
+                .map((item) => {
+                  const llmProviderKey = getLlmProviderKey(item);
+                  return (
                 <tr key={item.name}>
                   <td className="px-4 py-3 font-medium text-gray-950">
                     {item.console_url ? (
@@ -277,14 +637,33 @@ export default function ApisPage() {
                       {item.configured ? 'Yes' : 'No'}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-gray-800">{item.daily_requests}</td>
-                  <td className="px-4 py-3 text-gray-800">{item.daily_tokens_in}</td>
-                  <td className="px-4 py-3 text-gray-800">{item.daily_tokens_out}</td>
-                  <td className="px-4 py-3 text-gray-800">₹{item.daily_estimated_cost_inr.toFixed(4)}</td>
+                  <td className="px-4 py-3 text-gray-800">{formatInteger(item.daily_requests)}</td>
+                  <td className="px-4 py-3 text-gray-800">{formatInteger(item.daily_tokens_in)}</td>
+                  <td className="px-4 py-3 text-gray-800">{formatInteger(item.daily_tokens_out)}</td>
+                  <td className="px-4 py-3 text-gray-800">
+                    {llmProviderKey ? (
+                      <button
+                        type="button"
+                        onClick={() => openCostHistory(llmProviderKey)}
+                        className="font-medium text-indigo-600 hover:text-indigo-800 hover:underline"
+                        title="Show LLM cost history"
+                      >
+                        {formatConvertedCost(item.daily_estimated_cost_inr, item.daily_estimated_cost)}
+                      </button>
+                    ) : (
+                      <>{formatConvertedCost(item.daily_estimated_cost_inr, item.daily_estimated_cost)}</>
+                    )}
+                    {item.usage_measurement === 'actual' ? (
+                      <div className="mt-1 text-xs font-semibold text-emerald-700">
+                        Provider day total · {formatUsd(item.daily_estimated_cost)}
+                      </div>
+                    ) : null}
+                  </td>
                   <td className="px-4 py-3 text-gray-600">{item.daily_limit_requests ?? 'Provider plan'}</td>
                   <td className="px-4 py-3 text-gray-600">{item.notes ?? '-'}</td>
                 </tr>
-              ))
+                  );
+              })
             ) : (
               <tr>
                 <td colSpan={9} className="px-4 py-8 text-center text-gray-500">
@@ -295,6 +674,28 @@ export default function ApisPage() {
           </tbody>
         </table>
       </div>
+
+      <CombinedLlmCostChart
+        histories={combinedCostHistories}
+        loading={combinedCostLoading}
+        failures={combinedCostFailures}
+        onRetry={loadCombinedCostHistories}
+        visibility={combinedCostVisibility}
+        onVisibilityChange={updateCombinedCostVisibility}
+      />
+
+      {costHistoryProvider ? (
+        <LlmCostHistoryModal
+          history={costHistory}
+          loading={costHistoryLoading}
+          error={costHistoryError}
+          activeTab={costHistoryTab}
+          onTabChange={setCostHistoryTab}
+          onClose={closeCostHistory}
+          onSeeMoreDays={seeMoreDays}
+          onSeeMoreRuns={seeMoreRuns}
+        />
+      ) : null}
     </div>
   );
 }

@@ -9,7 +9,8 @@ The project uses:
 - Queue: Redis
 - Workers: Celery
 - Database: PostgreSQL
-- Containerization: Docker
+- Local containerization: Docker
+- Production runtime: systemd / no-Docker
 
 ---
 
@@ -109,6 +110,38 @@ docker exec -it investor-backend-1 alembic upgrade head
 * Inside Docker DB host = `postgres`
 * Outside Docker DB host = `localhost`
 
+## Production Runtime Memory (No-Docker/Systemd)
+
+* This production server is a **systemd / no-Docker** deployment. Do not assume Docker for runtime operations unless the user explicitly says Docker.
+* The canonical backend environment file on production is `/etc/investor/backend.env`.
+* The canonical frontend environment file on production is `/etc/investor/frontend.env`.
+* Prefer the `investor-*` systemd service names when giving production commands: `investor-backend`, `investor-celery-worker`, `investor-celery-beat`, and `investor-frontend`.
+* For this systemd production deployment, always use `/etc/investor/*.env` paths when discussing environment files.
+
+<!-- BULLPEN_RUN_AUDIT_SYNC_CONTRACT -->
+## Bullpen Run Audit Synchronization Contract
+
+Any future change to Bullpen Stage 1, Stage 2, or Stage 3 inputs, outputs, filters,
+LLM prompts, evidence fields, formula logic, rankings, tie-breakers, guardrails,
+capital sizing, decisions, exits, orders, execution or reconciliation states, or
+error handling is incomplete unless the Bullpen Runs Audit system is updated in the
+same task.
+
+Future agents and Codex tasks must update, as applicable:
+
+* Audit capture calls and adapters
+* Snapshot or schema versioning
+* Formula and algorithm registry entries
+* Deterministic validators and finding rules
+* API schemas and route responses
+* Run audit UI labels and renderers
+* Legacy compatibility and backfill mapping
+* Tests
+* `docs/bullpen-run-audit.md`
+
+Bullpen audit changes must preserve backward compatibility for existing frozen
+snapshots. If new Bullpen behavior cannot be represented by the current audit schema,
+create a new schema version or migration path instead of rewriting historical facts.
 
 # STRICT RULES
 
@@ -432,8 +465,8 @@ Backend:
 - PostgreSQL
 
 Deployment:
-- Docker
-- Docker Compose
+- Docker / Docker Compose for local or containerized environments
+- systemd / no-Docker for this production server
 
 ---
 
@@ -499,3 +532,32 @@ Release safety rules:
 - If deployment fails, inspect the failure, fix it, push again, and continue until production is healthy or a real external blocker is found.
 - If required production access, GitHub auth, secrets, or server env values are missing, surface the blocker clearly and specifically.
 - Do not perform destructive production actions or delete user data unless the user explicitly requests it.
+
+---
+
+# AWS Guidance
+
+- Prefer the AWS MCP Server for AWS interactions — it provides sandboxed
+  execution, observability, and audit logging. If unavailable, use the
+  AWS CLI directly.
+- Before starting a task, check whether a relevant AWS skill is available.
+  Load the skill with `retrieve_skill` and prefer its guidance over
+  general knowledge.
+- When uncertain about specific AWS details (API parameters, permissions,
+  limits, error codes), verify against documentation rather than guessing.
+  State uncertainty explicitly if you cannot confirm.
+- When creating infrastructure, prefer infrastructure-as-code (AWS CDK or
+  CloudFormation) over direct CLI commands.
+- When working with infrastructure, follow AWS Well-Architected Framework
+  principles.
+- Do not use em dashes in AWS resource names or descriptions. Use
+  hyphens instead.
+
+## Secret Safety
+
+- MUST load the `aws-secrets-manager` skill first for any secret,
+  credential, API key, token, or password task. MUST NOT call
+  `secretsmanager get-secret-value` or `batch-get-secret-value`, and MUST
+  NOT hit the Secrets Manager Agent daemon directly. MUST use
+  `{{resolve:secretsmanager:secret-id:SecretString:json-key}}` with
+  `asm-exec` so the secret resolves at runtime without entering context.

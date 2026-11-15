@@ -1,12 +1,25 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+import asyncio
+import logging
+import os
+import random
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+from email.utils import parsedate_to_datetime
 from typing import Any, Protocol
+from urllib.parse import urlencode
 
-from app.domains.polymarket.bullpen import run_bullpen_json, utc_now
+import httpx
+
+from app.domains.polymarket.bullpen import (
+    run_bullpen_json,
+    run_first_bullpen_json,
+    utc_now,
+)
 from app.domains.polymarket.logger import redact_secrets
+from app.domains.polymarket.position_classification import classify_bullpen_position
 from app.domains.polymarket.schemas import (
-    ActivitySource,
     PolymarketBotConfig,
     PolymarketDiscoveryDebugAccepted,
     PolymarketDiscoveryDebugCandidate,
@@ -20,6 +33,63 @@ from app.domains.polymarket.schemas import (
     TradeSource,
 )
 
+POLYMARKET_DATA_API_BASE_URL = "https://data-api.polymarket.com"
+POLYMARKET_GAMMA_API_BASE_URL = "https://gamma-api.polymarket.com"
+POLYMARKET_DATA_API_TIMEOUT_SECONDS = 10
+POLYMARKET_POLYGON_RPC_URL = "https://polygon-rpc.com"
+POLYMARKET_POLYGON_RPC_FALLBACK_URLS = [
+    "https://polygon-bor-rpc.publicnode.com",
+    "https://polygon.drpc.org",
+    "https://polygon-rpc.publicnode.com",
+]
+POLYMARKET_PUSD_TOKEN_ADDRESS = "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB"
+POLYMARKET_PUSD_DECIMALS = 1_000_000
+POLYMARKET_HTTP_HEADERS = {"User-Agent": "investment-engine-polymarket-bot/1.0"}
+POLYGON_CHAIN_ID = "0x89"
+POLYGON_RPC_MAX_ATTEMPTS = 3
+POLYGON_RPC_BACKOFF_BASE_SECONDS = 0.25
+POLYGON_RPC_BACKOFF_MAX_SECONDS = 2.0
+POLYGON_RPC_JITTER_MAX_SECONDS = 0.1
+POLYGON_RPC_CONCURRENCY_LIMIT = 2
+LEADERBOARD_PERIOD_MAX_AGE = {
+    "today": timedelta(days=1),
+    "weekly": timedelta(days=7),
+}
+logger = logging.getLogger(__name__)
+_polygon_rpc_semaphore: asyncio.Semaphore | None = None
+_polygon_rpc_semaphore_loop: asyncio.AbstractEventLoop | None = None
+
+
+def _polygon_rpc_semaphore_for_current_loop() -> asyncio.Semaphore:
+    global _polygon_rpc_semaphore, _polygon_rpc_semaphore_loop
+
+    loop = asyncio.get_running_loop()
+    # Celery runs Auto-Live jobs with asyncio.run(), which creates a fresh
+    # event loop for each task/retry. asyncio synchronization primitives are
+    # bound to the loop they were first used on, so never reuse the global
+    # Polygon RPC limiter across loops.
+    if _polygon_rpc_semaphore is None or _polygon_rpc_semaphore_loop is not loop:
+        _polygon_rpc_semaphore = asyncio.Semaphore(POLYGON_RPC_CONCURRENCY_LIMIT)
+        _polygon_rpc_semaphore_loop = loop
+    return _polygon_rpc_semaphore
+
+
+@dataclass(frozen=True)
+class PolymarketNetWorthEstimate:
+    wallet: str
+    positions_value_usd: float
+    cash_balance_usd: float
+    redeemable_value_usd: float
+    net_worth_usd: float
+
+
+@dataclass(frozen=True)
+class PolygonRpcProbeResult:
+    ok: bool
+    classification: str
+    detail: str
+
+
 MOCK_MARKETS: list[tuple[str, str, str]] = [
     ("btc-100k-2026", "Will Bitcoin hit $100k in 2026?", "Yes"),
     ("fed-cut-june", "Will the Fed cut rates by June?", "Yes"),
@@ -32,59 +102,19 @@ MOCK_MARKETS: list[tuple[str, str, str]] = [
 class MarketDataProvider(Protocol):
     async def get_top_traders(self) -> list[PolymarketTrader]: ...
 
-    async def get_recent_trades(self, traders: list[PolymarketTrader]) -> list[PolymarketSourceTrade]: ...
+    async def get_recent_trades(
+        self, traders: list[PolymarketTrader]
+    ) -> list[PolymarketSourceTrade]: ...
 
 
 class MockProvider:
-    def __init__(self) -> None:
-        self._counter = 0
-
     async def get_top_traders(self) -> list[PolymarketTrader]:
-        return [
-            PolymarketTrader(
-                id=f"mock-trader-{index + 1}",
-                name=f"Mock Trader {index + 1}",
-                address=f"0xMOCK{str(index + 1).rjust(36, '0')}",
-                activity_source="fallback",
-                volume_24h=50_000 - index * 2_750,
-                trades_24h=120 - index * 8,
-                source_reason="Mock trader",
-                source="mock",
-            )
-            for index in range(10)
-        ]
+        return []
 
-    async def get_recent_trades(self, traders: list[PolymarketTrader]) -> list[PolymarketSourceTrade]:
-        self._counter += 1
-        batch_size = 6 if self._counter == 1 else 1 + (self._counter % 3)
-        rows: list[PolymarketSourceTrade] = []
-        for index in range(batch_size):
-            trader = traders[(self._counter + index) % len(traders)]
-            market = MOCK_MARKETS[(self._counter + index) % len(MOCK_MARKETS)]
-            side = "BUY" if (self._counter + index) % 3 else "SELL"
-            price = round(0.25 + (((self._counter + index) * 7) % 50) / 100, 2)
-            size_usd = round(10 + (((self._counter + index) * 13) % 90), 2)
-            rows.append(
-                PolymarketSourceTrade(
-                    id=f"mock-{self._counter}-{index}-{side}-{market[0]}",
-                    source_trade_key=(
-                        f"mock:{trader.id}:{market[0]}:{market[2]}:{side}:{self._counter}:{size_usd:.6f}:{price:.4f}"
-                    ),
-                    trader_id=trader.id,
-                    trader_name=trader.name,
-                    trader_address=trader.address,
-                    clean_trader_identity=trader.address,
-                    market_id=market[0],
-                    market_title=market[1],
-                    outcome=market[2],
-                    side=side,
-                    price=price,
-                    size_usd=size_usd,
-                    timestamp=utc_now(),
-                    source="mock",
-                )
-            )
-        return rows
+    async def get_recent_trades(
+        self, traders: list[PolymarketTrader]
+    ) -> list[PolymarketSourceTrade]:
+        return []
 
 
 class BullpenReadOnlyProvider:
@@ -95,67 +125,302 @@ class BullpenReadOnlyProvider:
         self.invalid_manual_wallets = parsed_wallets["invalid"]
         self.last_discovery_status = self._empty_status()
 
+    def update_manual_targets(self, targets: str) -> None:
+        parsed_wallets = parse_manual_wallets(targets)
+        self.manual_wallets = parsed_wallets["valid"]
+        self.invalid_manual_wallets = parsed_wallets["invalid"]
+        self.last_discovery_status = self._empty_status()
+
     async def get_top_traders(self) -> list[PolymarketTrader]:
         discovery = await self._discover_active_traders()
         manual = await self._read_manual_wallets()
+        leaderboard = await self._read_profit_leaderboard_traders()
         fallback = (
-            {"traders": [], "rows_considered": 0, "wallets_extracted": 0, "rows_rejected": 0}
-            if discovery["active"]
+            {
+                "traders": [],
+                "rows_considered": 0,
+                "wallets_extracted": 0,
+                "rows_rejected": 0,
+            }
+            if leaderboard["traders"] or discovery["active"]
             else await self._read_fallback_wallets()
         )
-        merged = merge_traders([*discovery["active"], *fallback["traders"], *manual])
-        selected = select_tracked_traders(merged, manual, self.config.max_tracked_traders)
+        merged = merge_traders(
+            [
+                *leaderboard["traders"],
+                *discovery["active"],
+                *fallback["traders"],
+                *manual,
+            ]
+        )
+        selected = select_tracked_traders(
+            merged, manual, self.config.max_tracked_traders
+        )
         self.last_discovery_status = PolymarketLiveSourceStatus(
             source_mode="live-read",
             discovery_mode=(
-                "active feed + manual wallets + optional trending market activity"
+                "weekly + today profit leaderboards (top 100 each) + active feed + manual wallets + optional trending market activity"
                 if self.config.use_trending_market_activity
-                else "active feed + manual wallets"
+                else "weekly + today profit leaderboards (top 100 each) + active feed + manual wallets"
             ),
-            active_traders_found=len(discovery["active"]),
-            candidate_rows_considered=discovery["candidate_rows_considered"] + fallback["rows_considered"],
-            candidate_wallets_extracted=discovery["candidate_wallets_extracted"] + fallback["wallets_extracted"],
+            active_traders_found=len(leaderboard["traders"]) + len(discovery["active"]),
+            candidate_rows_considered=leaderboard["rows_considered"]
+            + discovery["candidate_rows_considered"]
+            + fallback["rows_considered"],
+            candidate_wallets_extracted=leaderboard["wallets_extracted"]
+            + discovery["candidate_wallets_extracted"]
+            + fallback["wallets_extracted"],
             fallback_traders_selected=len(fallback["traders"]),
-            activity_source_used="feed" if discovery["active"] else ("fallback" if fallback["traders"] else None),
-            rows_rejected_last_discovery=discovery["rows_rejected"] + fallback["rows_rejected"],
+            activity_source_used=(
+                "wallet"
+                if leaderboard["traders"]
+                else (
+                    "feed"
+                    if discovery["active"]
+                    else ("fallback" if fallback["traders"] else None)
+                )
+            ),
+            rows_rejected_last_discovery=leaderboard["rows_rejected"]
+            + discovery["rows_rejected"]
+            + fallback["rows_rejected"],
             accepted_activity_trades_last_discovery=discovery["accepted_trades"],
-            manual_wallets_configured=len(self.manual_wallets) + len(self.invalid_manual_wallets),
+            manual_wallets_configured=len(self.manual_wallets)
+            + len(self.invalid_manual_wallets),
             manual_wallets_valid=len(self.manual_wallets),
-            manual_wallets_invalid=[redact_manual_wallet_input(item) for item in self.invalid_manual_wallets],
+            manual_wallets_invalid=[
+                redact_manual_wallet_input(item) for item in self.invalid_manual_wallets
+            ],
             manual_tracked_wallets=manual,
             last_active_trader_discovery_time=utc_now(),
-            last_discovery_error=discovery["error"],
+            last_discovery_error=leaderboard["error"] or discovery["error"],
             trending_market_activity_enabled=self.config.use_trending_market_activity,
             trending_market_activity_unavailable=(
-                None if self.config.use_trending_market_activity else "Trending market activity disabled"
+                None
+                if self.config.use_trending_market_activity
+                else "Trending market activity disabled"
             ),
         )
         return selected
 
-    async def get_recent_trades(self, traders: list[PolymarketTrader]) -> list[PolymarketSourceTrade]:
+    async def get_recent_trades(
+        self, traders: list[PolymarketTrader]
+    ) -> list[PolymarketSourceTrade]:
         manual = [trader for trader in traders if "Manual" in trader.source_reason]
-        selected = select_tracked_traders(traders, manual, self.config.max_tracked_traders)
+        selected = select_tracked_traders(
+            traders, manual, self.config.max_tracked_traders
+        )
         live_read_trades = await self._read_tracked_wallet_trades(selected)
-        market_trades = await self._read_trending_market_trades() if self.config.use_trending_market_activity else []
-        return dedupe_trades([*live_read_trades, *market_trades])[:100]
+        market_trades = (
+            await self._read_trending_market_trades()
+            if self.config.use_trending_market_activity
+            else []
+        )
+        return dedupe_trades([*live_read_trades, *market_trades])[
+            : max(100, self.config.max_tracked_traders * 2)
+        ]
 
     def get_discovery_status(self) -> PolymarketLiveSourceStatus:
         return self.last_discovery_status
 
-    async def debug_discovery(self, target: str = "swisstony") -> PolymarketDiscoveryDebugReport:
+    async def debug_discovery(
+        self, target: str = "swisstony"
+    ) -> PolymarketDiscoveryDebugReport:
         return await debug_discovery(target)
+
+    async def _read_profit_leaderboard_traders(self) -> dict[str, Any]:
+        weekly = await self._read_leaderboard_traders(
+            label="weekly",
+            period_values=("7d", "week", "weekly"),
+            limit=100,
+        )
+        today = await self._read_leaderboard_traders(
+            label="today",
+            period_values=("1d", "today", "day"),
+            limit=100,
+        )
+        traders = merge_traders([*weekly["traders"], *today["traders"]])
+        errors = [item["error"] for item in (weekly, today) if item.get("error")]
+        return {
+            "traders": traders,
+            "rows_considered": weekly["rows_considered"] + today["rows_considered"],
+            "wallets_extracted": len(
+                {trader.address.lower() for trader in traders if trader.address}
+            ),
+            "rows_rejected": weekly["rows_rejected"] + today["rows_rejected"],
+            "error": "; ".join(errors) if errors else None,
+        }
+
+    async def _read_leaderboard_traders(
+        self, *, label: str, period_values: tuple[str, ...], limit: int
+    ) -> dict[str, Any]:
+        data_api_time_period = {"today": "DAY", "weekly": "WEEK"}.get(label.lower())
+        if data_api_time_period:
+            try:
+                return await self._read_data_api_leaderboard_traders(
+                    label=label,
+                    time_period=data_api_time_period,
+                    limit=limit,
+                )
+            except Exception as exc:
+                data_api_error = redact_secrets(str(exc))
+            else:
+                data_api_error = None
+        else:
+            data_api_error = None
+
+        commands: list[list[str]] = []
+        for period in period_values:
+            commands.extend(
+                [
+                    [
+                        "polymarket",
+                        "data",
+                        "leaderboard",
+                        "--time-period",
+                        period,
+                        "--sort",
+                        "pnl",
+                        "--hide-farmers",
+                        "--hide-bots",
+                        "--limit",
+                        str(limit),
+                        "--read-only",
+                        "--non-interactive",
+                        "--output",
+                        "json",
+                    ],
+                    [
+                        "polymarket",
+                        "data",
+                        "leaderboard",
+                        "--period",
+                        period,
+                        "--sort",
+                        "pnl",
+                        "--hide-farmers",
+                        "--hide-bots",
+                        "--limit",
+                        str(limit),
+                        "--read-only",
+                        "--non-interactive",
+                        "--output",
+                        "json",
+                    ],
+                ]
+            )
+        try:
+            parsed = await run_first_bullpen_json(commands)
+            rows = collect_rows(parsed)
+            normalized = [normalize_fallback_trader_row(row) for row in rows]
+            traders = [
+                trader
+                for trader in normalized
+                if trader and trader_matches_leaderboard_period(trader, label)
+            ]
+            for trader in traders:
+                trader.source_reason = (
+                    f"{label.title()} profit leaderboard trader discovered via Bullpen"
+                )
+                trader.leaderboard_period = label
+                trader.leaderboard_periods = [label]
+                trader.leaderboard_profit_usd = {label: trader.profit_usd}
+            selected = sorted(
+                traders, key=lambda trader: trader.profit_usd, reverse=True
+            )[:limit]
+            return {
+                "traders": selected,
+                "rows_considered": len(rows),
+                "wallets_extracted": len(
+                    {trader.address.lower() for trader in selected if trader.address}
+                ),
+                "rows_rejected": len(rows) - len(traders),
+                "error": None,
+            }
+        except Exception as exc:
+            errors = [redact_secrets(str(exc))]
+            if data_api_error:
+                errors.insert(0, f"Data API: {data_api_error}")
+            return {
+                "traders": [],
+                "rows_considered": 0,
+                "wallets_extracted": 0,
+                "rows_rejected": 0,
+                "error": f"{label.title()} leaderboard unavailable: {'; '.join(errors)}",
+            }
+
+    async def _read_data_api_leaderboard_traders(
+        self, *, label: str, time_period: str, limit: int
+    ) -> dict[str, Any]:
+        rows: list[dict[str, Any]] = []
+        page_size = min(50, max(1, limit))
+        async with httpx.AsyncClient(
+            timeout=POLYMARKET_DATA_API_TIMEOUT_SECONDS,
+            headers=POLYMARKET_HTTP_HEADERS,
+        ) as client:
+            for offset in range(0, limit, page_size):
+                query = urlencode(
+                    {
+                        "category": "OVERALL",
+                        "timePeriod": time_period,
+                        "orderBy": "PNL",
+                        "limit": str(min(page_size, limit - offset)),
+                        "offset": str(offset),
+                    }
+                )
+                response = await client.get(
+                    f"{POLYMARKET_DATA_API_BASE_URL}/v1/leaderboard?{query}"
+                )
+                response.raise_for_status()
+                page_rows = collect_rows(response.json())
+                rows.extend(page_rows)
+                if len(page_rows) < page_size:
+                    break
+
+        normalized = [normalize_fallback_trader_row(row) for row in rows]
+        traders = [trader for trader in normalized if trader]
+        for trader in traders:
+            trader.source_reason = (
+                f"{label.title()} profit leaderboard trader discovered via Polymarket Data API"
+            )
+            trader.leaderboard_period = label
+            trader.leaderboard_periods = [label]
+            trader.leaderboard_profit_usd = {label: trader.profit_usd}
+        selected = traders[:limit]
+        return {
+            "traders": selected,
+            "rows_considered": len(rows),
+            "wallets_extracted": len(
+                {trader.address.lower() for trader in selected if trader.address}
+            ),
+            "rows_rejected": len(rows) - len(traders),
+            "error": None,
+        }
 
     async def _discover_active_traders(self) -> dict[str, Any]:
         try:
             parsed = await run_bullpen_json(
-                ["polymarket", "feed", "trades", "--read-only", "--non-interactive", "--limit", "1000", "--output", "json"]
+                [
+                    "polymarket",
+                    "feed",
+                    "trades",
+                    "--read-only",
+                    "--non-interactive",
+                    "--limit",
+                    "1000",
+                    "--output",
+                    "json",
+                ]
             )
             rows = collect_rows(parsed)
             normalized = [normalize_trade_row(row) for row in rows]
             trades = [item["trade"] for item in normalized if item["accepted"]]
             active = [
                 trader
-                for trader in aggregate_traders(trades, "live-read", "Active trader discovered from recent Bullpen trade feed")
+                for trader in aggregate_traders(
+                    trades,
+                    "live-read",
+                    "Active trader discovered from recent Bullpen trade feed",
+                )
                 if trader.trades_24h > 0
             ]
             return {
@@ -168,7 +433,9 @@ class BullpenReadOnlyProvider:
                         if isinstance(trade.get("address"), str) and trade["address"]
                     }
                 ),
-                "rows_rejected": len([item for item in normalized if not item["accepted"]]),
+                "rows_rejected": len(
+                    [item for item in normalized if not item["accepted"]]
+                ),
                 "accepted_trades": len(trades),
                 "error": None,
             }
@@ -185,62 +452,131 @@ class BullpenReadOnlyProvider:
     async def _read_fallback_wallets(self) -> dict[str, Any]:
         try:
             parsed = await run_bullpen_json(
-                ["polymarket", "data", "leaderboard", "--read-only", "--non-interactive", "--limit", "25", "--output", "json"]
+                [
+                    "polymarket",
+                    "data",
+                    "leaderboard",
+                    "--read-only",
+                    "--non-interactive",
+                    "--limit",
+                    "25",
+                    "--output",
+                    "json",
+                ]
             )
             rows = collect_rows(parsed)
-            traders = [item for item in (normalize_fallback_trader_row(row) for row in rows) if item][:10]
+            traders = [
+                item
+                for item in (normalize_fallback_trader_row(row) for row in rows)
+                if item
+            ][:10]
             return {
                 "traders": traders,
                 "rows_considered": len(rows),
-                "wallets_extracted": len({trader.address.lower() for trader in traders if trader.address}),
+                "wallets_extracted": len(
+                    {trader.address.lower() for trader in traders if trader.address}
+                ),
                 "rows_rejected": len(rows) - len(traders),
             }
         except Exception:
-            return {"traders": [], "rows_considered": 0, "wallets_extracted": 0, "rows_rejected": 0}
+            return {
+                "traders": [],
+                "rows_considered": 0,
+                "wallets_extracted": 0,
+                "rows_rejected": 0,
+            }
 
     async def _read_manual_wallets(self) -> list[PolymarketTrader]:
         traders: list[PolymarketTrader] = []
-        for address in self.manual_wallets:
+        for target in self.manual_wallets:
+            is_wallet = is_public_wallet_address(target)
+            handle = None if is_wallet else clean_handle(target)
             try:
-                trades = await self._read_wallet_activity(address)
-                aggregated = aggregate_traders(trades, "live-read", "Manual tracked wallet")
-                traders.append(
-                    aggregated[0]
-                    if aggregated
-                    else PolymarketTrader(
-                        id=address,
-                        name=short_address(address),
-                        address=address,
-                        activity_source="wallet",
-                        polymarket_profile_url=polymarket_profile_url(address),
-                        volume_24h=0,
-                        trades_24h=0,
-                        source_reason="Manual tracked wallet",
-                        source="live-read",
-                    )
+                seed = PolymarketTrader(
+                    id=target,
+                    name=short_address(target) if is_wallet else f"@{handle or target}",
+                    address=target if is_wallet else "",
+                    handle=handle,
+                    profile_slug=handle,
+                    activity_source="wallet" if is_wallet else "handle",
+                    polymarket_profile_url=(
+                        polymarket_profile_url(target)
+                        if is_wallet
+                        else polymarket_handle_profile_url(handle)
+                    ),
+                    profile_url=polymarket_handle_profile_url(handle),
+                    activity_url=polymarket_handle_activity_url(handle),
+                    volume_24h=0,
+                    trades_24h=0,
+                    source_reason="Manual tracked account",
+                    source="live-read",
                 )
+                trades = (
+                    await self._read_wallet_activity(target)
+                    if is_wallet
+                    else await self._read_handle_or_feed_activity(seed)
+                )
+                aggregated = aggregate_traders(
+                    trades, "live-read", "Manual tracked account"
+                )
+                if aggregated:
+                    trader = aggregated[0]
+                    trader.handle = trader.handle or handle
+                    trader.profile_slug = trader.profile_slug or handle
+                    trader.profile_url = (
+                        trader.profile_url or polymarket_handle_profile_url(handle)
+                    )
+                    trader.activity_url = (
+                        trader.activity_url or polymarket_handle_activity_url(handle)
+                    )
+                    trader.polymarket_profile_url = (
+                        trader.polymarket_profile_url or seed.polymarket_profile_url
+                    )
+                    traders.append(trader)
+                else:
+                    traders.append(seed)
             except Exception:
                 traders.append(
                     PolymarketTrader(
-                        id=address,
-                        name=short_address(address),
-                        address=address,
-                        activity_source="wallet",
-                        polymarket_profile_url=polymarket_profile_url(address),
+                        id=target,
+                        name=(
+                            short_address(target)
+                            if is_wallet
+                            else f"@{handle or target}"
+                        ),
+                        address=target if is_wallet else "",
+                        handle=handle,
+                        profile_slug=handle,
+                        activity_source="wallet" if is_wallet else "handle",
+                        profile_url=polymarket_handle_profile_url(handle),
+                        activity_url=polymarket_handle_activity_url(handle),
+                        polymarket_profile_url=(
+                            polymarket_profile_url(target)
+                            if is_wallet
+                            else polymarket_handle_profile_url(handle)
+                        ),
                         volume_24h=0,
                         trades_24h=0,
-                        source_reason="Manual tracked wallet; recent activity unavailable",
+                        source_reason="Manual tracked account; recent activity unavailable",
                         source="live-read",
                     )
                 )
         return traders
 
-    async def _read_tracked_wallet_trades(self, traders: list[PolymarketTrader]) -> list[PolymarketSourceTrade]:
+    async def _read_tracked_wallet_trades(
+        self, traders: list[PolymarketTrader]
+    ) -> list[PolymarketSourceTrade]:
         rows: list[PolymarketSourceTrade] = []
         for trader in [item for item in traders if item.source == "live-read"]:
             try:
-                wallet_trades = await self._read_wallet_activity(trader.address) if is_public_wallet_address(trader.address) else []
-                trades = wallet_trades or await self._read_handle_or_feed_activity(trader)
+                wallet_trades = (
+                    await self._read_wallet_activity(trader.address)
+                    if is_public_wallet_address(trader.address)
+                    else []
+                )
+                trades = wallet_trades or await self._read_handle_or_feed_activity(
+                    trader
+                )
                 if wallet_trades:
                     trader.activity_source = "wallet"
                 elif trades:
@@ -254,31 +590,138 @@ class BullpenReadOnlyProvider:
         return [trade for trade in rows if trade.source == "live-read"]
 
     async def _read_wallet_activity(self, address: str) -> list[dict[str, Any]]:
+        bullpen_error: Exception | None = None
+        bullpen_trades: list[dict[str, Any]] = []
+        try:
+            parsed = await run_first_bullpen_json(
+                [
+                    [
+                        "polymarket",
+                        "data",
+                        "profile",
+                        address,
+                        "--trades",
+                        "--read-only",
+                        "--non-interactive",
+                        "--output",
+                        "json",
+                    ],
+                    [
+                        "polymarket",
+                        "activity",
+                        "--address",
+                        address,
+                        "--type",
+                        "trade",
+                        "--limit",
+                        "50",
+                        "--read-only",
+                        "--non-interactive",
+                        "--output",
+                        "json",
+                    ],
+                ]
+            )
+            bullpen_trades = normalize_trade_rows_for_wallet(parsed, address)
+        except Exception as exc:
+            bullpen_error = exc
+
+        data_api_errors: list[Exception] = []
+        data_api_trades: list[dict[str, Any]] = []
+        for candidate_address in await self._wallet_activity_addresses(address):
+            try:
+                data_api_trades.extend(
+                    await self._read_data_api_wallet_activity(candidate_address)
+                )
+            except Exception as exc:
+                data_api_errors.append(exc)
+
+        if data_api_trades or bullpen_trades:
+            return dedupe_normalized_trade_rows([*data_api_trades, *bullpen_trades])
+        if bullpen_error:
+            raise bullpen_error from (data_api_errors[0] if data_api_errors else None)
+        if data_api_errors:
+            raise data_api_errors[0]
+        return []
+
+    async def _wallet_activity_addresses(self, address: str) -> list[str]:
+        resolved = await self._read_public_profile_wallet_addresses(address)
+        return unique_wallet_addresses([address, *resolved])
+
+    async def _read_public_profile_wallet_addresses(self, address: str) -> list[str]:
+        query = urlencode({"address": address})
+        url = f"{POLYMARKET_GAMMA_API_BASE_URL}/public-profile?{query}"
+        try:
+            async with httpx.AsyncClient(
+                timeout=POLYMARKET_DATA_API_TIMEOUT_SECONDS,
+                headers={"User-Agent": "investment-engine-polymarket-bot/1.0"},
+            ) as client:
+                response = await client.get(url)
+                response.raise_for_status()
+                return extract_wallet_addresses(response.json())
+        except Exception:
+            return []
+
+    async def _read_data_api_wallet_activity(
+        self, address: str
+    ) -> list[dict[str, Any]]:
+        activity_query = urlencode(
+            {
+                "user": address,
+                "type": "TRADE",
+                "limit": "100",
+                "sortBy": "TIMESTAMP",
+                "sortDirection": "DESC",
+            }
+        )
+        trades_query = urlencode(
+            {
+                "user": address,
+                "limit": "100",
+                "offset": "0",
+                "takerOnly": "false",
+            }
+        )
+        urls = [
+            f"{POLYMARKET_DATA_API_BASE_URL}/activity?{activity_query}",
+            f"{POLYMARKET_DATA_API_BASE_URL}/trades?{trades_query}",
+        ]
+        async with httpx.AsyncClient(
+            timeout=POLYMARKET_DATA_API_TIMEOUT_SECONDS,
+            headers={"User-Agent": "investment-engine-polymarket-bot/1.0"},
+        ) as client:
+            rows: list[dict[str, Any]] = []
+            first_error: Exception | None = None
+            for url in urls:
+                try:
+                    response = await client.get(url)
+                    response.raise_for_status()
+                    rows.extend(
+                        normalize_trade_rows_for_wallet(response.json(), address)
+                    )
+                except Exception as exc:
+                    first_error = first_error or exc
+            if rows:
+                return dedupe_normalized_trade_rows(rows)
+            if first_error:
+                raise first_error
+            return []
+
+    async def _read_handle_or_feed_activity(
+        self, trader: PolymarketTrader
+    ) -> list[dict[str, Any]]:
         parsed = await run_bullpen_json(
             [
                 "polymarket",
-                "activity",
-                "--address",
-                address,
-                "--type",
-                "trade",
-                "--limit",
-                "50",
+                "feed",
+                "trades",
                 "--read-only",
                 "--non-interactive",
+                "--limit",
+                "1000",
                 "--output",
                 "json",
             ]
-        )
-        normalized = [
-            normalize_trade_row({**row, "address": extract_address(row) or address})
-            for row in collect_rows(parsed)
-        ]
-        return [item["trade"] for item in normalized if item["accepted"]]
-
-    async def _read_handle_or_feed_activity(self, trader: PolymarketTrader) -> list[dict[str, Any]]:
-        parsed = await run_bullpen_json(
-            ["polymarket", "feed", "trades", "--read-only", "--non-interactive", "--limit", "1000", "--output", "json"]
         )
         identities = trader_identity_candidates(trader)
         normalized = [normalize_trade_row(row) for row in collect_rows(parsed)]
@@ -315,11 +758,23 @@ class BullpenReadOnlyProvider:
             market_rows = collect_rows(markets)
             trades: list[PolymarketSourceTrade] = []
             for market in market_rows:
-                slug = string_value(market.get("slug") or market.get("marketSlug") or market.get("id"))
+                slug = string_value(
+                    market.get("slug") or market.get("marketSlug") or market.get("id")
+                )
                 if not slug:
                     continue
                 parsed = await run_bullpen_json(
-                    ["polymarket", "trades", slug, "--limit", "25", "--read-only", "--non-interactive", "--output", "json"]
+                    [
+                        "polymarket",
+                        "trades",
+                        slug,
+                        "--limit",
+                        "25",
+                        "--read-only",
+                        "--non-interactive",
+                        "--output",
+                        "json",
+                    ]
                 )
                 rows = collect_rows(parsed)
                 for index, row in enumerate(rows):
@@ -327,11 +782,19 @@ class BullpenReadOnlyProvider:
                         {
                             **row,
                             "slug": slug,
-                            "marketTitle": row.get("marketTitle") or row.get("title") or market.get("title") or market.get("question") or slug,
+                            "marketTitle": row.get("marketTitle")
+                            or row.get("title")
+                            or market.get("title")
+                            or market.get("question")
+                            or slug,
                         }
                     )
                     if normalized["accepted"]:
-                        trades.append(source_trade_from_normalized(normalized["trade"], None, "live-market-read", index))
+                        trades.append(
+                            source_trade_from_normalized(
+                                normalized["trade"], None, "live-market-read", index
+                            )
+                        )
             self.last_discovery_status.trending_market_activity_unavailable = None
             return trades
         except Exception as exc:
@@ -349,18 +812,428 @@ class BullpenReadOnlyProvider:
                 if self.config.use_trending_market_activity
                 else "active feed + manual wallets"
             ),
-            manual_wallets_configured=len(self.manual_wallets) + len(self.invalid_manual_wallets),
+            manual_wallets_configured=len(self.manual_wallets)
+            + len(self.invalid_manual_wallets),
             manual_wallets_valid=len(self.manual_wallets),
-            manual_wallets_invalid=[redact_manual_wallet_input(item) for item in self.invalid_manual_wallets],
+            manual_wallets_invalid=[
+                redact_manual_wallet_input(item) for item in self.invalid_manual_wallets
+            ],
             manual_tracked_wallets=[],
             trending_market_activity_enabled=self.config.use_trending_market_activity,
             trending_market_activity_unavailable=(
-                None if self.config.use_trending_market_activity else "Trending market activity disabled"
+                None
+                if self.config.use_trending_market_activity
+                else "Trending market activity disabled"
             ),
         )
 
 
-def aggregate_traders(trades: list[dict[str, Any]], source: TradeSource, source_reason: str) -> list[PolymarketTrader]:
+async def estimate_polymarket_net_worth(target: str) -> PolymarketNetWorthEstimate:
+    wallet = await resolve_polymarket_proxy_wallet(target)
+    async with httpx.AsyncClient(
+        timeout=POLYMARKET_DATA_API_TIMEOUT_SECONDS,
+        headers=POLYMARKET_HTTP_HEADERS,
+    ) as client:
+        positions_value, positions = await _read_positions_value_and_rows(
+            client, wallet
+        )
+        cash_balance = await _read_pusd_balance(client, wallet)
+    redeemable_value = _sum_redeemable_value(positions)
+    net_worth = positions_value + cash_balance + redeemable_value
+    return PolymarketNetWorthEstimate(
+        wallet=wallet,
+        positions_value_usd=round(positions_value, 6),
+        cash_balance_usd=round(cash_balance, 6),
+        redeemable_value_usd=round(redeemable_value, 6),
+        net_worth_usd=round(net_worth, 6),
+    )
+
+
+async def resolve_polymarket_proxy_wallet(target: str) -> str:
+    normalized = target.strip()
+    if is_public_wallet_address(normalized):
+        return normalized
+
+    handle = clean_handle(normalized)
+    if not handle:
+        raise RuntimeError("Polymarket handle or wallet address is required.")
+
+    query = urlencode({"q": handle, "search_profiles": "true", "limit_per_type": "10"})
+    url = f"{POLYMARKET_GAMMA_API_BASE_URL}/public-search?{query}"
+    async with httpx.AsyncClient(
+        timeout=POLYMARKET_DATA_API_TIMEOUT_SECONDS,
+        headers=POLYMARKET_HTTP_HEADERS,
+    ) as client:
+        response = await client.get(url)
+        response.raise_for_status()
+        payload = response.json()
+
+    profiles = payload.get("profiles") if isinstance(payload, dict) else None
+    if not isinstance(profiles, list):
+        profiles = collect_rows(payload)
+
+    wanted = identity_key(handle)
+    profile = next(
+        (
+            item
+            for item in profiles
+            if isinstance(item, dict) and wanted in profile_identity_candidates(item)
+        ),
+        None,
+    )
+    if profile is None:
+        profile = next((item for item in profiles if isinstance(item, dict)), None)
+
+    wallet = extract_address(profile or {}) if isinstance(profile, dict) else None
+    if not wallet:
+        raise RuntimeError(f"No proxyWallet found for Polymarket profile @{handle}.")
+    return wallet
+
+
+async def _read_positions_value_and_rows(
+    client: httpx.AsyncClient, wallet: str
+) -> tuple[float, list[dict[str, Any]]]:
+    value_url = f"{POLYMARKET_DATA_API_BASE_URL}/value?{urlencode({'user': wallet})}"
+    value_response = await client.get(value_url)
+    value_response.raise_for_status()
+    positions_value = _extract_positions_value(value_response.json())
+
+    positions: list[dict[str, Any]] = []
+    offset = 0
+    limit = 500
+    while True:
+        query = urlencode(
+            {
+                "user": wallet,
+                "sizeThreshold": "0",
+                "limit": str(limit),
+                "offset": str(offset),
+                "sortBy": "CURRENT",
+                "sortDirection": "DESC",
+            }
+        )
+        positions_url = f"{POLYMARKET_DATA_API_BASE_URL}/positions?{query}"
+        response = await client.get(positions_url)
+        response.raise_for_status()
+        page = [row for row in collect_rows(response.json()) if isinstance(row, dict)]
+        positions.extend(page)
+        if len(page) < limit:
+            break
+        offset += limit
+    return positions_value, positions
+
+
+def _extract_positions_value(payload: Any) -> float:
+    if isinstance(payload, list):
+        for item in payload:
+            value = _extract_positions_value(item)
+            if value > 0:
+                return value
+        return 0
+    if not isinstance(payload, dict):
+        return 0
+    return (
+        number_value(
+            payload.get("value")
+            or payload.get("positionsValue")
+            or payload.get("positions_value")
+            or payload.get("currentValue")
+            or payload.get("current_value")
+        )
+        or 0
+    )
+
+
+async def _read_pusd_balance(client: httpx.AsyncClient, wallet: str) -> float:
+    probe_cache: dict[str, PolygonRpcProbeResult] = {}
+    body = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "eth_call",
+        "params": [
+            {
+                "to": POLYMARKET_PUSD_TOKEN_ADDRESS,
+                "data": _erc20_balance_of_calldata(wallet),
+            },
+            "latest",
+        ],
+    }
+    errors: list[str] = []
+    for rpc_url in _polygon_rpc_urls():
+        try:
+            probe = await _probe_polygon_rpc_endpoint(
+                client,
+                rpc_url,
+                probe_cache=probe_cache,
+            )
+            if not probe.ok:
+                errors.append(f"{rpc_url} [{probe.classification}]: {probe.detail}")
+                continue
+            payload = await _post_polygon_rpc_with_backoff(client, rpc_url, body)
+            result = payload.get("result") if isinstance(payload, dict) else None
+            if not isinstance(result, str) or not result.startswith("0x"):
+                raise RuntimeError("Polygon RPC did not return a pUSD balance result.")
+            return int(result, 16) / POLYMARKET_PUSD_DECIMALS
+        except Exception as exc:
+            errors.append(f"{rpc_url}: {redact_secrets(str(exc))}")
+
+    logger.warning(
+        "Polymarket pUSD balance unavailable from all Polygon RPC endpoints: %s",
+        "; ".join(errors) or "no RPC endpoints configured",
+    )
+    # Net-worth refreshes should not fail solely because public Polygon RPC
+    # endpoints are unavailable or rate-limited. Positions/redeemables still
+    # provide a useful lower-bound estimate, so use a zero cash balance when
+    # every configured RPC endpoint fails.
+    return 0.0
+
+
+async def _probe_polygon_rpc_endpoint(
+    client: httpx.AsyncClient,
+    rpc_url: str,
+    *,
+    probe_cache: dict[str, PolygonRpcProbeResult],
+) -> PolygonRpcProbeResult:
+    cached = probe_cache.get(rpc_url)
+    if cached is not None:
+        return cached
+
+    try:
+        chain_payload = await _post_polygon_rpc_with_backoff(
+            client,
+            rpc_url,
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "eth_chainId",
+                "params": [],
+            },
+        )
+        chain_id = chain_payload.get("result") if isinstance(chain_payload, dict) else None
+        if chain_id != POLYGON_CHAIN_ID:
+            result = PolygonRpcProbeResult(
+                ok=False,
+                classification="wrong_chain",
+                detail=(
+                    f"Expected Polygon chainId {POLYGON_CHAIN_ID}, but RPC returned "
+                    f"{chain_id or 'unknown'}."
+                ),
+            )
+            probe_cache[rpc_url] = result
+            return result
+
+        logs_payload = await _post_polygon_rpc_with_backoff(
+            client,
+            rpc_url,
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "eth_getLogs",
+                "params": [
+                    {
+                        "fromBlock": "latest",
+                        "toBlock": "latest",
+                        "address": POLYMARKET_PUSD_TOKEN_ADDRESS,
+                    }
+                ],
+            },
+        )
+        logs_result = logs_payload.get("result") if isinstance(logs_payload, dict) else None
+        if not isinstance(logs_result, list):
+            raise RuntimeError("eth_getLogs did not return a JSON array result.")
+
+        result = PolygonRpcProbeResult(
+            ok=True,
+            classification="ready",
+            detail="Polygon RPC passed chainId and eth_getLogs readiness checks.",
+        )
+    except Exception as exc:
+        detail = redact_secrets(str(exc))
+        normalized = detail.lower()
+        if "429" in normalized or "rate limit" in normalized or "retry-after" in normalized:
+            classification = "rate_limited"
+        elif chain_hint := _polygon_rpc_capability_classification(normalized):
+            classification = chain_hint
+        else:
+            classification = "unavailable"
+        result = PolygonRpcProbeResult(
+            ok=False,
+            classification=classification,
+            detail=detail,
+        )
+
+    probe_cache[rpc_url] = result
+    return result
+
+
+def _polygon_rpc_capability_classification(message: str) -> str | None:
+    if any(marker in message for marker in ("method not found", "unsupported method")):
+        return "missing_capability"
+    if any(
+        marker in message
+        for marker in (
+            "wrong chain",
+            "chain id",
+            "chainid",
+            "expected polygon",
+        )
+    ):
+        return "wrong_chain"
+    if "eth_getlogs" in message or "getlogs" in message:
+        return "missing_capability"
+    return None
+
+
+def _retry_after_seconds(value: str | None) -> float | None:
+    if not value:
+        return None
+    normalized = value.strip()
+    if not normalized:
+        return None
+    try:
+        parsed = float(normalized)
+        return max(0.0, parsed)
+    except ValueError:
+        pass
+    try:
+        parsed_date = parsedate_to_datetime(normalized)
+    except (TypeError, ValueError, IndexError, OverflowError):
+        return None
+    if parsed_date.tzinfo is None:
+        parsed_date = parsed_date.replace(tzinfo=timezone.utc)
+    return max(
+        0.0,
+        (parsed_date - datetime.now(timezone.utc)).total_seconds(),
+    )
+
+
+def _polygon_rpc_error_message(
+    rpc_url: str,
+    response: httpx.Response,
+    payload: object | None,
+) -> str:
+    if response.status_code == 429:
+        retry_after = _retry_after_seconds(response.headers.get("Retry-After"))
+        if retry_after is not None:
+            return (
+                f"Polygon RPC rate limited at {rpc_url} (HTTP 429, Retry-After {retry_after:g}s)."
+            )
+        return f"Polygon RPC rate limited at {rpc_url} (HTTP 429)."
+
+    if isinstance(payload, dict) and isinstance(payload.get("error"), dict):
+        error = payload["error"]
+        message = error.get("message") if isinstance(error, dict) else None
+        if isinstance(message, str) and message.strip():
+            return f"{rpc_url}: {message.strip()}"
+
+    return f"{rpc_url}: HTTP {response.status_code}"
+
+
+async def _post_polygon_rpc_with_backoff(
+    client: httpx.AsyncClient,
+    rpc_url: str,
+    body: dict[str, object],
+) -> object:
+    last_error: Exception | None = None
+    for attempt in range(POLYGON_RPC_MAX_ATTEMPTS):
+        async with _polygon_rpc_semaphore_for_current_loop():
+            response = await client.post(
+                rpc_url,
+                json=body,
+                headers={"content-type": "application/json", **POLYMARKET_HTTP_HEADERS},
+            )
+
+        payload: object | None
+        try:
+            payload = response.json()
+        except ValueError:
+            payload = None
+
+        response_error = None
+        if response.status_code >= 400:
+            response_error = RuntimeError(
+                _polygon_rpc_error_message(rpc_url, response, payload)
+            )
+        elif isinstance(payload, dict) and payload.get("error"):
+            error_payload = payload.get("error")
+            message = (
+                error_payload.get("message")
+                if isinstance(error_payload, dict)
+                else error_payload
+            )
+            response_error = RuntimeError(
+                f"{rpc_url}: {message or 'JSON-RPC error response'}"
+            )
+
+        if response_error is None:
+            return payload
+
+        last_error = response_error
+        normalized = str(response_error).lower()
+        if attempt + 1 >= POLYGON_RPC_MAX_ATTEMPTS or (
+            "429" not in normalized
+            and "rate limit" not in normalized
+            and "retry-after" not in normalized
+        ):
+            raise response_error
+
+        retry_after = _retry_after_seconds(response.headers.get("Retry-After"))
+        backoff = retry_after
+        if backoff is None:
+            backoff = min(
+                POLYGON_RPC_BACKOFF_MAX_SECONDS,
+                POLYGON_RPC_BACKOFF_BASE_SECONDS * (2**attempt)
+                + (random.random() * POLYGON_RPC_JITTER_MAX_SECONDS),
+            )
+        await asyncio.sleep(backoff)
+
+    raise last_error or RuntimeError(f"{rpc_url}: Polygon RPC request failed.")
+
+
+def _polygon_rpc_urls() -> list[str]:
+    configured = os.getenv("POLYMARKET_POLYGON_RPC_URLS")
+    raw_urls = (
+        configured.split(",")
+        if configured
+        else [POLYMARKET_POLYGON_RPC_URL, *POLYMARKET_POLYGON_RPC_FALLBACK_URLS]
+    )
+    urls: list[str] = []
+    for url in raw_urls:
+        normalized = url.strip()
+        if normalized and normalized not in urls:
+            urls.append(normalized)
+    return urls
+
+
+def _erc20_balance_of_calldata(wallet: str) -> str:
+    return "0x70a08231" + "0" * 24 + wallet[2:].lower()
+
+
+def _sum_redeemable_value(positions: list[dict[str, Any]]) -> float:
+    total = 0.0
+    for position in positions:
+        classification = classify_bullpen_position(position)
+        if not classification.is_claimable:
+            continue
+        total += classification.claimable_value_usd or 0
+    return total
+
+
+def profile_identity_candidates(profile: dict[str, Any]) -> set[str]:
+    values = [
+        profile.get("name"),
+        profile.get("username"),
+        profile.get("userName"),
+        profile.get("handle"),
+        profile.get("slug"),
+        profile.get("pseudonym"),
+    ]
+    return {identity_key(str(value)) for value in values if value}
+
+
+def aggregate_traders(
+    trades: list[dict[str, Any]], source: TradeSource, source_reason: str
+) -> list[PolymarketTrader]:
     now_ms = datetime.now(timezone.utc).timestamp() * 1000
     aggregated: dict[str, PolymarketTrader] = {}
     for trade in trades:
@@ -374,14 +1247,28 @@ def aggregate_traders(trades: list[dict[str, Any]], source: TradeSource, source_
             key,
             PolymarketTrader(
                 id=identity,
-                name=trade.get("trader_name") or handle or (short_address(address) if address else identity),
+                name=trade.get("trader_name")
+                or handle
+                or (short_address(address) if address else identity),
                 address=address,
                 handle=handle,
                 profile_slug=handle,
-                profile_url=polymarket_handle_profile_url(handle) if handle else polymarket_profile_url(address),
-                activity_url=polymarket_handle_activity_url(handle) if handle else polymarket_profile_url(address),
+                profile_url=(
+                    polymarket_handle_profile_url(handle)
+                    if handle
+                    else polymarket_profile_url(address)
+                ),
+                activity_url=(
+                    polymarket_handle_activity_url(handle)
+                    if handle
+                    else polymarket_profile_url(address)
+                ),
                 activity_source="feed",
-                polymarket_profile_url=polymarket_handle_profile_url(handle) if handle else polymarket_profile_url(address),
+                polymarket_profile_url=(
+                    polymarket_handle_profile_url(handle)
+                    if handle
+                    else polymarket_profile_url(address)
+                ),
                 volume_24h=0,
                 trades_1h=0,
                 trades_6h=0,
@@ -398,7 +1285,9 @@ def aggregate_traders(trades: list[dict[str, Any]], source: TradeSource, source_
         if 0 <= age_ms <= 24 * 60 * 60 * 1000:
             trader.trades_24h += 1
             trader.volume_24h += float(trade["size_usd"])
-        if not trader.last_trade_at or datetime.fromisoformat(trade["timestamp"]) > datetime.fromisoformat(trader.last_trade_at):
+        if not trader.last_trade_at or datetime.fromisoformat(
+            trade["timestamp"]
+        ) > datetime.fromisoformat(trader.last_trade_at):
             trader.last_trade_at = trade["timestamp"]
             trader.last_trade_age = age_label(age_ms)
         aggregated[key] = trader
@@ -412,11 +1301,16 @@ def source_trade_from_normalized(
     index: int,
 ) -> PolymarketSourceTrade:
     identity = clean_trade_identity(trade, trader) or "unknown"
-    raw_identity = trade.get("raw_identity") or (trader.id if trader else None) or trade.get("trader_name") or trade.get("handle") or trade.get("address") or identity
-    stable_key = stable_trade_key(source, identity, trade)
-    fallback_trade_id = (
-        f"{trade['market_id']}:{identity}:{trade['timestamp']}:{index}"
+    raw_identity = (
+        trade.get("raw_identity")
+        or (trader.id if trader else None)
+        or trade.get("trader_name")
+        or trade.get("handle")
+        or trade.get("address")
+        or identity
     )
+    stable_key = stable_trade_key(source, identity, trade)
+    fallback_trade_id = f"{trade['market_id']}:{identity}:{trade['timestamp']}:{index}"
     return PolymarketSourceTrade(
         id=stable_key or f"{source}:{trade.get('id') or fallback_trade_id}",
         source_trade_key=stable_key
@@ -427,7 +1321,11 @@ def source_trade_from_normalized(
             if trader
             else trade.get("trader_name")
             or trade.get("handle")
-            or (short_address(identity) if is_public_wallet_address(identity) else identity)
+            or (
+                short_address(identity)
+                if is_public_wallet_address(identity)
+                else identity
+            )
         ),
         trader_address=trade.get("address") or (trader.address if trader else ""),
         trader_handle=(trader.handle if trader else None) or trade.get("handle"),
@@ -436,6 +1334,7 @@ def source_trade_from_normalized(
         clean_trader_identity=identity,
         market_id=trade["market_id"],
         market_title=trade["market_title"],
+        event_end_at=trade.get("event_end_at"),
         outcome=trade["outcome"],
         side=trade["side"],
         price=float(trade["price"]),
@@ -450,10 +1349,30 @@ def normalize_fallback_trader_row(row: dict[str, Any]) -> PolymarketTrader | Non
     handle = extract_handle(row)
     if not address and not handle:
         return None
-    volume_24h = number_value(row.get("volume24h") or row.get("volume_24h") or row.get("volume") or row.get("pnl") or row.get("profit")) or 0
+    volume_24h = (
+        number_value(
+            row.get("volume24h")
+            or row.get("volume_24h")
+            or row.get("vol")
+            or row.get("volume")
+            or row.get("totalVolume")
+            or row.get("weeklyVolume")
+        )
+        or 0
+    )
+    trades_24h = int(
+        number_value(
+            row.get("trades24h")
+            or row.get("trades_24h")
+            or row.get("trades")
+            or row.get("tradeCount")
+        )
+        or 0
+    )
     name = string_value(
         row.get("name")
         or row.get("username")
+        or row.get("userName")
         or row.get("user_name")
         or row.get("displayName")
         or row.get("traderName")
@@ -466,17 +1385,77 @@ def normalize_fallback_trader_row(row: dict[str, Any]) -> PolymarketTrader | Non
         address=address or "",
         handle=handle,
         profile_slug=handle,
-        profile_url=polymarket_handle_profile_url(handle) if handle else polymarket_profile_url(address or ""),
-        activity_url=polymarket_handle_activity_url(handle) if handle else polymarket_profile_url(address or ""),
+        profile_url=(
+            polymarket_handle_profile_url(handle)
+            if handle
+            else polymarket_profile_url(address or "")
+        ),
+        activity_url=(
+            polymarket_handle_activity_url(handle)
+            if handle
+            else polymarket_profile_url(address or "")
+        ),
         activity_source="fallback",
-        bullpen_profile_url=safe_http_url(row.get("bullpenProfileUrl") or row.get("profileUrl") or row.get("url")),
-        polymarket_profile_url=polymarket_handle_profile_url(handle) if handle else polymarket_profile_url(address or ""),
+        bullpen_profile_url=safe_http_url(
+            row.get("bullpenProfileUrl") or row.get("profileUrl") or row.get("url")
+        ),
+        polymarket_profile_url=(
+            polymarket_handle_profile_url(handle)
+            if handle
+            else polymarket_profile_url(address or "")
+        ),
         volume_24h=volume_24h,
-        trades_24h=0,
-        last_trade_at=parse_timestamp(row.get("lastTradeAt") or row.get("last_trade_at") or row.get("lastActiveAt") or row.get("updatedAt")),
+        trades_24h=trades_24h,
+        profit_usd=(
+            number_value(
+                row.get("profit")
+                or row.get("pnl")
+                or row.get("profitUsd")
+                or row.get("profit_usd")
+                or row.get("realizedPnl")
+                or row.get("realized_pnl")
+                or row.get("totalPnl")
+                or row.get("total_pnl")
+            )
+            or 0
+        ),
+        last_trade_at=parse_timestamp(
+            row.get("lastTradeAt")
+            or row.get("last_trade_at")
+            or row.get("lastActiveAt")
+            or row.get("updatedAt")
+        ),
         source_reason="Fallback tracked wallet; no recent trade detected yet",
         source="live-read",
     )
+
+
+def trader_matches_leaderboard_period(
+    trader: PolymarketTrader, label: str, *, now: datetime | None = None
+) -> bool:
+    """Reject known-stale leaderboard rows for time-bounded leaderboards.
+
+    Bullpen can return high-PnL accounts for a requested daily/weekly leaderboard
+    even when the row's own last trade timestamp is months old. Keep rows that do
+    not expose a last-trade timestamp so discovery remains compatible with older
+    Bullpen output, but reject rows that prove they are outside the requested
+    leaderboard window.
+    """
+
+    max_age = LEADERBOARD_PERIOD_MAX_AGE.get(label.lower())
+    if not max_age or not trader.last_trade_at:
+        return True
+    try:
+        last_trade_at = datetime.fromisoformat(trader.last_trade_at)
+    except ValueError:
+        return False
+    if last_trade_at.tzinfo is None:
+        last_trade_at = last_trade_at.replace(tzinfo=timezone.utc)
+    current_time = now or datetime.now(timezone.utc)
+    if current_time.tzinfo is None:
+        current_time = current_time.replace(tzinfo=timezone.utc)
+    age = current_time - last_trade_at.astimezone(timezone.utc)
+    return timedelta(0) <= age <= max_age
 
 
 def normalize_trade_row(row: dict[str, Any]) -> dict[str, Any]:
@@ -491,6 +1470,21 @@ def normalize_trade_row(row: dict[str, Any]) -> dict[str, Any]:
         or row.get("pseudonym")
     )
     raw_identity = raw_identity_value(row)
+    event_end_at = parse_timestamp(
+        row.get("eventEndAt")
+        or row.get("event_end_at")
+        or row.get("marketEndAt")
+        or row.get("market_end_at")
+        or row.get("endDate")
+        or row.get("end_date")
+        or row.get("endTime")
+        or row.get("end_time")
+        or row.get("deadline")
+        or row.get("resolutionTime")
+        or row.get("resolution_time")
+        or row.get("closeTime")
+        or row.get("close_time")
+    )
     timestamp = parse_timestamp(
         row.get("timestamp")
         or row.get("createdAt")
@@ -512,42 +1506,19 @@ def normalize_trade_row(row: dict[str, Any]) -> dict[str, Any]:
         or row.get("condition_id")
     )
     sample_keys = list(row.keys())[:40]
-    side = "SELL" if "sell" in str(row.get("side") or row.get("action") or row.get("type") or "").lower() else "BUY"
-    row_type = string_value(row.get("type") or row.get("activityType") or row.get("activity_type") or row.get("eventType") or row.get("event_type"))
-    amount = number_value(
-        row.get("sizeUsd")
-        or row.get("size_usd")
-        or row.get("usdAmount")
-        or row.get("usd_amount")
-        or row.get("amountUsd")
-        or row.get("amount_usd")
-        or row.get("cash")
-        or row.get("amount")
-        or row.get("value")
-        or row.get("size")
-        or row.get("valueUsd")
-        or row.get("value_usd")
-        or row.get("shares")
+    side = (
+        "SELL"
+        if "sell"
+        in str(row.get("side") or row.get("action") or row.get("type") or "").lower()
+        else "BUY"
     )
-    extracted = {
-        "address": address,
-        "handle": handle,
-        "trader_name": trader_name,
-        "market_id": market_id,
-        "side": side,
-        "size_usd": amount,
-        "timestamp": timestamp,
-    }
-    if row_type and not any(token in row_type.lower() for token in ("trade", "buy", "sell")):
-        return {"accepted": False, "reason": "unsupported row type", "sample_keys": sample_keys, "extracted": extracted}
-    if not address and not handle and not trader_name:
-        return {"accepted": False, "reason": "missing trader identity", "sample_keys": sample_keys, "extracted": extracted}
-    if not market_id:
-        return {"accepted": False, "reason": "missing market", "sample_keys": sample_keys, "extracted": extracted}
-    if not timestamp:
-        return {"accepted": False, "reason": "missing timestamp", "sample_keys": sample_keys, "extracted": extracted}
-    if not amount or amount <= 0:
-        return {"accepted": False, "reason": "missing amount", "sample_keys": sample_keys, "extracted": extracted}
+    row_type = string_value(
+        row.get("type")
+        or row.get("activityType")
+        or row.get("activity_type")
+        or row.get("eventType")
+        or row.get("event_type")
+    )
     price = clamp_price(
         number_value(
             row.get("price")
@@ -561,7 +1532,86 @@ def normalize_trade_row(row: dict[str, Any]) -> dict[str, Any]:
         )
         or 0.5
     )
-    trade_id = string_value(row.get("id") or row.get("tradeId") or row.get("trade_id") or row.get("transactionHash") or row.get("txHash") or row.get("hash")) or f"{market_id}:{address}:{timestamp}:{side}"
+    amount = number_value(
+        row.get("sizeUsd")
+        or row.get("size_usd")
+        or row.get("usdcSize")
+        or row.get("usdc_size")
+        or row.get("usdAmount")
+        or row.get("usd_amount")
+        or row.get("amountUsd")
+        or row.get("amount_usd")
+        or row.get("amountUSDC")
+        or row.get("amount_usdc")
+        or row.get("cash")
+        or row.get("cashAmount")
+        or row.get("cash_amount")
+        or row.get("notional")
+        or row.get("value")
+        or row.get("valueUsd")
+        or row.get("value_usd")
+        or row.get("amount")
+    )
+    if amount is None:
+        shares = number_value(row.get("size") or row.get("shares"))
+        amount = shares * price if shares is not None else None
+    extracted = {
+        "address": address,
+        "handle": handle,
+        "trader_name": trader_name,
+        "market_id": market_id,
+        "side": side,
+        "size_usd": amount,
+        "timestamp": timestamp,
+    }
+    if row_type and not any(
+        token in row_type.lower() for token in ("trade", "buy", "sell")
+    ):
+        return {
+            "accepted": False,
+            "reason": "unsupported row type",
+            "sample_keys": sample_keys,
+            "extracted": extracted,
+        }
+    if not address and not handle and not trader_name:
+        return {
+            "accepted": False,
+            "reason": "missing trader identity",
+            "sample_keys": sample_keys,
+            "extracted": extracted,
+        }
+    if not market_id:
+        return {
+            "accepted": False,
+            "reason": "missing market",
+            "sample_keys": sample_keys,
+            "extracted": extracted,
+        }
+    if not timestamp:
+        return {
+            "accepted": False,
+            "reason": "missing timestamp",
+            "sample_keys": sample_keys,
+            "extracted": extracted,
+        }
+    if not amount or amount <= 0:
+        return {
+            "accepted": False,
+            "reason": "missing amount",
+            "sample_keys": sample_keys,
+            "extracted": extracted,
+        }
+    trade_id = (
+        string_value(
+            row.get("id")
+            or row.get("tradeId")
+            or row.get("trade_id")
+            or row.get("transactionHash")
+            or row.get("txHash")
+            or row.get("hash")
+        )
+        or f"{market_id}:{address}:{timestamp}:{side}"
+    )
     return {
         "accepted": True,
         "sample_keys": sample_keys,
@@ -573,14 +1623,49 @@ def normalize_trade_row(row: dict[str, Any]) -> dict[str, Any]:
             "trader_name": trader_name,
             "raw_identity": raw_identity,
             "market_id": market_id,
-            "market_title": string_value(row.get("title") or row.get("marketTitle") or row.get("market_title") or row.get("market") or row.get("question")) or market_id,
-            "outcome": string_value(row.get("outcome") or row.get("outcomeName") or row.get("outcome_name") or row.get("token") or row.get("asset")) or "Yes",
+            "market_title": string_value(
+                row.get("title")
+                or row.get("marketTitle")
+                or row.get("market_title")
+                or row.get("market")
+                or row.get("question")
+            )
+            or market_id,
+            "event_end_at": event_end_at,
+            "outcome": string_value(
+                row.get("outcome")
+                or row.get("outcomeName")
+                or row.get("outcome_name")
+                or row.get("token")
+                or row.get("asset")
+            )
+            or "Yes",
             "side": side,
             "price": price,
             "size_usd": max(0.0, amount),
             "timestamp": timestamp,
         },
     }
+
+
+def normalize_trade_rows_for_wallet(value: Any, address: str) -> list[dict[str, Any]]:
+    normalized = [
+        normalize_trade_row({**row, "address": extract_address(row) or address})
+        for row in collect_rows(value)
+    ]
+    return [item["trade"] for item in normalized if item["accepted"]]
+
+
+def dedupe_normalized_trade_rows(trades: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    seen: set[str] = set()
+    deduped: list[dict[str, Any]] = []
+    for trade in trades:
+        key = stable_trade_key("live-read", clean_trade_identity(trade), trade)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(trade)
+    return deduped
 
 
 def collect_rows(value: Any) -> list[dict[str, Any]]:
@@ -592,9 +1677,23 @@ def collect_rows(value: Any) -> list[dict[str, Any]]:
     if not isinstance(value, dict):
         return []
 
-    direct_keys = ["data", "trades", "items", "results", "activity", "activities", "feed", "markets", "leaderboard", "profiles", "events"]
+    direct_keys = [
+        "data",
+        "trades",
+        "items",
+        "results",
+        "activity",
+        "activities",
+        "feed",
+        "markets",
+        "leaderboard",
+        "profiles",
+        "events",
+    ]
     nested: list[dict[str, Any]] = []
-    has_array = any(isinstance(value.get(key), list) for key in direct_keys) or any(isinstance(item, list) for item in value.values())
+    has_array = any(isinstance(value.get(key), list) for key in direct_keys) or any(
+        isinstance(item, list) for item in value.values()
+    )
     for key in direct_keys:
         nested.extend(collect_rows(value.get(key)))
     return [value, *nested] if not has_array else nested
@@ -615,23 +1714,82 @@ def merge_traders(traders: list[PolymarketTrader]) -> list[PolymarketTrader]:
                 "trades_1h": max(existing.trades_1h, trader.trades_1h),
                 "trades_6h": max(existing.trades_6h, trader.trades_6h),
                 "trades_24h": max(existing.trades_24h, trader.trades_24h),
-                "last_trade_at": newest_iso(existing.last_trade_at, trader.last_trade_at),
-                "last_trade_age": trader.last_trade_age if newest_iso(existing.last_trade_at, trader.last_trade_at) == trader.last_trade_at else existing.last_trade_age,
+                "last_trade_at": newest_iso(
+                    existing.last_trade_at, trader.last_trade_at
+                ),
+                "last_trade_age": (
+                    trader.last_trade_age
+                    if newest_iso(existing.last_trade_at, trader.last_trade_at)
+                    == trader.last_trade_at
+                    else existing.last_trade_age
+                ),
                 "handle": existing.handle or trader.handle,
                 "profile_slug": existing.profile_slug or trader.profile_slug,
                 "profile_url": existing.profile_url or trader.profile_url,
                 "activity_url": existing.activity_url or trader.activity_url,
-                "activity_source": existing.activity_source if existing.trades_24h >= trader.trades_24h else trader.activity_source,
-                "source_reason": "Manual tracked wallet"
-                if "Manual" in existing.source_reason or "Manual" in trader.source_reason
-                else existing.source_reason,
+                "activity_source": (
+                    existing.activity_source
+                    if existing.trades_24h >= trader.trades_24h
+                    else trader.activity_source
+                ),
+                "profit_usd": max(existing.profit_usd, trader.profit_usd),
+                "leaderboard_profit_usd": {
+                    **(
+                        existing.leaderboard_profit_usd
+                        or (
+                            {existing.leaderboard_period: existing.profit_usd}
+                            if existing.leaderboard_period
+                            else {}
+                        )
+                    ),
+                    **(
+                        trader.leaderboard_profit_usd
+                        or (
+                            {trader.leaderboard_period: trader.profit_usd}
+                            if trader.leaderboard_period
+                            else {}
+                        )
+                    ),
+                },
+                "leaderboard_period": existing.leaderboard_period
+                or trader.leaderboard_period,
+                "leaderboard_periods": sorted(
+                    {
+                        *(
+                            existing.leaderboard_periods
+                            or (
+                                [existing.leaderboard_period]
+                                if existing.leaderboard_period
+                                else []
+                            )
+                        ),
+                        *(
+                            trader.leaderboard_periods
+                            or (
+                                [trader.leaderboard_period]
+                                if trader.leaderboard_period
+                                else []
+                            )
+                        ),
+                    }
+                ),
+                "source_reason": (
+                    "Manual tracked wallet"
+                    if "Manual" in existing.source_reason
+                    or "Manual" in trader.source_reason
+                    else (
+                        existing.source_reason
+                        if existing.source_reason == trader.source_reason
+                        else f"{existing.source_reason}; {trader.source_reason}"
+                    )
+                ),
             }
         )
     return list(merged.values())
 
 
-def compare_trader_key(trader: PolymarketTrader) -> tuple[int, int, float]:
-    return (activity_bucket(trader), trader.trades_24h, trader.volume_24h)
+def compare_trader_key(trader: PolymarketTrader) -> tuple[float, int, int, float]:
+    return (trader.profit_usd, activity_bucket(trader), trader.trades_24h, trader.volume_24h)
 
 
 def activity_bucket(trader: PolymarketTrader) -> int:
@@ -648,7 +1806,10 @@ def dedupe_trades(trades: list[PolymarketSourceTrade]) -> list[PolymarketSourceT
     seen: set[str] = set()
     deduped: list[PolymarketSourceTrade] = []
     for trade in trades:
-        key = trade.source_trade_key or f"{trade.source}:{trade.id}:{identity_key(trade.clean_trader_identity)}"
+        key = (
+            trade.source_trade_key
+            or f"{trade.source}:{trade.id}:{identity_key(trade.clean_trader_identity)}"
+        )
         if key in seen:
             continue
         seen.add(key)
@@ -660,12 +1821,15 @@ def parse_manual_wallets(value: str) -> dict[str, list[str]]:
     raw = [item.strip() for item in value.split(",") if item.strip()]
     valid: list[str] = []
     invalid: list[str] = []
-    for address in raw:
-        cleaned = clean_wallet_prefix(address)
-        if cleaned:
-            valid.append(cleaned)
+    for target in raw:
+        cleaned_wallet = clean_wallet_prefix(target)
+        cleaned_handle = clean_handle(target) or clean_handle(target.rsplit("/", 1)[-1])
+        if cleaned_wallet:
+            valid.append(cleaned_wallet)
+        elif cleaned_handle:
+            valid.append(cleaned_handle)
         else:
-            invalid.append(address)
+            invalid.append(target)
     return {"valid": list(dict.fromkeys(valid)), "invalid": invalid}
 
 
@@ -682,12 +1846,16 @@ def is_public_wallet_address(address: str) -> bool:
 
 
 def polymarket_profile_url(address: str) -> str | None:
-    return f"https://polymarket.com/profile/{address}" if is_public_wallet_address(address) else None
+    return (
+        f"https://polymarket.com/profile/{address}"
+        if is_public_wallet_address(address)
+        else None
+    )
 
 
 def polymarket_handle_profile_url(handle: str | None) -> str | None:
     slug = clean_handle(handle)
-    return f"https://polymarket.com/profile/{slug}" if slug else None
+    return f"https://polymarket.com/@{slug}" if slug else None
 
 
 def polymarket_handle_activity_url(handle: str | None) -> str | None:
@@ -702,6 +1870,43 @@ def safe_http_url(value: object) -> str | None:
         return None
     parsed = urlparse(value)
     return value if parsed.scheme in {"http", "https"} else None
+
+
+def extract_wallet_addresses(value: Any) -> list[str]:
+    wallets: list[str] = []
+
+    def walk(item: Any) -> None:
+        if isinstance(item, dict):
+            for key, nested in item.items():
+                if key in {
+                    "address",
+                    "wallet",
+                    "userAddress",
+                    "user_address",
+                    "proxyWallet",
+                    "proxy_wallet",
+                    "profileAddress",
+                    "account",
+                }:
+                    cleaned = clean_wallet_prefix(nested)
+                    if cleaned:
+                        wallets.append(cleaned)
+                walk(nested)
+        elif isinstance(item, list):
+            for nested in item:
+                walk(nested)
+
+    walk(value)
+    return unique_wallet_addresses(wallets)
+
+
+def unique_wallet_addresses(addresses: list[str]) -> list[str]:
+    unique: dict[str, str] = {}
+    for address in addresses:
+        cleaned = clean_wallet_prefix(address)
+        if cleaned:
+            unique.setdefault(cleaned.lower(), cleaned)
+    return list(unique.values())
 
 
 def extract_address(row: dict[str, Any]) -> str | None:
@@ -755,6 +1960,7 @@ def extract_handle(row: dict[str, Any]) -> str | None:
         or row.get("profileSlug")
         or row.get("profile_slug")
         or row.get("username")
+        or row.get("userName")
         or row.get("user_name")
         or row.get("name")
         or row.get("pseudonym")
@@ -800,7 +2006,13 @@ def identity_key(value: str) -> str:
 
 
 def trader_identity_candidates(trader: PolymarketTrader) -> set[str]:
-    values = [trader.address, trader.handle, trader.profile_slug, trader.name, trader.id]
+    values = [
+        trader.address,
+        trader.handle,
+        trader.profile_slug,
+        trader.name,
+        trader.id,
+    ]
     return {identity_key(item) for item in values if item}
 
 
@@ -825,10 +2037,23 @@ def select_tracked_traders(
     max_tracked: int,
 ) -> list[PolymarketTrader]:
     limit = max(1, max_tracked or 10)
-    manual_selected = sorted(merge_traders(manual), key=compare_trader_key, reverse=True)
-    if manual_selected:
-        return manual_selected[:limit]
-    return sorted(merge_traders(traders), key=compare_trader_key, reverse=True)[:limit]
+    manual_selected = sorted(
+        merge_traders(manual), key=compare_trader_key, reverse=True
+    )
+    selected = manual_selected[:limit]
+    selected_keys = {
+        identity_key(trader.address or trader.handle or trader.name or trader.id)
+        for trader in selected
+    }
+    remaining = [
+        trader
+        for trader in sorted(
+            merge_traders(traders), key=compare_trader_key, reverse=True
+        )
+        if identity_key(trader.address or trader.handle or trader.name or trader.id)
+        not in selected_keys
+    ]
+    return [*selected, *remaining][:limit]
 
 
 def clean_wallet_prefix(value: object) -> str | None:
@@ -867,11 +2092,20 @@ def raw_identity_value(row: dict[str, Any]) -> str | None:
     )
 
 
-def clean_trade_identity(trade: dict[str, Any], trader: PolymarketTrader | None = None) -> str | None:
-    address = clean_wallet_prefix(trade.get("address")) or (clean_wallet_prefix(trader.address) if trader else None)
+def clean_trade_identity(
+    trade: dict[str, Any], trader: PolymarketTrader | None = None
+) -> str | None:
+    address = clean_wallet_prefix(trade.get("address")) or (
+        clean_wallet_prefix(trader.address) if trader else None
+    )
     if address:
         return address
-    return clean_handle(trade.get("handle")) or (clean_handle(trader.handle) if trader else None) or clean_handle(trade.get("trader_name")) or (clean_handle(trader.name) if trader else None)
+    return (
+        clean_handle(trade.get("handle"))
+        or (clean_handle(trader.handle) if trader else None)
+        or clean_handle(trade.get("trader_name"))
+        or (clean_handle(trader.name) if trader else None)
+    )
 
 
 def newest_iso(a: str | None, b: str | None) -> str | None:
@@ -929,21 +2163,29 @@ def safe_command_args(args: list[str]) -> list[str]:
     return ["[address]" if is_public_wallet_address(arg) else arg for arg in args]
 
 
-async def run_debug_command(label: str, args: list[str], report: PolymarketDiscoveryDebugReport) -> object | None:
-    report.commands_attempted.append(PolymarketDiscoveryDebugCommand(label=label, args=safe_command_args(args)))
+async def run_debug_command(
+    label: str, args: list[str], report: PolymarketDiscoveryDebugReport
+) -> object | None:
+    report.commands_attempted.append(
+        PolymarketDiscoveryDebugCommand(label=label, args=safe_command_args(args))
+    )
     try:
         return await run_bullpen_json(args)
     except Exception as exc:
         report.errors.append(
             PolymarketDiscoveryDebugError(
                 command=label,
-                error=redact_secrets(str(exc)).replace("0x", "[address]" if "0x" in str(exc) else "0x"),
+                error=redact_secrets(str(exc)).replace(
+                    "0x", "[address]" if "0x" in str(exc) else "0x"
+                ),
             )
         )
         return None
 
 
-def add_debug_rows(report: PolymarketDiscoveryDebugReport, parsed: object) -> list[dict[str, Any]]:
+def add_debug_rows(
+    report: PolymarketDiscoveryDebugReport, parsed: object
+) -> list[dict[str, Any]]:
     rows = collect_rows(parsed)
     report.rows_returned_count += len(rows)
     report.sample_row_keys.extend([list(row.keys())[:40] for row in rows[:5]])
@@ -956,9 +2198,15 @@ def add_debug_rows(report: PolymarketDiscoveryDebugReport, parsed: object) -> li
             report.accepted.append(
                 PolymarketDiscoveryDebugAccepted(
                     address="[address]" if trade.get("address") else None,
-                    clean_identity="[address]" if trade.get("address") else (trade.get("handle") or trade.get("trader_name")),
+                    clean_identity=(
+                        "[address]"
+                        if trade.get("address")
+                        else (trade.get("handle") or trade.get("trader_name"))
+                    ),
                     raw_identity=(
-                        redact_secrets(str(trade.get("raw_identity"))).replace(trade.get("address") or "", "[address]")
+                        redact_secrets(str(trade.get("raw_identity"))).replace(
+                            trade.get("address") or "", "[address]"
+                        )
                         if trade.get("raw_identity")
                         else None
                     ),
@@ -981,17 +2229,23 @@ def add_debug_rows(report: PolymarketDiscoveryDebugReport, parsed: object) -> li
             if extracted.get("address"):
                 extracted["address"] = "[address]"
             report.rejected.append(
-                PolymarketDiscoveryDebugRejected(keys=item["sample_keys"], reason=item["reason"], extracted=extracted)
+                PolymarketDiscoveryDebugRejected(
+                    keys=item["sample_keys"], reason=item["reason"], extracted=extracted
+                )
             )
     return accepted
 
 
-def add_debug_candidates(report: PolymarketDiscoveryDebugReport, parsed: object) -> str | None:
+def add_debug_candidates(
+    report: PolymarketDiscoveryDebugReport, parsed: object
+) -> str | None:
     rows = collect_rows(parsed)
     for row in rows[:10]:
         address = extract_address(row)
         handle = extract_handle(row)
-        username = string_value(row.get("username") or row.get("user_name") or row.get("name"))
+        username = string_value(
+            row.get("username") or row.get("user_name") or row.get("name")
+        )
         report.candidates.append(
             PolymarketDiscoveryDebugCandidate(
                 address="[address]" if address else None,
@@ -1013,7 +2267,17 @@ async def debug_discovery(target: str) -> PolymarketDiscoveryDebugReport:
 
     feed = await run_debug_command(
         "feed trades",
-        ["polymarket", "feed", "trades", "--read-only", "--non-interactive", "--limit", "1000", "--output", "json"],
+        [
+            "polymarket",
+            "feed",
+            "trades",
+            "--read-only",
+            "--non-interactive",
+            "--limit",
+            "1000",
+            "--output",
+            "json",
+        ],
         report,
     )
     feed_accepted = add_debug_rows(report, feed) if feed else []
@@ -1021,12 +2285,30 @@ async def debug_discovery(target: str) -> PolymarketDiscoveryDebugReport:
     feed_hits = [
         item
         for item in feed_accepted
-        if handle_key in {identity_key(str(value)) for value in [item.get("address"), item.get("handle"), item.get("trader_name")] if value}
+        if handle_key
+        in {
+            identity_key(str(value))
+            for value in [
+                item.get("address"),
+                item.get("handle"),
+                item.get("trader_name"),
+            ]
+            if value
+        }
     ]
 
     activity = await run_debug_command(
         "activity",
-        ["polymarket", "activity", "--read-only", "--non-interactive", "--limit", "20", "--output", "json"],
+        [
+            "polymarket",
+            "activity",
+            "--read-only",
+            "--non-interactive",
+            "--limit",
+            "20",
+            "--output",
+            "json",
+        ],
         report,
     )
     if activity:
@@ -1034,14 +2316,35 @@ async def debug_discovery(target: str) -> PolymarketDiscoveryDebugReport:
 
     search = await run_debug_command(
         "search handle",
-        ["polymarket", "search", handle, "--type", "user", "--limit", "5", "--read-only", "--non-interactive", "--output", "json"],
+        [
+            "polymarket",
+            "search",
+            handle,
+            "--type",
+            "user",
+            "--limit",
+            "5",
+            "--read-only",
+            "--non-interactive",
+            "--output",
+            "json",
+        ],
         report,
     )
     address = add_debug_candidates(report, search) if search else None
 
     profile_by_handle = await run_debug_command(
         "profile handle",
-        ["polymarket", "data", "profile", handle, "--read-only", "--non-interactive", "--output", "json"],
+        [
+            "polymarket",
+            "data",
+            "profile",
+            handle,
+            "--read-only",
+            "--non-interactive",
+            "--output",
+            "json",
+        ],
         report,
     )
     if profile_by_handle:
@@ -1049,7 +2352,16 @@ async def debug_discovery(target: str) -> PolymarketDiscoveryDebugReport:
 
     profile_at_handle = await run_debug_command(
         "profile @handle",
-        ["polymarket", "data", "profile", f"@{handle}", "--read-only", "--non-interactive", "--output", "json"],
+        [
+            "polymarket",
+            "data",
+            "profile",
+            f"@{handle}",
+            "--read-only",
+            "--non-interactive",
+            "--output",
+            "json",
+        ],
         report,
     )
     if profile_at_handle:
@@ -1058,7 +2370,20 @@ async def debug_discovery(target: str) -> PolymarketDiscoveryDebugReport:
     if address:
         by_address = await run_debug_command(
             "activity address",
-            ["polymarket", "activity", "--address", address, "--type", "trade", "--read-only", "--non-interactive", "--limit", "20", "--output", "json"],
+            [
+                "polymarket",
+                "activity",
+                "--address",
+                address,
+                "--type",
+                "trade",
+                "--read-only",
+                "--non-interactive",
+                "--limit",
+                "20",
+                "--output",
+                "json",
+            ],
             report,
         )
         if by_address:
