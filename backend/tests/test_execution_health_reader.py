@@ -132,6 +132,13 @@ class ReaderTests(unittest.IsolatedAsyncioTestCase):
         finally:
             reader.READ_TIMEOUT_SECONDS = original
         self.assertEqual(result["read_state"], "unavailable")
+        self.assertIsNone(result["sample_size"])
+        empty = reader.summarize_durable([], now=100)
+        self.assertEqual(empty["sample_size"], 0)
+        self.assertTrue(empty["sample_counts"])
+        for name, count in empty["sample_counts"].items():
+            self.assertEqual(count, 0)
+            self.assertIsNone(result["sample_counts"][name])
         def denied_factory(): raise RuntimeError("synthetic-private-connection")
         for actor in (7, None, True, -1):
             result = await reader.read_durable_projection(
