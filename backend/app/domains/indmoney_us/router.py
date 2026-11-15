@@ -14,6 +14,7 @@ from app.domains.indmoney_us.schemas import (
     IndMoneyUsCurrentPricesRequest,
     IndMoneyUsCurrentPricesResponse,
     IndMoneyUsPortfolioOverviewResponse,
+    LastPasteResponse,
     IndMoneyUsPortfolioSnapshotCreateRequest,
     IndMoneyUsPortfolioSnapshotDetailResponse,
     IndMoneyUsPortfolioSnapshotSummaryResponse,
@@ -76,6 +77,17 @@ async def create_portfolio_snapshot(
         snapshot.parse_status,
     )
     return IndMoneyUsPortfolioSnapshotDetailResponse(**service.serialize_detail(snapshot))
+
+
+@router.get("/portfolio/last-paste", response_model=LastPasteResponse | None)
+async def last_pasted_snapshot(
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    row = await IndMoneyUsPortfolioSnapshotRepository(db).last_paste(current_user.id)
+    if row is None:
+        return None
+    return LastPasteResponse(raw_text=row.raw_text, pasted_at=row.created_at.replace(tzinfo=timezone.utc))
 
 
 @router.get("/portfolio/{snapshot_id}", response_model=IndMoneyUsPortfolioSnapshotDetailResponse)

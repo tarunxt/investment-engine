@@ -32,12 +32,14 @@ export function resolveUsIdentity(input: UsIdentityInput, verified: readonly Ver
   return resolveUsIdentityFromListings(input,validatedUsListings(verified));
 }
 function resolveUsIdentityFromListings(input: UsIdentityInput, verified: readonly VerifiedUsListing[]): UsIdentity {
-  const symbol = symbolOf(input.symbol), exchange = venue(input.exchange || 'US');
+  const symbol = symbolOf(input.symbol);
+  const prefix = /^(US|NASDAQ|NYSE|NYSEARCA|NYSEAMERICAN|AMEX|ARCA):/i.exec(input.symbol.trim());
+  const suppliedVenue = venue(input.exchange || 'US');
+  const exchange = suppliedVenue === 'US' && prefix ? venue(prefix[1]) : suppliedVenue;
   const all = verified.filter(row => row.symbol === symbol);
   const candidates = all.filter(row => (!input.shareClass || row.share_class.toUpperCase() === input.shareClass.trim().toUpperCase())
     && (exchange === 'US' || row.instrument.split(':')[0] === exchange));
   const unresolved = (issue: string): UsIdentity => ({key:`unresolved:${exchange}:${symbol}:${input.shareClass ?? '?'}`,symbol,exchange,listing:null,issue,holdingSafe:false});
-  const prefix = /^(US|NASDAQ|NYSE|NYSEARCA|NYSEAMERICAN|AMEX|ARCA):/i.exec(input.symbol.trim());
   if (prefix && exchange !== 'US' && venue(prefix[1]) !== 'US' && venue(prefix[1]) !== exchange) return unresolved('Symbol prefix conflicts with the supplied explicit listing venue.');
   if (!['US', ...Object.keys(mic)].includes(exchange)) return unresolved('Unsupported US listing venue; verified mapping required.');
   if (!candidates.length) return unresolved('Verified US symbol, listing MIC and share-class mapping unavailable.');

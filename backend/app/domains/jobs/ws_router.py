@@ -43,9 +43,6 @@ async def ws_job_detail(websocket: WebSocket, job_id: JobId, token: str | None =
         await websocket.close(code=4001, reason="Unauthorized")
         return
 
-    await websocket.accept()
-    logger.info("WS /ws/jobs/%d connected user_id=%s", job_id, user_id)
-
     # Send current state immediately so clients that connect after a fast-completing
     # job still receive the final status (Redis pub/sub drops events with no subscriber).
     try:
@@ -57,6 +54,10 @@ async def ws_job_detail(websocket: WebSocket, job_id: JobId, token: str | None =
             if not await session_identity_active(user_id):
                 await websocket.close(code=1008, reason="Session expired or revoked")
                 return
+            # Reject unavailable jobs and inactive sessions before upgrading the
+            # connection. Foreign and missing jobs use the same denial above.
+            await websocket.accept()
+            logger.info("WS /ws/jobs/%d connected user_id=%s", job_id, user_id)
             if job is not None:
                 status_val = (
                     job.status.value if hasattr(job.status, "value") else str(job.status)

@@ -30,12 +30,12 @@ for path in (root/'alembic/versions').glob('*.py'):
     if values.get('revision'):revisions[values['revision']]=values.get('down_revision')
 parents={p for v in revisions.values()for p in(v if isinstance(v,(tuple,list))else[v])if p}
 assert not parents-set(revisions)
-assert set(revisions)-parents=={'auth_session_merge_001'}
+assert set(revisions)-parents=={'a12_cost_session_merge_001'}
 def walk(rev,seen):
     assert rev not in seen,'migration cycle'
     for p in (revisions[rev]if isinstance(revisions[rev],(tuple,list))else[revisions[rev]]):
         if p:walk(p,seen|{rev})
-walk('auth_session_merge_001',set())
+walk('a12_cost_session_merge_001',set())
 engine=create_engine('postgresql+psycopg://postgres@/a9_synthetic?host=/var/run/postgresql')
 schema='a9_auth_migration_probe'
 with engine.begin()as db:

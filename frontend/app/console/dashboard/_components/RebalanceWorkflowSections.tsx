@@ -15,7 +15,6 @@ import { WorkflowRunBoundary } from "@/app/console/automated-rebalance/_componen
 import { type WorkflowStageKey, type StageState, type StageErrorDetail, type StageInfo, STAGE_ORDER, STAGE_METADATA, getStageTileLabel, parseTimestampMs, formatDuration, formatInrCost, WorkflowStageTile } from "@/components/shared/WorkflowStageTile";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { AutomatedRebalanceReliabilityBridge } from "@/app/console/automated-rebalance/_components/AutomatedRebalanceReliabilityBridge";
 import { InputEvidenceRows, InputEvidenceSummary } from "./InputEvidenceRows";
 import { threatInputRationale } from "./threatInputRationale";
@@ -41,6 +40,7 @@ import { BasketColumnTable, BasketColumnPicker, BasketColumnRename } from "@/com
 import type { BasketUnitsTrace } from "@/lib/basketUnitsExplanation";
 import { useWorkflowConfiguration } from "@/app/console/_components/WorkflowConfiguration";
 import { mergeStageEvidence } from "@/lib/stockFlowEvidence";
+import { classifyWorkflowLlmJob as classifyRunOutputJob } from "@/lib/workflowLlmEvidence";
 import { assertWholeShareOrdersReviewed, isWholeShareOrderSelectable, needsWholeShareTrimReview, type WholeShareChoice } from "@/lib/wholeShareReview";
 import {
   Fragment,
@@ -139,7 +139,7 @@ import {
   type ThreatStageInput,
 } from "@/lib/rebalanceStageInputs";
 import { URLs } from "@/lib/urls";
-import { formatApiTimestamp, formatCompactQuoteTime, formatCompactStageTime } from "@/lib/datetime";
+import { parseApiTimestamp, formatApiTimestamp, formatCompactQuoteTime, formatCompactStageTime } from "@/lib/datetime";
 import { INDIA_TIMEZONE } from "../_context";
 import { cn } from "@/lib/utils";
 import type {
@@ -346,6 +346,21 @@ function buildInitialStates() {
     zerodha: initialWorkflowState(),
     indmoneyUs: initialWorkflowState(),
   };
+}
+
+// Older tabs may have persisted history fields on upcoming/running stages.
+// Keep polling identity and terminal current failures; refresh running metrics
+// from that exact job instead of trusting fields inherited by older code.
+function restoreCurrentWorkflowStages(stages: WorkflowState): WorkflowState {
+  return STAGE_ORDER.reduce((next, stage) => {
+    const info = stages[stage];
+    next[stage] = info.state === "idle" || info.state === "queued"
+      ? { state: info.state }
+      : info.state === "running"
+        ? { state: info.state, activeRunId: info.activeRunId, startedAt: info.startedAt, runStatus: info.runStatus }
+        : info;
+    return next;
+  }, {} as WorkflowState);
 }
 
 function readPersistedWorkflow(): PersistedWorkflow | null {
@@ -632,6 +647,7 @@ function summarizeThreat(
     completedAt: analysis.updated_at ?? analysis.created_at,
     provider: analysis.provider,
     model: analysis.model,
+    jobId: analysis.job_id ?? null,
     runStatus: analysis.status,
     exportStatus: null,
     costUsd: analysis.estimated_cost ?? null,
@@ -1923,6 +1939,7 @@ function summarizeRunForIdleTile(
       startedAt: run.created_at,
       completedAt: isActiveRun ? null : getLatestRunTimestamp(run),
       lastRunId: run.id,
+      workflowSequence: run.auto_rebalance_sequence ?? null,
       evidence: { kind: "saved", references: [`Run #${run.id} · ${run.status} · ${getLatestRunTimestamp(run) ?? run.created_at}`] },
       recommendedStocks: recommendedStocks ?? null,
     },
@@ -1985,6 +2002,7 @@ function summarizeAutoRebalanceHistoryStage(
       costInr: getAutoRebalanceSummaryNumber(summary, "cost_inr"),
       error: item.error_message ?? null,
       lastRunId: item.run_id ?? null,
+      workflowSequence: history?.sequence ?? null,
       jobId: item.job_id ?? null,
       evidence: { kind: "saved", references: [
         `${history?.portfolio} workflow #${history?.sequence} · ${stage} · ${item.status} · ${item.completed_at ?? item.started_at ?? "stage time unavailable"}`,
@@ -2014,16 +2032,16 @@ function getLatestAutoRebalanceHistoryItem(
   items: AutoRebalanceHistoryItemResponse[] | undefined,
   stage?: WorkflowStageKey,
 ) {
+  const recordedStageTime = (invocation: AutoRebalanceHistoryItemResponse) => {
+    const entry = stage ? invocation.stages.find((item) => item.stage === stage) : undefined;
+    return parseTimestampMs(entry?.completed_at ?? entry?.started_at ?? invocation.completed_at ?? invocation.updated_at ?? invocation.created_at);
+  };
   return [...(items ?? [])]
     .filter(
       (item) =>
         !stage || item.stages.some((stageItem) => stageItem.stage === stage),
     )
-    .sort(
-      (a, b) =>
-        parseTimestampMs(b.completed_at ?? b.updated_at ?? b.created_at) -
-        parseTimestampMs(a.completed_at ?? a.updated_at ?? a.created_at),
-    )[0] ?? null;
+    .sort((a, b) => recordedStageTime(b) - recordedStageTime(a) || b.sequence - a.sequence)[0] ?? null;
 }
 
 function getStageCostInr(info: StageInfo, usdInrRate: number) {
@@ -2078,29 +2096,6 @@ function getRunDuration(run: RunResponse) {
     new Date(startMs).toISOString(),
     new Date(endMs).toISOString(),
   );
-}
-
-function classifyRunOutputJob(
-  job: NonNullable<RunResponse["run_jobs"]>[number]["job"],
-): RunOutputJobStatus {
-  const status = (job?.status || "").toLowerCase();
-  const issueText = `${job?.error_message || ""}
-${job?.response || ""}`.toLowerCase();
-  const hasSavedRows = Boolean(job?.response?.trim());
-  const isMalformedTable = issueText.includes("malformed table output");
-  const isPartialTable = issueText.includes("partial rebalance table");
-
-  if (
-    status === "partial" ||
-    isPartialTable ||
-    (isMalformedTable && hasSavedRows) ||
-    (hasSavedRows && status !== "completed" && status !== "failed")
-  ) {
-    return "partial";
-  }
-  if (status === "completed") return "completed";
-  if (status === "failed") return "failed";
-  return "other";
 }
 
 function getRunOutputDisplayLabel(run: RunResponse) {
@@ -2975,11 +2970,16 @@ function ScopedZerodhaBasketPreviewDialog({
   const portfolioAssets = tradingViewMarket === "india"
     ? { portfolioValue: currentWeights.portfolioValue, availableMargin, totalAssets: currentWeights.totalAssets }
     : portfolioParameterAssets(detailsData.portfolioSnapshot, tradingViewMarket, availableMargin);
-  const quoteRead = useBasketDisplayQuotes(open, tradingViewMarket, allocationUniverse.map(row => `${row.stock.exchange.toUpperCase()}:${row.stock.symbol.toUpperCase()}`), detailsData.portfolioSnapshot ? `${tradingViewMarket}:${detailsData.portfolioSnapshot.snapshot_date}:${detailsData.portfolioSnapshot.captured_at}:${ltpRefreshedAt ?? "initial"}` : null);
-  const upstoxCell = (symbol: string, exchange: string) => {
+  const quoteRows = allocationUniverse.map(row => row.stock);
+  const quoteInstruments = (tradingViewMarket === "us" ? [...quoteRows, ...orders] : quoteRows)
+    .map(row => `${row.exchange.toUpperCase()}:${row.symbol.toUpperCase()}`);
+  const columnNames = { ...(tradingViewMarket === "us" ? { "Vendor LTP": "Alpaca IEX LTP" } : {}), ...columnPreferences?.names } as Record<string, string>;
+  const quoteRead = useBasketDisplayQuotes(open, tradingViewMarket, quoteInstruments, detailsData.portfolioSnapshot ? `${tradingViewMarket}:${detailsData.portfolioSnapshot.snapshot_date}:${detailsData.portfolioSnapshot.captured_at}:${ltpRefreshedAt ?? "initial"}` : null);
+  const providerPriceCell = (symbol: string, exchange: string) => {
     const quote = verifiedFetchedDisplayQuote(tradingViewMarket === "india" ? (quoteRead.upstoxQuotes ?? []).filter(row => row.source.startsWith("Upstox ")) : quoteRead.quotes, symbol, exchange);
-    return <td className="whitespace-nowrap px-4 py-3 text-slate-700" data-provider={tradingViewMarket === "india" ? "upstox" : "us-vendor"} title={quote ? `${quote.source} · As of ${quote.asOf}` : tradingViewMarket === "india" ? "No Upstox quote available for this exact listing" : "No verified US vendor quote available for this exact listing"}>
-      {quote ? <><div>{formatBasketCurrency(quote.price, basketCurrency)}</div><time dateTime={quote.asOf} className="block text-[10px] text-slate-500">{formatCompactQuoteTime(quote.asOf)}</time></> : "Unavailable"}
+    const stale = tradingViewMarket === "us" && quoteRead.vendorQuotes?.some(row => row.instrument === stockIdentity(symbol, exchange) && row.stale);
+    return <td className="whitespace-nowrap px-4 py-3 text-slate-700" data-provider={tradingViewMarket === "india" ? "upstox" : "alpaca-iex"} title={quote ? `${quote.source} · As of ${quote.asOf}` : tradingViewMarket === "india" ? "No Upstox quote available for this exact listing" : "No verified Alpaca IEX trade available for this exact listing"}>
+      {quote ? <><div>{formatBasketCurrency(quote.price, basketCurrency)}</div><time dateTime={quote.asOf} className="block text-[10px] text-slate-500">{formatCompactQuoteTime(quote.asOf)}</time>{stale && <span className="block text-xs text-amber-700">Stale last trade</span>}</> : "Unavailable"}
     </td>;
   };
   const displayQuote = (symbol: string, exchange: string) => {
@@ -2999,7 +2999,7 @@ function ScopedZerodhaBasketPreviewDialog({
     const scoreSources = ids.map(runId => {
       const run = scoreSourceRuns.find(source => source.id === runId);
       const sameMarket = run && ["rebalance", "technical", "swing", "threats"].some(stage => isAnalysisRunForStage(run, stage as "rebalance" | "technical" | "swing" | "threats", tradingViewMarket));
-      return { runId, createdAt: run?.created_at ?? "", completed: run?.status === "completed", status: run?.status, market: sameMarket ? tradingViewMarket : null };
+      return { runId, createdAt: parseApiTimestamp(run?.created_at)?.toISOString() ?? "", completed: run?.status === "completed", status: run?.status, market: sameMarket ? tradingViewMarket : null };
     });
     return { verifiedUsIdentity: row.stock.usIdentity?.listing ? {securityId:row.stock.usIdentity.listing.security_id,exchangeAliases:row.stock.usIdentity.holdingSafe ? ["US"] : []} : undefined, identityIssue: row.stock.identityIssue, vendorReady: (quoteRead.vendorQuotes ?? []).find(quote => quote.instrument === stockIdentity(row.stock.symbol, row.stock.exchange))?.eligible_for_readiness === true, investedValue: usHolding?.investedValue ?? null, vendorLtp: vendor?.price ?? null, vendorSource: vendor?.source, vendorAsOf: vendor?.asOf, currentValue: tradingViewMarket === "us" ? usHolding?.currentValue ?? null : currentWeights.valid ? currentWeights.values.get(stockIdentity(row.stock.symbol, row.stock.exchange)) ?? 0 : null, holdingQuantity: tradingViewMarket === "us" ? usHolding?.quantity ?? null : holding?.quantity ?? null, holdingAsOf: holding?.asOf, holdingSource: holding?.source, upstoxLtp: upstox?.price ?? null, upstoxAsOf: upstox?.asOf, upstoxSource: upstox?.source, symbol: row.stock.symbol, exchange: row.stock.exchange, score: currentOrder ? currentDetail.calculatedScore : row.formulaScore, action: currentOrder ? getZerodhaBasketActionForPercent(currentOrder) : row.formulaAction, scoreSources, ...displayQuote(row.stock.symbol, row.stock.exchange) };
   };
@@ -3182,73 +3182,74 @@ function ScopedZerodhaBasketPreviewDialog({
             {orderSubmissionBlockedReason}
           </div>
         ) : null}
-        <div className="min-h-0 flex-1 overflow-auto p-5">
+        <div className="min-h-0 flex-1 overflow-auto overscroll-contain p-5">
           {loading ? (isZerodhaPreview ? <ZerodhaBasketLoading /> : (
             <div className="flex items-center justify-center gap-2 py-16 text-sm text-slate-500">
               <Loader2 className="size-4 animate-spin" /> {loadingLabel}
             </div>
           )) : orders.length || allocationUniverse.length || !error ? (
             <>
-              {error ? (
-                <div className="mb-5 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-                  {error}
-                </div>
-              ) : null}
+              <div className="sticky left-5">
+                {error ? (
+                  <div className="mb-5 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+                    {error}
+                  </div>
+                ) : null}
 
-              {displayCalculations.controls}
+                {displayCalculations.controls}
 
-              {!isZerodhaPreview ? <p className="mb-5 text-sm font-semibold text-slate-700">IndMoney US basket review · USD</p> : null}
+                {!isZerodhaPreview ? <p className="mb-5 text-sm font-semibold text-slate-700">IndMoney US basket review · USD</p> : null}
 
-              {submission ? (
-                <div className={cn("mb-5 rounded-2xl border px-4 py-3 text-sm", submission.executionMode === "direct_market" ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-blue-200 bg-blue-50 text-blue-800")}>
-                  {submission.executionMode === "direct_market" ? (
-                    <div className="flex flex-col gap-1">
-                      <div className="font-bold">Success: {submission.redirected} protected MARKET order{submission.redirected === 1 ? "" : "s"} completed in Kite.</div>
-                      <div>Executed rows are highlighted green below so you can see which Trim/Sell/Buy transactions finished.</div>
-                      {submission.portfolioRefreshedAt ? (
-                        <div>Portfolio snapshot refreshed after execution; the latest holdings are available for the next Trim calculation.</div>
-                      ) : null}
-                      {submission.failedMessages?.length ? (
-                        <div className="font-semibold text-amber-800">Failed: {submission.failedMessages.join("; ")}</div>
-                      ) : null}
+                {submission ? (
+                  <div className={cn("mb-5 rounded-2xl border px-4 py-3 text-sm", submission.executionMode === "direct_market" ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-blue-200 bg-blue-50 text-blue-800")}>
+                    {submission.executionMode === "direct_market" ? (
+                      <div className="flex flex-col gap-1">
+                        <div className="font-bold">Success: {submission.redirected} protected MARKET order{submission.redirected === 1 ? "" : "s"} completed in Kite.</div>
+                        <div>Executed rows are highlighted green below so you can see which Trim/Sell/Buy transactions finished.</div>
+                        {submission.portfolioRefreshedAt ? (
+                          <div>Portfolio snapshot refreshed after execution; the latest holdings are available for the next Trim calculation.</div>
+                        ) : null}
+                        {submission.failedMessages?.length ? (
+                          <div className="font-semibold text-amber-800">Failed: {submission.failedMessages.join("; ")}</div>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <>
+                        Created {submission.basketCount} Kite protected LIMIT basket tray{submission.basketCount === 1 ? "" : "s"} for {submission.redirected} selected order{submission.redirected === 1 ? "" : "s"}.
+                        {submission.basketCount > 1 ? ` Each tray contains at most ${ZERODHA_KITE_PUBLISHER_BATCH_SIZE} orders; place every tray in Kite.` : ""}
+                        {submission.clipboardCopied ? " A backup order checklist was copied to your clipboard." : " Use the table below as your backup manual-entry checklist if Kite rejects the basket payload."}
+                      </>
+                    )}
+                  </div>
+                ) : null}
+
+                {!isZerodhaPreview ? <p className="mb-5 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">Review selected US stock quantities and USD amounts before confirming the final basket.</p> : null}
+
+                <div className="mb-5 grid gap-3 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3">
+                  <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-4">
+                    <div className="text-xs font-bold uppercase tracking-wide text-emerald-700">Buy Basket</div>
+                    <div className="mt-2 text-2xl font-black text-emerald-950">{formatBasketCurrency(selectedOrders.some(order => order.side === "BUY" && order.amount === null) ? null : selectedBuyAmount, basketCurrency)}</div>
+                    <div className={cn("mt-3 text-xs font-bold uppercase tracking-wide", availableMarginToneClass)}>
+                      Available Margin
                     </div>
-                  ) : (
-                    <>
-                      Created {submission.basketCount} Kite protected LIMIT basket tray{submission.basketCount === 1 ? "" : "s"} for {submission.redirected} selected order{submission.redirected === 1 ? "" : "s"}.
-                      {submission.basketCount > 1 ? ` Each tray contains at most ${ZERODHA_KITE_PUBLISHER_BATCH_SIZE} orders; place every tray in Kite.` : ""}
-                      {submission.clipboardCopied ? " A backup order checklist was copied to your clipboard." : " Use the table below as your backup manual-entry checklist if Kite rejects the basket payload."}
-                    </>
-                  )}
-                </div>
-              ) : null}
-
-              {!isZerodhaPreview ? <p className="mb-5 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">Review selected US stock quantities and USD amounts before confirming the final basket.</p> : null}
-
-              <div className="mb-5 grid gap-3 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3">
-                <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-4">
-                  <div className="text-xs font-bold uppercase tracking-wide text-emerald-700">Buy Basket</div>
-                  <div className="mt-2 text-2xl font-black text-emerald-950">{formatBasketCurrency(selectedOrders.some(order => order.side === "BUY" && order.amount === null) ? null : selectedBuyAmount, basketCurrency)}</div>
-                  <div className={cn("mt-3 text-xs font-bold uppercase tracking-wide", availableMarginToneClass)}>
-                    Available Margin
+                    <div className={cn("mt-1 text-lg font-black", availableMarginToneClass)}>
+                      {availableMargin === null ? "Not available" : formatBasketCurrency(availableMargin, basketCurrency)}
+                    </div>
+                    <div className="mt-2 whitespace-nowrap text-sm text-emerald-900">After sales: <strong>{projectedBuyPower === null ? "Not available" : formatBasketCurrency(projectedBuyPower, basketCurrency)}</strong></div>
                   </div>
-                  <div className={cn("mt-1 text-lg font-black", availableMarginToneClass)}>
-                    {availableMargin === null ? "Not available" : formatBasketCurrency(availableMargin, basketCurrency)}
+                  <div className="rounded-2xl border border-red-100 bg-red-50 p-4">
+                    <div className="text-xs font-bold uppercase tracking-wide text-red-700">Sell Basket</div>
+                    <div className="mt-2 text-2xl font-black text-red-950">{formatBasketCurrency(selectedOrders.some(order => order.side === "SELL" && order.amount === null) ? null : selectedSellAmount, basketCurrency)}</div>
                   </div>
-                  <div className="mt-2 whitespace-nowrap text-sm text-emerald-900">After sales: <strong>{projectedBuyPower === null ? "Not available" : formatBasketCurrency(projectedBuyPower, basketCurrency)}</strong></div>
+                  <PortfolioParametersTile valuationNote={tradingViewMarket === "india" ? "Portfolio exposure includes settled + T1 delivery units at each listing’s saved last price. Total Assets adds Available Margin once; net/day positions are not added." : undefined} onDisplayParametersChange={displayCalculations.setParameters} key={`${basketBrokerLabel}:${tradingViewMarket}:${detailsData.portfolioSnapshot?.captured_at ?? "unavailable"}`} currency={basketCurrency} {...portfolioAssets} capturedAt={detailsData.portfolioSnapshot?.captured_at ?? null} />
                 </div>
-                <div className="rounded-2xl border border-red-100 bg-red-50 p-4">
-                  <div className="text-xs font-bold uppercase tracking-wide text-red-700">Sell Basket</div>
-                  <div className="mt-2 text-2xl font-black text-red-950">{formatBasketCurrency(selectedOrders.some(order => order.side === "SELL" && order.amount === null) ? null : selectedSellAmount, basketCurrency)}</div>
-                </div>
-                <PortfolioParametersTile valuationNote={tradingViewMarket === "india" ? "Portfolio exposure includes settled + T1 delivery units at each listing’s saved last price. Total Assets adds Available Margin once; net/day positions are not added." : undefined} onDisplayParametersChange={displayCalculations.setParameters} key={`${basketBrokerLabel}:${tradingViewMarket}:${detailsData.portfolioSnapshot?.captured_at ?? "unavailable"}`} currency={basketCurrency} {...portfolioAssets} capturedAt={detailsData.portfolioSnapshot?.captured_at ?? null} />
+                {quoteRead.loading ? <p role="status" className="mb-3 text-slate-600">Loading display prices…</p> : quoteRead.error ? <p role="alert" className="mb-3 text-amber-800">{quoteRead.upstoxEnabled ? "Price sources unavailable. " : `Display prices unavailable: ${quoteRead.error}. `}<button type="button" className="underline" onClick={quoteRead.retry}>Retry quotes</button></p> : null}
+                {displayCalculations.error ? <p role="alert" className="mb-3 text-red-700">{displayCalculations.error} <button type="button" onClick={displayCalculations.retry} className="underline">Retry historical scores</button></p> : null}
               </div>
-              {quoteRead.loading ? <p role="status" className="mb-3 text-slate-600">Loading display prices…</p> : quoteRead.error ? <p role="alert" className="mb-3 text-amber-800">{quoteRead.upstoxEnabled ? "Price sources unavailable. " : `Display prices unavailable: ${quoteRead.error}. `}<button type="button" className="underline" onClick={quoteRead.retry}>Retry quotes</button></p> : null}
-              {displayCalculations.error ? <p role="alert" className="mb-3 text-red-700">{displayCalculations.error} <button type="button" onClick={displayCalculations.retry} className="underline">Retry historical scores</button></p> : null}
-              <div className="overflow-hidden rounded-2xl border border-slate-200">
-                <div className="overflow-x-auto overscroll-x-contain">
-                  <BasketColumnTable hidden={hiddenColumns} order={columnPreferences?.order} names={columnPreferences?.names} onOpen={setColumnMenu} onRequestRename={setRenameColumn}>
+              <div className="w-fit min-w-full overflow-clip rounded-2xl border border-slate-200">
+                  <BasketColumnTable hidden={hiddenColumns} order={columnPreferences?.order} names={columnNames} onOpen={setColumnMenu} onRequestRename={setRenameColumn}>
                   <table className="min-w-[92rem] w-full text-sm">
-                    <thead>
+                    <thead className="sticky top-0 z-10 bg-slate-50">
                       <tr className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
                         <th className="px-4 py-3 font-semibold" data-column-label="Selection">
                           <input type="checkbox" checked={allSelected} onChange={() => onToggleAll(basketRows.map(row => row.id))} aria-label="Select or deselect all basket rows" className="size-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
@@ -3261,7 +3262,7 @@ function ScopedZerodhaBasketPreviewDialog({
                         {displayCalculations.headers}
                         <th className="px-4 py-3 font-semibold">Units</th>
                         <th className="px-4 py-3 font-semibold">%</th>
-                        <th className="px-4 py-3 font-semibold">{tradingViewMarket === "india" ? "Upstox LTP" : "Vendor LTP"}</th>
+                        <th className="px-4 py-3 font-semibold" data-column-label={tradingViewMarket === "us" ? "Vendor LTP" : undefined}>{tradingViewMarket === "india" ? "Upstox LTP" : "Alpaca IEX LTP"}</th>
                         <th className="px-4 py-3 font-semibold">Quoted LTP</th>
                         <th className="px-4 py-3 font-semibold">Limit Price</th>
                         <th className="px-4 py-3 font-semibold">Amount</th>
@@ -3352,7 +3353,7 @@ function ScopedZerodhaBasketPreviewDialog({
                                 <td className="px-4 py-3">
                                   <span>{formatBasketPercent(order.percent)}</span>
                                 </td>
-                                {upstoxCell(order.symbol, order.exchange)}
+                                {providerPriceCell(order.symbol, order.exchange)}
                                 <td className="whitespace-nowrap px-4 py-3 text-slate-700">{formatBasketCurrency(displayQuote(order.symbol, order.exchange).ltp, basketCurrency)}</td>
                                 <td className="whitespace-nowrap px-4 py-3 text-slate-700" title={`Market orders have no limit price; estimated value uses ${isZerodhaPreview ? "Upstox" : "US vendor"} LTP.`}>—</td>
                                 <td className="whitespace-nowrap px-4 py-3 text-slate-700">{formatBasketCurrency(order.amount, basketCurrency)}</td>
@@ -3403,7 +3404,7 @@ function ScopedZerodhaBasketPreviewDialog({
                                 <td className="px-4 py-3">{side ? <span className={cn("rounded-full px-3 py-1 text-xs font-bold", side === "BUY" ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700")}>{side}</span> : <span title="Hold has no order side">Not applicable</span>}</td>
                                 {displayCalculations.cells(displayStock(row))}
                                 <td className="px-4 py-3 text-slate-500">{isZerodhaPreview ? displayCalculations.units?.(displayStock(row), "Units action") : "Not applicable"}</td><td className="px-4 py-3 text-slate-500">Not applicable</td>
-                                {upstoxCell(row.stock.symbol, row.stock.exchange)}
+                                {providerPriceCell(row.stock.symbol, row.stock.exchange)}
                                 <td className="whitespace-nowrap px-4 py-3 text-slate-700" title={quote.ltpSource}>{quote.ltp === null ? "Unavailable" : formatBasketCurrency(quote.ltp, basketCurrency)}</td>
                                 <td className="px-4 py-3 text-slate-500">Not applicable</td><td className="px-4 py-3 text-slate-500">Not applicable</td><td className="px-4 py-3 text-slate-500">Not applicable</td>
                                 <td className="whitespace-nowrap px-4 py-3 text-xs font-semibold text-slate-600">{row.formulaAction === "Hold" ? "Hold · No executable order" : "Display only · No executable order"}</td>
@@ -3416,7 +3417,6 @@ function ScopedZerodhaBasketPreviewDialog({
                     </tbody>
                   </table>
                   </BasketColumnTable>
-                </div>
               </div>
             </>
           ) : (
@@ -3450,8 +3450,8 @@ function ScopedZerodhaBasketPreviewDialog({
     </div>
     {displayCalculations.popup}
     {unitsDetailOrder ? <BasketUnitsPopup row={unitsDetailOrder} broker={basketBrokerLabel} onClose={() => setUnitsDetailId(null)} /> : null}
-    {renameColumn ? <BasketColumnRename key={renameColumn} id={renameColumn} name={columnPreferences?.names?.[renameColumn] ?? renameColumn} onSave={name => columnPreferences?.rename?.(renameColumn, name)} onClose={() => setRenameColumn(null)} /> : null}
-    {columnMenu ? <BasketColumnPicker covered={Boolean(renameColumn)} labels={columnMenu} hidden={hiddenColumns} order={columnPreferences?.order} names={columnPreferences?.names} onReorder={columnPreferences?.reorder} onRequestRename={setRenameColumn} onToggle={label => columnPreferences ? columnPreferences.toggle(label) : setHiddenColumns(current => current.includes(label) ? current.filter(value => value !== label) : [...current, label])} onClose={() => setColumnMenu(null)} /> : null}
+    {renameColumn ? <BasketColumnRename key={renameColumn} id={renameColumn} name={columnNames[renameColumn] ?? renameColumn} onSave={name => columnPreferences?.rename?.(renameColumn, name)} onClose={() => setRenameColumn(null)} /> : null}
+    {columnMenu ? <BasketColumnPicker covered={Boolean(renameColumn)} labels={columnMenu} hidden={hiddenColumns} order={columnPreferences?.order} names={columnNames} onReorder={columnPreferences?.reorder} onRequestRename={setRenameColumn} onToggle={label => columnPreferences ? columnPreferences.toggle(label) : setHiddenColumns(current => current.includes(label) ? current.filter(value => value !== label) : [...current, label])} onClose={() => setColumnMenu(null)} /> : null}
     </>
   );
 }
@@ -4373,7 +4373,6 @@ export function RebalanceWorkflowSections({
   stageLedger?: boolean;
   surface?: WorkflowSurface | null;
 }) {
-  const router = useRouter();
   const [runtimeOwner] = useState(captureWorkflowOwner);
   const apiService = useMemo(() => workflowOwnedApi(workflowApiService, runtimeOwner), [runtimeOwner]);
   const usdInrRate = useUsdInrRate();
@@ -4390,7 +4389,7 @@ export function RebalanceWorkflowSections({
     Record<WorkflowPortfolio, WorkflowState>
   >(() =>
     initialRunningPortfolio && initialPersisted?.states
-      ? initialPersisted.states
+      ? { ...initialPersisted.states, [initialRunningPortfolio]: restoreCurrentWorkflowStages(initialPersisted.states[initialRunningPortfolio]) }
       : buildInitialStates(),
   );
   const [ledgerMarket, setLedgerMarket] = useState<WorkflowPortfolio>(() => initialRunningPortfolio ?? "zerodha");
@@ -5309,7 +5308,9 @@ ${zerodhaExecutionMode === "direct_market"
     }
   }, [runtimeOwner, apiService, basketSafety, zerodhaBasketPlacing, zerodhaBasketLtpRefreshing, zerodhaBasketDetailsData.portfolioSnapshot, zerodhaOrderSubmissionBlockedReason, selectedZerodhaBasketIds, zerodhaBasketOrders, zerodhaBasketSubmission?.phase, zerodhaExecutionMode]);
 
+  const savedStageReadGeneration = useRef(0);
   const loadLatestIdleStageInfo = useCallback(async () => {
+    const generation = ++savedStageReadGeneration.current;
     const [
       zerodhaOverviewResult,
       indmoneyOverviewResult,
@@ -5328,6 +5329,7 @@ ${zerodhaExecutionMode === "direct_market"
       apiService.getAutoRebalanceHistory("indmoney_us", { limit: 25 }),
     ]);
 
+    if (!isCurrentWorkflowOwner(runtimeOwner) || generation !== savedStageReadGeneration.current) return;
     const zerodhaOverview =
       zerodhaOverviewResult.status === "fulfilled"
         ? zerodhaOverviewResult.value
@@ -5346,8 +5348,8 @@ ${zerodhaExecutionMode === "direct_market"
     const failedHistory = [zerodhaHistoryResult, indmoneyHistoryResult].find(result => result.status === "rejected");
     setWorkflowHistoryError(failedHistory?.status === "rejected"
       ? `Saved workflow history unavailable: ${normalizeError(failedHistory.reason)}. Refresh to retry.` : null);
-    // Failed reads are unavailable, never evidence of an empty saved history.
-    if (failedHistory) return;
+    // A failed history read cannot establish a newer stage result. The other
+    // portfolio may still refresh, and the latest holdings count is independent.
     const historyByPortfolio: Record<
       WorkflowPortfolio,
       AutoRebalanceHistoryItemResponse[]
@@ -5396,18 +5398,11 @@ ${zerodhaExecutionMode === "direct_market"
             : (indmoneyOverview?.latest?.parse_status ?? "last snapshot");
 
         const historyInfo = (stage: WorkflowStageKey) =>
-          Object.fromEntries(
-            Object.entries(
-              summarizeAutoRebalanceHistoryStage(
-                getLatestAutoRebalanceHistoryItem(
-                  historyByPortfolio[portfolio],
-                  stage,
-                ),
-                stage,
-                usdInrRate,
-              ),
-            ).filter(([, value]) => value !== null && value !== undefined),
-          ) as Partial<StageInfo>;
+          summarizeAutoRebalanceHistoryStage(
+            getLatestAutoRebalanceHistoryItem(historyByPortfolio[portfolio], stage),
+            stage,
+            usdInrRate,
+          );
         const latestHistoryRebalance = historyInfo("rebalance");
         const latestHistoryTechnical = historyInfo("technical");
         const latestHistoryActionables = historyInfo("actionables");
@@ -5421,10 +5416,12 @@ ${zerodhaExecutionMode === "direct_market"
 
         acc[portfolio] = {
           sync: {
-            completedAt: overview?.latest?.captured_at ?? null,
-            runStatus: overview?.latest ? syncStatus : null,
-            evidence: overview?.latest ? { kind: "saved", references: [`Portfolio snapshot · ${overview.latest.captured_at}`] } : undefined,
-            ...historyInfo("sync"),
+            ...mergeStageEvidence({
+              completedAt: overview?.latest?.captured_at ?? null,
+              runStatus: overview?.latest ? syncStatus : null,
+              evidence: overview?.latest ? { kind: "saved", references: [`Portfolio snapshot · ${overview.latest.captured_at}`] } : undefined,
+            } as Partial<StageInfo>, historyInfo("sync"), true),
+            ...(overview?.latest ? { portfolioStockCount: overview.latest.holdings_count } : {}),
           },
           swing: mergeStageEvidence(
             summarizeRunForIdleTile(
@@ -5433,9 +5430,10 @@ ${zerodhaExecutionMode === "direct_market"
               latestSwingRun ? countUniqueStocksFromRun(latestSwingRun) : null,
             ),
             historyInfo("swing"),
+            true,
           ),
-          threats: {
-            ...(threat
+          threats: mergeStageEvidence(
+            threat
               ? withInrCost(
                   {
                     ...summarizeThreat(threat),
@@ -5450,9 +5448,10 @@ ${zerodhaExecutionMode === "direct_market"
                   },
                   usdInrRate,
                 )
-              : {}),
-            ...historyInfo("threats"),
-          },
+              : {},
+            historyInfo("threats"),
+            true,
+          ),
           rebalance: mergeStageEvidence(
             summarizeRunForIdleTile(
               latestRebalanceRun,
@@ -5461,7 +5460,8 @@ ${zerodhaExecutionMode === "direct_market"
                 ? buildConsensusRows(latestRebalanceRuns, market).length
                 : null,
             ),
-            historyInfo("rebalance"),
+            latestHistoryRebalance,
+            true,
           ),
           technical: mergeStageEvidence(
             summarizeRunForIdleTile(
@@ -5471,7 +5471,8 @@ ${zerodhaExecutionMode === "direct_market"
                 ? countUniqueStocksFromRun(latestTechnicalRun)
                 : null,
             ),
-            historyInfo("technical"),
+            latestHistoryTechnical,
+            true,
           ),
           actionables: mergeStageEvidence({
             evidence: latestActionablesTimestamp || historyActionablesTimestamp ? { kind: "derived", references: [
@@ -5510,33 +5511,47 @@ ${zerodhaExecutionMode === "direct_market"
     );
 
     setStates((current) => {
+      if (!isCurrentWorkflowOwner(runtimeOwner) || generation !== savedStageReadGeneration.current) return current;
       const next = { ...current };
-      (["zerodha", "indmoneyUs"] as WorkflowPortfolio[]).forEach(
-        (portfolio) => {
-          next[portfolio] = { ...current[portfolio] };
-          STAGE_ORDER.forEach((stage) => {
-            if (current[portfolio][stage].state !== "idle") return;
-            next[portfolio][stage] = {
-              ...current[portfolio][stage],
-              ...nextByPortfolio[portfolio][stage],
-              state: "idle",
-            };
-          });
-        },
-      );
+      (["zerodha", "indmoneyUs"] as WorkflowPortfolio[]).forEach((portfolio) => {
+        next[portfolio] = { ...current[portfolio] };
+        STAGE_ORDER.forEach((stage) => {
+          const existing = current[portfolio][stage];
+          const incoming = nextByPortfolio[portfolio][stage];
+          if (isWorkflowExecutingRef.current || runningPortfolio === portfolio) return;
+          if (existing.state === "running" || existing.state === "queued") return;
+          const existingAt = parseTimestampMs(existing.completedAt ?? existing.endedAt);
+          const incomingAt = parseTimestampMs(incoming.completedAt);
+          const knownStockCount = incoming.portfolioStockCount ?? existing.portfolioStockCount;
+          const snapshotCount = stage === "sync" && knownStockCount != null
+            ? { portfolioStockCount: knownStockCount }
+            : {};
+          // Replace one run's evidence atomically: spreading the prior stage leaks
+          // old errors and partial counts into a new successful result.
+          const historyAvailable = (portfolio === "zerodha" ? zerodhaHistoryResult : indmoneyHistoryResult).status === "fulfilled";
+          next[portfolio][stage] = historyAvailable && incoming.evidence && incomingAt > 0 && incomingAt >= existingAt
+            ? { ...incoming, ...snapshotCount, state: "idle" }
+            : { ...existing, ...snapshotCount };
+        });
+      });
       return next;
     });
-  }, [apiService, usdInrRate]);
+  }, [apiService, runtimeOwner, usdInrRate, runningPortfolio]);
 
   useEffect(() => {
-    const timeoutId = window.setTimeout(() => {
-      void loadLatestIdleStageInfo().catch(() => {
-        // The workflow tiles keep their built-in "Not available" fallbacks if
-        // any dashboard source is temporarily unavailable.
-      });
-    }, 0);
-
-    return () => window.clearTimeout(timeoutId);
+    const refreshSavedEvidence = () => {
+      if (document.visibilityState === "visible") {
+        void loadLatestIdleStageInfo().catch(() => {
+          // Do not turn unavailable history into blank or successful output.
+        });
+      }
+    };
+    const timeoutId = window.setTimeout(refreshSavedEvidence, 0);
+    window.addEventListener("focus", refreshSavedEvidence);
+    return () => {
+      window.clearTimeout(timeoutId);
+      window.removeEventListener("focus", refreshSavedEvidence);
+    };
   }, [loadLatestIdleStageInfo]);
 
   const updateStage = useCallback(
@@ -5651,15 +5666,14 @@ ${zerodhaExecutionMode === "direct_market"
   );
 
   const resetPortfolio = useCallback((portfolio: WorkflowPortfolio) => {
+    // Invalidate reads started before the Run click, including before reservation.
+    savedStageReadGeneration.current += 1;
+    setWorkflowHistoryError(null);
     setStates((current) => ({
       ...current,
       [portfolio]: STAGE_ORDER.reduce((acc, stage) => {
-        const info = current[portfolio][stage];
-        acc[stage] = {
-          ...info,
-          state: "idle",
-          activeRunId: null,
-        };
+        // Saved evidence remains in audit/history, never in a new run's cells.
+        acc[stage] = { state: "idle" };
         return acc;
       }, {} as WorkflowState),
     }));
@@ -5713,7 +5727,7 @@ ${zerodhaExecutionMode === "direct_market"
         completedAt: null,
         error: null,
         errorDetails: [],
-        lastRunId: null, activeRunId: null, recommendedStocks: null,
+        lastRunId: null, activeRunId: null, recommendedStocks: null, jobId: null, workflowSequence: null,
         passedLlms: 0, partialLlms: 0, failedLlms: 0, completedLlms: 0,
         partialNotice: null, exportStatus: null, costUsd: null, costInr: null,
         provider: null, model: null, runStatus: "processing", totalLlms: null,
@@ -6845,6 +6859,7 @@ ${zerodhaExecutionMode === "direct_market"
             workflowSnapshot = overview.latest;
             await markCompleted(portfolio, "sync", {
               completedAt: overview.latest?.captured_at,
+              portfolioStockCount: overview.latest?.holdings_count ?? null,
               runStatus:
                 overview.latest?.captured_at !== previousOverview.latest?.captured_at
                   ? "synced"
@@ -7497,6 +7512,7 @@ ${zerodhaExecutionMode === "direct_market"
           );
           markCompleted(portfolio, "sync", {
             completedAt: overview.latest?.captured_at,
+            portfolioStockCount: overview.latest?.holdings_count ?? null,
             runStatus:
               overview.latest?.captured_at !== previousOverview.latest?.captured_at
                 ? "synced"
@@ -7668,7 +7684,7 @@ ${zerodhaExecutionMode === "direct_market"
               Last run:{" "}
               {formatCompactStageTime(lastRunByPortfolio[section.portfolio])}
             </p>
-            {stageLedger ? <WorkflowRunBoundary historyHref={URLs.routes.console.autoRebalanceRuns(section.portfolio)} /> : null}
+            {stageLedger && !surface ? <WorkflowRunBoundary historyHref={URLs.routes.console.autoRebalanceRuns(section.portfolio)} /> : null}
             {audit?.status === "pending" ? (
               <p role="status" className="mt-2 flex items-center gap-2 text-sm text-amber-800">
                 <Loader2 className="size-4 shrink-0 animate-spin" />
@@ -7791,8 +7807,8 @@ ${zerodhaExecutionMode === "direct_market"
                 </Button>
               )}
             </div>
-            <AnalysisOnlyRunControl checked={analysisOnlyRuns[section.portfolio]} disabled={isBusy}
-              onChange={checked => setAnalysisOnlyRuns(current => ({ ...current, [section.portfolio]: checked }))} />
+            {!surface && <AnalysisOnlyRunControl checked={analysisOnlyRuns[section.portfolio]} disabled={isBusy}
+              onChange={checked => setAnalysisOnlyRuns(current => ({ ...current, [section.portfolio]: checked }))} />}
             <button
               type="button"
               disabled={isBusy}
@@ -7848,7 +7864,7 @@ ${zerodhaExecutionMode === "direct_market"
           </div>
         ) : null}
 
-        <WorkflowStageLedger market={section.portfolio} enabled={stageLedger} view={ledgerView} historyHref={URLs.routes.console.autoRebalanceRuns(section.portfolio)} onStockFlowClick={() => setStockFlowPortfolio(section.portfolio)}>
+        <WorkflowStageLedger active={runningPortfolio === section.portfolio} market={section.portfolio} enabled={stageLedger} view={ledgerView} historyHref={URLs.routes.console.autoRebalanceRuns(section.portfolio)} onStockFlowClick={() => setStockFlowPortfolio(section.portfolio)}>
           {STAGE_ORDER.map((stage) => (
             <WorkflowStageTile
               key={stage}
@@ -7983,7 +7999,7 @@ ${zerodhaExecutionMode === "direct_market"
   const content = (
     <AutomatedRebalanceReliabilityBridge>
       {workflowHistoryError ? <div role="alert" className="mb-4 rounded border border-amber-500 p-3">{workflowHistoryError}</div> : null}
-      {stageLedger ? <WorkflowStageLedgerViews market={surface?.market ?? ledgerMarket} view={ledgerView} onChange={(market, view) => { if (surface && market !== surface.market) { router.push(market === "zerodha" ? "/console/zerodha#india-workflow" : "/console/indmoney-us#us-workflow"); return; } setLedgerMarket(market); setLedgerView(view); }} /> : null}
+      {stageLedger ? <WorkflowStageLedgerViews market={surface?.market ?? ledgerMarket} portfolioOnly={Boolean(surface)} view={ledgerView} onChange={(market, view) => { setLedgerMarket(market); setLedgerView(view); }} /> : null}
       <section className={stageLedger ? "min-w-0" : "grid gap-6 xl:grid-cols-2"}>
         {(!stageLedger || (surface?.market ?? ledgerMarket) === "zerodha") && renderSectionCard(zerodhaSection)}
         {(!stageLedger || (surface?.market ?? ledgerMarket) === "indmoneyUs") && renderSectionCard(indmoneySection)}

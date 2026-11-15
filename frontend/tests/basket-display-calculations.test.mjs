@@ -178,7 +178,7 @@ test('actual broker preview renders US copy and labels without India routing con
  const output=ts.transpileModule(`${node.getText(ast)}\nexport {ScopedZerodhaBasketPreviewDialog};`,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText;
  const Button=props=>React.createElement('button',props,props.children),stub=()=>null;
  let sizingAssets;let providerQuotes=[];const tileComponent=()=>null;
- const bindings={...math,...submissionSafety,...reviewDialogHooks,BasketMarketClosedNotice:({closed})=>closed?React.createElement("button",{"aria-haspopup":"dialog"},"Markets closed"):null,basketActionGroup:math.basketActionGroup,...draftMath,BasketDraftUnits:props=>React.createElement("div",{},props.children),BasketColumnTable:props=>props.children,kiteWeightContext:math.kiteWeightContext,kiteHoldingQuantity:math.kiteHoldingQuantity,stockIdentity:math.stockIdentity,validDisplayPrice:math.validDisplayPrice,useId:()=>"fixture-order-blockers",useBasketDisplayQuotes:()=>({quotes:[],upstoxQuotes:providerQuotes,loading:false}),verifiedFetchedDisplayQuote:math.verifiedFetchedDisplayQuote,useState:initial=>[typeof initial==='function'?initial():initial,()=>{}],useEffect:()=>{},useBasketDisplayCalculations:(_open,_market,_stocks,assets)=>{sizingAssets=assets;return({popupOpen:false,showAll:true,lower:-2,upper:1.5,cells:()=>Array.from({length:9},(_,i)=>React.createElement("td",{key:i},"derived")),headers:null,controls:null,popup:null,setParameters:()=>{}});},portfolioParameterMargin:snapshot=>snapshot?.available_margin ?? null,portfolioParameterAssets:()=>({portfolioValue:100,availableMargin:0,totalAssets:100}),verifiedDisplayQuote:()=>null,displayScoreAccepted:()=>true,isWholeShareOrderSelectable:()=>true,getZerodhaAvailableMarginToneClass:()=>'',getIndiaMarketStatus:()=>({open:false,label:'NSE/BSE closed → Zerodha AMO'}),ZERODHA_BASKET_SECTION_ORDER:['Buy New'],ZERODHA_BASKET_SECTION_LABELS:{'Buy New':'Buy New'},getZerodhaBasketActionForPercent:order=>order.action,compareZerodhaBasketOrdersByScore:()=>0,parseTimestampMs:Date.parse,formatTimestamp:v=>v,formatCompactQuoteTime:dateMath.formatCompactQuoteTime,formatCompactStageTime:dateMath.formatCompactStageTime,formatBasketCurrency:(value,currency)=>`${currency} ${value}`,formatZerodhaLtpRefreshTime:()=>'',formatBasketQuantity:String,formatBasketPercent:String,getZerodhaBasketUnitLimit:()=>null,ZERODHA_ORDER_KINDS:['Market'],Fragment:React.Fragment,Button,cn:(...v)=>v.filter(Boolean).join(' '),Info:stub,X:stub,Loader2:stub,TradingViewUrlListButton:stub,TradingViewSymbolLink:props=>React.createElement('span',null,props.children),PortfolioParametersTile:tileComponent,ScoreMatrixModal:stub,StockDetailsButton:stub,ScoreMatrixButton:stub,ConsensusBreakupButton:stub,WholeShareTrimChoice:stub};
+ const bindings={...math,...submissionSafety,...reviewDialogHooks,BasketMarketClosedNotice:({closed})=>closed?React.createElement("button",{"aria-haspopup":"dialog"},"Markets closed"):null,basketActionGroup:math.basketActionGroup,...draftMath,BasketDraftUnits:props=>React.createElement("div",{},props.children),BasketColumnTable:props=>props.children,kiteWeightContext:math.kiteWeightContext,kiteHoldingQuantity:math.kiteHoldingQuantity,stockIdentity:math.stockIdentity,validDisplayPrice:math.validDisplayPrice,useId:()=>"fixture-order-blockers",useBasketDisplayQuotes:(_open,market,instruments)=>({quotes:market==="us"?providerQuotes.filter(row=>instruments.includes(row.instrument)):[],vendorQuotes:market==="us"?providerQuotes:[],upstoxQuotes:providerQuotes,loading:false}),verifiedFetchedDisplayQuote:math.verifiedFetchedDisplayQuote,useState:initial=>[typeof initial==='function'?initial():initial,()=>{}],useEffect:()=>{},useBasketDisplayCalculations:(_open,_market,_stocks,assets)=>{sizingAssets=assets;return({popupOpen:false,showAll:true,lower:-2,upper:1.5,cells:()=>Array.from({length:9},(_,i)=>React.createElement("td",{key:i},"derived")),headers:null,controls:null,popup:null,setParameters:()=>{}});},portfolioParameterMargin:snapshot=>snapshot?.available_margin ?? null,portfolioParameterAssets:()=>({portfolioValue:100,availableMargin:0,totalAssets:100}),verifiedDisplayQuote:()=>null,displayScoreAccepted:()=>true,isWholeShareOrderSelectable:()=>true,getZerodhaAvailableMarginToneClass:()=>'',getIndiaMarketStatus:()=>({open:false,label:'NSE/BSE closed → Zerodha AMO'}),ZERODHA_BASKET_SECTION_ORDER:['Buy New'],ZERODHA_BASKET_SECTION_LABELS:{'Buy New':'Buy New'},getZerodhaBasketActionForPercent:order=>order.action,compareZerodhaBasketOrdersByScore:()=>0,parseTimestampMs:Date.parse,formatTimestamp:v=>v,formatCompactQuoteTime:dateMath.formatCompactQuoteTime,formatCompactStageTime:dateMath.formatCompactStageTime,formatBasketCurrency:(value,currency)=>`${currency} ${value}`,formatZerodhaLtpRefreshTime:()=>'',formatBasketQuantity:String,formatBasketPercent:String,getZerodhaBasketUnitLimit:()=>null,ZERODHA_ORDER_KINDS:['Market'],Fragment:React.Fragment,Button,cn:(...v)=>v.filter(Boolean).join(' '),Info:stub,X:stub,Loader2:stub,TradingViewUrlListButton:stub,TradingViewSymbolLink:props=>React.createElement('span',null,props.children),PortfolioParametersTile:tileComponent,ScoreMatrixModal:stub,StockDetailsButton:stub,ScoreMatrixButton:stub,ConsensusBreakupButton:stub,WholeShareTrimChoice:stub};
  const result={exports:{}};new Function('exports','module','require',...Object.keys(bindings),output)(result.exports,result,require,...Object.values(bindings));
  const props={open:true,loading:false,error:null,orders:[{id:'row',symbol:'ABC',exchange:'NASDAQ',action:'Buy New',side:'BUY',units:1,lastPrice:20,price:20,amount:20,percent:100,orderKind:'Market',stock:{},detail:{calculatedScore:2}}],selectedIds:new Set(),detailsData:{portfolioSnapshot:null},historicalRows:[],formulaConfig:{},buyThreshold:2.5,buyThresholdDraft:'2.50',onBuyThresholdDraftChange:()=>{},onClose:()=>{},onToggle:()=>{},onToggleAll:()=>{},onToggleSection:()=>{},onUnitsChange:()=>{},onPercentChange:()=>{},onOrderKindChange:()=>{},onExecutionModeChange:()=>{},onRefreshLtp:()=>{},onFormulaConfigChange:()=>{},executionMode:'publisher_limit',placing:false,directMarketAvailable:false,submission:null,ltpRefreshing:false,ltpRefreshedAt:null};
  let executions=0;const onPlaceOrder=()=>{executions++;};
@@ -214,8 +214,12 @@ test('actual broker preview renders US copy and labels without India routing con
  for(const rows of [[],[{...providerQuotes[0],instrument:'BSE:ABC'}],[{...providerQuotes[0],price:0}],[{...providerQuotes[0],source:'Kite exact venue'}]]){
    providerQuotes=rows;const partial=renderToStaticMarkup(result.exports.ScopedZerodhaBasketPreviewDialog(comparisonProps));assert.match(partial,/data-provider="upstox"[^>]*>Unavailable/);
  }
+ providerQuotes=[{instrument:'NASDAQ:ABC',price:42.25,as_of:end,source:'US vendor Alpaca · IEX only',stale:true}];
+ const usQuoted=renderToStaticMarkup(result.exports.ScopedZerodhaBasketPreviewDialog({...props,tradingViewMarket:'us',basketBrokerLabel:'IndMoney',basketCurrency:'USD',onPlaceOrder}));
+ assert.match(usQuoted,/data-provider="alpaca-iex"[^>]*><div>USD 42.25/);
+ assert.match(usQuoted,/>Stale last trade</);
  providerQuotes=[];
- assert.match(html,/Vendor LTP/);assert.match(html,/Verified US vendor price/);assert.match(html,/Action New has no buy or sell direction/);
+ assert.match(html,/>Alpaca IEX LTP<\/th>/);assert.match(html,/data-provider="alpaca-iex"[^>]*>Unavailable/);assert.match(html,/Verified US vendor price/);assert.match(html,/Action New has no buy or sell direction/);
  bindings.ZERODHA_BASKET_SECTION_ORDER.push('Sell All','Trim','Add more');
  const actions=['Sell All','Trim','Buy New','Add more','Hold'];
  const allocationUniverse=actions.map((action,index)=>({id:`display-${index}`,formulaAction:action,formulaScore:index/10,stock:{key:`NSE:FIXTURE${index}`,symbol:`FIXTURE${index}`,exchange:'NSE',rows:[]},detail:{calculatedScore:index/10}}));
@@ -761,6 +765,47 @@ test('verified US aliases contribute original historical observations once witho
  const rejected=math.historicalMean(conflicting,'ABC','NASDAQ',undefined,proof);assert.equal(rejected.score,1);assert.equal(rejected.rows.length,1);assert.equal(rejected.excludedRows.length,2);assert.match(rejected.excludedRows[0].reason,/Conflicting saved alias/);
 });
 
+test('saved US basket uses its source-run cutoff and keeps verified US history in the mean', async () => {
+ const h = hooks(), pending = [];
+ const component = load('../components/BasketDisplayCalculations.tsx', {
+   ...h.bindings, ...math,
+   apiService: {getBasketScoreHistory: params => new Promise(resolve => pending.push({params, resolve}))},
+ });
+ const stock = {symbol:'SMCI', exchange:'NASDAQ', score:-2.22, ltp:20,
+   verifiedUsIdentity:{securityId:'smci',exchangeAliases:['US']},
+   scoreSources:[{runId:462,createdAt:end,completed:false,status:'partial',market:'us'}]};
+ const render = () => { h.start(); return component.useBasketDisplayCalculations(true,'us',[stock],1000,end,'IndMoney'); };
+ render(); h.flush();
+ assert.equal(Date.parse(pending[0].params.as_of), Date.parse(end));
+ pending[0].resolve({...history([observation(461,-1.78,{symbol:'SMCI',exchange:'US'})]), market:'us',symbols:['SMCI']});
+ await tick();
+ const state = render();
+ const value = name => find(state.cells(stock), n=>n.props?.['aria-label'] === 'SMCI '+name+' calculation').props.children;
+ assert.equal(Number(value('Historical Weighted Score')), -2);
+ assert.match(String(value('Target Weight')), /^0(?:\.0+)?%$/);
+});
+
+test('India stale score diagnostics identify actual source window without admitting old scores',async()=>{
+ const h=hooks(),pending=[];
+ const component=load('../components/BasketDisplayCalculations.tsx',{...h.bindings,...math,apiService:{getBasketScoreHistory:params=>new Promise(resolve=>pending.push({params,resolve}))}});
+ const stock={symbol:'HAL',exchange:'NSE',score:2,ltp:100,scoreSources:[{runId:42,createdAt:'2026-10-20T12:00:00Z',completed:true,market:'india'}]};
+ const render=(open=true)=>{h.start();return component.useBasketDisplayCalculations(open,'india',[stock],1000,end,'Zerodha');};
+ render();h.flush();assert.equal(pending[0].params.as_of,undefined,'India current window must not silently move backwards');pending.shift().resolve(history([]));await tick();let state=render();
+ assert.equal(state.metrics(stock).target,null);assert.equal(state.metrics(stock).mean.score,null);
+ const notice=find(state.controls,n=>n.props?.['aria-label']==='Unavailable score reasons');assert.ok(notice);assert.match(JSON.stringify(notice),/Run #42: recorded 2026-10-20T12:00:00Z/);assert.match(JSON.stringify(notice),/too old/);assert.match(JSON.stringify(notice),/not zero or a recommendation to sell/);
+ state.retry();render();h.flush();pending.shift().resolve(history([observation(50,2)]));await tick();state=render();assert.equal(find(state.controls,n=>n.props?.['aria-label']==='Unavailable score reasons'),null,'resolved score must remove the stale warning');assert.equal(state.metrics(stock).mean.score,2);
+ render(false);h.flush();assert.equal(find(render(false).controls,n=>n.props?.['aria-label']==='Unavailable score reasons'),null);
+});
+
+test('score source diagnostics distinguish provenance, status and timestamps without changing data',()=>{
+ const source={runId:42,createdAt:end,completed:false,status:'failed',market:'india'},before=structuredClone(source);
+ assert.match(math.scoreSourceIssues(history([]),[source]).join(' '),/status failed/);
+ assert.match(math.scoreSourceIssues(history([]),[{...source,completed:true,market:null}]).join(' '),/market provenance/);
+ assert.match(math.scoreSourceIssues(history([]),[{...source,createdAt:'invalid'}]).join(' '),/timestamp is unavailable/);
+ assert.match(math.scoreSourceIssues(history([]),[]).join(' '),/No saved source-run provenance/);
+ assert.deepEqual(math.scoreSourceIssues(history([]),[{...source,status:'partial'}]),[]);
+ assert.deepEqual(source,before);
+});
 
 test('quote effect fixture owns polling timers, visibility listeners and aborted request cycles',async()=>{
  const h=hooks(),pending=[];let now=0;

@@ -2150,10 +2150,18 @@ function DashboardPageForUser({
         <div className="mt-5 flex flex-wrap gap-3">
           <Button asChild className="rounded-full">
             <Link
-              href={URLs.routes.console.automatedRebalance()}
+              href={`${URLs.routes.console.zerodha()}#india-workflow`}
               prefetch={false}
             >
-              Open automated workflow
+              Review India workflow
+            </Link>
+          </Button>
+          <Button asChild variant="outline" className="rounded-full">
+            <Link
+              href={`${URLs.routes.console.indmoneyUs()}#us-workflow`}
+              prefetch={false}
+            >
+              Review US workflow
             </Link>
           </Button>
           <Button asChild variant="outline" className="rounded-full">
