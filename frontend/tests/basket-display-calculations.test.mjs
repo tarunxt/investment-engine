@@ -779,3 +779,25 @@ test('saved US basket uses its source-run cutoff and keeps verified US history i
  assert.equal(Number(value('Historical Weighted Score')), -2);
  assert.match(String(value('Target Weight')), /^0(?:\.0+)?%$/);
 });
+
+test('India stale score diagnostics identify actual source window without admitting old scores',async()=>{
+ const h=hooks(),pending=[];
+ const component=load('../components/BasketDisplayCalculations.tsx',{...h.bindings,...math,apiService:{getBasketScoreHistory:params=>new Promise(resolve=>pending.push({params,resolve}))}});
+ const stock={symbol:'HAL',exchange:'NSE',score:2,ltp:100,scoreSources:[{runId:42,createdAt:'2026-10-20T12:00:00Z',completed:true,market:'india'}]};
+ const render=(open=true)=>{h.start();return component.useBasketDisplayCalculations(open,'india',[stock],1000,end,'Zerodha');};
+ render();h.flush();assert.equal(pending[0].params.as_of,undefined,'India current window must not silently move backwards');pending.shift().resolve(history([]));await tick();let state=render();
+ assert.equal(state.metrics(stock).target,null);assert.equal(state.metrics(stock).mean.score,null);
+ const notice=find(state.controls,n=>n.props?.['aria-label']==='Unavailable score reasons');assert.ok(notice);assert.match(JSON.stringify(notice),/Run #42: recorded 2026-10-20T12:00:00Z/);assert.match(JSON.stringify(notice),/too old/);assert.match(JSON.stringify(notice),/not zero or a recommendation to sell/);
+ state.retry();render();h.flush();pending.shift().resolve(history([observation(50,2)]));await tick();state=render();assert.equal(find(state.controls,n=>n.props?.['aria-label']==='Unavailable score reasons'),null,'resolved score must remove the stale warning');assert.equal(state.metrics(stock).mean.score,2);
+ render(false);h.flush();assert.equal(find(render(false).controls,n=>n.props?.['aria-label']==='Unavailable score reasons'),null);
+});
+
+test('score source diagnostics distinguish provenance, status and timestamps without changing data',()=>{
+ const source={runId:42,createdAt:end,completed:false,status:'failed',market:'india'},before=structuredClone(source);
+ assert.match(math.scoreSourceIssues(history([]),[source]).join(' '),/status failed/);
+ assert.match(math.scoreSourceIssues(history([]),[{...source,completed:true,market:null}]).join(' '),/market provenance/);
+ assert.match(math.scoreSourceIssues(history([]),[{...source,createdAt:'invalid'}]).join(' '),/timestamp is unavailable/);
+ assert.match(math.scoreSourceIssues(history([]),[]).join(' '),/No saved source-run provenance/);
+ assert.deepEqual(math.scoreSourceIssues(history([]),[{...source,status:'partial'}]),[]);
+ assert.deepEqual(source,before);
+});

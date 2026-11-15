@@ -8740,6 +8740,7 @@ function ScopedFinalActionablesConsole({
   const [runs, setRuns] = useState<RunResponse[]>(() => cachedRunsOnFirstRender ?? []);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [historyNotice, setHistoryNotice] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [showRunDetails, setShowRunDetails] = useState(false);
   const [selectedSetupGroup, setSelectedSetupGroup] = useState<SetupStockGroup | null>(null);
@@ -8761,8 +8762,13 @@ function ScopedFinalActionablesConsole({
     const request = ++runsRequestRef.current;
     setLoading(true);
     setError(null);
+    setHistoryNotice(null);
     try {
-      const response = await withFinalActionablesReadDeadline(fetchAllFullRuns());
+      // Full retained history is required for exact input-bundle matching. Do
+      // not replace it with recent-only or partial data just to beat 30 seconds.
+      const response = await withFinalActionablesReadDeadline(fetchAllFullRuns(), 120_000, () => {
+        if (request === runsRequestRef.current) setHistoryNotice("Still reading the full retained run history. Previously available results are not yet refreshed. This view waits up to two minutes; the shared background read is not cancelled by that limit. No scan or trade is started.");
+      });
       if (request !== runsRequestRef.current) return;
       setRuns(response);
       cacheFinalActionablesRuns(runCacheKey, response, market);
@@ -8771,7 +8777,10 @@ function ScopedFinalActionablesConsole({
       if (request !== runsRequestRef.current) return;
       setError(err instanceof Error ? err.message : "Failed to load rebalance runs.");
     } finally {
-      if (request === runsRequestRef.current) setLoading(false);
+      if (request === runsRequestRef.current) {
+        setLoading(false);
+        setHistoryNotice(null);
+      }
     }
   }, [market, runCacheKey]);
 
@@ -8872,14 +8881,14 @@ function ScopedFinalActionablesConsole({
   const technicalScanIsActive = useMemo(() => hasActiveTechnicalScan(runs), [runs]);
 
   useEffect(() => {
-    if (!technicalScanIsActive || technicalScanRunning) return;
+    if (!technicalScanIsActive || technicalScanRunning || loading) return;
 
     const interval = window.setInterval(() => {
       void loadRuns();
     }, TECHNICAL_SCAN_POLL_INTERVAL_MS);
 
     return () => window.clearInterval(interval);
-  }, [loadRuns, technicalScanIsActive, technicalScanRunning]);
+  }, [loadRuns, technicalScanIsActive, technicalScanRunning, loading]);
 
   useEffect(() => {
     if (!runs.length) return;
@@ -8932,6 +8941,7 @@ function ScopedFinalActionablesConsole({
   return (
     <div className="min-h-screen bg-gray-50">
       <main className="mx-auto max-w-7xl space-y-8 px-4 py-8 sm:px-6 lg:px-8">
+        {historyNotice ? <p role="status" className="rounded border border-amber-400 bg-amber-50 p-3 text-sm text-amber-900">{historyNotice}</p> : null}
         <PortfolioAnalysisNav
           portfolio={portfolio}
           active="finalActionables"

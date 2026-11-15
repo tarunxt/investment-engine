@@ -314,7 +314,7 @@ test('actual run loader ignores stale success, stale errors and completion after
   const state = { runs: [], loading: false, error: null, cache: [] };
   const requests = { current: 0 };
   const loader = load(sourcePath, {
-    withFinalActionablesReadDeadline,
+    withFinalActionablesReadDeadline, setHistoryNotice: () => {},
     useCallback: (fn) => fn, runsRequestRef: requests, market: 'india', runCacheKey: 'india',
     setLoading: (value) => { state.loading = value; }, setError: (value) => { state.error = value; },
     setRuns: (value) => { state.runs = value; },

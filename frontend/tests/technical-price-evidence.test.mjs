@@ -25,7 +25,7 @@ for (const [label,patch] of [
 ]) test(`fail closed without research downgrade: ${label}`, async () => {
   const result = {quotes:[{...quote,...patch}],missing:[]};
   const original = structuredClone(result);
-  await assert.rejects(exports.resolveTechnicalPriceEvidence([quote.instrument],async()=>result,now), /Invalid or stale broker quote/);
+  await assert.rejects(exports.resolveTechnicalPriceEvidence([quote.instrument],async()=>result,now), /Invalid broker (?:price|quote timestamp)|Future-dated broker quote|Stale broker quote/);
   assert.deepEqual(result,original);
 });
 test('partial batch remains rejected on repeated attempts and accepts a later valid fixture', async () => {
@@ -61,4 +61,33 @@ test('unrelated failures and malformed successful quotes do not silently downgra
   for (const quotes of [[],[{...quote,instrument:'BSE:BEL'}],[{...quote,as_of:'2026-10-28T09:17:00Z'}]]) {
     await assert.rejects(exports.resolveTechnicalPriceEvidence(['NSE:BEL'],async()=>({quotes,missing:[]}),now));
   }
+});
+
+
+test('stale quote error reports exact venue, quote time, age and blocked downstream stage',()=>{
+ const stale={...quote,instrument:'BSE:BEL',as_of:new Date(now-900001).toISOString()};
+ assert.throws(()=>exports.technicalPriceEvidence(['BSE:BEL'],{quotes:[stale],missing:[]},now),error=>{
+   assert.match(error.message,/Stale broker quote for BSE:BEL/);
+   assert.ok(error.message.includes(stale.as_of));
+   assert.match(error.message,/age 900.001 seconds/);
+   assert.match(error.message,/15 minutes/);
+   assert.match(error.message,/Technical validation has not started/);
+   assert.match(error.message,/cannot produce final actionables/);
+   return true;
+ });
+});
+test('default freshness clock is read at response validation, not request start',async()=>{
+ const original=Date.now; let clock=now;
+ Date.now=()=>clock;
+ try {
+   const delayed={...quote,as_of:new Date(now-899000).toISOString()};
+   await assert.rejects(exports.resolveTechnicalPriceEvidence(['NSE:BEL'],async()=>{clock+=2000;return {quotes:[delayed],missing:[]};}),/Stale broker quote.*age 901.000 seconds/);
+   const futureAtStart={...quote,as_of:new Date(now+61000).toISOString()};clock=now;
+   const accepted=await exports.resolveTechnicalPriceEvidence(['NSE:BEL'],async()=>{clock+=2000;return {quotes:[futureAtStart],missing:[]};});
+   assert.match(accepted,/TECHNICAL_PRICE_ANCHORS_V1/);
+ } finally {Date.now=original;}
+});
+test('malformed response and invalid validation clock fail closed',()=>{
+ for(const response of [null,{}, {quotes:null}])assert.throws(()=>exports.technicalPriceEvidence(['NSE:BEL'],response,now),/Malformed broker quote response/);
+ assert.throws(()=>exports.technicalPriceEvidence(['NSE:BEL'],{quotes:[quote]},NaN),/validation time is unavailable/);
 });

@@ -7,7 +7,7 @@ import { BasketActionSizingPopup } from "./BasketActionSizingPopup";
 import { basketActionSizing } from "@/lib/basketActionSizing";
 import type { UsVendorDisplayQuote } from "@/types/api";
 import { apiService } from "@/services/api";
-import { ALLOCATION_SCORE_POLICY, allocationScoreContract, allocationDisclosure, indmoneyActionSizing, allocateDisplayScores, sellHoldingDisplay, weightComparison, displaySizingPrice, formatBasketIntegerCurrency, formatBasketDisplayCurrency, brokerDisplayAllocation, defaultDisplayParameters, historicalMean, stockIdentity, type BasketScoreHistory, type CurrentScoreCalculation } from "@/lib/basketDisplayCalculations";
+import { ALLOCATION_SCORE_POLICY, allocationScoreContract, allocationDisclosure, indmoneyActionSizing, allocateDisplayScores, sellHoldingDisplay, weightComparison, displaySizingPrice, formatBasketIntegerCurrency, formatBasketDisplayCurrency, brokerDisplayAllocation, defaultDisplayParameters, historicalMean, scoreSourceIssues, stockIdentity, type BasketScoreHistory, type CurrentScoreCalculation } from "@/lib/basketDisplayCalculations";
 
 type Stock = { verifiedUsIdentity?: {securityId:string;exchangeAliases:readonly string[]}; identityIssue?: string | null; investedValue?: number | null; vendorReady?: boolean; vendorLtp?: number | null; vendorAsOf?: string; vendorSource?: string; holdingQuantity?: number | null; holdingAsOf?: string; holdingSource?: string; upstoxLtp?: number | null; upstoxAsOf?: string; upstoxSource?: string; currentValue?: number | null; symbol: string; exchange: string; score: number | null; action?: string | null; ltp: number | null; limitPrice?: number | null; ltpAsOf?: string; ltpSource?: string; quoteLoading?: boolean; scoreSources?: CurrentScoreCalculation['sources'] };
 export function useBasketDisplayQuotes(open: boolean, market: "india" | "us", instruments: string[], scope: string | null = null) {
@@ -134,7 +134,18 @@ export function useBasketDisplayCalculations(open: boolean, market: "india" | "u
     return stock.quoteLoading && price.basis !== "limit_estimate" ? null : brokerDisplayAllocation(allocation.weights.get(row.key), totalAssets, price.price, market)?.amount ?? null;
   }), totalAssets, Boolean(open && data && !data.truncated && !loading && !error && parameters.valid && stocks.length > 0 && Number.isSafeInteger(parameters.maximumStocks) && parameters.maximumStocks > 0 && Number.isFinite(parameters.cash) && parameters.cash >= 0 && parameters.cash <= 100 && Number.isFinite(parameters.normalised) && parameters.normalised >= 0 && parameters.normalised <= 100 && stocks.every(stock => means.get(stockIdentity(stock.symbol, stock.exchange))?.score != null)));
   const percentAggregate = (value: number | null) => value === null ? "Unavailable" : `${number(value * 100)}%`;
+  const unavailableScores = data && !loading && !error && !data.truncated
+    ? stocks.filter(stock => means.get(stockIdentity(stock.symbol, stock.exchange))?.score == null) : [];
   const disclosure = <section aria-label="Allocation disclosure" className="my-3 text-sm">
+    {unavailableScores.length > 0 && data ? <section aria-label="Unavailable score reasons" className="mb-3 rounded border border-amber-500 p-3 text-amber-900 dark:text-amber-200">
+      <h3 className="font-semibold">{unavailableScores.length} stock(s) need eligible score evidence</h3>
+      <p>Selected score window: ({data.window_start}, {data.as_of}] · {data.timezone}. Missing scores are not zero or a recommendation to sell.</p>
+      <ul>{unavailableScores.map(stock => {
+        const reasons = scoreSourceIssues(data, stock.scoreSources ?? []);
+        return <li key={stockIdentity(stock.symbol, stock.exchange)}><strong>{stockIdentity(stock.symbol, stock.exchange)}</strong>: {reasons.length ? reasons.join(' ') : 'No eligible saved observation or usable current calculation exists for this exact listing.'}</li>;
+      })}</ul>
+      <p>Next: review the source runs in Saved evidence and configuration. Current recommendations need eligible analysis in this window; a new scan requires separate review and may incur LLM costs. Opening this basket does not run a scan or refresh old evidence.</p>
+    </section> : null}
     <p>Min Cash {parameters.cash}% is a minimum input, not an exact invested allocation. Weight cap {parameters.normalised}%; caps are not redistributed.</p>
     <table className="w-full text-left"><caption className="text-left">Calculated allocation targets · {market === "india" ? "INR" : "USD"}</caption><tbody>
       <tr><th scope="row">Aggregate target weight</th><td>{percentAggregate(aggregate.weight)}</td></tr>
