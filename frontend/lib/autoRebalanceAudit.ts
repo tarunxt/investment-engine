@@ -222,11 +222,23 @@ export class AutoRebalanceAuditSession {
       this.verificationError = null;
       return true;
     } catch (error) {
-      this.verificationError = errorMessage(error);
+      this.verificationError = [...this.failures.values()][0] ?? errorMessage(error);
       return false;
     } finally {
       this.pending -= 1;
       this.publish();
     }
   }
+}
+
+/** Same-browser activity for the client-side final calculation. The browser releases the lock on tab closure. */
+export function actionablesActivityKey(ownerId: number, portfolio: string, sequence: number) {
+  return `cred-x:actionables:${ownerId}:${portfolio}:${sequence}`;
+}
+
+export function announceActionablesActivity(key: string) {
+  let release = () => {};
+  const done = new Promise<void>(resolve => { release = resolve; });
+  void navigator.locks?.request(key, { mode: "shared" }, () => done).catch(() => {});
+  return release;
 }

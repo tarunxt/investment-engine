@@ -30,22 +30,22 @@ const page=await browser.newPage();const errors=[];page.on('pageerror',e=>errors
 let passed=0;
 try{
 for(const {width,height} of [{width:1440,height:1000},{width:390,height:844}]){
- await page.setViewportSize({width,height});await page.goto(base+'/console/indmoney-us');await page.getByText('Raw Pasted Snapshot',{exact:true}).waitFor();
+ await page.setViewportSize({width,height});await page.goto(base+'/console/indmoney-us');await page.getByText('Market Indices',{exact:true}).waitFor();
  assert.equal(await page.evaluate(()=>devicePixelRatio),1);
  await page.screenshot({path:path.join(output,`${baseline?'before':'after'}-${width}.png`),fullPage:true});
  if(baseline)continue;
  await page.getByText('ACME · Display name needs review',{exact:true}).first().waitFor();
  await page.getByText('Holdings parsed',{exact:true}).waitFor();
  await page.getByText('Market-context extraction: Incomplete or unavailable.',{exact:true}).waitFor();
- assert.equal(await page.locator('pre').textContent(),snapshot.raw_text);assert.equal(await page.getByRole('cell',{name:'$0.01',exact:true}).count(),1);passed++;
+ assert.equal(await page.locator('pre').count(),0);assert.equal(await page.getByRole('cell',{name:'$0.01',exact:true}).count(),1);passed++;
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
  await page.keyboard.press('Tab');assert.equal(await page.locator(':focus').count(),1);await page.keyboard.press('Enter');passed++;
  await page.evaluate(()=>fixture.setProps(p=>({...p,selectedSnapshot:{...fixture.original,market_indices:[{name:'S&P 500',value:6000,change_value:1,change_percent:0.1}]}})));
  await page.getByText('Market-context extraction: 1 index rows extracted; coverage is not verified.',{exact:true}).waitFor();passed++;
  await page.evaluate(()=>fixture.setProps(p=>({...p,selectedSnapshot:{...fixture.original,raw_text:'ACME only',holdings:[{...fixture.original.holdings[0],company_name:'Acme Example Company'}]}})));
- await page.getByText('Acme Example Company',{exact:true}).first().waitFor();assert.equal(await page.locator('pre').textContent(),'ACME only');passed++;
+ await page.getByText('Acme Example Company',{exact:true}).first().waitFor();assert.equal(await page.locator('pre').count(),0);passed++;
  await page.evaluate(()=>fixture.setProps(p=>({...p,selecting:true,selectedSnapshotId:2})));
- await page.getByRole('status').filter({hasText:'Loading snapshot details'}).waitFor();assert.equal(await page.locator('pre').textContent(),'ACME only');passed++;
+ await page.getByRole('status').filter({hasText:'Loading snapshot details'}).waitFor();assert.equal(await page.locator('pre').count(),0);passed++;
  await page.evaluate(()=>fixture.setProps(p=>({...p,selecting:false,error:'Fixture detail read failed'})));await page.getByText('Fixture detail read failed',{exact:true}).waitFor();passed++;
  await page.evaluate(()=>fixture.setProps(p=>({...p,selectedSnapshot:null,overview:{history:[]},error:null})));await page.getByText('No INDmoney snapshots yet',{exact:true}).waitFor();passed++;
  await page.evaluate(()=>fixture.setProps(p=>({...p,overview:null,loading:true})));await page.getByRole('status').filter({hasText:'Loading INDmoney portfolio history'}).waitFor();passed++;

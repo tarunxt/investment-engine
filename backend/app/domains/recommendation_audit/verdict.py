@@ -43,12 +43,35 @@ def evaluate(decision, comparison, claims, observations):
         contradictions = [o for o in valid if o.stance == "contradicts"]
         support = [o for o in valid if o.stance == "supports" and o.countersearch_complete]
         state = "contradicted" if contradictions else "supported" if support and claim.kind != "qualitative" else "unknown"
-        results.append({"claim": claim.model_dump(mode="json"), "state": state, "observations": [o.model_dump(mode="json") for o in observations if o.claim_id == claim.id]})
+        explanation = explain_claim(claim, state, valid, support)
+        results.append({"claim": claim.model_dump(mode="json"), "state": state, "observations": [o.model_dump(mode="json") for o in observations if o.claim_id == claim.id], "explanation": explanation})
     critical = [r for r in results if r["claim"]["critical"]]
     if any(r["state"] == "contradicted" for r in critical): verdict = "unsupported"
     elif critical and all(r["state"] == "supported" for r in critical) and not findings: verdict = "supported"
     else: verdict = "insufficient_evidence"
     return {"policy_version": POLICY_VERSION, "verdict": verdict, "findings": findings, "claims": results, "scope": "Captured claims and data checks; not proof of profitable trading", "model_explanation_is_proof": False}
+
+
+def explain_claim(claim, state, valid, support):
+    """Presentation metadata only; never participates in the verdict decision.
+
+    Version describes explanations, not the historical evidence/verdict policy.
+    """
+    if state == "contradicted":
+        code, reason = "contradictory_evidence", "Eligible independent evidence contradicts this claim; contradiction takes precedence over support."
+    elif state == "supported":
+        code, reason = "independent_support", "Eligible independent evidence supports this claim with countersearch complete; other critical claims and data gates must still pass."
+    elif claim.kind == "qualitative" and valid:
+        code, reason = "qualitative_not_certifiable", "Qualitative rationale cannot be certified by repetition or a new explanation, even when an observation reports support."
+    elif claim.id == "invalidation" and any(o.stance == "neutral" for o in valid):
+        code, reason = "unmet_invalidation_neutral", "The invalidation condition was not met. This is neutral counter-case evidence, not support for this critical claim; every critical claim must be supported."
+    elif not valid:
+        code, reason = "eligible_evidence_missing", "No independent observation with known availability by original completion is eligible for this claim. Missing or ineligible evidence cannot certify it."
+    elif any(o.stance == "supports" for o in valid) and not support:
+        code, reason = "countersearch_incomplete", "Reported support lacks completed countersearch and cannot certify this claim."
+    else:
+        code, reason = "evidence_unresolved", "Eligible observations are neutral or unknown and do not support this critical claim."
+    return {"version": "claim-explanation-v1", "code": code, "reason": reason}
 
 
 def candle_observations(claims, candles, *, decision_at, source_id, source_url, content_hash, observed_at):

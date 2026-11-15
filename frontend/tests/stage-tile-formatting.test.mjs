@@ -78,7 +78,8 @@ test('every stage combines partial and error details in a single concise Error r
     const partial=ui.getStageTileError({state:'completed',partialNotice:'LLM output is partially used: long original explanation.'});
     assert.equal(partial.value,'LLM output partial'); assert.match(partial.detail,/long original explanation/);
   }
-  assert.equal(ui.getStageTileError({state:'idle'}).value,'None');
+  assert.equal(ui.getStageTileError({state:'idle'}).value,'-');
+  assert.equal(ui.getStageTileError({state:'completed',error:'None'}).value,'-');
   assert.equal(ui.getStageTileError({state:'completed',runStatus:'partial'}).value,'LLM output partial');
   assert.match(ui.getStageTileError({state:'failed',errorDetails:[{message:'only diagnostic'}]}).detail,/only diagnostic/);
   for (const message of ['quota exceeded','Insufficient balance','authentication failed','invalid output contract','cancelled','unclassified failure']) {

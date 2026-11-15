@@ -49,6 +49,8 @@ export type StageInfo = {
   errorDetails?: StageErrorDetail[];
   activeRunId?: number | null;
   lastRunId?: number | null;
+  workflowSequence?: number | null;
+  portfolioStockCount?: number | null;
   jobId?: number | null;
   completedLlms?: number | null;
   passedLlms?: number | null;
@@ -58,6 +60,7 @@ export type StageInfo = {
   totalLlms?: number | null;
   recommendedStocks?: number | null;
   rebalanceInputs?: number | null;
+  finalInputs?: Record<string, unknown>;
   frozenFinal?: Record<string, unknown>;
 };
 
@@ -153,16 +156,28 @@ export const LLM_STAGE_TILE_KEYS = new Set<WorkflowStageKey>([
   "technical",
 ]);
 
+export function getStageBackgroundClass(state: StageState) {
+  if (state === "running") return "bg-yellow-50";
+  if (state === "queued") return "bg-sky-50";
+  if (state === "completed") return "bg-emerald-50";
+  if (state === "failed") return "bg-red-50";
+  return "bg-slate-100";
+}
+
 export function getStageClasses(state: StageState) {
+  return `${getStageBackgroundClass(state)} ${getStageToneClasses(state)}`;
+}
+
+function getStageToneClasses(state: StageState) {
   if (state === "running")
-    return "border-amber-300 bg-amber-50 text-amber-950 shadow-amber-100 ring-1 ring-amber-100";
+    return "border-amber-300 text-amber-950 shadow-amber-100 ring-1 ring-amber-100";
   if (state === "queued")
-    return "border-sky-200 bg-sky-50 text-sky-950 shadow-sky-100 ring-1 ring-sky-100";
+    return "border-sky-200 text-sky-950 shadow-sky-100 ring-1 ring-sky-100";
   if (state === "completed")
-    return "border-emerald-300 bg-emerald-50 text-emerald-950 shadow-emerald-100 ring-1 ring-emerald-100";
+    return "border-emerald-300 text-emerald-950 shadow-emerald-100 ring-1 ring-emerald-100";
   if (state === "failed")
-    return "border-red-300 bg-red-50 text-red-950 shadow-red-100 ring-1 ring-red-100";
-  return "border-slate-200 bg-white text-slate-950 shadow-slate-100";
+    return "border-red-300 text-red-950 shadow-red-100 ring-1 ring-red-100";
+  return "border-slate-200 text-slate-950 shadow-slate-100";
 }
 
 export function getStageTileLabel(stage: WorkflowStageKey) {
@@ -251,7 +266,7 @@ export function isInsufficientBalanceError(error?: string | null) {
 }
 
 export function formatBriefTileError(error?: string | null) {
-  if (!error?.trim() || isSheetExportError(error)) return "None";
+  if (!error?.trim() || isSheetExportError(error)) return "-";
   if (/partial(?:ly)?/i.test(error)) return "LLM output partial";
   if (isInsufficientBalanceError(error)) return "Provider credits insufficient";
   if (/timeout|timed?\s*out|deadline/i.test(error)) return "Request timed out";
@@ -263,8 +278,26 @@ export function formatBriefTileError(error?: string | null) {
 }
 
 export function getTileErrorDetail(error?: string | null) {
-  if (!error?.trim() || isSheetExportError(error)) return null;
+  if (!error?.trim() || error.trim().toLowerCase() === "none" || isSheetExportError(error)) return null;
   return error;
+}
+
+/** Execution state and saved result are distinct: an idle page can still show a terminal result. */
+export function getStageLedgerTone(info: StageInfo) {
+  const status = info.runStatus?.trim().toLowerCase();
+  if (info.state === "running" || info.state === "queued") return getStageBackgroundClass(info.state);
+  if (info.state === "failed" || ["failed", "error", "canceled", "cancelled", "interrupted"].includes(status ?? "")) return "bg-red-50";
+  if (status === "completion unconfirmed" || hasStagePartialOutput(info)) return "bg-amber-50";
+  if (info.state === "completed" || ["completed", "partial", "saved calculation", "synced", "last synced portfolio", "succeeded", "success"].includes(status ?? "")) return "bg-emerald-50";
+  if (["processing", "running"].includes(status ?? "")) return "bg-amber-50";
+  if (["pending", "queued"].includes(status ?? "")) return "bg-sky-50";
+  return getStageBackgroundClass(info.state);
+}
+
+export function hasStagePartialOutput(info: StageInfo) {
+  if (info.state === "running" || info.state === "queued") return false;
+  return info.runStatus?.trim().toLowerCase() === "partial" ||
+    (info.partialLlms ?? 0) > 0 || Boolean(info.partialNotice?.trim());
 }
 
 export function getStageTileError(info: StageInfo): StageTileRow {
@@ -274,7 +307,7 @@ export function getStageTileError(info: StageInfo): StageTileRow {
       ? `Recorded partial output${info.partialLlms != null ? `: ${info.partialLlms} partial LLM responses` : ""}.` : null;
   const detail = [error, partial && partial !== error ? partial : null].filter(Boolean).join("\n\n") ||
     (info.errorDetails?.length ? info.errorDetails.map(item => item.message).join("\n\n") : null);
-  return { label: "Error", value: error ? formatBriefTileError(error) : partial ? "LLM output partial" : detail ? "Stage execution failed" : "None", detail, errorDetails: info.errorDetails };
+  return { label: "Error", value: error ? formatBriefTileError(error) : partial ? "LLM output partial" : detail ? "Stage execution failed" : "-", detail, errorDetails: info.errorDetails };
 }
 
 export function getLlmStageTileRows(info: StageInfo, now: number): StageTileRow[] {
@@ -469,7 +502,7 @@ export function WorkflowStageTile({
     ? selected
       ? "ring-2 ring-blue-500"
       : info.state === "idle"
-        ? "bg-white opacity-100"
+        ? "opacity-100"
         : ""
     : "";
   const isFreshActionables = isActionablesFresh(info.completedAt, now);

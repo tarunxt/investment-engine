@@ -2787,6 +2787,32 @@ filter match, never the existence of all saved history. The supplemental Bullpen
 run source remains independent and is labeled as unfiltered. A history retry only
 repeats the existing list read; it does not invoke explicit materialization.
 
+
+### Trade-analysis presentation evidence
+
+Trade-analysis list and detail views preserve missing or invalid confidence as
+not evaluated, separate failed retrieval from empty learning categories, and mark
+legacy learning fields as unvalidated hypotheses. A stored exit-timing or
+confidence-alignment field alone does not establish evaluated advice. Its original
+value remains available in the raw-evidence disclosure. Filter scope and displayed
+record counts are visible; aggregate totals do not establish complete outcome or
+fee coverage. Coverage denominators, declared exit windows/units and version
+provenance require the analytics response contract before evaluated display.
+This presentation change does not alter capture, frozen snapshots, formulas,
+execution permissions or API responses. Offline component/browser fixtures are in
+`frontend/tests/bullpen-trade-analysis-source-state.test.mjs` and
+`frontend/scripts/audit10-trade-analysis-offline.mjs`; neither requires production
+navigation or provider calls.
+## Stage 1 nested source evidence (2 November 2026)
+
+The shared Stage 1 detail popup preserves unknown versus verified-empty source
+semantics independently of normalized fallback arrays. Unavailable, partial or
+incomplete evidence does not establish zero totals or absent positions. Saved
+known totals retain their completion timestamp, and retained rows remain visible.
+This is presentation-only: no audit schema, frozen snapshot, validator, execution
+input or financial calculation changes. Regression evidence is recorded in
+`docs/evidence/a6-06-nested-stage1-regression.md`.
+
 ## Post-trade descriptive analysis v2 (Audit10, 2026-11-01)
 
 `bullpen-descriptive-v2` is a derived post-trade review algorithm, separate from

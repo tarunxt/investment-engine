@@ -22,10 +22,10 @@ for (const [label,patch] of [
   ['one millisecond too far ahead',{as_of:new Date(now+60001).toISOString()}],
   ['missing timestamp',{as_of:undefined}], ['invalid timestamp',{as_of:'unknown'}],
   ['zero price',{price:0}], ['negative price',{price:-1}], ['infinite price',{price:Infinity}],
-]) test(`fail closed without research downgrade: ${label}`, async () => {
+]) test(`rejects invalid broker anchor: ${label}`, async () => {
   const result = {quotes:[{...quote,...patch}],missing:[]};
   const original = structuredClone(result);
-  await assert.rejects(exports.resolveTechnicalPriceEvidence([quote.instrument],async()=>result,now), /Invalid or stale broker quote/);
+  assert.throws(()=>exports.technicalPriceEvidence([quote.instrument],result,now), /Invalid broker (?:price|quote timestamp)|Future-dated broker quote|Stale broker quote/);
   assert.deepEqual(result,original);
 });
 test('partial batch remains rejected on repeated attempts and accepts a later valid fixture', async () => {
@@ -38,7 +38,7 @@ test('partial batch remains rejected on repeated attempts and accepts a later va
   assert.match(prompt,/NSE:SYNTHETIC/);
   assert.deepEqual(partial,{quotes:[quote],missing:[second.instrument]});
 });
-for (const [label,quotes] of [['wrong venue',[{...quote,instrument:'BSE:BEL'}]],['duplicate',[quote,quote]],['stale',[{...quote,as_of:'2026-10-28T09:17:00Z'}]],['bad price',[{...quote,price:NaN}]]]) test(label,()=>assert.throws(()=>exports.technicalPriceEvidence(['NSE:BEL'],{quotes,missing:[]},now)));
+for (const [label,quotes] of [['wrong venue',[{...quote,instrument:'BSE:BEL'}]],['duplicate',[quote,quote]],['stale'],['bad price',[{...quote,price:NaN}]]]) test(label,()=>assert.throws(()=>exports.technicalPriceEvidence(['NSE:BEL'],{quotes,missing:[]},now)));
 
 test('Personal API permission denial continues with explicitly unanchored research', async () => {
   const denied = Object.assign(new Error('Zerodha denied market-data access (PermissionException). This connection cannot provide live quotes.'), {status:403});
@@ -58,7 +58,50 @@ test('unrelated failures and malformed successful quotes do not silently downgra
   for (const error of [new Error('offline'), Object.assign(new Error('TokenException'),{status:409}), Object.assign(new Error('Forbidden'),{status:403}), Object.assign(new Error('Zerodha denied market-data access (PermissionException)'),{status:502})]) {
     await assert.rejects(exports.resolveTechnicalPriceEvidence(['NSE:BEL'],async()=>{throw error;},now),e=>e===error);
   }
-  for (const quotes of [[],[{...quote,instrument:'BSE:BEL'}],[{...quote,as_of:'2026-10-28T09:17:00Z'}]]) {
+  for (const quotes of [[],[{...quote,instrument:'BSE:BEL'}]]) {
     await assert.rejects(exports.resolveTechnicalPriceEvidence(['NSE:BEL'],async()=>({quotes,missing:[]}),now));
   }
+});
+
+
+test('stale quote error reports exact venue, quote time, age and blocked downstream stage',()=>{
+ const stale={...quote,instrument:'BSE:BEL',as_of:new Date(now-900001).toISOString()};
+ assert.throws(()=>exports.technicalPriceEvidence(['BSE:BEL'],{quotes:[stale],missing:[]},now),error=>{
+   assert.match(error.message,/Stale broker quote for BSE:BEL/);
+   assert.ok(error.message.includes(stale.as_of));
+   assert.match(error.message,/age 900.001 seconds/);
+   assert.match(error.message,/15 minutes/);
+   assert.match(error.message,/Technical validation has not started/);
+   assert.match(error.message,/cannot produce final actionables/);
+   return true;
+ });
+});
+test('default freshness clock is read at response validation, not request start',async()=>{
+ const original=Date.now; let clock=now;
+ Date.now=()=>clock;
+ try {
+   const delayed={...quote,as_of:new Date(now-899000).toISOString()};
+   assert.match(await exports.resolveTechnicalPriceEvidence(['NSE:BEL'],async()=>{clock+=2000;return {quotes:[delayed],missing:[]};}),/internet_research_no_broker_quotes/);
+   const futureAtStart={...quote,as_of:new Date(now+61000).toISOString()};clock=now;
+   const accepted=await exports.resolveTechnicalPriceEvidence(['NSE:BEL'],async()=>{clock+=2000;return {quotes:[futureAtStart],missing:[]};});
+   assert.match(accepted,/TECHNICAL_PRICE_ANCHORS_V1/);
+ } finally {Date.now=original;}
+});
+test('malformed response and invalid validation clock fail closed',()=>{
+ for(const response of [null,{}, {quotes:null}])assert.throws(()=>exports.technicalPriceEvidence(['NSE:BEL'],response,now),/Malformed broker quote response/);
+ assert.throws(()=>exports.technicalPriceEvidence(['NSE:BEL'],{quotes:[quote]},NaN),/validation time is unavailable/);
+});
+
+test('Stage 5 researches exact listings when BEL has no usable broker anchor', async () => {
+  const instrument = 'BSE:BEL';
+  for (const patch of [{as_of:new Date(now-900001).toISOString()}, {price:0}, {as_of:'invalid'}]) {
+    const result = {quotes:[{...quote,instrument,...patch}, quote],missing:[]};
+    const prompt = await exports.resolveTechnicalPriceEvidence([instrument,quote.instrument],async()=>result,now);
+    assert.match(prompt,/internet_research_no_broker_quotes/);
+    assert.match(prompt,/BSE:BEL/);
+    assert.doesNotMatch(prompt,/TECHNICAL_PRICE_ANCHORS_V1/);
+    await assert.rejects(exports.resolveTechnicalPriceEvidence([instrument,'BSE:OTHER'],async()=>result,now),/Missing or ambiguous/);
+  }
+  const future = {...quote,instrument,as_of:new Date(now+60001).toISOString()};
+  await assert.rejects(exports.resolveTechnicalPriceEvidence([instrument],async()=>({quotes:[future],missing:[]}),now),/Future-dated/);
 });
