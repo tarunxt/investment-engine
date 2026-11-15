@@ -1,6 +1,8 @@
+import type { SwingTradeMarket } from "@/lib/swingTrade";
 import { inputReadiness } from "@/lib/rebalanceReadiness";
 
 type Props = {
+  market: SwingTradeMarket;
   loading: boolean;
   error: string | null;
   portfolio: { holdings: unknown[] } | null;
@@ -9,7 +11,7 @@ type Props = {
   blockedReason: string | null;
 };
 
-export function RebalanceReadiness({ loading, error, portfolio, threats, selectedSwingCount, blockedReason }: Props) {
+export function RebalanceReadiness({ market, loading, error, portfolio, threats, selectedSwingCount, blockedReason }: Props) {
   const rows = [
     { name: "Portfolio", state: inputReadiness(loading, error, Boolean(portfolio?.holdings.length)), detail: "Latest holdings snapshot" },
     { name: "Swing", state: inputReadiness(loading, error, selectedSwingCount > 0), detail: `${selectedSwingCount} selected model outputs (may be historical)` },
@@ -27,7 +29,7 @@ export function RebalanceReadiness({ loading, error, portfolio, threats, selecte
         ))}
       </ul>
       <p className="mt-3 font-medium" role="status">{blockedReason ? `Execution blocked: ${blockedReason}` : "Execution may proceed under the current input rules."}</p>
-      <p className="mt-1 text-xs text-gray-600">Swing and Threats context is not required by the existing input rules. Checklist states describe saved context; the execution message reflects submission checks. US holdings must pass the existing snapshot validation. Model selection and prompt checks still apply; queued jobs remain subject to server validation.</p>
+      <p className="mt-1 text-xs text-gray-600">Swing and Threats context is not required by the existing input rules. Checklist states describe saved context; the execution message reflects submission checks. {market === "us" ? "US holdings must pass the existing snapshot validation." : "India holdings, when supplied, must pass the existing numeric-exposure checks. A missing India snapshot is allowed by the current input rules."} Model selection and prompt checks still apply; queued jobs remain subject to server validation.</p>
       <p className="mt-1 text-xs text-gray-600">An unknown model estimate is not a verified zero and does not change execution eligibility. A reported ₹0.00 estimate does not confirm a free run.</p>
     </section>
   );

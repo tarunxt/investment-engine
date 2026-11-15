@@ -130,14 +130,14 @@ def test_provider_snapshot_replaces_incomplete_job_estimate_for_same_day():
     assert rows == snapshot
 
 
-def test_durable_provider_calls_replace_jobs_after_ledger_rollout():
+def test_legacy_source_precedence_does_not_make_tariff_estimate_actual():
     local = [_usage_row(day=5, source="job", requests=1, tokens_in=100, cost=0.01)]
     calls = [_usage_row(day=5, source="provider_ledger", requests=1, tokens_in=500, cost=0.05)]
 
     rows = _effective_usage_rows(local, calls, [])
 
     assert rows == calls
-    assert rows[0]["measurement"] == "actual"
+    assert rows[0]["measurement"] == "estimated"
 
 
 def test_rollout_day_keeps_job_estimate_until_full_day_ledger_exists():

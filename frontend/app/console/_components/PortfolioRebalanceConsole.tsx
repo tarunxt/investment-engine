@@ -252,7 +252,7 @@ function RebalanceInputBox({
   market: SwingTradeMarket;
   basePrompt: string;
 }) {
-  const { setPrompt, setOutputSourceSelection, prompt, selectedTargets, submitting } = useDashboard();
+  const { setPrompt, setOutputSourceSelection, prompt, hasUnsavedPromptDraft, selectedTargets, submitting } = useDashboard();
   const [portfolioSnapshot, setPortfolioSnapshot] =
     useState<PortfolioSnapshot>(null);
   const [threatAnalysis, setThreatAnalysis] = useState<ThreatAnalysis>(null);
@@ -368,6 +368,7 @@ function RebalanceInputBox({
 
   useEffect(() => {
     if (inputError) return;
+    if (hasUnsavedPromptDraft) return;
     const nextPrompt = composePrompt(basePrompt, promptInputBundle);
     setPrompt((current) => {
       if (
@@ -380,7 +381,7 @@ function RebalanceInputBox({
       }
       return current;
     });
-  }, [basePrompt, inputError, promptInputBundle, setPrompt]);
+  }, [basePrompt, inputError, promptInputBundle, setPrompt, hasUnsavedPromptDraft]);
 
   const inputCount = promptInputBundle.length.toLocaleString("en-IN");
   const inputSections = useMemo(
@@ -492,6 +493,7 @@ function RebalanceInputBox({
   return (
     <>
     <RebalanceReadiness
+      market={market}
       loading={loading} error={error}
       portfolio={portfolioSnapshot} threats={threatAnalysis}
       selectedSwingCount={selectedSwingRuns.reduce((count, run) => count + run.run_jobs.filter((link) => Boolean(link.job.response?.trim())).length, 0)}
