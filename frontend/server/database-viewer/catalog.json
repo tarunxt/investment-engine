@@ -1,0 +1,268 @@
+{
+  "version": 1,
+  "schema": "credx_viewer",
+  "relations": [
+    {
+      "relation": "runs",
+      "source_model": "Run",
+      "source_path": "backend/app/domains/runs/models.py",
+      "columns": [
+        "id",
+        "status",
+        "current_stage",
+        "auto_rebalance_portfolio",
+        "auto_rebalance_sequence",
+        "created_at",
+        "updated_at"
+      ],
+      "key": "id",
+      "ownership": "t.user_id = {owner_id}",
+      "policy_columns": [
+        "user_id"
+      ]
+    },
+    {
+      "relation": "jobs",
+      "source_model": "Job",
+      "source_path": "backend/app/domains/jobs/models.py",
+      "columns": [
+        "id",
+        "provider",
+        "model",
+        "status",
+        "tokens_in",
+        "tokens_out",
+        "estimated_cost",
+        "web_search_used",
+        "scheduled_at",
+        "created_at",
+        "updated_at"
+      ],
+      "key": "id",
+      "ownership": "t.user_id = {owner_id}",
+      "policy_columns": [
+        "user_id"
+      ]
+    },
+    {
+      "relation": "run_jobs",
+      "source_model": "RunJob",
+      "source_path": "backend/app/domains/runs/models.py",
+      "columns": [
+        "id",
+        "run_id",
+        "job_id",
+        "stage",
+        "created_at",
+        "updated_at"
+      ],
+      "key": "id",
+      "ownership": "EXISTS (SELECT 1 FROM public.runs r WHERE r.id = t.run_id AND r.user_id = {owner_id}) AND EXISTS (SELECT 1 FROM public.jobs j WHERE j.id = t.job_id AND j.user_id = {owner_id})",
+      "policy_columns": [
+        "run_id",
+        "job_id"
+      ]
+    },
+    {
+      "relation": "prompts",
+      "source_model": "Prompt",
+      "source_path": "backend/app/domains/prompts/models.py",
+      "columns": [
+        "id",
+        "version",
+        "is_system",
+        "is_active",
+        "created_at",
+        "updated_at"
+      ],
+      "key": "id",
+      "ownership": "t.user_id = {owner_id} AND t.is_system = false",
+      "policy_columns": [
+        "user_id",
+        "is_system"
+      ]
+    },
+    {
+      "relation": "auto_rebalance_workflows",
+      "source_model": "AutoRebalanceWorkflow",
+      "source_path": "backend/app/domains/runs/models.py",
+      "columns": [
+        "id",
+        "portfolio",
+        "sequence",
+        "status",
+        "current_stage",
+        "completed_at",
+        "created_at",
+        "updated_at"
+      ],
+      "key": "id",
+      "ownership": "t.user_id = {owner_id}",
+      "policy_columns": [
+        "user_id"
+      ]
+    },
+    {
+      "relation": "auto_rebalance_workflow_stages",
+      "source_model": "AutoRebalanceWorkflowStage",
+      "source_path": "backend/app/domains/runs/models.py",
+      "columns": [
+        "id",
+        "workflow_id",
+        "stage",
+        "status",
+        "started_at",
+        "completed_at",
+        "created_at",
+        "updated_at"
+      ],
+      "key": "id",
+      "ownership": "EXISTS (SELECT 1 FROM public.auto_rebalance_workflows w WHERE w.id = t.workflow_id AND w.user_id = {owner_id}) AND (t.run_id IS NULL OR EXISTS (SELECT 1 FROM public.runs r WHERE r.id = t.run_id AND r.user_id = {owner_id})) AND (t.job_id IS NULL OR EXISTS (SELECT 1 FROM public.jobs j WHERE j.id = t.job_id AND j.user_id = {owner_id}))",
+      "policy_columns": [
+        "workflow_id",
+        "run_id",
+        "job_id"
+      ]
+    },
+    {
+      "relation": "final_actionable_history",
+      "source_model": "FinalActionableHistory",
+      "source_path": "backend/app/domains/runs/models.py",
+      "columns": [
+        "id",
+        "market",
+        "stock_symbol",
+        "stock_name",
+        "covered_at",
+        "action",
+        "score",
+        "consensus_numerator",
+        "consensus_denominator",
+        "historical_current_units",
+        "historical_current_value",
+        "action_units",
+        "amount",
+        "formula_version",
+        "coverage_status",
+        "created_at",
+        "updated_at"
+      ],
+      "key": "id",
+      "ownership": "t.user_id = {owner_id} AND EXISTS (SELECT 1 FROM public.runs r WHERE r.id = t.rebalance_run_id AND r.user_id = {owner_id}) AND (t.workflow_id IS NULL OR EXISTS (SELECT 1 FROM public.auto_rebalance_workflows w WHERE w.id = t.workflow_id AND w.user_id = {owner_id})) AND (t.technical_scan_run_id IS NULL OR EXISTS (SELECT 1 FROM public.runs r WHERE r.id = t.technical_scan_run_id AND r.user_id = {owner_id}))",
+      "policy_columns": [
+        "user_id",
+        "rebalance_run_id",
+        "workflow_id",
+        "technical_scan_run_id"
+      ]
+    },
+    {
+      "relation": "zerodha_portfolio_snapshots",
+      "source_model": "ZerodhaPortfolioSnapshot",
+      "source_path": "backend/app/domains/zerodha/models.py",
+      "columns": [
+        "id",
+        "snapshot_date",
+        "captured_at",
+        "source",
+        "holdings_count",
+        "net_positions_count",
+        "day_positions_count",
+        "holdings_market_value",
+        "holdings_pnl",
+        "holdings_day_change_value",
+        "available_margin",
+        "positions_pnl",
+        "positions_m2m",
+        "holdings_invested_value",
+        "created_at",
+        "updated_at"
+      ],
+      "key": "id",
+      "ownership": "t.user_id = {owner_id}",
+      "policy_columns": [
+        "user_id"
+      ]
+    },
+    {
+      "relation": "indmoney_us_portfolio_snapshots",
+      "source_model": "IndMoneyUsPortfolioSnapshot",
+      "source_path": "backend/app/domains/indmoney_us/models.py",
+      "columns": [
+        "id",
+        "snapshot_date",
+        "captured_at",
+        "source",
+        "parse_status",
+        "holdings_count",
+        "reported_holdings_count",
+        "indices_count",
+        "wallet_balance",
+        "current_value",
+        "invested_value",
+        "day_return_value",
+        "day_return_percent",
+        "total_return_value",
+        "total_return_percent",
+        "created_at",
+        "updated_at"
+      ],
+      "key": "id",
+      "ownership": "t.user_id = {owner_id}",
+      "policy_columns": [
+        "user_id"
+      ]
+    },
+    {
+      "relation": "llm_provider_usage_calls",
+      "source_model": "LlmProviderUsageCallRecord",
+      "source_path": "backend/app/domains/api_usage/models.py",
+      "columns": [
+        "id",
+        "provider",
+        "model",
+        "occurred_at",
+        "tokens_in",
+        "tokens_out",
+        "cache_hit_tokens",
+        "cache_miss_tokens",
+        "actual_cost",
+        "created_at",
+        "updated_at"
+      ],
+      "key": "id",
+      "ownership": "t.user_id = {owner_id} AND (t.job_id IS NULL OR EXISTS (SELECT 1 FROM public.jobs j WHERE j.id = t.job_id AND j.user_id = {owner_id}))",
+      "policy_columns": [
+        "user_id",
+        "job_id"
+      ]
+    },
+    {
+      "relation": "llm_provider_usage_daily_snapshots",
+      "source_model": "LlmProviderUsageDailySnapshot",
+      "source_path": "backend/app/domains/api_usage/models.py",
+      "columns": [
+        "id",
+        "provider",
+        "model",
+        "usage_date",
+        "timezone",
+        "requests",
+        "tokens_in",
+        "tokens_out",
+        "cache_hit_tokens",
+        "cache_miss_tokens",
+        "actual_cost",
+        "source",
+        "captured_at",
+        "created_at",
+        "updated_at"
+      ],
+      "key": "id",
+      "ownership": "t.user_id = {owner_id}",
+      "policy_columns": [
+        "user_id"
+      ]
+    }
+  ]
+}

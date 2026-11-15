@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { fetchDatabaseViewerSocket } from "./databaseViewerSocket.ts";
 
 const hopHeaders = ["connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailer", "transfer-encoding", "upgrade"];
 
@@ -20,18 +21,17 @@ export function databaseFailurePage(reference: string) {
   </style></head><body><main aria-labelledby="title"><h1 id="title" tabindex="-1">Database is unavailable</h1><p>We couldn’t load the Database viewer. Its data could not be checked. This does not mean the database is empty.</p><p>Try again. If the problem continues, share the support reference below with your support contact.</p><nav aria-label="Recovery actions"><a href="/database">Retry Database</a><a href="/console/dashboard">Back to console</a></nav><small>Support reference: ${safeReference}</small></main></body></html>`;
 }
 
-export async function proxyDatabaseDestination(request: Request, fetcher: typeof fetch = fetch) {
+export async function proxyDatabaseDestination(request: Request, fetcher: typeof fetch = fetchDatabaseViewerSocket) {
   const reference = `DB-${randomUUID()}`;
-  const origin = (process.env.DATABASE_VIEWER_INTERNAL_URL || "http://127.0.0.1:8080").replace(/\/+$/, "");
+  // Virtual URL only: transport is always the private Unix socket.
+  const origin = "http://viewer.invalid";
   // Application credentials and identity headers never cross into the viewer.
   const headers = new Headers();
   for (const name of ['accept', 'accept-language']) {
     const value = request.headers.get(name);
     if (value) headers.set(name, value);
   }
-  if (!headers.has("x-forwarded-host")) headers.set("x-forwarded-host", new URL(request.url).host);
-  if (!headers.has("x-forwarded-proto")) headers.set("x-forwarded-proto", new URL(request.url).protocol.replace(":", ""));
-  // Match the existing rewrite: viewer authentication remains upstream-owned.
+  // Application authentication has already been verified by the protected handler.
   const readOnly = request.method === "GET" || request.method === "HEAD";
   try {
     const destination = new URL(origin);
