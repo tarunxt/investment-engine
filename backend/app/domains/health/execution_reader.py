@@ -74,6 +74,8 @@ def _epoch(value):
 def _unknown():
     result = summarize_durable([], now=0)
     result["read_state"] = "unavailable"
+    result["sample_size"] = None
+    result["sample_counts"] = dict.fromkeys(result["sample_counts"])
     return result
 
 
