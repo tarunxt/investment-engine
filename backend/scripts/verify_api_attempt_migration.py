@@ -87,7 +87,7 @@ def baseline_snapshot(engine: sa.Engine, *, exclude_tables=frozenset({EVENT_TABL
             table = sa.Table(name, sa.MetaData(), autoload_with=connection)
             snapshot[name] = {
                 "columns": [
-                    (column["name"], str(column["type"]), column["nullable"], column["default"])
+                    (column["name"], column["type"].compile(dialect=engine.dialect), column["nullable"], column["default"])
                     for column in inspector.get_columns(name)
                 ],
                 "indexes": inspector.get_indexes(name),
@@ -104,7 +104,7 @@ def baseline_snapshot(engine: sa.Engine, *, exclude_tables=frozenset({EVENT_TABL
 
 
 def verify_forward_baseline(before: dict, after: dict) -> None:
-    """Permit only the registered nullable policy addition; preserve old facts."""
+    """Permit exact registered additive policy/dispatch changes; preserve old facts."""
     observed = deepcopy(after)
     workflow = observed.get("auto_rebalance_workflows")
     prior = before.get("auto_rebalance_workflows")
@@ -120,12 +120,64 @@ def verify_forward_baseline(before: dict, after: dict) -> None:
             require(policy[0] in row and row.pop(policy[0]) is None, "Forward policy changed legacy row defaults")
             rows.append(json.dumps(row, sort_keys=True, default=str))
         workflow["rows"] = sorted(rows)
+    outbox = observed.get("outbox")
+    prior_outbox = before.get("outbox")
+    if outbox is not None and prior_outbox is not None:
+        additions = [
+            ("job_id", "INTEGER", True, None),
+            ("state", "VARCHAR(32)", True, None),
+            ("claim_token", "VARCHAR(36)", True, None),
+            ("next_attempt_at", "TIMESTAMP WITH TIME ZONE", True, None),
+            ("last_error_type", "VARCHAR(100)", True, None),
+        ]
+        for column in additions:
+            require(not any(c[0] == column[0] for c in prior_outbox["columns"]),
+                    "Baseline unexpectedly contains A11 dispatch column")
+            require([c for c in outbox["columns"] if c[0] == column[0]] == [column],
+                    "Forward dispatch column contract changed")
+            outbox["columns"].remove(column)
+        rows = []
+        for raw in outbox["rows"]:
+            row = json.loads(raw)
+            for column in additions:
+                require(column[0] in row and row.pop(column[0]) is None,
+                        "Forward dispatch changed legacy row defaults")
+            rows.append(json.dumps(row, sort_keys=True, default=str))
+        outbox["rows"] = sorted(rows)
+
+        def remove_exact(category, expected):
+            matches = [item for item in outbox[category] if item.get("name") == expected["name"]]
+            require(len(matches) == 1, "Missing or duplicated A11 dispatch constraint/index")
+            item = deepcopy(matches[0])
+            # SQLAlchemy versions differ only in reporting these default metadata
+            # fields. Validate their exact benign values, never ignore options.
+            if "comment" in item:
+                require(item.pop("comment") is None, "Unexpected dispatch comment")
+            if "include_columns" in item:
+                require(item.pop("include_columns") == [], "Unexpected covering columns")
+            options = item.pop("dialect_options", {})
+            require(all((key == "postgresql_include" and value == []) or
+                        (key == "postgresql_nulls_not_distinct" and value is False)
+                        for key, value in options.items()), "Unexpected dispatch index options")
+            require(item == expected, "Forward dispatch constraint/index contract changed")
+            require(not any(old.get("name") == expected["name"] for old in prior_outbox[category]),
+                    "Baseline unexpectedly contains A11 dispatch constraint/index")
+            outbox[category].remove(matches[0])
+
+        remove_exact("foreign_keys", {
+            "name": "fk_outbox_job_id", "constrained_columns": ["job_id"],
+            "referred_schema": None, "referred_table": "jobs", "referred_columns": ["id"], "options": {},
+        })
+        remove_exact("unique", {"name": "uq_outbox_job_id", "column_names": ["job_id"]})
+        remove_exact("indexes", {"name": "ix_outbox_state", "unique": False, "column_names": ["state"]})
+        remove_exact("indexes", {"name": "uq_outbox_job_id", "unique": True,
+                                 "column_names": ["job_id"], "duplicates_constraint": "uq_outbox_job_id"})
     require(observed == before, "Forward head upgrade changed existing schema/data")
 
 
 def seed_baseline(engine: sa.Engine) -> None:
     metadata = sa.MetaData()
-    metadata.reflect(engine, only=["users", "jobs", "universal_scan_settings", "universal_scan_states"])
+    metadata.reflect(engine, only=["users", "jobs", "outbox", "universal_scan_settings", "universal_scan_states"])
     now = datetime.now(UTC).replace(tzinfo=None)
     with engine.begin() as connection:
         connection.execute(metadata.tables["users"].insert().values(
@@ -137,6 +189,10 @@ def seed_baseline(engine: sa.Engine) -> None:
             id=1, user_id=1, prompt="Synthetic migration fixture; never executed",
             provider="synthetic", model="synthetic", status="completed",
             created_at=now, updated_at=now,
+        ))
+        connection.execute(metadata.tables["outbox"].insert().values(
+            id=uuid4(), topic="historical.synthetic", payload={"preserve": "legacy evidence"},
+            created_at=now, published_at=None, attempts=0,
         ))
         for name in ("universal_scan_settings", "universal_scan_states"):
             connection.execute(metadata.tables[name].insert().values(

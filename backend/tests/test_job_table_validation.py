@@ -1,6 +1,10 @@
 import os
 import unittest
-from types import SimpleNamespace
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
+from app.domains.jobs.models import Job
+from app.domains.jobs.repository import SyncJobRepository
 from unittest.mock import MagicMock, patch
 
 os.environ.setdefault(
@@ -14,59 +18,27 @@ from app.domains.jobs import tasks
 from app.shared.types import JobStatus
 
 
-class FakeDB:
-    def __init__(self):
-        self.rolled_back = False
-        self.closed = False
-
-    def rollback(self):
-        self.rolled_back = True
-
-    def close(self):
-        self.closed = True
-
-
-class FakeRepo:
-    def __init__(self, job):
-        self.job = job
-
-    def get(self, _job_id: int):
-        return self.job
-
-    def update_status(
-        self,
-        job,
-        status,
-        *,
-        response=None,
-        error_message=None,
-        tokens_in=None,
-        tokens_out=None,
-        estimated_cost=None,
-        web_search_used=None,
-        web_search_queries=None,
-        web_sources=None,
-    ):
-        job.status = status
-        if response is not None:
-            job.response = response
-        if error_message is not None:
-            job.error_message = error_message
-        if tokens_in is not None:
-            job.tokens_in = tokens_in
-        if tokens_out is not None:
-            job.tokens_out = tokens_out
-        if estimated_cost is not None:
-            job.estimated_cost = estimated_cost
-        if web_search_used is not None:
-            job.web_search_used = web_search_used
-        if web_search_queries is not None:
-            job.web_search_queries = web_search_queries
-        if web_sources is not None:
-            job.web_sources = web_sources
-
-
 class ExecuteAIJobTableValidationTests(unittest.TestCase):
+    def prepare_fenced_job(self, job, sync_session_local_mock, sync_repo_cls_mock):
+        # Persist real claims and use fenced writes; only external adapters are mocked.
+        class TrackedSession(Session):
+            closed = False
+            def close(self):
+                self.closed = True
+                super().close()
+        engine = create_engine("sqlite://", poolclass=StaticPool,
+                               connect_args={"check_same_thread": False})
+        Job.__table__.create(engine)
+        sessions = sessionmaker(engine, class_=TrackedSession, expire_on_commit=False)
+        fake_db = sessions()
+        fake_db.add(job); fake_db.commit()
+        fake_repo = SyncJobRepository(fake_db)
+        first_session = [fake_db]
+        sync_session_local_mock.side_effect = lambda: first_session.pop() if first_session else sessions()
+        sync_repo_cls_mock.return_value = fake_repo
+        self.addCleanup(engine.dispose)
+        return fake_db, fake_repo
+
     @patch("app.domains.jobs.tasks._refresh_run_status")
     @patch("app.domains.jobs.tasks._publish_job_update")
     @patch("app.domains.google_sheets.stock_service.normalize_stock_rows")
@@ -84,7 +56,7 @@ class ExecuteAIJobTableValidationTests(unittest.TestCase):
         _publish_job_update_mock,
         _refresh_run_status_mock,
     ):
-        job = SimpleNamespace(
+        job = Job(
             id=68,
             prompt=(
                 "Return only one markdown table.\n"
@@ -99,11 +71,7 @@ class ExecuteAIJobTableValidationTests(unittest.TestCase):
             tokens_out=None,
             estimated_cost=None,
         )
-        fake_db = FakeDB()
-        fake_repo = FakeRepo(job)
-
-        sync_session_local_mock.return_value = fake_db
-        sync_repo_cls_mock.return_value = fake_repo
+        fake_db, fake_repo = self.prepare_fenced_job(job, sync_session_local_mock, sync_repo_cls_mock)
 
         provider = MagicMock()
         provider.generate.return_value = AIProviderResponse(
@@ -167,7 +135,7 @@ class ExecuteAIJobTableValidationTests(unittest.TestCase):
         _publish_job_update_mock,
         _refresh_run_status_mock,
     ):
-        job = SimpleNamespace(
+        job = Job(
             id=102,
             prompt=(
                 "Return only one markdown table.\n"
@@ -182,11 +150,7 @@ class ExecuteAIJobTableValidationTests(unittest.TestCase):
             tokens_out=None,
             estimated_cost=None,
         )
-        fake_db = FakeDB()
-        fake_repo = FakeRepo(job)
-
-        sync_session_local_mock.return_value = fake_db
-        sync_repo_cls_mock.return_value = fake_repo
+        fake_db, fake_repo = self.prepare_fenced_job(job, sync_session_local_mock, sync_repo_cls_mock)
 
         provider = MagicMock()
         provider.generate.side_effect = [
@@ -247,7 +211,7 @@ class ExecuteAIJobTableValidationTests(unittest.TestCase):
         _publish_job_update_mock,
         _refresh_run_status_mock,
     ):
-        job = SimpleNamespace(
+        job = Job(
             id=1021,
             prompt=(
                 "Return only one markdown table.\n"
@@ -262,11 +226,7 @@ class ExecuteAIJobTableValidationTests(unittest.TestCase):
             tokens_out=None,
             estimated_cost=None,
         )
-        fake_db = FakeDB()
-        fake_repo = FakeRepo(job)
-
-        sync_session_local_mock.return_value = fake_db
-        sync_repo_cls_mock.return_value = fake_repo
+        fake_db, fake_repo = self.prepare_fenced_job(job, sync_session_local_mock, sync_repo_cls_mock)
 
         provider = MagicMock()
         provider.generate.side_effect = [
@@ -339,7 +299,7 @@ class ExecuteAIJobTableValidationTests(unittest.TestCase):
         _publish_job_update_mock,
         _refresh_run_status_mock,
     ):
-        job = SimpleNamespace(
+        job = Job(
             id=103,
             prompt=(
                 "Return only one markdown table.\n"
@@ -354,11 +314,7 @@ class ExecuteAIJobTableValidationTests(unittest.TestCase):
             tokens_out=None,
             estimated_cost=None,
         )
-        fake_db = FakeDB()
-        fake_repo = FakeRepo(job)
-
-        sync_session_local_mock.return_value = fake_db
-        sync_repo_cls_mock.return_value = fake_repo
+        fake_db, fake_repo = self.prepare_fenced_job(job, sync_session_local_mock, sync_repo_cls_mock)
 
         provider = MagicMock()
         provider.generate.side_effect = [
@@ -422,7 +378,7 @@ class ExecuteAIJobTableValidationTests(unittest.TestCase):
         _publish_job_update_mock,
         _refresh_run_status_mock,
     ):
-        job = SimpleNamespace(
+        job = Job(
             id=294,
             prompt=(
                 "Return only one markdown table.\n"
@@ -437,11 +393,7 @@ class ExecuteAIJobTableValidationTests(unittest.TestCase):
             tokens_out=None,
             estimated_cost=None,
         )
-        fake_db = FakeDB()
-        fake_repo = FakeRepo(job)
-
-        sync_session_local_mock.return_value = fake_db
-        sync_repo_cls_mock.return_value = fake_repo
+        fake_db, fake_repo = self.prepare_fenced_job(job, sync_session_local_mock, sync_repo_cls_mock)
 
         provider = MagicMock()
         provider.generate.return_value = AIProviderResponse(
@@ -485,7 +437,7 @@ class ExecuteAIJobTableValidationTests(unittest.TestCase):
         _publish_job_update_mock,
         _refresh_run_status_mock,
     ):
-        job = SimpleNamespace(
+        job = Job(
             id=401,
             prompt=(
                 "[INDMONEY_US_EVENTS]\n"
@@ -502,11 +454,7 @@ class ExecuteAIJobTableValidationTests(unittest.TestCase):
             tokens_out=None,
             estimated_cost=None,
         )
-        fake_db = FakeDB()
-        fake_repo = FakeRepo(job)
-
-        sync_session_local_mock.return_value = fake_db
-        sync_repo_cls_mock.return_value = fake_repo
+        fake_db, fake_repo = self.prepare_fenced_job(job, sync_session_local_mock, sync_repo_cls_mock)
 
         provider = MagicMock()
         provider.generate.side_effect = [
@@ -567,7 +515,7 @@ class ExecuteAIJobTableValidationTests(unittest.TestCase):
         _publish_job_update_mock,
         _refresh_run_status_mock,
     ):
-        job = SimpleNamespace(
+        job = Job(
             id=902,
             prompt=(
                 "[REBALANCE_FLOW:india]\n"
@@ -584,11 +532,7 @@ class ExecuteAIJobTableValidationTests(unittest.TestCase):
             tokens_out=None,
             estimated_cost=None,
         )
-        fake_db = FakeDB()
-        fake_repo = FakeRepo(job)
-
-        sync_session_local_mock.return_value = fake_db
-        sync_repo_cls_mock.return_value = fake_repo
+        fake_db, fake_repo = self.prepare_fenced_job(job, sync_session_local_mock, sync_repo_cls_mock)
 
         provider = MagicMock()
         provider.generate.side_effect = [
@@ -645,7 +589,7 @@ class ExecuteAIJobTableValidationTests(unittest.TestCase):
         _publish_job_update_mock,
         _refresh_run_status_mock,
     ):
-        job = SimpleNamespace(
+        job = Job(
             id=903,
             prompt=(
                 "[REBALANCE_FLOW:india]\n"
@@ -668,11 +612,7 @@ class ExecuteAIJobTableValidationTests(unittest.TestCase):
             tokens_out=None,
             estimated_cost=None,
         )
-        fake_db = FakeDB()
-        fake_repo = FakeRepo(job)
-
-        sync_session_local_mock.return_value = fake_db
-        sync_repo_cls_mock.return_value = fake_repo
+        fake_db, fake_repo = self.prepare_fenced_job(job, sync_session_local_mock, sync_repo_cls_mock)
 
         partial_response = (
             "## 01 Jun 2026 | Recommended Rebalance | Aggressive Swing Portfolio | Generated by Gemini\n"
@@ -734,7 +674,7 @@ class ExecuteAIJobTableValidationTests(unittest.TestCase):
         _publish_job_update_mock,
         _refresh_run_status_mock,
     ):
-        job = SimpleNamespace(
+        job = Job(
             id=904,
             prompt=(
                 "[REBALANCE_FLOW:india]\n"
@@ -751,11 +691,7 @@ class ExecuteAIJobTableValidationTests(unittest.TestCase):
             tokens_out=None,
             estimated_cost=None,
         )
-        fake_db = FakeDB()
-        fake_repo = FakeRepo(job)
-
-        sync_session_local_mock.return_value = fake_db
-        sync_repo_cls_mock.return_value = fake_repo
+        fake_db, fake_repo = self.prepare_fenced_job(job, sync_session_local_mock, sync_repo_cls_mock)
 
         malformed_response = (
             "| Exchange Symbol | Stock Symbol | Current Units | Action (Buy/Add/Sell All/Trim/Hold/Buy New) | Units Change | Final Units | Technical Setup |\n"
