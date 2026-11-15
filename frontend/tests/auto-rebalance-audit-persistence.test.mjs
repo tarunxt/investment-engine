@@ -110,7 +110,9 @@ function harness({ analysisOnly = false, formulaScore = 0, intercept, read, emai
     createRun: async (payload) => { modelCalls.push(payload); return { id: modelCalls.length }; },
   };
   const bindings = {
-    runtimeOwner: {}, isCurrentWorkflowOwner: () => true,
+    runtimeOwner: { id: 7 }, isCurrentWorkflowOwner: () => true, requireWorkflowOwner: owner => owner,
+    actionablesActivityKey: helperModule.exports.actionablesActivityKey, announceActionablesActivity: helperModule.exports.announceActionablesActivity,
+    savedStageReadGeneration: {current:0}, setWorkflowHistoryError: set("historyError"),
     readLatestIndmoneySnapshot: () => apiService.indmoneyUsPortfolioOverview(),
     readIndmoneySnapshotSource, useCallback: (fn) => fn, technicalInputPlanIssue, AutoRebalanceAuditSession, assertAutoRebalanceRunMetadata, autoRebalanceAuditKey, assertIndmoneyHoldingsSnapshot,
     activeAutoRebalanceMetadataRef: active, auditSessionsRef: sessions,
@@ -353,7 +355,7 @@ test("actual workflow card renders pending and failed history independently of o
       URLs: { routes: { console: { autoRebalanceRuns: () => "/console/auto-rebalance-runs?portfolio=zerodha" } } },
       formatTimestamp: () => "03 Oct", formatCompactStageTime: () => "03 Oct 00:00", lastRunByPortfolio: { zerodha: null }, isBusy: false, STAGE_ORDER: stages, now: 0,
       WorkflowStageTile: ({ stage }) => createElement("button", null, `View output ${stage}`),
-      stageLedger: false, ledgerView: "ledger",
+      stageLedger: false, ledgerView: "ledger", surface: undefined,
       WorkflowStageLedger: ({ children }) => createElement("div", null, children),
       RebalanceStockFlowTrigger: () => null, getWorkflowRunDuration: () => null,
       getWorkflowRunCost: () => 0, formatInrCost: () => "0", usdInrRate: 1, lastAutoRebalanceCosts: { zerodha: 0 },
@@ -544,9 +546,23 @@ for (const analysisOnly of [false, true]) {
     assert.deepEqual(reservations, [{ portfolio: "zerodha", flag: analysisOnly }]);
   });
 }
-test("stale India quotes stop the actual workflow before Technical job creation and final acceptance", async () => {
+test("stale India quotes start unanchored Technical research with the exact listing and reason", async () => {
   const h = harness({quoteRead: async instruments => ({
     quotes: instruments.map(instrument => ({instrument,price:100,as_of:'2000-01-01T00:00:00Z',source:'synthetic stale fixture'})),
+    missing:[],
+  })});
+  await h.runWorkflow("zerodha");
+  const technicalCalls = h.modelCalls.filter(call => call.scanLabel === "Technical Scan");
+  assert.equal(technicalCalls.length, 1);
+  assert.match(technicalCalls[0].prompt, /\[TECHNICAL_PRICE_MODE_V1\]internet_research_no_broker_quotes\[\/TECHNICAL_PRICE_MODE_V1\]/);
+  assert.match(technicalCalls[0].prompt, /NSE:TEST \(stale quote\)/);
+  assert.doesNotMatch(technicalCalls[0].prompt, /\[TECHNICAL_PRICE_ANCHORS_V1\]/);
+});
+
+test("future-dated India quotes stop the actual workflow before Technical job creation and final acceptance", async () => {
+  const futureQuote = new Date(Date.now() + 10 * 60_000).toISOString();
+  const h = harness({quoteRead: async instruments => ({
+    quotes: instruments.map(instrument => ({instrument, price:100, as_of:futureQuote, source:'synthetic future fixture'})),
     missing:[],
   })});
   await h.runWorkflow("zerodha");
@@ -555,6 +571,7 @@ test("stale India quotes stop the actual workflow before Technical job creation 
   assert.notEqual(h.view.states.zerodha.actionables.state,"completed");
   assert.equal(h.emails.length,0);
   assert.equal(h.durable.get("india:42:technical").status,"failed");
+  assert.equal(h.durable.get("india:42:actionables")?.summary?.frozen_final, undefined);
 });
 for (const rawScore of [3.033333333333333, -3.033333333333333, 0, null]) {
   test(`actual workflow freezes explicit v2 raw/effective evidence for ${rawScore}`, async () => {
@@ -570,3 +587,26 @@ for (const rawScore of [3.033333333333333, -3.033333333333333, 0, null]) {
     assert.equal(frozen.rows[0].scorePolicy, frozen.scorePolicy);
   });
 }
+
+test('actual selective workflow clears cached evidence before each reservation acknowledgement', async () => {
+  let gate=deferred();
+  const h=harness({selection:['swing'],reserve:()=>gate.promise});
+  for(let iteration=0;iteration<2;iteration++) {
+    const stale={state:'failed',error:'Previous run failure',errorDetails:[{message:'Previous detail'}],lastRunId:900,completedAt:'2026-10-01T00:00:00Z',recommendedStocks:99,evidence:{kind:'saved',references:['Old run']}};
+    for(const stage of stages)h.view.states.zerodha[stage]=structuredClone(stale);
+    const running=h.runWorkflow('zerodha');
+    assert.equal(h.view.running,'zerodha');
+    assert.equal(h.modelCalls.length,iteration,'reservation is still pending');
+    for(const stage of stages) {
+      const info=h.view.states.zerodha[stage];
+      for(const field of ['errorDetails','lastRunId','completedAt','recommendedStocks','evidence'])assert.equal(info[field],undefined,`${stage}.${field}`);
+      assert.notEqual(info.error,'Previous run failure');
+    }
+    gate.resolve(metadata('india',42+iteration));
+    await running;
+    assert.equal(h.view.running,null);
+    assert.equal(h.view.states.zerodha.swing.state,'completed');
+    assert.equal(h.modelCalls.length,iteration+1);
+    gate=deferred();
+  }
+});

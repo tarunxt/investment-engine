@@ -320,7 +320,7 @@ Inputs you will receive in this prompt:
 Capital / Portfolio Rules:
 - MANDATORY coverage: output exactly one decision row for EVERY stock currently present in the Latest Portfolio Snapshot, even if the decision is Hold. Never omit a current holding because it is weak, unchanged, small, low-conviction, or already discussed in threats.
 - Review existing holdings and decide whether each one is Hold, Buy/Add, Trim, or Sell All.
-- Evaluate EVERY stock appearing in the attached swing-trade recommendation tables. If its exchange/symbol identity is already in the Latest Portfolio Snapshot, include it only in that holding's single Hold, Buy/Add, Trim, or Sell All decision; never label it Buy New or add a second row. For a US snapshot labeled US, a matching symbol at a known US venue is the same existing holding, not a fresh candidate.
+- Evaluate EVERY stock appearing in the attached swing-trade recommendation tables. If its exchange/symbol identity is already in the Latest Portfolio Snapshot, include it only in that holding's single Hold, Buy/Add, Trim, or Sell All decision; never label it Buy New or add a second row. For a US snapshot labeled US, a matching symbol at a known US venue is the same existing holding, not a fresh candidate. For a US snapshot, the Market column identifies the country only. Carry the listing exchange from the selected Swing output for the same security and share class into Exchange Symbol. If no selected output identifies its venue, verify the listing before assigning one. Never output US as an exchange or emit a second row for a market alias. Keep conflicting concrete listings distinct.
 - Consider Buy New only for candidates not already present in the Latest Portfolio Snapshot.
 - Include Buy New rows for the swing-trade candidates that are stronger than existing portfolio names after considering current portfolio concentration, threats, catalysts, momentum, and opportunity cost.
 - Output one decision row for EVERY exact exchange/symbol identity in the union of current holdings and ALL supplied Swing tables, including candidates not selected for fresh buy. Never omit a candidate.
@@ -383,7 +383,7 @@ Formatting Rules:
 - For Sell All, Units Change must equal negative Current Units and Final Units must be 0.
 - For Hold, Units Change must be 0 and Final Units must equal Current Units.
 - Do not include any stock unless it is from my current holdings or from the attached LLM recommendation tables.
-- Do not output a partial rebalance table. Missing any current holding is a hard failure.
+- Include every current holding when possible. If some rows cannot be completed, return all usable rows and identify the missing holdings. Never invent values for missing holdings.
 - Use only factual/current market intelligence available online and the provided LLM tables.
 - Use numeric-only values in cells for all numeric fields (no ${copy.currency}/% text in values).
 - Be decisive. Avoid vague comments.
@@ -481,7 +481,7 @@ function formatPortfolioSnapshot(
     ]);
     return `Snapshot date: ${usSnapshot.snapshot_date}; captured at: ${usSnapshot.captured_at}\n\n${asMarkdownTable(
       [
-        "Exchange",
+        "Market",
         "Stock Symbol",
         "Company Name",
         "Current Units",

@@ -94,7 +94,8 @@ test("dashboard cache is user-scoped and below-fold panels mount on visibility",
   assert.match(dashboard, /getDashboardSummary\(\)/);
   assert.doesNotMatch(dashboard, /useUsdInrRate/);
   assert.doesNotMatch(dashboard, /RebalanceWorkflowSections/);
-  assert.match(dashboard, /automatedRebalance\(\)/);
+  assert.match(dashboard, /zerodha\(\)\}#india-workflow[^>]+>\s*Review India workflow\s*<\/Link>/);
+  assert.match(dashboard, /indmoneyUs\(\)\}#us-workflow[^>]+>\s*Review US workflow\s*<\/Link>/);
   assert.match(automatedRebalance, /RebalanceWorkflowSections/);
   assert.match(dashboard, /Start and monitor each market’s multi-stage workflow below its portfolio page/);
   assert.doesNotMatch(dashboard, /DashboardFinalActionablesTables/);

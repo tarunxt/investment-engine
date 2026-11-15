@@ -93,3 +93,32 @@ async def test_running_sources_fail_before_arithmetic(audit_db, stored_capture):
     with pytest.raises(HTTPException) as error:
         await write(audit_db, 'actionables', 'completed', summary={'frozen_final': stored_capture})
     assert (error.value.status_code, error.value.detail) == (409, 'Final source jobs must be terminal')
+
+
+@pytest.mark.anyio
+async def test_reconcile_exact_sources_twice(audit_db, stored_capture):
+    from test_auto_rebalance_audit_durability import OWNER, snapshot
+    from app.domains.runs.router import reconcile_auto_rebalance
+    async with audit_db.sessions() as db:
+        technical = await db.get(Run, 20)
+        technical.status = JobStatus.COMPLETED
+        technical.prompt += '\n[TECHNICAL_REBALANCE_SOURCES_V1]{"run_ids":[10],"job_ids":[11]}[/TECHNICAL_REBALANCE_SOURCES_V1]'
+        await db.commit()
+    for stage in ('sync', 'threats', 'swing'):
+        await write(audit_db, stage, 'skipped')
+    await write(audit_db, 'rebalance', 'partial', run_id=10)
+    await write(audit_db, 'technical', 'completed', run_id=20, summary={
+        'final_inputs': {key: stored_capture[key] for key in ('formula', 'rebalance_run_ids', 'response_hashes')}})
+    await write(audit_db, 'actionables', 'processing')
+    results = []
+    for _ in range(2):
+        async with audit_db.sessions() as db:
+            result = await reconcile_auto_rebalance('india', 42, db, OWNER)
+            results.append(result.summary['frozen_final'])
+            if len(results) == 1:
+                first_dispatch_count = audit_db.dispatch.call_count
+    assert results[0] == results[1]
+    assert results[0]['rows'][0]['rawScore'] == 74 / 24
+    workflow, count, _ = await snapshot(audit_db)
+    assert (workflow.status, count) == ('partial', 6)
+    assert audit_db.dispatch.call_count == first_dispatch_count

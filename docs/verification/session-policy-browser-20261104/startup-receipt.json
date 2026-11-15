@@ -1,0 +1,7 @@
+{
+  "actual_main_import": "PASS",
+  "missing_schema_startup": "PASS",
+  "full_startup": "BLOCKED",
+  "blocker_type": "BullpenRuntimeValidationError",
+  "blocker": "Bullpen runtime validation failed: BULLPEN_BIN is not executable: `/usr/local/bin/bullpen`; canonical Bullpen credential store is missing: `/home/investor/.bullpen`"
+}

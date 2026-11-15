@@ -65,7 +65,10 @@ export type StageTwoBypassDialogState = {
   steps: string[];
 };
 
+import { getStageOneDialogEvidence } from "./bullpenStageOneEvidence";
+
 export type ScanCandidateDialogState = {
+  evidence: ReturnType<typeof getStageOneDialogEvidence>;
   runId?: string | null;
   mode: ScanCandidateDialogMode;
   isIndependentStageOne: boolean;
@@ -2317,6 +2320,7 @@ export function buildRunDetailScanCandidateDialogState({
   mode: ScanCandidateDialogMode;
   activePositionsFallback?: WorkflowStageView["activePositionsFound"];
 }): ScanCandidateDialogState {
+  const evidence = getStageOneDialogEvidence(stage);
   const activePositionCounts = getStageActivePositionCounts(stage);
   const stageOneStats = getStageOneStats(stage);
   const retainedActivePositionRows =
@@ -2333,6 +2337,7 @@ export function buildRunDetailScanCandidateDialogState({
   const detailedRows =
     mode === "all-scanned" ? stage.scannedCandidates : stage.scanCandidates;
   const emptyRowsReason =
+    !evidence.scanKnown ? evidence.label :
     detailedRows.length > 0
       ? null
       : stage.state === "current"
@@ -2342,6 +2347,7 @@ export function buildRunDetailScanCandidateDialogState({
           : "No events were returned by the Stage 1 scan, so there are no event rows or per-event filter reasons to display.";
 
   return {
+    evidence,
     mode,
     runId: run?.id ?? null,
     isIndependentStageOne: stage.outputs.independent_stage1_scan === true,
@@ -2349,7 +2355,7 @@ export function buildRunDetailScanCandidateDialogState({
     scanCompletedAt: stage.timerCompletedAt,
     totalScanned: stageOneStats.totalScanned,
     passedFilterCount: stageOneStats.passedFilters,
-    rejectedFilterCount,
+    rejectedFilterCount: evidence.complete ? rejectedFilterCount : null,
     emptyRowsReason,
     candidates: buildScanCandidateDialogRows({
       candidates: detailedRows,

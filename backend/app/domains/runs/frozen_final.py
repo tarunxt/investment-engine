@@ -12,9 +12,12 @@ from .run_identity import analysis_run_identity
 from app.domains.jobs.models import Job
 
 
-async def validate_frozen_final(db, payload, *, user_id, portfolio, sequence, allow_legacy=False):
+async def validate_frozen_final(db, payload, *, user_id, portfolio, sequence, allow_legacy=False, rebuild=False):
     if not isinstance(payload, dict) or payload.get('schema') not in {'workflow-final-v1', 'workflow-final-v2'}:
         raise HTTPException(422, 'Unsupported frozen final schema')
+    if (payload.get('broker', portfolio) != portfolio
+            or payload.get('workflow_sequence', sequence) != sequence):
+        raise HTTPException(409, 'Frozen calculation belongs to another workflow')
     legacy = payload['schema'] == 'workflow-final-v1'
     if legacy and not allow_legacy:
         raise HTTPException(422, 'New final captures require workflow-final-v2 source recomputation')
@@ -99,6 +102,15 @@ async def validate_frozen_final(db, payload, *, user_id, portfolio, sequence, al
                 jobs_by_run[link.run_id].append(known_jobs[link.job_id])
         try:
             calculations = source_calculations(payload, sources=sources, jobs_by_run=jobs_by_run, market=market)
+            if rebuild:
+                from .final_reconciliation import materialize_rows
+                if manifest_data is None or not calculations:
+                    raise HTTPException(409, "Rebuild requires a saved Technical source manifest and verified listings")
+                payload.update(rows=materialize_rows(calculations), rebalance_run_id=rebalance_ids[0],
+                               input_listing_count=len(calculations), final_listing_count=len(calculations),
+                               excluded_non_buy_listings=[])
+                if len(calculations) > 500 or len(json.dumps(payload)) > 2_000_000:
+                    raise HTTPException(422, "Rebuilt final exceeds audit size limit")
             verify_recomputed_rows(payload, calculations, raw_field='rawScore', effective_field='effectiveScore')
         except (UnverifiableFinal, ArithmeticError) as exc:
             raise HTTPException(422, f'Final calculation could not be verified: {exc}') from exc

@@ -15,9 +15,14 @@ class IndMoneyUsPortfolioSnapshotCreateRequest(BaseModel):
         cleaned = value.strip()
         if not cleaned:
             raise ValueError("raw_text is required")
-        if len(cleaned) > 200_000:
+        if len(value) > 200_000:
             raise ValueError("raw_text is too large")
-        return cleaned
+        return value
+
+
+class LastPasteResponse(BaseModel):
+    raw_text: str
+    pasted_at: datetime
 
 
 class IndMoneyUsMarketIndex(BaseModel):
@@ -103,7 +108,7 @@ class IndMoneyUsCurrentPriceQuoteRequest(BaseModel):
         cleaned = value.strip().upper()
         if not cleaned:
             raise ValueError("value is required")
-        if len(cleaned) > 24:
+        if len(value) > 24:
             raise ValueError("value is too long")
         if not all(char.isalnum() or char in {".", "-", "_"} for char in cleaned):
             raise ValueError("value contains unsupported characters")

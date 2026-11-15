@@ -39,10 +39,12 @@ class MigrationSafetyTests(unittest.TestCase):
     @patch.object(Path, "is_file", return_value=True)
     def test_exact_test_environment_strips_inherited_credentials_and_overrides(self, *_):
         environment = self.environment()
-        environment.update(OPENAI_API_KEY="synthetic-forbidden-value", PGHOST="elsewhere.invalid", PGOPTIONS="unsafe", AWS_PROFILE="production")
+        environment.update(OPENAI_API_KEY="synthetic-forbidden-value", PGHOST="elsewhere.invalid", PGOPTIONS="unsafe", AWS_PROFILE="production",
+                           JWT_SIGNING_KEY="synthetic-inherited-key", JWT_SECRET="synthetic-alias", SECRET_KEY="synthetic-alias")
         clean = verifier.guarded_environment(environment)
         self.assertEqual(clean["DATABASE_URL"], verifier.TEST_DATABASE_URL)
-        for key in ("OPENAI_API_KEY", "PGHOST", "PGOPTIONS", "AWS_PROFILE"):
+        self.assertEqual(clean["JWT_SIGNING_KEY"], bytes(range(32)).hex())
+        for key in ("OPENAI_API_KEY", "PGHOST", "PGOPTIONS", "AWS_PROFILE", "JWT_SECRET", "SECRET_KEY"):
             self.assertNotIn(key, clean)
 
     def test_refuses_environment_or_url_changes_before_database_or_alembic(self):

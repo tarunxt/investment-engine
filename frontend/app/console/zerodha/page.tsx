@@ -950,9 +950,6 @@ export default function ZerodhaPage() {
         tabIndex={-1}
         className="scroll-mt-6 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gray-950"
       >
-        <a href="#portfolio-top" className="mb-3 inline-block text-sm text-violet-700 underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gray-950">
-          Back to portfolio top
-        </a>
         {portfolioError && !selectedSnapshot && !loadingPortfolio ? (
           <div role="alert" className="border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-800">
             <h2 className="font-semibold">Saved snapshots unavailable</h2>
