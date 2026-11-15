@@ -323,3 +323,24 @@ test("frontend launcher supports standalone slots and legacy rollback slots", ()
   assert.match(launcher, /node_modules\/\.bin\/next/);
   assert.match(launcher, /\bstart\b/);
 });
+
+test("signing preflight accepts deployed aliases and redacts rejected keys", async () => {
+  const validator = fileURLToPath(new URL("../../backend/app/core/jwt_configuration.py", import.meta.url));
+  const first = "10af58c492dd7eb1".repeat(3) + "ffe203731d55c42b";
+  const second = first.slice(0, -1) + "c";
+  const run = (env) => execFileAsync("python3", [validator], { env: { PATH: process.env.PATH, ...env } });
+  for (const name of ["JWT_SIGNING_KEY", "JWT_SECRET", "SECRET_KEY"]) {
+    const { stdout, stderr } = await run({ [name]: first });
+    assert.equal(stdout + stderr, "");
+  }
+  await run({ JWT_SIGNING_KEY: first, SECRET_KEY: first });
+  for (const env of [{}, { JWT_SIGNING_KEY: "" }, { JWT_SIGNING_KEY: "0".repeat(64) },
+    { JWT_SIGNING_KEY: first, JWT_SECRET: second }]) {
+    await assert.rejects(run(env), (error) => {
+      assert.equal(error.code, 1);
+      assert.equal(error.stdout, "");
+      assert.ok(!error.stderr.includes(first) && !error.stderr.includes(second));
+      return true;
+    });
+  }
+});
