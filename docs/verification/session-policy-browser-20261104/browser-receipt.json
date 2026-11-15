@@ -1,0 +1,77 @@
+{
+  "cases": [
+    {
+      "name": "cookie flags, trusted update and client update rejection",
+      "result": "PASS"
+    },
+    {
+      "name": "missing access uses refresh exchange",
+      "result": "PASS"
+    },
+    {
+      "name": "two-process concurrent refresh and late stale cookie",
+      "result": "PASS"
+    },
+    {
+      "name": "lost_claim forbids takeover and permits explicit reauthentication",
+      "result": "PASS"
+    },
+    {
+      "name": "lost_refresh forbids takeover and permits explicit reauthentication",
+      "result": "PASS"
+    },
+    {
+      "name": "expired logout with reserved intent revokes only current family",
+      "result": "PASS"
+    },
+    {
+      "name": "held SDK signout and generic 401 preserve finite retry and acknowledgement",
+      "result": "PASS"
+    },
+    {
+      "name": "password change revokes all devices and preserves another account",
+      "result": "PASS"
+    },
+    {
+      "name": "password reset revokes all devices and preserves another account",
+      "result": "PASS"
+    }
+  ],
+  "pids": [
+    3401,
+    3402,
+    3554,
+    3555,
+    3679,
+    3680,
+    3806,
+    3807,
+    3980,
+    3981,
+    4155,
+    4156,
+    4332,
+    4333,
+    4469,
+    4470,
+    4902,
+    4903
+  ],
+  "blocked": [
+    "https://accounts.google.com",
+    "https://accounts.google.com",
+    "https://accounts.google.com",
+    "https://accounts.google.com"
+  ],
+  "fixtureRoot": "/tmp/session-http-ci-k12R4F",
+  "source": "563bb4cc78c7b2fc136045d5c8390a371333fe9f",
+  "browser": "154.0.8037.57",
+  "concurrency": {
+    "statuses": [
+      200,
+      409
+    ],
+    "refreshes": 1,
+    "claims": 2
+  }
+}

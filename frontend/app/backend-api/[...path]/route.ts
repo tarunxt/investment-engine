@@ -366,6 +366,7 @@ function getProxyAttemptTimeoutMs(method: string, path: string) {
     );
   }
 
+
   if (isBullpenHistoryRead(method, path)) {
     return BULLPEN_HISTORY_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS;
   }
@@ -529,6 +530,15 @@ async function proxyBackendRequest(request: NextRequest, context: RouteContext) 
     );
   }
 
+  // Logout needs revocation only, even when access is expired or refresh has
+  // already been reserved. Never rotate simply to authenticate this action.
+  const revokeWithRefresh = request.method === "POST" && path === "auth/logout" &&
+    Boolean(backendSession?.refreshToken);
+  const upstreamPath = revokeWithRefresh ? "auth/logout-refresh" : path;
+  const upstreamBody = revokeWithRefresh
+    ? JSON.stringify({ refresh_token: backendSession!.refreshToken })
+    : body;
+
   const eventTrendsTimeoutMs = getEventTrendsProxyTimeoutMs(request, path);
   const totalTimeoutMs =
     eventTrendsTimeoutMs === null
@@ -548,19 +558,18 @@ async function proxyBackendRequest(request: NextRequest, context: RouteContext) 
       callerSignal: request.signal,
       totalBudgetMs: totalTimeoutMs,
       primaryAttemptBudgetMs: primaryAttemptTimeoutMs,
-      refreshAuthentication: backendSession
+      refreshAuthentication: backendSession && !revokeWithRefresh
         ? (signal) => rotateBackendTokens(backendSession, signal)
         : undefined,
       fetchCandidate: async (candidate, signal) => {
-        const targetUrl = buildTargetUrl(candidate.baseUrl, path, request);
+        const targetUrl = buildTargetUrl(candidate.baseUrl, upstreamPath, request);
+        const headers = buildForwardHeaders(request, correlationId,
+          revokeWithRefresh ? null : backendSession?.accessToken ?? null);
+        if (revokeWithRefresh) headers.set("Content-Type", "application/json");
         const response = await fetch(targetUrl, {
           method: request.method,
-          headers: buildForwardHeaders(
-            request,
-            correlationId,
-            backendSession?.accessToken ?? null,
-          ),
-          body,
+          headers,
+          body: upstreamBody,
           cache: "no-store",
           signal,
         });
@@ -608,6 +617,13 @@ async function proxyBackendRequest(request: NextRequest, context: RouteContext) 
       );
     }
 
+    if (error instanceof BackendRuntimeHttpError && error.status === 409) {
+      outcome = "refresh_coordination_required";
+      return NextResponse.json(
+        { message: "Your session update is in progress or could not be confirmed. Reload this page, or sign in again." },
+        { status: 409, headers: { "X-Correlation-ID": correlationId } },
+      );
+    }
     if (error instanceof BackendRuntimeHttpError && error.status === 401) {
       outcome = "authentication_failed";
       return NextResponse.json(

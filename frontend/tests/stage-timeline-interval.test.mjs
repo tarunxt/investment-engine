@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import ts from 'typescript';
+import { useEffect, useState } from 'react';
 import * as jsxRuntime from 'react/jsx-runtime';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { formatApiTimestamp, parseApiTimestamp } from '../lib/datetime.ts';
@@ -11,8 +12,8 @@ const ast = ts.createSourceFile('history.tsx',source,ts.ScriptTarget.Latest,true
 const names = ['statusTone','stageCardTone','formatTime','formatCost','StatusBadge','StageSummary'];
 const functions = ast.statements.filter(node=>ts.isFunctionDeclaration(node)&&names.includes(node.name?.text)).map(node=>node.getText(ast)).join('\n');
 const compiled = ts.transpileModule(functions,{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
-const StageSummary = new Function('exports','require','STAGE_LABELS','formatApiTimestamp','parseApiTimestamp','AlertCircle',compiled+'\nreturn StageSummary;')(
-  {},name=>{assert.equal(name,'react/jsx-runtime');return jsxRuntime;}, {actionables:'Actionables'},formatApiTimestamp,parseApiTimestamp,()=>null,
+const StageSummary = new Function('exports','require','STAGE_LABELS','formatApiTimestamp','parseApiTimestamp','AlertCircle','useState','useEffect','captureWorkflowOwner',compiled+'\nreturn StageSummary;')(
+  {},name=>{assert.equal(name,'react/jsx-runtime');return jsxRuntime;}, {actionables:'Actionables'},formatApiTimestamp,parseApiTimestamp,()=>null,useState,useEffect,()=>null,
 );
 const stage = {stage:'actionables',status:'completed',started_at:'2026-01-01T00:00:01Z',completed_at:'2026-01-01T00:00:00Z',provider_count:0,completed_provider_count:0,failed_provider_count:0,estimated_cost:0};
 const render = changes=>renderToStaticMarkup(jsxRuntime.jsx(StageSummary,{stage:{...stage,...changes}}));
@@ -56,4 +57,10 @@ test('actual timeline markup exposes warning in browser accessibility text and n
     }
     assert.deepEqual(external,[]);
   }finally{await browser.close();}
+});
+
+test('saved processing without a live Actionables calculation is unconfirmed; running and terminal partial stage colours differ',()=>{
+  assert.match(render({status:'processing',completed_at:null}),/Finish unconfirmed/);
+  assert.match(render({stage:'technical',status:'processing',completed_at:null}),/bg-yellow-50/);
+  assert.match(render({stage:'rebalance',status:'partial'}),/bg-amber-50/);
 });

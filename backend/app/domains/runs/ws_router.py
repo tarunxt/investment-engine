@@ -23,7 +23,7 @@ async def ws_run_list(websocket: WebSocket, token: str | None = Query(None)):
     await websocket.accept()
     logger.info("WS /ws/runs connected user_id=%s", user_id)
     try:
-        await relay_channel(websocket, f"user_run_updates:{user_id}")
+        await relay_channel(websocket, f"user_run_updates:{user_id}", auth_identity=user_id)
     except WebSocketDisconnect:
         logger.info("WS /ws/runs disconnected user_id=%s", user_id)
     except Exception as e:
@@ -43,7 +43,7 @@ async def ws_run_detail(websocket: WebSocket, run_id: JobId, token: str | None =
     await websocket.accept()
     logger.info("WS /ws/runs/%d connected user_id=%s", run_id, user_id)
     try:
-        await relay_channel(websocket, f"run_updates:{run_id}")
+        await relay_channel(websocket, f"run_updates:{run_id}", auth_identity=user_id)
     except WebSocketDisconnect:
         logger.info("WS /ws/runs/%d disconnected user_id=%s", run_id, user_id)
     except Exception as e:

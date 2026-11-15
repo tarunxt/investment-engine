@@ -42,7 +42,6 @@ def test_job_projection_excludes_undeclared_credential_attributes():
     ('runtime_metadata_json', {'failure_diagnostics': {'password': SENTINEL}}),
     ('request_context_json', {'account_secret': SENTINEL}),
 ])
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason='Evidence gap confirmed: declared error/context fields have no projection sanitization; owning lane must define safe projection')
 def test_job_projection_must_not_expose_sensitive_declared_internals(field, value):
     assert SENTINEL not in json.dumps(projection(**{field: value}))
 

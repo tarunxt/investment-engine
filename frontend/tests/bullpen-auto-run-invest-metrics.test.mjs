@@ -1,3 +1,4 @@
+import { readBullpenScheduleSource } from "./helpers/bullpenScheduleSource.mjs";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
@@ -460,13 +461,7 @@ test("Stage 3 exit metric descriptions distinguish in-flight submitting rows", a
 });
 
 test("schedule card wires step metric tiles into the shared popup flow", () => {
-  const source = readFileSync(
-    new URL(
-      "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
-      import.meta.url,
-    ),
-    "utf8",
-  );
+  const source = readBullpenScheduleSource();
 
   assert.match(source, /getInvestStepMetricDialogKind\(step\.key, "planned"\)/);
   assert.match(source, /getInvestStepMetricDialogKind\(step\.key, "processed"\)/);
@@ -494,13 +489,7 @@ test("schedule card wires step metric tiles into the shared popup flow", () => {
 });
 
 test("same-run schedule and detail views use the shared execution-evidence partition", () => {
-  const source = readFileSync(
-    new URL(
-      "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
-      import.meta.url,
-    ),
-    "utf8",
-  );
+  const source = readBullpenScheduleSource();
 
   assert.match(source, /partitionInvestDecisionsByExecutionEvidence\(decisions\)/);
   assert.match(source, /partitionInvestDecisionsByExecutionEvidence\(tableRows\)/);
@@ -516,13 +505,7 @@ test("same-run schedule and detail views use the shared execution-evidence parti
 });
 
 test("persisted Stage 3 counters override historical decision-row maxima", () => {
-  const source = readFileSync(
-    new URL(
-      "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
-      import.meta.url,
-    ),
-    "utf8",
-  );
+  const source = readBullpenScheduleSource();
 
   assert.match(source, /usesPersistedStage3ExecutionCounters/);
   assert.match(source, /persisted_order_intents/);
@@ -537,13 +520,7 @@ test("persisted Stage 3 counters override historical decision-row maxima", () =>
 });
 
 test("schedule card hides removed Stage 3 Step 1 exit shortlist copy", () => {
-  const source = readFileSync(
-    new URL(
-      "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
-      import.meta.url,
-    ),
-    "utf8",
-  );
+  const source = readBullpenScheduleSource();
 
   assert.doesNotMatch(source, /Active positions shortlisted for exits/);
   assert.doesNotMatch(source, /Stage 3 Step 1 reviews active positions before any buy\s+orders/);
@@ -672,13 +649,7 @@ test("legacy and non-sell Stage 3 rows do not gain execution telemetry", async (
 });
 
 test("Stage 3 order and detail cells render immediate-sell telemetry", () => {
-  const source = readFileSync(
-    new URL(
-      "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
-      import.meta.url,
-    ),
-    "utf8",
-  );
+  const source = readBullpenScheduleSource();
 
   assert.match(source, /getBullpenStage3SellExecutionTelemetry/);
   assert.match(source, /Fallback reason:/);
