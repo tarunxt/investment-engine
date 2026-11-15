@@ -2153,7 +2153,7 @@ function DashboardPageForUser({
               href={URLs.routes.console.automatedRebalance()}
               prefetch={false}
             >
-              Open automated workflow
+              Review India workflow
             </Link>
           </Button>
           <Button asChild variant="outline" className="rounded-full">
