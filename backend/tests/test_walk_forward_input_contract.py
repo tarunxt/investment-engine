@@ -90,12 +90,13 @@ def test_a10_007_positive_horizon_beyond_history_remains_unknown_and_defaults_un
 
 
 @pytest.mark.parametrize('horizon',[True,False,'1',1.5,1.0,0,-1])
-def test_a10_007_cli_invalid_horizon_does_not_replace_existing_report(tmp_path,horizon):
+@pytest.mark.parametrize('evidence_only',[False,True])
+def test_a10_007_cli_invalid_horizon_does_not_replace_existing_report(tmp_path,horizon,evidence_only):
     source,output=tmp_path/'input.json',tmp_path/'report.json'
     source.write_text(json.dumps({'records':[record()],'prices':prices(),'simulation':{'train_fraction':0,'horizons':[horizon]}}))
     output.write_bytes(b'{"previous":true}\n');before=source.read_bytes();old=output.read_bytes()
     script=Path(__file__).resolve().parents[1]/'scripts'/'replay_recommendations.py'
-    command=[sys.executable,str(script),str(source),str(output)]
+    command=[sys.executable,str(script),str(source),str(output)]+(['--evidence-only'] if evidence_only else [])
     result=subprocess.run(command,capture_output=True,text=True)
     assert result.returncode==2
     assert output.read_bytes()==old and source.read_bytes()==before
