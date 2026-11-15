@@ -81,6 +81,7 @@ try {
  if(mixedFailure){assert.match(await page.locator('tbody').innerText(),/Passed:1/);assert.match(await page.locator('tbody').innerText(),/Failed:1/);}
  assert.match(await page.getByRole('status').innerText(),/Rebalance has partial output/);
  assert.equal(await page.locator('tbody tr').filter({hasText:'LLM output partial'}).count(),1);
+ assert.match(await page.locator('tbody tr').filter({hasText:'LLM output partial'}).getAttribute('class'),/\bbg-emerald-50\b/);
  await page.screenshot({path:path.join(evidence,'us-partial-desktop.png'),fullPage:true});
  // Error dialog repeated opening, Escape and native focus restoration.
  const errors=page.getByRole('button',{name:/Show error details/});
