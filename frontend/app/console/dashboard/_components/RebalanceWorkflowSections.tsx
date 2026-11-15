@@ -348,6 +348,21 @@ function buildInitialStates() {
   };
 }
 
+// Older tabs may have persisted history fields on upcoming/running stages.
+// Keep polling identity and terminal current failures; refresh running metrics
+// from that exact job instead of trusting fields inherited by older code.
+function restoreCurrentWorkflowStages(stages: WorkflowState): WorkflowState {
+  return STAGE_ORDER.reduce((next, stage) => {
+    const info = stages[stage];
+    next[stage] = info.state === "idle" || info.state === "queued"
+      ? { state: info.state }
+      : info.state === "running"
+        ? { state: info.state, activeRunId: info.activeRunId, startedAt: info.startedAt, runStatus: info.runStatus }
+        : info;
+    return next;
+  }, {} as WorkflowState);
+}
+
 function readPersistedWorkflow(): PersistedWorkflow | null {
   if (typeof window === "undefined") return null;
   try {
@@ -4374,7 +4389,7 @@ export function RebalanceWorkflowSections({
     Record<WorkflowPortfolio, WorkflowState>
   >(() =>
     initialRunningPortfolio && initialPersisted?.states
-      ? initialPersisted.states
+      ? { ...initialPersisted.states, [initialRunningPortfolio]: restoreCurrentWorkflowStages(initialPersisted.states[initialRunningPortfolio]) }
       : buildInitialStates(),
   );
   const [ledgerMarket, setLedgerMarket] = useState<WorkflowPortfolio>(() => initialRunningPortfolio ?? "zerodha");

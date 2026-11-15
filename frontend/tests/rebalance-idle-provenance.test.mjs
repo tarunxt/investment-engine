@@ -143,3 +143,19 @@ test('a pre-start history request cannot apply after reset invalidates its gener
   release();
   assert.deepEqual(await pending,initial);
 });
+
+
+test('restoring an older active cache keeps exact polling identity and real terminal failures', () => {
+  const start=source.indexOf('function restoreCurrentWorkflowStages(');
+  const body=source.slice(start,source.indexOf('\nfunction ',start+1));
+  const restore=new Function('STAGE_ORDER',ts.transpileModule(body+'\nreturn restoreCurrentWorkflowStages;', {compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText)(stages);
+  const old=Object.fromEntries(stages.map(stage=>[stage,{state:'idle',error:'Old failure',lastRunId:33,recommendedStocks:99}]));
+  old.swing={...old.swing,state:'running',activeRunId:400,startedAt:newTime,runStatus:'processing'};
+  old.threats={state:'failed',error:'Current failure',errorDetails:[{message:'Current failure',jobId:501}],lastRunId:401};
+  old.technical.state='queued';
+  const restored=restore(old);
+  assert.deepEqual(restored.swing,{state:'running',activeRunId:400,startedAt:newTime,runStatus:'processing'});
+  assert.deepEqual(restored.threats,old.threats);
+  assert.deepEqual(restored.technical,{state:'queued'});
+  assert.deepEqual(restored.rebalance,{state:'idle'});
+});
