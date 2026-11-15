@@ -1,5 +1,8 @@
 'use client';
 
+import { onWorkflowOwnerInvalidated } from '@/lib/workflowOwnerLifetime';
+import { acquireZerodhaLogin } from '@/lib/zerodhaLoginArbitration';
+import { PortfolioWorkflowSlot } from '@/app/console/_components/WorkflowSurfaceSlots';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AlertCircle,
@@ -511,6 +514,7 @@ export default function ZerodhaPage() {
   const [showRedirectDetails, setShowRedirectDetails] = useState(false);
   const popupRef = useRef<Window | null>(null);
   const popupPollRef = useRef<number | null>(null);
+  const loginReleaseRef = useRef<(() => void) | null>(null);
 
   const stopPopupTracking = useCallback((updateState = true) => {
     if (popupPollRef.current !== null) {
@@ -518,10 +522,17 @@ export default function ZerodhaPage() {
       popupPollRef.current = null;
     }
     popupRef.current = null;
+    loginReleaseRef.current?.();
+    loginReleaseRef.current = null;
     if (updateState) {
       setConnectingPopup(false);
     }
   }, []);
+
+  useEffect(() => onWorkflowOwnerInvalidated(() => {
+    popupRef.current?.close();
+    stopPopupTracking();
+  }), [stopPopupTracking]);
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -627,6 +638,9 @@ export default function ZerodhaPage() {
       return;
     }
 
+    const release = acquireZerodhaLogin();
+    if (!release) { setError("Another Zerodha sign-in is already open. Complete or close it before retrying."); return; }
+    loginReleaseRef.current = release;
     setError(null);
     setConnectingPopup(true);
 
@@ -636,12 +650,12 @@ export default function ZerodhaPage() {
     const top = Math.max(window.screenY + (window.outerHeight - height) / 2, 0);
     const popup = window.open(
       loginUrl,
-      'zerodha-connect',
+      'zerodha-portfolio-connect',
       `popup=yes,width=${width},height=${height},left=${Math.round(left)},top=${Math.round(top)}`,
     );
 
     if (!popup) {
-      setConnectingPopup(false);
+      stopPopupTracking();
       setError('Popup blocked. Allow popups for this site or use the manual token option below.');
       return;
     }
@@ -691,6 +705,7 @@ export default function ZerodhaPage() {
   useEffect(() => {
     const handler = (ev: MessageEvent) => {
       if (ev.origin !== window.location.origin) return;
+      if (!popupRef.current || ev.source !== popupRef.current) return;
       if (ev.data?.type === 'zerodha_connected') {
         stopPopupTracking();
         const baselineCapturedAt = portfolioOverview?.latest?.captured_at ?? null;
@@ -935,9 +950,6 @@ export default function ZerodhaPage() {
         tabIndex={-1}
         className="scroll-mt-6 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gray-950"
       >
-        <a href="#portfolio-top" className="mb-3 inline-block text-sm text-violet-700 underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gray-950">
-          Back to portfolio top
-        </a>
         {portfolioError && !selectedSnapshot && !loadingPortfolio ? (
           <div role="alert" className="border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-800">
             <h2 className="font-semibold">Saved snapshots unavailable</h2>
@@ -1012,6 +1024,7 @@ export default function ZerodhaPage() {
           </div>
         </>
       )}
+      <PortfolioWorkflowSlot market="zerodha" />
     </div>
   );
 }

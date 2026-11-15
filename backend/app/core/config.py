@@ -1,8 +1,9 @@
 import os
+import re
 from datetime import datetime, timezone
 from typing import Optional
 
-from pydantic import AliasChoices, Field, field_validator
+from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _TRUE_ENV_VALUES = {"1", "true", "t", "yes", "y", "on", "debug", "development", "dev"}
@@ -12,7 +13,40 @@ _FALSE_ENV_VALUES = {"0", "false", "f", "no", "n", "off", "release", "prod", "pr
 class Settings(BaseSettings):
     """Application configuration from environment variables."""
 
-    model_config = SettingsConfigDict(env_file=".env", case_sensitive=False)
+    model_config = SettingsConfigDict(
+        env_file=".env", case_sensitive=False, extra="ignore", hide_input_in_errors=True,
+    )
+
+    # Keep aliases as separate fields so conflicting/blank legacy values cannot
+    # be silently hidden by AliasChoices. Never expose these in repr or dumps.
+    jwt_signing_key: Optional[SecretStr] = Field(default=None, repr=False, exclude=True)
+    jwt_secret: Optional[SecretStr] = Field(default=None, repr=False, exclude=True)
+    secret_key: Optional[SecretStr] = Field(default=None, repr=False, exclude=True)
+
+    @model_validator(mode="after")
+    def _require_private_jwt_signing_key(self) -> "Settings":
+        supplied = [
+            value.get_secret_value()
+            for value in (self.jwt_signing_key, self.jwt_secret, self.secret_key)
+            if value is not None
+        ]
+        if not supplied:
+            raise ValueError("JWT_SIGNING_KEY is required (private server-generated key)")
+        # A single explicit format avoids whitespace/encoding ambiguity. Format
+        # checks cannot establish randomness: generate 32 bytes with a CSPRNG.
+        if any(re.fullmatch(r"[0-9a-f]{64}", value) is None for value in supplied):
+            raise ValueError("JWT signing keys must encode 32 random bytes as 64 lowercase hex characters")
+        if any(
+            value == value[:size] * (64 // size)
+            for value in supplied for size in (1, 2, 4, 8, 16, 32)
+        ):
+            raise ValueError("JWT signing keys must not be repeated/default patterns")
+        if any(value != supplied[0] for value in supplied[1:]):
+            raise ValueError("Conflicting JWT_SIGNING_KEY, JWT_SECRET or SECRET_KEY configuration")
+        # Canonical > JWT_SECRET > SECRET_KEY, with all supplied names required
+        # to agree. No default or previous-key verification path is supported.
+        self.jwt_signing_key = SecretStr(supplied[0])
+        return self
 
     # Database
     database_url: str

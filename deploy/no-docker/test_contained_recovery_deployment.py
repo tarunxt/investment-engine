@@ -51,6 +51,10 @@ fi
         self.envfile=self.root/"backend.env";self.envfile.write_text("CREDX_RECOVERY_MODE=1\n")
         candidate=self.root/"candidate";candidate.mkdir()
         for name in ("deploy-recovery.sh","backend-recovery-artifact.py"): shutil.copyfile(DRIVER.parent/name,candidate/name)
+        # Bash's SECONDS advances during real sleeps. Model that in each fixture shell
+        # so readiness deadlines can be exercised without waiting two minutes.
+        virtual_time = self.root / "virtual-time.bash"
+        virtual_time.write_text('sleep() { SECONDS=$((SECONDS + $1)); }\n')
         self.make_shims()
         workflow=yaml.load((REPO/".github/workflows/deploy.yml").read_text(),Loader=yaml.BaseLoader)
         step=next(s for s in workflow["jobs"]["deploy-production"]["steps"] if s.get("id")=="deploy-ssh")
@@ -60,7 +64,7 @@ fi
         script=script.replace('/etc/investor/backend.env',str(self.envfile)).replace('/run/investor-production-deploy.lock',str(self.root/"lock"))
         self.script=self.root/"workflow.sh";self.script.write_text(script)
         artifacts=self.app/"artifacts";(artifacts/"frontend.tar.gz").write_text("fixture");(artifacts/"frontend.tar.gz.sha256").write_text("fixture")
-        self.environment={**os.environ,"PATH":str(self.bin)+os.pathsep+os.environ["PATH"],"FIXTURE_ROOT":str(self.root),"FIXTURE_APP":str(self.app),"FIXTURE_PYTHON":sys.executable,"FIXTURE_MODE":"1","DEPLOY_COMMIT_SHA":"b"*40,"DEPLOY_SCOPE":"backend-only","FRONTEND_BASE_SHA":"a"*40,"REMOTE_ARTIFACT_DIR":str(artifacts),"REMOTE_ARTIFACT_FILE":"frontend.tar.gz"}
+        self.environment={**os.environ,"BASH_ENV":str(virtual_time),"PATH":str(self.bin)+os.pathsep+os.environ["PATH"],"FIXTURE_ROOT":str(self.root),"FIXTURE_APP":str(self.app),"FIXTURE_PYTHON":sys.executable,"FIXTURE_MODE":"1","DEPLOY_COMMIT_SHA":"b"*40,"DEPLOY_SCOPE":"backend-only","FRONTEND_BASE_SHA":"a"*40,"REMOTE_ARTIFACT_DIR":str(artifacts),"REMOTE_ARTIFACT_FILE":"frontend.tar.gz"}
 
     def executable(self,path,source):
         path.write_text(source);path.chmod(0o755)
@@ -134,7 +138,14 @@ else:
         self.executable(self.bin/"curl",common+"""
 url=args[-1]
 if '/health/ready' in url:
-    if os.getenv('FIXTURE_FAIL_HEALTH') and (app/'backend/app/main.py').read_text()=='candidate': raise SystemExit(22)
+    release=(app/'backend/app/main.py').read_text()
+    if os.getenv('FIXTURE_FAIL_HEALTH') and release=='candidate': raise SystemExit(22)
+    if os.getenv('FIXTURE_DELAY_HEALTH') == release:
+        counter=root/('health-probes-'+release)
+        count=int(counter.read_text()) if counter.exists() else 0
+        counter.write_text(str(count+1))
+        if count < 25: raise SystemExit(7)
+    if '%{http_code}' in args: print('200',end='')
 elif url.endswith('/zerodha/orders'): print('503',end='')
 else: print('401',end='')
 """)
@@ -172,8 +183,19 @@ else: print('401',end='')
         commands=(self.root/'commands').read_text();self.assertNotIn('reset --hard',commands);self.assertNotIn('systemctl stop',commands)
         self.unchanged_runtime()
 
+    def test_candidate_becomes_ready_after_fifty_seconds(self):
+        result = self.run_workflow(FIXTURE_DELAY_HEALTH='candidate')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertGreaterEqual(int((self.root/'health-probes-candidate').read_text()), 26)
+        self.assertEqual((self.app/'backend/app/main.py').read_text(), 'candidate')
+        self.unchanged_runtime()
+
     def test_failed_health_restores_complete_source_and_retains_candidate(self):
-        result=self.run_workflow(FIXTURE_FAIL_HEALTH='1');self.assertNotEqual(result.returncode,0,result.stdout)
+        result=self.run_workflow(FIXTURE_FAIL_HEALTH='1', FIXTURE_DELAY_HEALTH='previous')
+        self.assertNotEqual(result.returncode,0,result.stdout)
+        self.assertIn('Backend readiness did not return HTTP 200 within 120 seconds.', result.stderr)
+        self.assertGreaterEqual(int((self.root/'health-probes-previous').read_text()), 26)
+        self.assertNotIn('ROLLBACK_BLOCKED', result.stderr)
         self.assertEqual((self.app/'backend/app/main.py').read_text(),'previous')
         self.assertEqual((self.app/'backend/app/nested/guard.py').read_text(),'old-guard')
         self.assertEqual((self.app/'deploy/no-docker/scripts/run-backend.sh').read_text(),'previous-launcher')

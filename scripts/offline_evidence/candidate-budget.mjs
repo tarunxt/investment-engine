@@ -8,10 +8,6 @@ if (!baselinePath || !candidatePath || !/^[a-f0-9]{40}$/.test(expectedSha ?? '')
 }
 const baseline = JSON.parse(readFileSync(baselinePath, 'utf8'));
 const report = JSON.parse(readFileSync(candidatePath, 'utf8'));
-for (const key of ['sourceCommit', 'build', 'environment', 'window']) {
-  if (typeof report[key] !== 'string' || !report[key].trim()) throw Error(`Missing ${key}`);
-}
-if (report.sourceCommit !== expectedSha) throw Error('Candidate source identity mismatch');
 for (const target of ['login', 'dashboard', 'bullpen']) {
   const samples = (report.profiles ?? []).flatMap(p => p.samples ?? []).filter(s => s.target === target);
   if (!samples.length) throw Error(`Not measured: ${target}`);
@@ -22,6 +18,6 @@ for (const target of ['login', 'dashboard', 'bullpen']) {
     }
   }
 }
-const result = checkJavaScriptBudgets(baseline, report);
-console.log(JSON.stringify({sourceCommit: report.sourceCommit, ...result}, null, 2));
+const result = checkJavaScriptBudgets(baseline, report, {sha: expectedSha});
+console.log(JSON.stringify({sourceCommit: report.evidence?.sha, ...result}, null, 2));
 if (result.failures.length) process.exitCode = 1;

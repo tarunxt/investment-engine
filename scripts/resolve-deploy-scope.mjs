@@ -32,6 +32,9 @@ export function resolveReleaseScope(input, io) {
   if (event === 'workflow_dispatch') {
     if (ref !== 'refs/heads/main') throw new Error('Manual deployment requires main');
     if (!['auto', 'frontend', 'backend', 'full'].includes(requestedScope)) throw new Error('Unknown manual scope');
+    if (input.runnerSshWindow && (!['frontend', 'full'].includes(requestedScope) || input.expectedSha !== sha)) {
+      throw new Error('Runner SSH window requires explicit frontend or full scope and the exact reviewed SHA');
+    }
     if (requestedScope === 'frontend') {
       if (input.expectedSha !== sha) throw new Error('Frontend release requires the exact reviewed SHA');
       // Successful scope-detection-only holds are not deployment evidence.
@@ -66,6 +69,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   try {
     const result = resolveReleaseScope({ sha: process.env.GITHUB_SHA, before: process.env.BEFORE_SHA,
       event: process.env.GITHUB_EVENT_NAME, ref: process.env.GITHUB_REF,
+      runnerSshWindow: process.env.RUNNER_SSH_WINDOW === 'true',
       requestedScope: process.env.REQUESTED_SCOPE, expectedSha: process.env.EXPECTED_RELEASE_SHA, repository: process.env.GITHUB_REPOSITORY }, {
       git: args => execFileSync('git', args, { encoding: 'utf8' }),
       api: path => JSON.parse(execFileSync('gh', ['api', path], { encoding: 'utf8' })),

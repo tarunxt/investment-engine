@@ -192,4 +192,10 @@ def export_tables(result: NormalizationResult) -> tuple[ExportTable, ...]:
             exports.append(ExportTable(block.index, block.headers, block.rows,
                                        tuple(Provenance(block.index, index, block.line + 1 + index if block.line else None)
                                              for index in range(1, len(block.rows) + 1))))
-    return tuple(exports)
+    # Only export copies are minimized. Original/content/blocks/canonical rows
+    # retain source bytes and financial provenance for validation and auditing.
+    from app.domains.jobs.public_projection import REDACTED, credential_label, public_text, public_value
+    return tuple(ExportTable(table.fragment, tuple(public_text(h) for h in table.headers), tuple(
+        tuple(REDACTED if index < len(table.headers) and credential_label(table.headers[index])
+              else public_value(value) for index, value in enumerate(row))
+        for row in table.rows), table.provenance) for table in exports)

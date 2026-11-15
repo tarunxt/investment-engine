@@ -1,6 +1,6 @@
 """Canonical model imports for SQLAlchemy metadata discovery."""
 
-from app.domains.auth.models import ActivityLog, APIKey, User, UserProfile, UserSession
+from app.domains.auth.models import ActivityLog, APIKey, User, UserProfile, UserSession, AuthSessionFamily, AuthRefreshIntent
 from app.domains.api_usage.models import (
     ApiUsageAttemptEvent,
     LlmProviderUsageCallRecord,
@@ -47,6 +47,7 @@ from app.domains.bullpen_trade_analysis.models import (
 )
 from app.domains.dashboard.models import DashboardPortfolioDailySnapshot
 from app.domains.cost_drivers.models import (
+    CostCollectionIntent,
     CostRecommendation,
     CostSnapshot,
     TrafficCostRollup,
@@ -124,6 +125,7 @@ __all__ = [
     "BullpenTradeAnalysisLlmRecord",
     "BullpenTradeAnalysisRecord",
     "BullpenTradeAnalysisSnapshotRecord",
+    "CostCollectionIntent",
     "CostRecommendation",
     "DashboardPortfolioDailySnapshot",
     "CostSnapshot",
@@ -151,6 +153,8 @@ __all__ = [
     "User",
     "UserProfile",
     "UserSession",
+    "AuthSessionFamily",
+    "AuthRefreshIntent",
     "ZerodhaAuditLog",
     "ZerodhaCredential",
     "ZerodhaPortfolioSnapshot",

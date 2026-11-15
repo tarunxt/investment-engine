@@ -2786,3 +2786,20 @@ for the successfully verified current request. Filtered zero results describe a
 filter match, never the existence of all saved history. The supplemental Bullpen
 run source remains independent and is labeled as unfiltered. A history retry only
 repeats the existing list read; it does not invoke explicit materialization.
+
+
+### Trade-analysis presentation evidence
+
+Trade-analysis list and detail views preserve missing or invalid confidence as
+not evaluated, separate failed retrieval from empty learning categories, and mark
+legacy learning fields as unvalidated hypotheses. A stored exit-timing or
+confidence-alignment field alone does not establish evaluated advice. Its original
+value remains available in the raw-evidence disclosure. Filter scope and displayed
+record counts are visible; aggregate totals do not establish complete outcome or
+fee coverage. Coverage denominators, declared exit windows/units and version
+provenance require the analytics response contract before evaluated display.
+This presentation change does not alter capture, frozen snapshots, formulas,
+execution permissions or API responses. Offline component/browser fixtures are in
+`frontend/tests/bullpen-trade-analysis-source-state.test.mjs` and
+`frontend/scripts/audit10-trade-analysis-offline.mjs`; neither requires production
+navigation or provider calls.
