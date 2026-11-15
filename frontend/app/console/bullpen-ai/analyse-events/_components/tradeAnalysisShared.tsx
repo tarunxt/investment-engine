@@ -7,7 +7,7 @@ export const tradeAnalysisSelectClassName =
   "h-10 rounded-none border border-border bg-background px-3 text-sm text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/30";
 
 export function formatCurrency(value?: number | null) {
-  if (value === null || value === undefined || Number.isNaN(value)) return "—";
+  if (value === null || value === undefined || !Number.isFinite(value)) return "—";
   return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",
@@ -16,15 +16,23 @@ export function formatCurrency(value?: number | null) {
 }
 
 export function formatNumber(value?: number | null, digits = 2) {
-  if (value === null || value === undefined || Number.isNaN(value)) return "—";
+  if (value === null || value === undefined || !Number.isFinite(value)) return "—";
   return new Intl.NumberFormat("en-US", {
     maximumFractionDigits: digits,
   }).format(value);
 }
 
 export function formatPercent(value?: number | null, digits = 2) {
-  if (value === null || value === undefined || Number.isNaN(value)) return "—";
+  if (value === null || value === undefined || !Number.isFinite(value)) return "—";
   return `${formatNumber(value, digits)}%`;
+}
+
+// Confidence is a probability; missing or invalid evidence is never zero.
+export function formatConfidence(value?: number | null) {
+  if (value == null || !Number.isFinite(value) || value < 0 || value > 1) {
+    return "Not evaluated";
+  }
+  return formatPercent(value * 100);
 }
 
 export function formatDateTime(value?: string | null) {

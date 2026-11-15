@@ -26,9 +26,19 @@ try {
  const [market,setMarket]=useState('India'),[view,setView]=useState('ledger'),[state,setState]=useState(new URLSearchParams(location.search).get('fixture')||'loaded'),[checks,setChecks]=useState({});
  const call=(name)=>()=>window.actions.push(name);
  const stages=STAGE_ORDER.map((stage,index)=>{
+ const palette=new URLSearchParams(location.search).get('palette');
  const partial=market==='US'&&stage==='rebalance'&&state==='loaded';
  const completed=state==='empty'?null:'2026-10-30T14:13:00Z';
  const info=state==='empty'?{state:'idle'}:{state:state==='loading'?'queued':state==='failed'&&stage==='rebalance'?'failed':'completed',completedAt:completed,startedAt:'2026-10-30T14:11:00Z',endedAt:'2026-10-30T14:13:00Z',totalLlms:2,completedLlms:2,passedLlms:partial?1:2,partialLlms:partial?${mixedFailure ? 0 : 1}:0,failedLlms:partial?${mixedFailure ? 1 : 0}:0,recommendedStocks:index===1?null:state==='zero'?0:13,rebalanceInputs:1,costInr:null,runStatus:partial?'partial':state==='stale'?'stale':null,error:state==='failed'&&stage==='rebalance'?'Provider timeout':null,partialNotice:partial?'${mixedFailure ? 'One provider completed and one provider failed.' : 'One saved LLM response was partial.'}':null};
+ if(palette)Object.assign(info,{state:palette,runStatus:null,partialLlms:0,failedLlms:0,partialNotice:null});
+ if(stage==='sync' && state!=='empty')info.portfolioStockCount=state==='zero'?0:8;
+ if(state==='recovered' && stage==='rebalance'){
+   info.state='idle';
+   info.runStatus='completed';
+   info.lastRunId=502;
+   info.workflowSequence=215;
+   info.evidence={kind:'saved',references:['Run #502']};
+ }
  if(state==='derived'){
    info.state=stage==='technical'?'failed':'idle';
    info.runStatus=stage==='technical'?'failed':stage==='actionables'?'derived from latest rebalance/technical scan':'completed';
@@ -38,9 +48,10 @@ try {
  });
  return <main className="mx-auto max-w-[1380px] p-4 text-slate-700"><h1 className="mb-3 text-xl font-bold text-slate-950">Automated rebalance · offline fixture</h1>
  <WorkflowStageLedgerViews market={market==='India'?'zerodha':'indmoneyUs'} view={view} onChange={(m,v)=>{setMarket(m==='zerodha'?'India':'US');setView(v)}}/>
- <label className="mb-3 block text-xs">Fixture state <select value={state} onChange={e=>setState(e.target.value)}>{['loaded','loading','empty','failed','stale','zero','selection','derived'].map(s=><option key={s}>{s}</option>)}</select></label>
+ <label className="mb-3 block text-xs">Fixture state <select value={state} onChange={e=>setState(e.target.value)}>{['loaded','loading','empty','failed','stale','zero','selection','derived','recovered'].map(s=><option key={s}>{s}</option>)}</select></label>
  <article className="rounded-2xl border border-indigo-200 bg-indigo-50/50 p-4"><div className="flex justify-between gap-3"><div><h2 className="text-xl font-bold text-slate-950">Run {market==='India'?'Zerodha':'Indmoney'} Auto-Rebalance</h2><p className="mt-2 text-sm">Last run: {state==='empty'?'n/a':'30 Oct 19:43'}</p></div><section aria-label="Run controls"><h3 className="text-sm font-semibold">Run controls</h3><button className="mt-2 rounded-lg bg-indigo-700 px-4 py-2 text-white" onClick={call('run')}>Run</button></section></div>
- <WorkflowStageLedger enabled view={view} historyHref="#history" onStockFlowClick={call('flow')}>{stages}</WorkflowStageLedger>
+ <div data-palette-tiles hidden={!new URLSearchParams(location.search).has('palette')}>{stages}</div>
+ <WorkflowStageLedger enabled view={view} market={market==='India'?'zerodha':'indmoneyUs'} historyHref="#history" onStockFlowClick={call('flow')}>{stages}</WorkflowStageLedger>
  <footer className="mt-3 rounded-xl border border-emerald-100 bg-emerald-50 p-3 text-sm">Cumulative LLM time: 00:08:39 · Total cost incurred in last Auto-rebalance: n/a</footer></article><p id="history">Offline fixture history destination</p></main>;
  }
  createRoot(document.getElementById('root')).render(<Fixture/>);
@@ -49,7 +60,7 @@ try {
  const w=require('next/dist/compiled/webpack/webpack');
  await new Promise((resolve,reject)=>w.webpack({mode:'development',devtool:false,entry:path.join(temporary,'entry.tsx'),output:{path:temporary,filename:'bundle.js'},resolve:{extensions:['.tsx','.ts','.js'],modules:[path.join(frontend,'node_modules')],alias:{'@':frontend}},module:{rules:[{test:/\.tsx?$/,use:path.join(temporary,'loader.cjs')}]},plugins:[new w.webpack.DefinePlugin({'process.env':JSON.stringify({NODE_ENV:'development'})})]},(error,stats)=>error?reject(error):stats.hasErrors()?reject(new Error(stats.toString({all:false,errors:true}))):resolve()));
  const postcss=require('postcss'),tailwind=require('@tailwindcss/postcss');
- const css=(await postcss([tailwind({base:frontend})]).process('@import "tailwindcss";',{from:path.join(frontend,'auto-stages-fixture.css')})).css;
+ const css=(await postcss([tailwind({base:frontend})]).process(await readFile(path.join(frontend,'app/globals.css'),'utf8'),{from:path.join(frontend,'app/globals.css')})).css;
  const bundle=await readFile(path.join(temporary,'bundle.js'));
  server=createServer((req,res)=>{res.setHeader('Content-Type',req.url==='/bundle.js'?'text/javascript':req.url==='/style.css'?'text/css':'text/html');res.end(req.url==='/bundle.js'?bundle:req.url==='/style.css'?css:'<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Offline stage ledger</title><link rel="stylesheet" href="/style.css"><div id="root"></div><script src="/bundle.js"></script>');});
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
@@ -62,18 +73,30 @@ try {
  assert.equal(await page.locator('tbody tr').count(),6);
  assert.deepEqual(await page.locator('thead th').allTextContents(),['Stage','Evidence time','Completion / inputs','Stocks','Duration','Error']);
  assert.equal(await page.getByRole('status').count(),0);
+ for(const index of [0,1]) assert.equal(await page.locator('tbody tr').nth(index).locator('td').nth(2).innerText(),'8');
+ assert.match(await page.locator('tbody tr').first().locator('th').getAttribute('class'),/bg-blue-100/);
  await page.screenshot({path:path.join(evidence,'india-desktop.png'),fullPage:true});
  await page.getByRole('button',{name:'US stage ledger',exact:true}).focus();await page.keyboard.press('Enter');
  assert.equal(await page.getByRole('status').count(),1);
  if(mixedFailure){assert.match(await page.locator('tbody').innerText(),/Passed:1/);assert.match(await page.locator('tbody').innerText(),/Failed:1/);}
  assert.match(await page.getByRole('status').innerText(),/Rebalance has partial output/);
  assert.equal(await page.locator('tbody tr').filter({hasText:'LLM output partial'}).count(),1);
+ assert.match(await page.locator('tbody tr').filter({hasText:'LLM output partial'}).getAttribute('class'),/\bbg-emerald-50\b/);
  await page.screenshot({path:path.join(evidence,'us-partial-desktop.png'),fullPage:true});
  // Error dialog repeated opening, Escape and native focus restoration.
  const errors=page.getByRole('button',{name:/Show error details/});
  for(let i=0;i<2;i++){await errors.click();await page.getByRole('dialog').waitFor();await page.keyboard.press('Escape');await page.getByRole('dialog').waitFor({state:'detached'});assert.equal(await errors.evaluate(el=>el===document.activeElement),true);}
  const rebalance=page.getByRole('button',{name:/04 Rebalance/});await rebalance.focus();await page.keyboard.press('Enter');
  assert.match(await page.getByRole('region',{name:'Saved evidence and configuration'}).innerText(),/Rebalance/);
+ assert.equal(await rebalance.getAttribute('aria-pressed'),'true');
+ assert.match(await page.locator('tbody tr').nth(3).locator('th').getAttribute('class'),/bg-blue-100/);
+ assert.doesNotMatch(await page.locator('tbody tr').first().locator('th').getAttribute('class'),/bg-blue-100/);
+ await page.getByLabel('Fixture state').selectOption('recovered');
+ assert.equal(await page.getByRole('status').count(),0);
+ assert.equal(await page.getByRole('button',{name:'Show error details for Rebalance'}).count(),0);
+ assert.match(await page.locator('tbody tr').nth(3).getAttribute('class'),/bg-emerald-50/);
+ assert.equal(await page.getByRole('button',{name:'Open Rebalance LLM details'}).getAttribute('data-workflow-run-id'),'502');
+ await page.getByLabel('Fixture state').selectOption('loaded');
  for(const [name,action] of [['Inputs','inputs:rebalance'],['Models','models:rebalance'],['Prompt','prompt:rebalance'],['Saved output','output:rebalance'],['Stock Flow','flow'],['Open stage','open:rebalance']]){await page.getByRole('button',{name,exact:true}).click();assert.equal(await page.evaluate(()=>window.actions.at(-1)),action);}
  assert.equal(await page.evaluate(()=>window.actions.some(a=>a==='run'||a==='sync'||a.startsWith('order:'))),false);
  await page.getByRole('link',{name:'History',exact:true}).click();assert.match(page.url(),/#history$/);await page.goBack();assert.equal(await page.locator('tbody tr').count(),6);
@@ -91,7 +114,7 @@ try {
  if(state==='empty'){assert.match(await page.locator('tbody').innerText(),/Not available/);assert.doesNotMatch(await page.locator('tbody').innerText(),/Passed:2/);}
  if(state==='failed')assert.equal(await page.locator('tbody tr').filter({hasText:'Request timed out'}).count(),1);
  if(state==='stale')assert.match(await page.locator('tbody').innerText(),/stale/i);
- if(state==='zero'){assert.equal(await page.locator('tbody tr').nth(2).locator('td').nth(2).innerText(),'0');assert.equal(await page.locator('tbody tr').nth(1).locator('td').nth(2).innerText(),'n/a');}
+ if(state==='zero'){assert.equal(await page.locator('tbody tr').nth(2).locator('td').nth(2).innerText(),'0');assert.equal(await page.locator('tbody tr').nth(1).locator('td').nth(2).innerText(),'0');}
  if(state==='selection'){const check=page.getByRole('checkbox',{name:/Select Rebalance/});await check.focus();await page.keyboard.press('Space');assert.equal(await check.isChecked(),true);await page.getByRole('button',{name:'Run and order controls',exact:true}).click();assert.match(await page.getByRole('region',{name:'Sync and order controls'}).innerText(),/Next run: Rebalance/);assert.equal(await page.getByRole('checkbox',{name:'Rebalance',exact:true}).isChecked(),true);await page.getByRole('button',{name:'India stage ledger',exact:true}).click();}
  }
  await page.getByLabel('Fixture state').selectOption('loaded');
@@ -116,6 +139,42 @@ try {
  }
  assert.equal(await page.evaluate(()=>window.actions.length),0);
  await page.screenshot({path:path.join(evidence,'derived-provenance.png'),fullPage:true});
+ // Verify the actual shared tiles and ledger rows with application CSS in both themes.
+ // Canvas normalizes equivalent browser oklab/oklch serialization into RGBA.
+ const backgroundRgba=el=>{
+   const context=document.createElement('canvas').getContext('2d');
+   context.fillStyle=getComputedStyle(el).backgroundColor;
+   context.fillRect(0,0,1,1);
+   return Array.from(context.getImageData(0,0,1,1).data).join(',');
+ };
+ const stateClasses={completed:'bg-emerald-50',running:'bg-amber-50',queued:'bg-sky-50',idle:'bg-slate-100',failed:'bg-red-50'};
+ for(const dark of [false,true])for(const market of ['India','US']){
+   const colours=[];
+   for(const [state,background] of Object.entries(stateClasses)){
+     await page.goto(origin+'?palette='+state);await page.getByRole('table').waitFor();
+     if(market==='US')await page.getByRole('button',{name:'US stage ledger',exact:true}).click();
+     await page.addStyleTag({content:'*, *::before, *::after { transition: none !important; }'});
+     await page.evaluate(dark=>document.documentElement.classList.toggle('dark',dark),dark);
+     const rows=page.locator('tbody tr'),tiles=page.locator('[data-palette-tiles] article');
+     assert.equal(await rows.count(),6);assert.equal(await tiles.count(),6);
+     for(const targets of [rows,tiles])for(let i=0;i<6;i++){
+       assert.equal(await targets.nth(i).evaluate((el,bg)=>el.classList.contains(bg),background),true,market+' '+state);
+     }
+     const rowColour=await rows.first().evaluate(backgroundRgba);
+     const tileColour=await tiles.first().evaluate(backgroundRgba);
+     assert.equal(rowColour,tileColour,market+' '+state+' theme '+dark);
+     assert.notEqual(rowColour.split(',').at(-1),'0');colours.push(rowColour);
+     // Selecting another stage must preserve its state colour.
+     await page.getByRole('button',{name:/04 Rebalance/}).click();
+     assert.equal(await rows.nth(3).evaluate(backgroundRgba),rowColour);
+     if(state==='idle'){
+       await page.getByLabel('Fixture state').selectOption('selection');
+       assert.equal(await tiles.first().evaluate(backgroundRgba),tileColour);
+     }
+   }
+   assert.equal(new Set(colours).size,5,market+' distinguishable state colours, dark='+dark);
+ }
+ console.log('PASS: all 5 statuses × 6 stages × both brokers × both themes; tiles and ledger computed backgrounds match; selection preserves state colours.');
  assert.deepEqual(consoleErrors,[]);
  console.log('PASS: 6 rows; value inventory; India/US; partial row and summary; all evidence callbacks; loading/empty/failed/stale/zero/selection; repeated dialogs; Escape/focus/keyboard; back navigation; narrow scroll; market-specific orders; no execution callbacks triggered.');
  console.log('Screenshots: '+evidence);

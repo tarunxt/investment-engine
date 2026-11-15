@@ -40,7 +40,7 @@ for(const {width,height} of [{width:1180,height:757},{width:1440,height:900},{wi
    assert.equal(await link.evaluate(el=>el===document.activeElement),true);
  }
  assert.ok((await page.getByRole('link',{name:'Platform Cost Drivers',exact:true}).getAttribute('class')).includes('text-primary'));
- assert.equal(await page.getByText('We couldn’t load usage for this month. Costs are unknown until usage loads successfully.',{exact:true}).count(),1);
+ assert.equal(await page.getByText('We couldn’t read the stored snapshot for this month. Costs are unknown. Passive reads do not request AWS collection.',{exact:true}).count(),1);
  assert.equal(await page.getByText('No zero-cost inference is made and no retry was triggered.',{exact:true}).count(),0);
  assert.equal(await page.getByRole('tab').count(),0);
  assert.equal(await page.evaluate(()=>requests.length),1,'Failure must not automatically retry');

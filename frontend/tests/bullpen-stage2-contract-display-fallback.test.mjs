@@ -1,3 +1,4 @@
+import { readBullpenScheduleSource } from "./helpers/bullpenScheduleSource.mjs";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
@@ -153,13 +154,7 @@ test("Stage 2 display falls back to durable Stage 3 plan counts without inventin
 });
 
 test("Stage 2 card renders recovered counts but keeps the row dialog gated on exact IDs", () => {
-  const source = readFileSync(
-    new URL(
-      "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
-      import.meta.url,
-    ),
-    "utf8",
-  );
+  const source = readBullpenScheduleSource();
 
   assert.match(source, /readStageTwoActionableDisplayContract/);
   assert.match(source, /stage2_actionable_exit_count/);

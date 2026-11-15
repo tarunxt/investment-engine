@@ -4,7 +4,8 @@ import { redirect } from "next/navigation";
 import { BackendRuntimeHttpError } from "@/app/api/bullpen-ai/_lib/backendBullpenRuntime";
 import {
   createBackendSessionContext,
-  fetchBackendJsonWithSession,
+  fetchBackendJsonReadOnly,
+  BackendSessionHandlerRequiredError,
 } from "@/app/api/bullpen-ai/_lib/serverBackendSession";
 import type { DashboardSummaryResponse } from "@/types/api";
 
@@ -17,7 +18,7 @@ export default async function DashboardPage() {
     const session = await createBackendSessionContext({
       headers: requestHeaders,
     });
-    initialSummary = await fetchBackendJsonWithSession<DashboardSummaryResponse>(
+    initialSummary = await fetchBackendJsonReadOnly<DashboardSummaryResponse>(
       session,
       "/dashboard/summary",
     );
@@ -25,9 +26,13 @@ export default async function DashboardPage() {
     if (error instanceof BackendRuntimeHttpError && error.status === 401) {
       redirect("/login?reason=session-expired");
     }
-    console.warn("Initial dashboard summary was unavailable.", {
-      error_type: error instanceof Error ? error.name : "UnknownError",
-    });
+    // No private bootstrap data on a missing/expired credential. The client
+    // can use the existing supported BFF handler; SSR never mutates cookies.
+    if (!(error instanceof BackendSessionHandlerRequiredError)) {
+      console.warn("Initial dashboard summary was unavailable.", {
+        error_type: error instanceof Error ? error.name : "UnknownError",
+      });
+    }
   }
 
   return (

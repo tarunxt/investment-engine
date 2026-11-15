@@ -68,3 +68,19 @@ def test_capture_scope_and_paired_t37_t39_analogues():
     assert [c["state"] for c in result["claims"]] == ["supported", "unknown", "unknown"]
     assert result["verdict"] == "insufficient_evidence"
     assert run([], [])["verdict"] == "insufficient_evidence"
+
+
+@pytest.mark.parametrize("trigger", ["supports", "contradicts", "neutral", "unknown"])
+@pytest.mark.parametrize("invalidation", ["supports", "contradicts", "neutral", "unknown"])
+def test_additive_explanation_preserves_complete_verdict_truth_table(trigger, invalidation):
+    claims = [Claim(id="trigger", kind="close_below", text="fixture"),
+              Claim(id="invalidation", kind="close_above", text="fixture")]
+    observations = [observation("trigger", trigger), observation("invalidation", invalidation)]
+    before = [item.model_dump(mode="json") for item in observations]
+    result = run(claims, observations)
+    expected = ("unsupported" if "contradicts" in (trigger, invalidation) else
+                "supported" if trigger == invalidation == "supports" else "insufficient_evidence")
+    assert result["verdict"] == expected
+    assert result["policy_version"] == POLICY_VERSION
+    assert [item.model_dump(mode="json") for item in observations] == before
+    assert all(item["explanation"]["version"] == "claim-explanation-v1" for item in result["claims"])
