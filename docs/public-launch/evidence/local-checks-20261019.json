@@ -1,0 +1,28 @@
+{
+  "baseline_sha": "0c6e61e524c7a87c7b9ea79342f17b14a45e97a1",
+  "environment": "isolated connected Mac, Python 3.13, synthetic in-memory SQLite; no application startup",
+  "checks": [
+    {
+      "name": "synthetic-baseline",
+      "command": "PYTHONPATH=backend .venv-stage01/bin/python -m pytest -q scripts/public_launch",
+      "tests": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "google-signin",
+      "command": "PYTHONPATH=backend DATABASE_URL=sqlite+aiosqlite:///:memory: REDIS_URL=redis://127.0.0.1:1/15 ENVIRONMENT=test AUTH_DISABLED=false .venv-stage01/bin/python -m pytest --noconftest -q backend/tests/test_google_signin.py",
+      "tests": 19,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  ],
+  "not_run": [
+    "PostgreSQL/Redis integration: Docker daemon unavailable",
+    "Frontend lint/type/build/browser: no frontend changes or isolated live stack",
+    "UAT/production: forbidden in current task"
+  ],
+  "setup_failure_resolved": "Initial standalone Google collection lacked REDIS_URL; rerun with unused synthetic URL passed."
+}
