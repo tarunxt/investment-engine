@@ -125,7 +125,14 @@ try {
   });
   console.log("Secure Auth.js session reached the protected backend proxy.");
 } finally {
-  frontend.kill("SIGTERM");
-  backend.close();
-  await Promise.allSettled([once(frontend, "exit"), once(backend, "close")]);
+  // Subscribe before stopping: close/exit may otherwise fire before once(),
+  // leaving top-level await unsettled and hiding the original assertion error.
+  const frontendStopped = frontend.exitCode === null && frontend.signalCode === null
+    ? once(frontend, "exit")
+    : Promise.resolve();
+  const backendStopped = backend.listening
+    ? new Promise((resolve) => backend.close(resolve))
+    : Promise.resolve();
+  if (frontend.exitCode === null && frontend.signalCode === null) frontend.kill("SIGTERM");
+  await Promise.allSettled([frontendStopped, backendStopped]);
 }
