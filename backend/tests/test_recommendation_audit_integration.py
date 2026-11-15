@@ -91,6 +91,10 @@ def test_advisory_capture_failure_preserves_successful_job(db,monkeypatch):
     from app.domains.jobs.repository import SyncJobRepository
     import app.domains.recommendation_audit.capture as capture
     run,job=source(db);original=job.response
+    # Exercise a real completion transition. Historical terminal rows now reject
+    # worker rewrites, while advisory failure during completion must stay safe.
+    job.status = JobStatus.PROCESSING
+    db.commit()
     monkeypatch.setattr(settings,"recommendation_audit_enabled",True)
     def broken(*args): raise ValueError("invalid audit fixture")
     monkeypatch.setattr(capture,"capture_terminal",broken)

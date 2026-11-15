@@ -49,6 +49,8 @@ export type StageInfo = {
   errorDetails?: StageErrorDetail[];
   activeRunId?: number | null;
   lastRunId?: number | null;
+  workflowSequence?: number | null;
+  portfolioStockCount?: number | null;
   jobId?: number | null;
   completedLlms?: number | null;
   passedLlms?: number | null;
@@ -153,16 +155,28 @@ export const LLM_STAGE_TILE_KEYS = new Set<WorkflowStageKey>([
   "technical",
 ]);
 
+export function getStageBackgroundClass(state: StageState) {
+  if (state === "running") return "bg-amber-50";
+  if (state === "queued") return "bg-sky-50";
+  if (state === "completed") return "bg-emerald-50";
+  if (state === "failed") return "bg-red-50";
+  return "bg-slate-100";
+}
+
 export function getStageClasses(state: StageState) {
+  return `${getStageBackgroundClass(state)} ${getStageToneClasses(state)}`;
+}
+
+function getStageToneClasses(state: StageState) {
   if (state === "running")
-    return "border-amber-300 bg-amber-50 text-amber-950 shadow-amber-100 ring-1 ring-amber-100";
+    return "border-amber-300 text-amber-950 shadow-amber-100 ring-1 ring-amber-100";
   if (state === "queued")
-    return "border-sky-200 bg-sky-50 text-sky-950 shadow-sky-100 ring-1 ring-sky-100";
+    return "border-sky-200 text-sky-950 shadow-sky-100 ring-1 ring-sky-100";
   if (state === "completed")
-    return "border-emerald-300 bg-emerald-50 text-emerald-950 shadow-emerald-100 ring-1 ring-emerald-100";
+    return "border-emerald-300 text-emerald-950 shadow-emerald-100 ring-1 ring-emerald-100";
   if (state === "failed")
-    return "border-red-300 bg-red-50 text-red-950 shadow-red-100 ring-1 ring-red-100";
-  return "border-slate-200 bg-white text-slate-950 shadow-slate-100";
+    return "border-red-300 text-red-950 shadow-red-100 ring-1 ring-red-100";
+  return "border-slate-200 text-slate-950 shadow-slate-100";
 }
 
 export function getStageTileLabel(stage: WorkflowStageKey) {
@@ -265,6 +279,23 @@ export function formatBriefTileError(error?: string | null) {
 export function getTileErrorDetail(error?: string | null) {
   if (!error?.trim() || isSheetExportError(error)) return null;
   return error;
+}
+
+/** Execution state and saved result are distinct: an idle page can still show a terminal result. */
+export function getStageLedgerTone(info: StageInfo) {
+  const status = info.runStatus?.trim().toLowerCase();
+  if (info.state === "running" || info.state === "queued") return getStageBackgroundClass(info.state);
+  if (info.state === "failed" || ["failed", "error", "canceled", "cancelled", "interrupted"].includes(status ?? "")) return "bg-red-50";
+  if (info.state === "completed" || ["completed", "partial", "synced", "last synced portfolio", "succeeded", "success"].includes(status ?? "")) return "bg-emerald-50";
+  if (["processing", "running"].includes(status ?? "")) return "bg-amber-50";
+  if (["pending", "queued"].includes(status ?? "")) return "bg-sky-50";
+  return getStageBackgroundClass(info.state);
+}
+
+export function hasStagePartialOutput(info: StageInfo) {
+  if (info.state === "running" || info.state === "queued") return false;
+  return info.runStatus?.trim().toLowerCase() === "partial" ||
+    (info.partialLlms ?? 0) > 0 || Boolean(info.partialNotice?.trim());
 }
 
 export function getStageTileError(info: StageInfo): StageTileRow {
@@ -469,7 +500,7 @@ export function WorkflowStageTile({
     ? selected
       ? "ring-2 ring-blue-500"
       : info.state === "idle"
-        ? "bg-white opacity-100"
+        ? "opacity-100"
         : ""
     : "";
   const isFreshActionables = isActionablesFresh(info.completedAt, now);

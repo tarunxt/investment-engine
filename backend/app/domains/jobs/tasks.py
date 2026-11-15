@@ -373,6 +373,8 @@ def _extract_rebalance_current_holdings_from_prompt(prompt: str) -> list[dict[st
     except ValueError:
         return []
     exchange_idx = headers.index("exchange") if "exchange" in headers else None
+    if exchange_idx is None and "market" in headers:
+        exchange_idx = headers.index("market")
 
     holdings: list[dict[str, str]] = []
     seen_symbols: set[str] = set()
@@ -464,7 +466,7 @@ def _build_rebalance_table_repair_prompt(prompt: str, previous_output: str, reas
         "Regenerate the FULL rebalance answer and return ONLY one markdown table with the exact rebalance columns from the original prompt.\n"
         "Requirements:\n"
         "- Include one complete decision row for EVERY current portfolio holding from the Latest Portfolio Snapshot; do not omit holdings and do not stop after a subset.\n"
-        "- Evaluate every stock from the supplied swing-trade tables. If its exchange/symbol identity is already in the Latest Portfolio Snapshot, include it only in that holding's single Hold, Buy/Add, Trim, or Sell All decision; never label it Buy New or add a second row for the SAME exchange/symbol. Keep different concrete venues separate. For a US snapshot labeled US, a matching symbol at a known US venue is the same existing holding, not a fresh candidate.\n"
+        "- Evaluate every stock from the supplied swing-trade tables. If its exchange/symbol identity is already in the Latest Portfolio Snapshot, include it only in that holding's single Hold, Buy/Add, Trim, or Sell All decision; never label it Buy New or add a second row for the SAME exchange/symbol. Keep different concrete venues separate. For a US snapshot labeled US, a matching symbol at a known US venue is the same existing holding, not a fresh candidate. The US snapshot supplies market only. Carry forward the exact listing exchange from the selected model outputs for the same security. Verify unresolved venues. Never copy US into Exchange Symbol or duplicate a holding under a country alias.\n"
         "- Include EVERY selected Swing exchange/symbol, even when not selected for buying. For an unheld non-buy use Hold, all position/change/buy quantities and Total Buy Amount 0, and your original non-buy reason. Never invent a reason or omit the row.\n"
         "- Consider Buy New only for candidates not already present in the Latest Portfolio Snapshot, after threats/opportunity-cost review.\n"
         "- Every row must include Exchange Symbol, Stock Symbol, Current Units, Action, Units Change, Final Units, price/risk fields, Upside Horizon (% return), Weeks, confidence, and all rationale columns.\n"
@@ -677,7 +679,8 @@ def _publish_job_update(job: Job) -> None:
     r: _sync_redis.Redis | None = None
     try:
         status_val = job.status.value if hasattr(job.status, "value") else str(job.status)
-        payload = json.dumps({
+        from app.domains.jobs.public_projection import public_job_details
+        payload = json.dumps(public_job_details({
             "type": "job.updated",
             "job_id": job.id,
             "provider": job.provider,
@@ -697,7 +700,7 @@ def _publish_job_update(job: Job) -> None:
             "exported_at": job.exported_at.isoformat() if job.exported_at else None,
             "exported_sheet_url": job.exported_sheet_url,
             "updated_at": job.updated_at.isoformat() if job.updated_at else None,
-        })
+        }))
         
         redis_url = settings.redis_url
         logger.info("Publishing WS update for job_id=%s to Redis at %s", job.id, redis_url)

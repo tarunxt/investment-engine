@@ -30,7 +30,7 @@ def setup_route(monkeypatch, latest):
     execute = AsyncMock(return_value=SimpleNamespace(job_id=501))
     monkeypatch.setattr(routes, "CreateJobUseCase", lambda **kwargs: SimpleNamespace(execute=execute))
     job = SimpleNamespace(id=501, status="pending", provider="synthetic", model="fixture", created_at=datetime(2026, 11, 1, tzinfo=timezone.utc))
-    monkeypatch.setattr(routes, "PostgresJobRepository", lambda db: SimpleNamespace(get=AsyncMock(return_value=job)))
+    monkeypatch.setattr(routes, "PostgresJobRepository", lambda db: SimpleNamespace(get_for_user=AsyncMock(side_effect=lambda job_id, user_id: job if (job_id, user_id) == (501, 11) else None)))
     return lookup, execute, redis
 
 
