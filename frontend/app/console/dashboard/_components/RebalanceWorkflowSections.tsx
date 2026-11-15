@@ -2841,7 +2841,6 @@ function getStageOutputRoute(
 }
 
 function ZerodhaBasketPreviewDialog(props: Parameters<typeof ScopedZerodhaBasketPreviewDialog>[0]) {
-  // Keep preferences above the remounted preview and across reloads in this tab.
   const { user } = useAuth();
   const owner = user && Number.isSafeInteger(user.id) && user.id > 0 ? user.id : null;
   const [columnPreferences, setColumnPreferences] = useState<Record<string, BasketColumnLayout>>({});
@@ -2851,12 +2850,28 @@ function ZerodhaBasketPreviewDialog(props: Parameters<typeof ScopedZerodhaBasket
     const hidden = readBasketColumnLayout(preferenceScope);
     setColumnPreferences(current => Object.hasOwn(current, preferenceScope) ? current : { ...current, [preferenceScope]: hidden });
   }, [owner, preferenceScope]);
-  useEffect(() => {
-    if (owner !== null && Object.hasOwn(columnPreferences, preferenceScope)) {
-      writeBasketColumnLayout(preferenceScope, columnPreferences[preferenceScope]);
-    }
-  }, [owner, preferenceScope, columnPreferences]);
-  return <ScopedZerodhaBasketPreviewDialog key={`${preferenceScope}:${props.detailsData.portfolioSnapshot?.captured_at ?? "missing"}:${props.open}`} {...props} columnPreferences={{ hiddenColumns: columnPreferences[preferenceScope]?.hidden ?? [], order: columnPreferences[preferenceScope]?.order ?? [], names: columnPreferences[preferenceScope]?.names ?? {}, toggle: id => setColumnPreferences(current => { const layout = current[preferenceScope] ?? emptyBasketColumnLayout(); return { ...current, [preferenceScope]: { ...layout, hidden: layout.hidden.includes(id) ? layout.hidden.filter(value => value !== id) : [...layout.hidden, id] } }; }), reorder: order => setColumnPreferences(current => ({ ...current, [preferenceScope]: { ...(current[preferenceScope] ?? emptyBasketColumnLayout()), order } })), rename: (id, name) => setColumnPreferences(current => { const layout = current[preferenceScope] ?? emptyBasketColumnLayout(); return { ...current, [preferenceScope]: { ...layout, names: { ...layout.names, [id]: name } } }; }) }} />;
+  const saved = columnPreferences[preferenceScope];
+  function updateLayout(change: (layout: BasketColumnLayout) => BasketColumnLayout) {
+    const previous = saved ?? (owner === null ? emptyBasketColumnLayout() : readBasketColumnLayout(preferenceScope));
+    const next = change(previous);
+    if (owner !== null) writeBasketColumnLayout(preferenceScope, next);
+    setColumnPreferences(current => ({ ...current, [preferenceScope]: next }));
+  }
+  return <ScopedZerodhaBasketPreviewDialog
+    key={`${preferenceScope}:${props.detailsData.portfolioSnapshot?.captured_at ?? "missing"}:${props.open}`}
+    {...props}
+    columnPreferences={{
+      hiddenColumns: saved?.hidden ?? [],
+      order: saved?.order ?? [],
+      names: saved?.names ?? {},
+      toggle: id => updateLayout(layout => ({
+        ...layout,
+        hidden: layout.hidden.includes(id) ? layout.hidden.filter(value => value !== id) : [...layout.hidden, id],
+      })),
+      reorder: order => updateLayout(layout => ({ ...layout, order })),
+      rename: (id, name) => updateLayout(layout => ({ ...layout, names: { ...layout.names, [id]: name } })),
+    }}
+  />;
 }
 function ScopedZerodhaBasketPreviewDialog({
   open,
