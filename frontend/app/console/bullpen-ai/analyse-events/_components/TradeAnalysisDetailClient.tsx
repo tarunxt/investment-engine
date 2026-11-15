@@ -308,7 +308,7 @@ export function TradeAnalysisDetailClient() {
               { label: "Exit Slippage", value: formatNumber(trade.sell_slippage, 4) },
               { label: "Best Observed Price (source units; window unspecified)", value: formatNumber(trade.best_possible_exit_price_after_buy, 2) },
               { label: "Worst Observed Price", value: formatNumber(trade.worst_price_after_buy, 2) },
-              { label: "Missed Profit", value: formatNumber(trade.missed_profit_amount, 2) },
+              { label: "Legacy Missed Profit Estimate (unvalidated)", value: formatNumber(trade.missed_profit_amount, 2) },
               { label: "Drawdown While Held", value: formatNumber(trade.drawdown_while_held, 4) },
             ]}
           />
@@ -411,7 +411,7 @@ export function TradeAnalysisDetailClient() {
 
       <Card className="rounded-none border-slate-200 shadow-none">
         <CardHeader>
-          <CardTitle className="text-base text-slate-950">Actionable Learning</CardTitle>
+          <CardTitle className="text-base text-slate-950">Descriptive Review (unvalidated)</CardTitle>
         </CardHeader>
         <CardContent className="grid gap-4 lg:grid-cols-2">
           <div className="space-y-3 text-sm text-slate-700">
@@ -422,6 +422,7 @@ export function TradeAnalysisDetailClient() {
             <p>Entry too expensive (stored hypothesis): {data.actionable_learning.entry_too_expensive === true ? "Yes" : data.actionable_learning.entry_too_expensive === false ? "No" : "Not evaluated"}</p>
             <p>Liquidity or spread issue (stored hypothesis): {data.actionable_learning.liquidity_or_spread_issue === true ? "Yes" : data.actionable_learning.liquidity_or_spread_issue === false ? "No" : "Not evaluated"}</p>
             <p>LLM confidence aligned: Not evaluated. A single outcome does not establish calibration.</p>
+            <p>Analysis version: {data.actionable_learning.algorithm_version ?? "legacy/unknown"}</p>
           </div>
           <div className="space-y-3 text-sm text-slate-700">
             <p>What worked: {data.actionable_learning.what_worked.join(" | ") || "—"}</p>

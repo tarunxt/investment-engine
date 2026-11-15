@@ -7,6 +7,7 @@ import sys
 import tempfile
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.domains.recommendation_audit.evaluation import replay, sensitivity, walk_forward, validate_horizons
+from app.domains.recommendation_audit.validation import validation_report
 
 
 def atomic_report(path, report):
@@ -29,10 +30,13 @@ def atomic_report(path, report):
 def main():
     parser = argparse.ArgumentParser(description="Replay frozen recommendation evidence without APIs")
     parser.add_argument("input", type=Path); parser.add_argument("output", type=Path)
+    parser.add_argument("--evidence-only", action="store_true", help="Inventory only; no replay or toy simulation")
     args = parser.parse_args()
     try:
         if args.input.resolve() == args.output.resolve():
             raise ValueError("Source and output must differ")
+        if args.evidence_only and args.input.stat().st_size > 20_000_000:
+            raise ValueError("Offline input exceeds byte bound")
         data = json.loads(args.input.read_text())
         if not isinstance(data, dict):
             raise ValueError("Expected JSON object")
@@ -55,8 +59,9 @@ def main():
             raise ValueError("Expected simulation object")
         if "horizons" in simulation:
             validate_horizons(simulation["horizons"])
-        report = {"robustness_established": False}
-        report.update(dataset_provenance=data.get("provenance", "unspecified"), replay=replay(records),
+        report = {"validation": validation_report(data), "robustness_established": False}
+        if not args.evidence_only:
+            report.update(dataset_provenance=data.get("provenance", "unspecified"), replay=replay(records),
                           sensitivity=[{"id": r.get("id"), **sensitivity(r)} for r in records],
                           walk_forward=walk_forward(records, data.get("prices", []), **data.get("simulation", {})))
         atomic_report(args.output, report)

@@ -2803,3 +2803,46 @@ execution permissions or API responses. Offline component/browser fixtures are i
 `frontend/tests/bullpen-trade-analysis-source-state.test.mjs` and
 `frontend/scripts/audit10-trade-analysis-offline.mjs`; neither requires production
 navigation or provider calls.
+## Stage 1 nested source evidence (2 November 2026)
+
+The shared Stage 1 detail popup preserves unknown versus verified-empty source
+semantics independently of normalized fallback arrays. Unavailable, partial or
+incomplete evidence does not establish zero totals or absent positions. Saved
+known totals retain their completion timestamp, and retained rows remain visible.
+This is presentation-only: no audit schema, frozen snapshot, validator, execution
+input or financial calculation changes. Regression evidence is recorded in
+`docs/evidence/a6-06-nested-stage1-regression.md`.
+
+## Post-trade descriptive analysis v2 (Audit10, 2026-11-01)
+
+`bullpen-descriptive-v2` is a derived post-trade review algorithm, separate from
+Stage 1/2/3 decision formulas and frozen run snapshots. Single outcomes do not
+establish calibration, causality or validated learning. Reinforcement and policy
+change flags are withheld; no training, routing, prompt or trading consumer was
+found in the repository. Legacy stored analysis remains original evidence.
+
+Detail GET computes a labelled transient review without writes. The existing
+explicit recompute action appends an `ANALYSIS_VERSION` to the existing trade
+snapshot table with algorithm version, calculation time, source trade identity
+and calculation inputs. It does not overwrite the original analysis columns,
+source snapshots, units or executions. Repeated revisions are separate snapshots;
+there is no bulk recomputation/backfill or new schema/migration. Analysis revision
+is not a changed execution or original decision-time evidence.
+
+Only declared `cents`/`unit_price` operands normalize. New in-position monitor
+maxima declare their existing heldProbability × 100 source; legacy units remain
+unknown. Execution-summary extraction no longer substitutes order intent for
+missing fill fields, and genuine zero fills survive. In-hold maxima never prove
+an executable post-exit opportunity; post-exit advice remains Not evaluated until
+a bounded horizon and executable liquidity/size/spread/fee convention are approved.
+
+Null outcome and execution fees remain unknown. Closed population, known/unknown
+outcomes, known-outcome denominator, recorded subtotals and fee component coverage
+are separate. Known zero is a non-win (`net_pnl > 0` is a win). Metrics describe
+the selected cohort; raw-dollar ranks do not establish comparable risk-adjusted
+performance. Tax/spread/FX coverage is not asserted. Existing financial execution,
+exit/partial-close lifecycle policy and run-audit capture remain unchanged.
+
+Acceptance and task-specific unresolved gates are tracked in
+`docs/audit10-bullpen-analysis-acceptance.md`; frozen run audit schemas need no
+change because this revision neither changes nor backfills decision-time runs.

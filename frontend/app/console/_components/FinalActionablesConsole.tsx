@@ -3847,7 +3847,7 @@ function CapturedRationalesCell({ row }: { row: CanonicalRow }) {
           <div className="mt-1.5 space-y-1 text-xs leading-5">
             {group.items.map(({ header, label, score, value }) => (
               <p key={`${header}-${label ?? "plain"}`} className="flex items-start gap-1.5 whitespace-pre-wrap break-words">
-                <ScoreTriangleIcon score={score} />
+                <ScoreSymbol score={score} className="shrink-0 tabular-nums" />
                 <span>
                   {label ? <span className="font-semibold">{label}: </span> : null}
                   {value}
