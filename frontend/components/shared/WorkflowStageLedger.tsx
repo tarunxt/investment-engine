@@ -61,7 +61,10 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
   const openDuration = (item: Stage) => {
     setDurationStage(item);
   };
-  const partialStages = stages.filter(item => hasStagePartialOutput(item.info));
+  const partialStages = stages.filter(item =>
+    hasStagePartialOutput(item.info) &&
+    !(view === "ledger" && market === "zerodha" && item.stage === "rebalance")
+  );
   const syncedStockCount = market === "zerodha" ? stages.find(item => item.stage === "sync")?.info.portfolioStockCount : undefined;
   return <div className="mt-4 min-w-0 space-y-3 text-sm text-slate-600">
     {view !== "execution" && partialStages.map(item => <p key={item.stage} role="status" className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-amber-950">
