@@ -7754,20 +7754,7 @@ ${zerodhaExecutionMode === "direct_market"
               {formatCompactStageTime(lastRunByPortfolio[section.portfolio])}
             </p>
             {stageLedger && !surface ? <WorkflowRunBoundary historyHref={URLs.routes.console.autoRebalanceRuns(section.portfolio)} /> : null}
-            {audit?.status === "pending" ? (
-              <p role="status" className="mt-2 flex items-center gap-2 text-sm text-amber-800">
-                <Loader2 className="size-4 shrink-0 animate-spin" />
-                {audit.label}: run history confirmation pending. Completed outputs remain available.
-              </p>
-            ) : audit?.status === "failed" ? (
-              <div role="alert" className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
-                <p className="font-semibold">{audit.label}: run history was not confirmed.</p>
-                <p className="mt-1">Completed outputs remain available. A completion email has not been queued. Do not rerun model work to repair history.</p>
-                {audit.message ? <p className="mt-1">{audit.message}</p> : null}
-                <Link href={URLs.routes.console.autoRebalanceRuns(section.portfolio)} className="mt-2 inline-block font-semibold underline">Check saved run history</Link>
-              </div>
-            ) : null}
-            {emailWarning ? <p role="alert" className="mt-2 text-sm text-amber-800">{emailWarning}</p> : null}
+
           </div>
           <div aria-label={stageLedger ? "Run controls" : undefined} className="flex w-full min-w-0 flex-col items-start gap-3 xl:w-auto xl:max-w-full xl:items-end">
             {stageLedger ? <h3 className="text-sm font-semibold text-slate-900">Run controls</h3> : null}
@@ -7893,46 +7880,6 @@ ${zerodhaExecutionMode === "direct_market"
           </div>
         </div>
 
-        {technicalInputIssue ? <div role="alert" className="mt-5 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950"><p>{technicalInputIssue}</p><button type="button" className="mt-2 font-semibold text-blue-800 underline" onClick={() => openInputSelection(section.portfolio, "technical")}>Choose saved Rebalance inputs</button></div> : null}
-        {showQuotaLlmSwitchWarning ? (
-          <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm leading-6 text-amber-950 shadow-sm">
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-              <div className="flex min-w-0 gap-3">
-                <AlertCircle className="mt-0.5 size-5 shrink-0 text-amber-600" />
-                <div>
-                  <p className="font-extrabold">Threat Scan quota exceeded.</p>
-                  <p className="mt-1">
-                    Switch LLMs for both the Threats Scan and Technical Scan
-                    stages before rerunning auto-rebalance.
-                  </p>
-                </div>
-              </div>
-              <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-9 rounded-full border-amber-300 bg-white px-4 text-xs font-extrabold text-amber-950 hover:bg-amber-100"
-                  onClick={() =>
-                    void showStageLlmInfo(section.portfolio, "threats")
-                  }
-                >
-                  Switch Threats LLMs
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-9 rounded-full border-amber-300 bg-white px-4 text-xs font-extrabold text-amber-950 hover:bg-amber-100"
-                  onClick={() =>
-                    void showStageLlmInfo(section.portfolio, "technical")
-                  }
-                >
-                  Switch Technical LLMs
-                </Button>
-              </div>
-            </div>
-          </div>
-        ) : null}
-
         <WorkflowStageLedger active={runningPortfolio === section.portfolio} market={section.portfolio} enabled={stageLedger} view={ledgerView} historyHref={URLs.routes.console.autoRebalanceRuns(section.portfolio)} onStockFlowClick={() => setStockFlowPortfolio(section.portfolio)}>
           {STAGE_ORDER.map((stage) => (
             <WorkflowStageTile
@@ -8015,6 +7962,59 @@ ${zerodhaExecutionMode === "direct_market"
             />
           ))}
         </WorkflowStageLedger>
+        {technicalInputIssue ? <div role="alert" className="mt-5 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950"><p>{technicalInputIssue}</p><button type="button" className="mt-2 font-semibold text-blue-800 underline" onClick={() => openInputSelection(section.portfolio, "technical")}>Choose saved Rebalance inputs</button></div> : null}
+        {showQuotaLlmSwitchWarning ? (
+          <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm leading-6 text-amber-950 shadow-sm">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div className="flex min-w-0 gap-3">
+                <AlertCircle className="mt-0.5 size-5 shrink-0 text-amber-600" />
+                <div>
+                  <p className="font-extrabold">Threat Scan quota exceeded.</p>
+                  <p className="mt-1">
+                    Switch LLMs for both the Threats Scan and Technical Scan
+                    stages before rerunning auto-rebalance.
+                  </p>
+                </div>
+              </div>
+              <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-9 rounded-full border-amber-300 bg-white px-4 text-xs font-extrabold text-amber-950 hover:bg-amber-100"
+                  onClick={() =>
+                    void showStageLlmInfo(section.portfolio, "threats")
+                  }
+                >
+                  Switch Threats LLMs
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-9 rounded-full border-amber-300 bg-white px-4 text-xs font-extrabold text-amber-950 hover:bg-amber-100"
+                  onClick={() =>
+                    void showStageLlmInfo(section.portfolio, "technical")
+                  }
+                >
+                  Switch Technical LLMs
+                </Button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+        {audit?.status === "pending" ? (
+          <p role="status" className="mt-2 flex items-center gap-2 text-sm text-amber-800">
+            <Loader2 className="size-4 shrink-0 animate-spin" />
+            {audit.label}: run history confirmation pending. Completed outputs remain available.
+          </p>
+        ) : audit?.status === "failed" ? (
+          <div role="alert" className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
+            <p className="font-semibold">{audit.label}: run history was not confirmed.</p>
+            <p className="mt-1">Completed outputs remain available. A completion email has not been queued. Do not rerun model work to repair history.</p>
+            {audit.message ? <p className="mt-1">{audit.message}</p> : null}
+            <Link href={URLs.routes.console.autoRebalanceRuns(section.portfolio)} className="mt-2 inline-block font-semibold underline">Check saved run history</Link>
+          </div>
+        ) : null}
+        {emailWarning ? <p role="alert" className="mt-2 text-sm text-amber-800">{emailWarning}</p> : null}
         <div className="mt-5 flex items-center justify-between gap-3 rounded-2xl border border-emerald-100 bg-emerald-50 px-5 py-4 text-base font-normal text-emerald-950">
           <div className="flex min-w-0 flex-wrap items-center gap-3">
             <RebalanceStockFlowTrigger
@@ -8067,12 +8067,12 @@ ${zerodhaExecutionMode === "direct_market"
 
   const content = (
     <AutomatedRebalanceReliabilityBridge>
-      {workflowHistoryError ? <div role="alert" className="mb-4 rounded border border-amber-500 p-3">{workflowHistoryError}</div> : null}
       {stageLedger ? <WorkflowStageLedgerViews market={surface?.market ?? ledgerMarket} portfolioOnly={Boolean(surface)} view={ledgerView} onChange={(market, view) => { setLedgerMarket(market); setLedgerView(view); }} /> : null}
       <section className={stageLedger ? "min-w-0" : "grid gap-6 xl:grid-cols-2"}>
         {(!stageLedger || (surface?.market ?? ledgerMarket) === "zerodha") && renderSectionCard(zerodhaSection)}
         {(!stageLedger || (surface?.market ?? ledgerMarket) === "indmoneyUs") && renderSectionCard(indmoneySection)}
       </section>
+      {workflowHistoryError ? <div role="alert" className="mb-4 rounded border border-amber-500 p-3">{workflowHistoryError}</div> : null}
 
       <RebalanceStockFlowDialog
         portfolio={stockFlowPortfolio}

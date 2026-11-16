@@ -27,7 +27,7 @@ try {
  const call=(name)=>()=>window.actions.push(name);
  const stages=STAGE_ORDER.map((stage,index)=>{
  const palette=new URLSearchParams(location.search).get('palette');
- const partial=market==='US'&&stage==='rebalance'&&state==='loaded';
+ const partial=stage==='rebalance'&&state==='loaded';
  const completed=state==='empty'?null:'2026-10-30T14:13:00Z';
  const info=state==='empty'?{state:'idle'}:{state:state==='loading'?'queued':state==='failed'&&stage==='rebalance'?'failed':'completed',completedAt:completed,startedAt:'2026-10-30T14:11:00Z',endedAt:'2026-10-30T14:13:00Z',totalLlms:2,completedLlms:2,passedLlms:partial?1:2,partialLlms:partial?${mixedFailure ? 0 : 1}:0,failedLlms:partial?${mixedFailure ? 1 : 0}:0,recommendedStocks:index===1?null:state==='zero'?0:13,rebalanceInputs:1,costInr:null,runStatus:partial?'partial':state==='stale'?'stale':null,error:state==='failed'&&stage==='rebalance'?'Provider timeout':null,partialNotice:partial?'${mixedFailure ? 'One provider completed and one provider failed.' : 'One saved LLM response was partial.'}':null};
  if(palette)Object.assign(info,{state:palette,runStatus:null,partialLlms:0,failedLlms:0,partialNotice:null});
@@ -73,13 +73,14 @@ try {
  assert.equal(await page.locator('tbody tr').count(),6);
  assert.deepEqual(await page.locator('thead th').allTextContents(),['Stage','Evidence time','Completion / inputs','Stocks','Duration','Error']);
  assert.equal(await page.getByRole('status').count(),0);
+ const indiaError=page.getByRole('cell').getByRole('button',{name:'Show error details for Rebalance'});
+ await indiaError.click();await page.getByRole('dialog').waitFor();await page.keyboard.press('Escape');await page.getByRole('dialog').waitFor({state:'detached'});
  for(const index of [0,1]) assert.equal(await page.locator('tbody tr').nth(index).locator('td').nth(2).innerText(),'8');
  assert.match(await page.locator('tbody tr').first().locator('th').getAttribute('class'),/bg-blue-100/);
  await page.screenshot({path:path.join(evidence,'india-desktop.png'),fullPage:true});
  await page.getByRole('button',{name:'US stage ledger',exact:true}).focus();await page.keyboard.press('Enter');
- assert.equal(await page.getByRole('status').count(),1);
+ assert.equal(await page.getByRole('status').count(),0);
  if(mixedFailure){assert.match(await page.locator('tbody').innerText(),/Passed:1/);assert.match(await page.locator('tbody').innerText(),/Failed:1/);}
- assert.match(await page.getByRole('status').innerText(),/Rebalance has partial output/);
  assert.equal(await page.locator('tbody tr').filter({hasText:'LLM output partial'}).count(),1);
  assert.match(await page.locator('tbody tr').filter({hasText:'LLM output partial'}).getAttribute('class'),/\bbg-amber-50\b/);
  await page.screenshot({path:path.join(evidence,'us-partial-desktop.png'),fullPage:true});

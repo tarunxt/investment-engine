@@ -26,7 +26,7 @@ try {
  const [market,setMarket]=useState('India'),[view,setView]=useState('ledger'),[state,setState]=useState('loaded'),[checks,setChecks]=useState({});
  const call=(name)=>()=>window.actions.push(name);
  const stages=STAGE_ORDER.map((stage,index)=>{
- const partial=market==='US'&&stage==='rebalance'&&state==='loaded';
+ const partial=stage==='rebalance'&&state==='loaded';
  const completed=state==='empty'?null:'2026-10-30T14:13:00Z';
  const info=state==='empty'?{state:'idle'}:{state:state==='loading'?'queued':state==='failed'&&stage==='rebalance'?'failed':'completed',completedAt:completed,startedAt:'2026-10-30T14:11:00Z',endedAt:'2026-10-30T14:13:00Z',totalLlms:2,completedLlms:2,passedLlms:partial?1:2,partialLlms:partial?1:0,failedLlms:0,recommendedStocks:index===1?null:state==='zero'?0:13,rebalanceInputs:1,costInr:null,runStatus:partial?'partial':state==='stale'?'stale':null,error:state==='failed'&&stage==='rebalance'?'Provider timeout':null,partialNotice:partial?'One saved LLM response was partial.':null};
  return <WorkflowStageTile key={stage} stage={stage} info={info} now={now} selectable={state==='selection'} selected={Boolean(checks[stage])} onClick={state==='selection'?()=>setChecks({...checks,[stage]:!checks[stage]}):call('open:'+stage)} onInfoClick={!['sync','actionables'].includes(stage)?call('models:'+stage):undefined} onInputClick={stage!=='sync'?call('inputs:'+stage):undefined} onPromptClick={!['sync','actionables'].includes(stage)?call('prompt:'+stage):undefined} onOutputClick={call('output:'+stage)} onSyncNowClick={stage==='sync'?call('sync'):undefined} onPlaceOrderClick={stage==='actionables'?call('order:'+market):undefined} placeOrderLabel={market==='US'?'Final Order':'Place Order'} onCalculationsClick={stage==='actionables'?call('calculation'):undefined}/>;
@@ -68,11 +68,12 @@ try {
  assert.equal(await page.locator('tbody tr').count(),6);
  assert.deepEqual(await page.locator('thead th').allTextContents(),['Stage','Saved time','Completion / inputs','Stocks','Duration','Error']);
  assert.equal(await page.getByRole('status').count(),0);
+ const indiaError=page.getByRole('cell').getByRole('button',{name:'Show error details for Rebalance'});
+ await indiaError.click();await page.getByRole('dialog').waitFor();await page.keyboard.press('Escape');await page.getByRole('dialog').waitFor({state:'detached'});
  await page.screenshot({path:path.join(evidence,'india-desktop.png'),fullPage:true});
  await page.getByRole('button',{name:'US stage ledger',exact:true}).focus();await page.keyboard.press('Enter');
  assert.equal(await savedHistory.getAttribute('href'),'/console/auto-rebalance-runs/indmoneyUs');
- assert.equal(await page.getByRole('status').count(),1);
- assert.match(await page.getByRole('status').innerText(),/Rebalance has partial output/);
+ assert.equal(await page.getByRole('status').count(),0);
  assert.equal(await page.locator('tbody tr').filter({hasText:'LLM output partial'}).count(),1);
  await page.screenshot({path:path.join(evidence,'us-partial-desktop.png'),fullPage:true});
  // Error dialog repeated opening, Escape and native focus restoration.
