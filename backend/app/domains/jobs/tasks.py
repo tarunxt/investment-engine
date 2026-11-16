@@ -1414,6 +1414,11 @@ def execute_ai_job(self, job_id: int) -> None:
                 ownership.after_call()
                 return result
         provider = OwnedProvider()
+        from app.domains.jobs.technical_prices import (
+            MissingTechnicalListings, merge_technical_rows, missing_listing_prompt,
+            technical_identity_instructions, validate_technical_prices,
+        )
+        prompt_to_execute += technical_identity_instructions(job.prompt)
         with provider_usage_phase("initial_generation"):
             result = provider.generate(prompt=prompt_to_execute, model=job.model)
         if _job_was_cancelled(repo, job_id):
@@ -1434,8 +1439,33 @@ def execute_ai_job(self, job_id: int) -> None:
             raise RuntimeError(
                 f"{job.provider}/{job.model} returned empty output after generation"
             )
-        from app.domains.jobs.technical_prices import validate_technical_prices
-        validate_technical_prices(job.prompt, content)
+        for attempt in range(_MAX_STOCK_REPAIR_ATTEMPTS + 1):
+            try:
+                validate_technical_prices(job.prompt, content)
+                break
+            except MissingTechnicalListings as missing:
+                if attempt == _MAX_STOCK_REPAIR_ATTEMPTS:
+                    raise
+                repair_prompt = missing_listing_prompt(job.prompt, missing.ids)
+            if _job_was_cancelled(repo, job_id):
+                return
+            with provider_usage_phase("row_repair"):
+                repair = provider.generate(prompt=repair_prompt, model=job.model)
+            tokens_in += repair.tokens_in
+            tokens_out += repair.tokens_out
+            estimated_cost = round(estimated_cost + repair.cost, 6)
+            web_search_used, web_search_queries, web_sources = merge_web_metadata(
+                web_search_used, web_search_queries, web_sources,
+                response_used=repair.web_search_used, response_queries=repair.web_search_queries,
+                response_sources=repair.web_sources,
+            )
+            if _job_was_cancelled(repo, job_id):
+                return
+            try:
+                validate_technical_prices(repair_prompt, repair.content or "")
+            except MissingTechnicalListings:
+                pass  # A partial supplement can still contribute validated rows.
+            content = merge_technical_rows(content, repair.content or "")
         if _requires_generic_table_output(job.prompt):
             if _is_rebalance_output(job.prompt):
                 content, rebalance_table_issue, _parsed_rebalance_rows = _validate_rebalance_table_content(content, job.prompt)
