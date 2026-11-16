@@ -3,7 +3,7 @@
 import { useId, useState, type ComponentProps, type ReactElement } from "react";
 import { StageDurationBreakdownDialog } from "@/app/console/dashboard/_components/StageDurationBreakdownDialog";
 import { StageErrorDetails } from "./StageErrorDetails";
-import { getStageLedgerTone, hasStagePartialOutput, getIdleStageRows, getStageTileLabel, STAGE_METADATA, type WorkflowStageTile } from "./WorkflowStageTile";
+import { getStageLedgerTone, getIdleStageRows, getStageTileLabel, STAGE_METADATA, type WorkflowStageTile } from "./WorkflowStageTile";
 
 type Stage = ComponentProps<typeof WorkflowStageTile>;
 function evidenceLabel(item: Stage) {
@@ -61,16 +61,8 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
   const openDuration = (item: Stage) => {
     setDurationStage(item);
   };
-  const partialStages = stages.filter(item =>
-    hasStagePartialOutput(item.info) &&
-    !(view === "ledger" && market === "zerodha" && item.stage === "rebalance")
-  );
   const syncedStockCount = market === "zerodha" ? stages.find(item => item.stage === "sync")?.info.portfolioStockCount : undefined;
   return <div className="mt-4 min-w-0 space-y-3 text-sm text-slate-600">
-    {view !== "execution" && partialStages.map(item => <p key={item.stage} role="status" className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-amber-950">
-      <strong>{getStageTileLabel(item.stage)} has partial output.</strong>{" "}
-      {rowValue(item, "LLMs completed", "Completion unavailable")}. Inspect this stage’s error details before relying on its output.
-    </p>)}
     {view === "ledger" ? <div role="region" aria-label="Saved stage ledger, scroll for all columns" tabIndex={0} className="overflow-x-auto rounded-xl border border-indigo-100 bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600">
       <table className="w-full min-w-[790px] border-collapse text-left text-sm">
         <caption className="sr-only">Saved workflow stages. Select a stage to inspect its evidence; execution controls are separate.</caption>
