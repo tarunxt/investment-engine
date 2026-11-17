@@ -198,11 +198,18 @@ class ExecutionHarness:
                 lifecycle.append(self)
         provider = SimpleNamespace(generate=generate)
         factory = SimpleNamespace(create=lambda name: provider)
+        from app.domains.jobs import technical_prices
         technical = MagicMock()
         modules = {
             **self.modules,
             'app.domains.ai_providers.factory': stub_module('app.domains.ai_providers.factory', ProviderFactory=factory),
-            'app.domains.jobs.technical_prices': stub_module('app.domains.jobs.technical_prices', validate_technical_prices=technical),
+            'app.domains.jobs.technical_prices': stub_module(
+                'app.domains.jobs.technical_prices', validate_technical_prices=technical,
+                MissingTechnicalListings=technical_prices.MissingTechnicalListings,
+                merge_technical_rows=technical_prices.merge_technical_rows,
+                missing_listing_prompt=technical_prices.missing_listing_prompt,
+                technical_identity_instructions=technical_prices.technical_identity_instructions,
+            ),
             'app.domains.jobs.partial_output': stub_module('app.domains.jobs.partial_output', has_partial_output=lambda metadata: partial, PARTIAL_NOTICE='synthetic partial'),
         }
         namespace = dict(self.namespace, celery=celery, SyncSessionLocal=sessions,
