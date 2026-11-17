@@ -39,8 +39,8 @@ async def reconcile_swing(db, run):
 
     # Serialize competing pollers. Refresh the identity map after acquiring locks
     # so cancellation, renewal or a newer stage always wins over a stale read.
-    locked = (await db.execute(select(Run).where(Run.id == run.id)
-              .with_for_update().execution_options(populate_existing=True))).scalar_one()
+    locked = (await db.execute(select(Run.status, Run.current_stage).where(Run.id == run.id)
+              .with_for_update())).one()
     if locked.status != JobStatus.PROCESSING or locked.current_stage != stage:
         return
     jobs = (await db.execute(select(Job).join(RunJob, RunJob.job_id == Job.id)
@@ -65,5 +65,5 @@ async def reconcile_swing(db, run):
             job.error_message = "Saved Swing response failed contract validation after worker ownership expired."
         job.runtime_metadata_json = {**job.runtime_metadata_json, "swing_reconciliation": job.error_message,
                                      "deterministic_output": validation}
-    locked.status = aggregate_stage_status(j.status for j in jobs)
+    run.status = aggregate_stage_status(j.status for j in jobs)
     await db.commit()
