@@ -157,6 +157,7 @@ class SyncRunRepository:
             select(RunJob, Job)
             .join(Job, RunJob.job_id == Job.id)
             .where(RunJob.run_id == run_id, RunJob.stage == stage)
+            .execution_options(populate_existing=True)
         ).all()
         return [(rj, job) for rj, job in rows]
 
