@@ -21,7 +21,7 @@ def returned_after_owner_expiry(job, now):
         and bool(job.response)
         and claim.get("state") in {"owned", "reconciliation_needed"}
         and claim.get("provider_started") is True
-        and claim.get("pending_calls") == 0
+        and (claim.get("pending_calls") == 0 or claim.get("state") == "reconciliation_needed")
         and isinstance(expiry, (int, float))
         and isfinite(expiry) and expiry <= now
         and not job.scheduled_at
@@ -51,6 +51,15 @@ async def reconcile_swing(db, run):
         return
     for job in jobs:
         if job.status in TERMINAL:
+            continue
+        claim = job.runtime_metadata_json[KEY]
+        if claim.get("pending_calls") != 0:
+            # reconcile() has fenced this attempt: require_owner rejects further
+            # writes and admit refuses a replay. Preserve its uncertain billing
+            # and raw response, but never publish the response as usable.
+            job.status = JobStatus.FAILED
+            job.error_message = "Worker ownership expired with an unconfirmed provider call. Saved response excluded; no replay."
+            job.runtime_metadata_json = {**job.runtime_metadata_json, "swing_reconciliation": job.error_message}
             continue
         token = configure_output_context(job, {"run_id": str(run.id)})
         try:
