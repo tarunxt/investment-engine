@@ -56,6 +56,7 @@ jobs:
           backend/tests/test_auth_websocket_tickets.py
           backend/tests/test_recovery_containment.py
           backend/tests/test_jobs_ownership.py
+          backend/tests/test_stalled_swing_reconciliation.py
           backend/tests/test_jobs_cache_ownership.py
           backend/tests/test_jobs_public_projection.py
           backend/tests/test_jobs_public_projection_regressions.py

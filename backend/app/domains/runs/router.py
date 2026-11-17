@@ -22,6 +22,7 @@ from app.domains.runs.models import (
 )
 from app.domains.runs.repository import PostgresRunRepository
 from app.domains.runs.auto_rebalance_audit import LLM_STAGES, validate_execution
+from app.domains.runs.swing_reconciliation import reconcile_swing
 from app.domains.runs.run_identity import analysis_run_identity
 from app.domains.runs.schemas import (
     AutoRebalanceCompletionEmailRequest,
@@ -1090,6 +1091,7 @@ async def get_run(
     run = await repo.get(run_id, user_id=current_user.id)
     if not run:
         raise HTTPException(404, detail="Run not found")
+    await reconcile_swing(db, run)
     return run
 
 
