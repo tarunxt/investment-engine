@@ -22,6 +22,8 @@ const planAst = ts.createSourceFile("inputs.ts", planSource, ts.ScriptTarget.Lat
 const planExports = {};
 new Function("exports", compile(planAst.statements.find(node => node.name?.getText(planAst) === "technicalInputPlanIssue").getText(planAst)))(planExports);
 const { technicalInputPlanIssue } = planExports;
+const preflightExports = {};
+new Function("exports", compile(readFileSync(new URL("../lib/rebalancePreflight.ts", import.meta.url), "utf8")))(preflightExports);
 const priceExports = {};
 new Function("exports", compile(readFileSync(new URL("../lib/technicalPriceEvidence.ts", import.meta.url), "utf8")))(priceExports);
 const rebalanceSource = readFileSync(new URL("../lib/rebalance.ts", import.meta.url), "utf8");
@@ -71,7 +73,7 @@ function harness({ analysisOnly = false, formulaScore = 0, intercept, read, emai
   const timers = [];
   const updates = [];
   const alerts = [];
-  const view = { audits: {}, warnings: {}, running: null, states: Object.fromEntries(["zerodha", "indmoneyUs"].map((p) => [p, Object.fromEntries(stages.map((stage) => [stage, { state: "idle" }]))])) };
+  const view = { preflightErrors: {}, audits: {}, warnings: {}, running: null, states: Object.fromEntries(["zerodha", "indmoneyUs"].map((p) => [p, Object.fromEntries(stages.map((stage) => [stage, { state: "idle" }]))])) };
   const set = (key) => (value) => { view[key] = typeof value === "function" ? value(view[key]) : value; };
   const active = { current: {} };
   const sessions = { current: {} };
@@ -125,6 +127,9 @@ function harness({ analysisOnly = false, formulaScore = 0, intercept, read, emai
     selectedInputs: Object.fromEntries(["zerodha", "indmoneyUs"].map((p) => [p, Object.fromEntries(stages.map((stage) => [stage, new Set([`${stage}:next`])]))])),
     isWorkflowExecutingRef: execution, activeExecutionRefsRef: { current: [] },
     cancelRequestedRef: cancel, pauseRequestedRef: pause,
+    ...preflightExports, validateTechnicalInstruments: priceExports.validateTechnicalInstruments,
+    setPreflightPortfolio: set("checking"), setPreflightErrors: set("preflightErrors"),
+    getCompatibleTargets: () => [], readStageLlmSelection: () => [], targetKey: target => `${target.provider}:${target.model}`,
     setRunningPortfolio: set("running"), setWorkflowPaused: () => {},
     reserveAutoRebalanceRunMetadata: reserve ?? (async (p) => metadata(p === "zerodha" ? "india" : "indmoney_us")),
     analysisOnlyRuns: { zerodha: analysisOnly, indmoneyUs: analysisOnly }, setAnalysisOnlyRuns: () => {}, setActiveAutoRebalanceMetadata: () => {}, setSpecificMode: () => {}, setSelectedStages: () => {}, setSelectedInputs: () => {}, setLastAutoRebalanceCosts: () => {},
@@ -347,7 +352,7 @@ test("actual workflow card renders pending and failed history independently of o
       exports: {}, technicalInputPlanIssue, selectedInputs: { zerodha: { technical: new Set(["technical:next"]) } },
       require: (name) => { assert.equal(name, "react/jsx-runtime"); return jsxRuntime; },
       auditStates: { zerodha: { key: "india:42", label: "India 42", status, message: "History not acknowledged" } },
-      completionEmailWarnings: {}, runningPortfolio: null, states: { zerodha: workflowStates },
+      preflightPortfolio: null, preflightErrors: {}, completionEmailWarnings: {}, runningPortfolio: null, states: { zerodha: workflowStates },
       hasActiveWorkflowStage: () => false, getQueuedStages: () => new Set(),
       analysisOnlyRuns: { zerodha: false }, AnalysisOnlyRunControl: () => null,
       specificMode: { zerodha: false }, selectedStages: { zerodha: new Set() },
@@ -439,7 +444,7 @@ test("pause after a completed swing records the next selected unstarted stage wi
 
 test("pause after sync clears the premarked next stage without launching its model", async () => {
   let h;
-  h = harness({ selection: ["sync", "swing", "actionables"], intercept: ({ stage, payload }) => {
+  h = harness({ selection: ["sync", "swing"], intercept: ({ stage, payload }) => {
     if (stage === "sync" && payload.status === "completed") h.pause.current = true;
   } });
   await h.runWorkflow("indmoneyUs");
@@ -456,14 +461,19 @@ test("INDmoney's real holdings guard blocks invalid pasted and saved snapshots b
   for (const snapshot of [null, { parse_status: "unparsed", holdings: [] },
     { ...holdingsSnapshot, reported_holdings_count: 2 },
     { ...holdingsSnapshot, holdings: [{ symbol: "ABC", quantity: null }] }]) {
-    for (const pastedPayload of [undefined, { source_text: "synthetic invalid holdings" }]) {
-      const h = harness({ snapshot, selection: ["sync", "swing", "actionables"] });
+    for (const pastedPayload of [undefined, { raw_text: "synthetic invalid holdings" }]) {
+      const h = harness({ snapshot, selection: ["sync", "swing"] });
       await h.runWorkflow("indmoneyUs", pastedPayload);
       assert.equal(h.modelCalls.length, 0);
       assert.equal(h.emails.length, 0);
       assert.equal(h.auditWrites.some(({ stage, payload }) => stage === "sync" && payload.status === "completed"), false);
-      assert.equal(h.durable.get("indmoney_us:42:sync").status, "failed");
-      assert.match(h.view.states.indmoneyUs.sync.error, /My US Stocks|Saved snapshot identity or capture time is unavailable/);
+      if (pastedPayload) {
+        assert.equal(h.durable.get("indmoney_us:42:sync").status, "failed");
+        assert.match(h.view.states.indmoneyUs.sync.error, /My US Stocks|Saved snapshot identity or capture time is unavailable/);
+      } else {
+        assert.equal(h.auditWrites.length, 0);
+        assert.match(h.view.preflightErrors.indmoneyUs.join(' '), /My US Stocks|Saved snapshot identity or capture time is unavailable/);
+      }
     }
   }
 });
@@ -485,7 +495,7 @@ test("kill while reservation is pending cannot start model work after reservatio
   const reservation = deferred();
   const h = harness({ reserve: () => reservation.promise });
   const running = h.runWorkflow("zerodha");
-  await until(() => h.execution.current);
+  await until(() => h.view.running === "zerodha");
   h.cancel.current = true;
   reservation.resolve(metadata());
   await running;
@@ -595,6 +605,7 @@ test('actual selective workflow clears cached evidence before each reservation a
     const stale={state:'failed',error:'Previous run failure',errorDetails:[{message:'Previous detail'}],lastRunId:900,completedAt:'2026-10-01T00:00:00Z',recommendedStocks:99,evidence:{kind:'saved',references:['Old run']}};
     for(const stage of stages)h.view.states.zerodha[stage]=structuredClone(stale);
     const running=h.runWorkflow('zerodha');
+    await until(() => h.view.running === 'zerodha');
     assert.equal(h.view.running,'zerodha');
     assert.equal(h.modelCalls.length,iteration,'reservation is still pending');
     for(const stage of stages) {

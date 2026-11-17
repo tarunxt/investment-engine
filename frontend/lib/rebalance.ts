@@ -325,6 +325,7 @@ Capital / Portfolio Rules:
 - Include Buy New rows for the swing-trade candidates that are stronger than existing portfolio names after considering current portfolio concentration, threats, catalysts, momentum, and opportunity cost.
 - Output one decision row for EVERY exact exchange/symbol identity in the union of current holdings and ALL supplied Swing tables, including candidates not selected for fresh buy. Never omit a candidate.
 - For an unheld candidate not selected for purchase, use Hold with Current Units, Units Change, Final Units, Units to Buy and Total Buy Amount all 0; provide your actual non-buy reason in Rationale Cruxx. This is a non-buy decision, not a holding or executable order.
+- Stock Symbol must be the exact exchange trading ticker, never a company name or display label. For India, Exchange Symbol must be NSE or BSE and Stock Symbol must contain 1–64 uppercase letters, digits, &, _, . or - with no spaces. Verify malformed source identities against the exchange and explain any correction in the rationale.
 - Preserve each source exchange/symbol identity. NSE and BSE listings remain separate; an association to a held company is context only, never permission to reuse another venue’s quote.
 - Use aggressive but sensible swing-trade logic.
 - Prefer liquid ${exchangeExamples} stocks with strong volume, momentum, catalyst, and relative strength.

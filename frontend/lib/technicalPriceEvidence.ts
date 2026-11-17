@@ -1,5 +1,18 @@
 import type { ZerodhaDisplayQuoteResponse } from "@/types/api";
 
+/** Validate the entire batch before sending a broker request. Never guess a ticker. */
+export function validateTechnicalInstruments(instruments: string[]): string[] {
+  const unique = [...new Set(instruments)];
+  const invalid = unique.filter(key => !/^(?:NSE|BSE):[A-Z0-9&_.-]{1,64}$/.test(key));
+  if (invalid.length) {
+    throw new Error(`Invalid exact NSE/BSE trading symbols: ${invalid.join(", ")}. Correct the source Stock Symbol and Exchange Symbol fields or regenerate that scan with exact exchange tickers.`);
+  }
+  if (unique.length < 1 || unique.length > 500) {
+    throw new Error(`Technical Scan requires 1–500 unique NSE/BSE instruments. Received ${unique.length}. Review the selected Rebalance outputs.`);
+  }
+  return unique;
+}
+
 function researchOnlyEvidence(reason: string) {
   return `\n\n[TECHNICAL_PRICE_MODE_V1]internet_research_no_broker_quotes[/TECHNICAL_PRICE_MODE_V1]\n${reason} Continue the technical internet research requested above using fresh exact-exchange sources. No broker price anchors were supplied: do not describe researched prices as broker-verified or live Kite quotes. Check source dates and corporate actions; do not invent prices or setups when evidence is unavailable.\n`;
 }
@@ -54,6 +67,7 @@ export async function resolveTechnicalPriceEvidence(
   readQuotes: (instruments: string[]) => Promise<ZerodhaDisplayQuoteResponse>,
   now?: number,
 ): Promise<string> {
+  instruments = validateTechnicalInstruments(instruments);
   let result: ZerodhaDisplayQuoteResponse;
   try {
     result = await readQuotes(instruments);

@@ -240,6 +240,7 @@ async function executeWorkflow({ stages = ['sync', 'threats', 'swing', 'rebalanc
   let reservations = 0;
   const completed = [];
   const errors = [];
+  let preflightErrors = [];
   const threatReads = [];
   const runReads = [];
   const consensusInputs = [];
@@ -288,6 +289,10 @@ async function executeWorkflow({ stages = ['sync', 'threats', 'swing', 'rebalanc
     // Persistence behavior is exercised by auto-rebalance-audit-persistence;
     // this harness isolates the existing source-selection/model-call contract.
     getAuditSession: () => ({ key: 'indmoney_us:100', verifyCompletion: async () => true, drain: async () => {} }),
+    ...load(read('../lib/rebalancePreflight.ts')),
+    setPreflightPortfolio: noop,
+    setPreflightErrors: update => { preflightErrors = update({}).indmoneyUs ?? []; },
+    getCompatibleTargets: () => targets, targetKey: target => `${target.provider}:${target.model}`, readStageLlmSelection: () => [],
     setRunningPortfolio: noop, resetPortfolio: noop, setWorkflowPaused: noop, setActiveAutoRebalanceMetadata: noop, setStates: noop,
     updateStage: (_portfolio, stage, info) => { if (info.error) errors.push({ stage, error: info.error }); },
     markRunning: noop, markCompleted: (_portfolio, stage) => { completed.push(stage); },
@@ -309,15 +314,15 @@ async function executeWorkflow({ stages = ['sync', 'threats', 'swing', 'rebalanc
   };
   const { execute } = load(`export const execute = ${callbackSource};`, bindings);
   await execute('indmoneyUs');
-  return { created, completed, errors, alerts, reservations, threatReads, runReads, consensusInputs, targets };
+  return { created, completed, errors, preflightErrors, alerts, reservations, threatReads, runReads, consensusInputs, targets };
 }
 
 test('invalid saved INDmoney snapshot fails sync before any paid stage is queued', async () => {
   const result = await executeWorkflow({ snapshot: { ...portfolioSnapshot, parse_status: 'unparsed', holdings: [] } });
   assert.deepEqual(result.created, []);
   assert.deepEqual(result.completed, []);
-  assert.equal(result.errors[0].stage, 'sync');
-  assert.match(result.errors[0].error, /My US Stocks/);
+  assert.equal(result.reservations, 0);
+  assert.match(result.preflightErrors.join(' '), /My US Stocks/);
 });
 
 test('offline full workflow keeps six stages and independent model samples while emitting each selected source once', async () => {
@@ -328,10 +333,10 @@ test('offline full workflow keeps six stages and independent model samples while
   const swingPrompt = result.created.find((call) => call.stage === 'swing').prompt;
   assert.equal(swingPrompt.match(/Threat Scan #99/g)?.length, 1);
   assert.equal(swingPrompt.match(/Threat Scan #98/g)?.length, 1);
-  assert.deepEqual(result.threatReads, [99, 98], 'selected historical threats are fetched by their own ID');
+  assert.deepEqual(result.threatReads, [99, 98, 99, 98], 'selected historical threats are fetched by their own ID');
   const rebalancePrompt = result.created.find((call) => call.stage === 'rebalance').prompt;
   for (const jobId of [501, 502, 503]) assert.equal(rebalancePrompt.match(new RegExp(`Bullish rationale ${jobId}`, 'g'))?.length, 1);
-  assert.deepEqual(keys(result.consensusInputs[1]), ['60:601', '60:602', '61:603']);
+  assert.deepEqual(keys(result.consensusInputs[2]), ['60:601', '60:602', '61:603']);
   assert.deepEqual(result.created.find((call) => call.stage === 'swing').targets, result.targets);
 });
 
@@ -375,9 +380,14 @@ test('offline workflow rejects stale/conflicting and out-of-scope sources before
   for (const { expectedStages, failed, ...options } of cases) {
     const result = await executeWorkflow(options);
     assert.deepEqual(result.created.map((call) => call.stage), expectedStages);
-    assert.equal(result.errors.length, 1);
-    assert.equal(result.errors[0].stage, failed);
-    assert.match(result.errors[0].error, refreshError);
+    if (result.preflightErrors.length) {
+      assert.equal(result.reservations, 0);
+      assert.match(result.preflightErrors.join(' '), refreshError);
+    } else {
+      assert.equal(result.errors.length, 1);
+      assert.equal(result.errors[0].stage, failed);
+      assert.match(result.errors[0].error, refreshError);
+    }
   }
 });
 
@@ -444,7 +454,8 @@ test('manual rebalance shows actionable validation errors and blocks submit with
  test('Next cannot silently substitute history when Swing was skipped', async () => {
   const result = await executeWorkflow({ stages: ['rebalance'], selected: { rebalance: new Set(['rebalance:next']) } });
   assert.deepEqual(result.created, []);
-  assert.match(result.errors[0].error, /Next Swing output is unavailable/);
+  assert.equal(result.reservations, 0);
+  assert.match(result.preflightErrors.join(' '), /Next Swing/);
 });
 
 test('snapshot drift fails before paid Rebalance', async () => {
@@ -489,7 +500,7 @@ test('Reset Defaults selects only the upcoming output for every stage', () => {
 });
 
 test('Technical Next without selected Rebalance is rejected before reservation, source reads or provider work',async()=>{
- const result=await executeWorkflow({stages:['technical']});assert.equal(result.reservations,0);assert.deepEqual(result.created,[]);assert.deepEqual(result.runReads,[]);assert.deepEqual(result.errors,[]);assert.equal(result.alerts.length,1);assert.match(result.alerts[0],/Next means a new result from this invocation/);assert.match(result.alerts[0],/saved completed\/partial/);
+ const result=await executeWorkflow({stages:['technical']});assert.equal(result.reservations,0);assert.deepEqual(result.created,[]);assert.deepEqual(result.errors,[]);assert.equal(result.alerts.length,0);assert.match(result.preflightErrors.join(' '),/Next means a new result from this invocation/);assert.match(result.preflightErrors.join(' '),/saved completed\/partial/);
  const issue=inputs.technicalInputPlanIssue(true,false,new Set(['technical:next','run:60:job:601']));assert.ok(issue,'saved jobs do not silently replace a missing requested Next source');
  assert.equal(inputs.technicalInputPlanIssue(false,false,new Set(['technical:next'])),null);
 });
@@ -497,7 +508,7 @@ test('Technical Next without selected Rebalance is rejected before reservation, 
 test('Technical accepts completed/partial generated or explicitly selected saved Rebalance without substituting latest',async()=>{
  for(const rebalanceStatus of ['completed','partial']){
   const full=await executeWorkflow({rebalanceStatus});assert.deepEqual(full.alerts,[]);assert.deepEqual(full.errors,[]);assert.ok(full.created.some(call=>call.stage==='technical'));
-  const selected=await executeWorkflow({stages:['technical'],selected:{technical:new Set(['run:60:job:601','run:60:job:602'])},rebalanceStatus});assert.deepEqual(selected.alerts,[]);assert.deepEqual(selected.errors,[]);assert.deepEqual(selected.created.map(call=>call.stage),['technical']);assert.deepEqual(selected.runReads,[60]);assert.deepEqual(keys(selected.consensusInputs[0]),['60:601','60:602']);
+  const selected=await executeWorkflow({stages:['technical'],selected:{technical:new Set(['run:60:job:601','run:60:job:602'])},rebalanceStatus});assert.deepEqual(selected.alerts,[]);assert.deepEqual(selected.errors,[]);assert.deepEqual(selected.created.map(call=>call.stage),['technical']);assert.deepEqual(selected.runReads,[60,60]);assert.deepEqual(keys(selected.consensusInputs[0]),['60:601','60:602']);
  }
  const source=read('../app/console/dashboard/_components/RebalanceWorkflowSections.tsx');const preflight=source.indexOf('const inputPlanIssue =');assert.ok(preflight<source.indexOf('const zerodhaPopup =',preflight));assert.match(source,/Choose saved Rebalance inputs/);assert.match(source,/lastRunId: null, activeRunId: null, recommendedStocks: null/);assert.match(source,/errorDetails: \[\]/);
 });
