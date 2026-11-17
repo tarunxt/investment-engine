@@ -7745,6 +7745,14 @@ ${zerodhaExecutionMode === "direct_market"
 
   const renderSectionCard = (section: (typeof sections)[number]) => {
     const audit = auditStates[section.portfolio];
+    const savedWorkflowSequences = STAGE_ORDER.map(
+      (stage) => states[section.portfolio][stage].workflowSequence,
+    ).filter((sequence): sequence is number =>
+      typeof sequence === "number" && Number.isSafeInteger(sequence) && sequence > 0,
+    );
+    const displayedWorkflowSequence =
+      activeAutoRebalanceMetadata[section.portfolio]?.auto_rebalance_sequence ??
+      (savedWorkflowSequences.length ? Math.max(...savedWorkflowSequences) : null);
     const emailWarning = completionEmailWarnings[section.portfolio];
     const isSectionRunning = runningPortfolio === section.portfolio;
     const hasActiveStage = hasActiveWorkflowStage(section.portfolio, states);
@@ -7786,7 +7794,7 @@ ${zerodhaExecutionMode === "direct_market"
               </Link>
             </div>
             <p className="mt-2 text-base leading-6 text-slate-500">
-              Last run:{" "}
+              Last/Current run{displayedWorkflowSequence !== null ? ` #${displayedWorkflowSequence}` : ""}:{" "}
               {formatCompactStageTime(lastRunByPortfolio[section.portfolio])}
             </p>
             {stageLedger && !surface ? <WorkflowRunBoundary historyHref={URLs.routes.console.autoRebalanceRuns(section.portfolio)} /> : null}
