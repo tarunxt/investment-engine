@@ -63,7 +63,7 @@ test('every Stage tile adapter shares compact timestamps, count-only recommendat
   for(const value of [null,undefined])assert.equal(ui.formatRecommendedStockProgress({recommendedStocks:value}),'n/a');
   assert.equal(ui.formatRecommendedStockProgress({recommendedStocks:0}),'0');
   const source=readFileSync(new URL('../app/console/dashboard/_components/RebalanceWorkflowSections.tsx',import.meta.url),'utf8');
-  assert.match(source,/Last run:\{" "\}\s*\{formatCompactStageTime\(lastRunByPortfolio\[section.portfolio\]\)\}/);
+  assert.match(source,/Last\/Current run.*:\{" "\}\s*\{formatCompactStageTime\(lastRunByPortfolio\[section.portfolio\]\)\}/);
 });
 
 test('every stage combines partial and error details in a single concise Error row without changing evidence', () => {
