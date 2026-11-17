@@ -352,7 +352,7 @@ test("actual workflow card renders pending and failed history independently of o
       exports: {}, technicalInputPlanIssue, selectedInputs: { zerodha: { technical: new Set(["technical:next"]) } },
       require: (name) => { assert.equal(name, "react/jsx-runtime"); return jsxRuntime; },
       auditStates: { zerodha: { key: "india:42", label: "India 42", status, message: "History not acknowledged" } },
-      preflightPortfolio: null, preflightErrors: {}, completionEmailWarnings: {}, runningPortfolio: null, states: { zerodha: workflowStates },
+      activeAutoRebalanceMetadata: {}, preflightPortfolio: null, preflightErrors: {}, completionEmailWarnings: {}, runningPortfolio: null, states: { zerodha: workflowStates },
       hasActiveWorkflowStage: () => false, getQueuedStages: () => new Set(),
       analysisOnlyRuns: { zerodha: false }, AnalysisOnlyRunControl: () => null,
       specificMode: { zerodha: false }, selectedStages: { zerodha: new Set() },
