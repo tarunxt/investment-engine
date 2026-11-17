@@ -20,8 +20,9 @@ def test_live_or_uncertain_job_is_preserved(changes):
 
 
 @pytest.mark.asyncio
-async def test_one_pass_one_recovered_partial(monkeypatch):
-    passed, partial = child(), child(state="reconciliation_needed")
+@pytest.mark.parametrize("pending, outcome", [(0, JobStatus.PARTIAL), (1, JobStatus.FAILED)])
+async def test_one_pass_one_recovered_partial(monkeypatch, pending, outcome):
+    passed, partial = child(), child(state="reconciliation_needed", pending_calls=pending)
     passed.status = JobStatus.COMPLETED
     run = SimpleNamespace(id=488, current_stage=1, status=JobStatus.PROCESSING,
                           auto_rebalance_sequence=225, auto_rebalance_label="India Run #225 (Swing Scan)",
@@ -36,5 +37,6 @@ async def test_one_pass_one_recovered_partial(monkeypatch):
     await recovery.reconcile_swing(db, run)
     await recovery.reconcile_swing(db, run)
     assert passed.status == JobStatus.COMPLETED
-    assert partial.status == run.status == JobStatus.PARTIAL
+    assert partial.status == outcome
+    assert run.status == JobStatus.PARTIAL
     db.commit.assert_awaited_once()
