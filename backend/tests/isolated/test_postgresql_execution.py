@@ -214,6 +214,7 @@ class ExecutionHarness:
         }
         namespace = dict(self.namespace, celery=celery, SyncSessionLocal=sessions,
             recovery_mode=lambda: False, monotonic=time.monotonic, Job=Job,
+            _MAX_STOCK_REPAIR_ATTEMPTS=2,
             MaxRetriesExceededError=MaxRetriesExceededError,
             logger=logging.getLogger('a11.synthetic'), WorkerLogHelper=MagicMock(),
             resolve_job_usage_identity=lambda *args: {},
