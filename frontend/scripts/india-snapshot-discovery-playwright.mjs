@@ -61,15 +61,18 @@ zerodhaOrders:()=>read('orders',{data:[]})
     await page.screenshot({path:path.join(evidence,'baseline-'+width+'.png')});
     for(const mode of ['saved','loading','empty','failed','partial','connection-failed','unconfigured','connected']) {
       await visit(mode);
-      const link=page.getByRole('link',{name:'View saved snapshot',exact:true});
-      await link.waitFor();
-      assert.ok((await link.boundingBox()).y<(width===1180?757:844));
-      assert.match(await link.locator('..').textContent(),/without signing in to Zerodha.*Reconnect separately/);
+      const menu=page.getByRole('navigation',{name:'Zerodha views'});
+      assert.equal(await page.getByRole('link',{name:'View saved snapshot',exact:true}).count(),0);
+      await menu.getByRole('link',{name:'Rebalance',exact:true}).click();
+      await page.locator('#india-workflow').waitFor({state:'attached'});
+      assert.equal(await saved().isVisible(),false);
+      await menu.getByRole('link',{name:'My Zerodha Portfolio'}).click();
+      await saved().waitFor();
       await page.screenshot({path:path.join(evidence,mode+'-'+width+'.png')});
       if(!['empty','failed'].includes(mode)) await page.waitForFunction(()=>window.apiCalls.filter(x=>x==='portfolio').length>=2);
       if(mode==='loading') await saved().getByRole('heading',{name:'Portfolio Snapshots'}).waitFor();
       const before=await page.evaluate(()=>window.apiCalls.slice());
-      await link.focus();await page.keyboard.press('Enter');
+      await page.evaluate(()=>{location.hash='saved-portfolio-snapshots'});
       await page.waitForFunction(()=>location.hash==='#saved-portfolio-snapshots');
       assert.equal(await saved().evaluate(el=>el===document.activeElement),true);
       if(mode!=='connected' && await saved().getByRole('button',{name:'Sync Portfolio',exact:true}).count()) assert.equal(await saved().getByRole('button',{name:'Sync Portfolio',exact:true}).isEnabled(),false);

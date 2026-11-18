@@ -2,7 +2,7 @@
 
 import { onWorkflowOwnerInvalidated } from '@/lib/workflowOwnerLifetime';
 import { acquireZerodhaLogin } from '@/lib/zerodhaLoginArbitration';
-import { PortfolioWorkflowSlot } from '@/app/console/_components/WorkflowSurfaceSlots';
+import { BrokerPortfolioTabs } from '@/app/console/_components/BrokerPortfolioTabs';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AlertCircle,
@@ -787,244 +787,233 @@ export default function ZerodhaPage() {
   }
 
   return (
-    <div className="mx-auto flex flex-col gap-6">
-      {/* Header */}
-      <header id="portfolio-top" tabIndex={-1} className="flex scroll-mt-6 flex-col gap-3 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gray-950">
-        <div>
-          <div className="inline-flex items-start gap-1">
-            <h1 className="text-lg font-semibold tracking-tight text-gray-950">India Portfolio · Zerodha</h1>
-            {status?.connected && (
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                onClick={handleDisconnect}
-                disabled={disconnecting}
-                aria-label="Disconnect Zerodha"
-                title="Disconnect Zerodha"
-                className="-mt-1 text-red-600 hover:text-red-700"
-              >
-                {disconnecting ? (
-                  <Loader2 className="size-3 animate-spin" />
-                ) : (
-                  <Unplug className="size-3" />
-                )}
-                <span className="sr-only">Disconnect</span>
-              </Button>
-            )}
+    <BrokerPortfolioTabs market="zerodha">
+      <div className="mx-auto flex flex-col gap-6">
+        {/* Header */}
+        <header id="portfolio-top" tabIndex={-1} className="flex scroll-mt-6 flex-col gap-3 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gray-950">
+          <div>
+            <div className="inline-flex items-start gap-1">
+              <h1 className="text-lg font-semibold tracking-tight text-gray-950">India Portfolio · Zerodha</h1>
+              {status?.connected && (
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  onClick={handleDisconnect}
+                  disabled={disconnecting}
+                  aria-label="Disconnect Zerodha"
+                  title="Disconnect Zerodha"
+                  className="-mt-1 text-red-600 hover:text-red-700"
+                >
+                  {disconnecting ? (
+                    <Loader2 className="size-3 animate-spin" />
+                  ) : (
+                    <Unplug className="size-3" />
+                  )}
+                  <span className="sr-only">Disconnect</span>
+                </Button>
+              )}
+            </div>
+            <p className="flex flex-wrap gap-x-2 text-sm text-gray-500">
+              <span>India</span>
+              <span aria-hidden="true">·</span>
+              <span>
+                {selectedSnapshot
+                  ? `Saved snapshot ${new Date(`${selectedSnapshot.snapshot_date}T00:00:00+05:30`).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium' })}`
+                  : loadingPortfolio
+                    ? 'Loading saved snapshots…'
+                    : portfolioError
+                      ? 'Saved snapshot status unavailable'
+                      : 'No saved snapshot'}
+              </span>
+              <span aria-hidden="true">·</span>
+              <span>{status ? (status.connected ? 'Connected' : 'Not connected') : 'Connection status unavailable'}</span>
+            </p>
           </div>
-          <p className="flex flex-wrap gap-x-2 text-sm text-gray-500">
-            <span>India</span>
-            <span aria-hidden="true">·</span>
-            <span>
-              {selectedSnapshot
-                ? `Saved snapshot ${new Date(`${selectedSnapshot.snapshot_date}T00:00:00+05:30`).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium' })}`
-                : loadingPortfolio
-                  ? 'Loading saved snapshots…'
-                  : portfolioError
-                    ? 'Saved snapshot status unavailable'
-                    : 'No saved snapshot'}
-            </span>
-            <span aria-hidden="true">·</span>
-            <span>{status ? (status.connected ? 'Connected' : 'Not connected') : 'Connection status unavailable'}</span>
-          </p>
-        </div>
-        <nav aria-label="Portfolio stages and markets">
-          <PortfolioAnalysisNav portfolio="zerodha" active="portfolio" className={styles.navigation} />
-        </nav>
-      </header>
+          <nav aria-label="Portfolio stages and markets">
+            <PortfolioAnalysisNav portfolio="zerodha" active="portfolio" className={styles.navigation} />
+          </nav>
+        </header>
 
-      {/* Error */}
-      {error && (
-        <div className="flex items-start gap-3 border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
-          <AlertCircle className="mt-0.5 size-4 shrink-0" />
-          <span>{error}</span>
-          <button onClick={() => setError(null)} className="ml-auto text-red-600 hover:text-red-800">✕</button>
-        </div>
-      )}
-
-      <div className="flex flex-wrap items-center justify-end gap-2">
-        <StatusRevealButton
-          active={showConnectionDetails}
-          label={status?.connected ? 'Show Zerodha connection details' : 'Show Zerodha login status'}
-          onClick={() => setShowConnectionDetails((current) => !current)}
-          className={cn(
-            status?.connected
-              ? 'border-emerald-200 text-emerald-700 hover:bg-emerald-50 focus-visible:bg-emerald-50'
-              : 'border-gray-200 text-gray-600 hover:bg-gray-100',
-          )}
-        >
-          {status?.connected ? <CheckCircle2 className="size-4" /> : <LogOut className="size-4" />}
-        </StatusRevealButton>
-        {configured ? (
-          <StatusRevealButton
-            active={showRedirectDetails}
-            label="Show Zerodha redirect URL details"
-            onClick={() => setShowRedirectDetails((current) => !current)}
-            className="border-blue-200 text-blue-700 hover:bg-blue-50 focus-visible:bg-blue-50"
-          >
-            <Link2 className="size-4" />
-          </StatusRevealButton>
-        ) : null}
-      </div>
-
-      {showConnectionDetails ? (
-        <div
-          className={cn(
-            'flex items-center gap-3 border px-4 py-3 text-sm',
-            status?.connected
-              ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
-              : 'border-gray-200 bg-gray-50 text-gray-600',
-          )}
-        >
-          {status?.connected ? (
-            <>
-              <CheckCircle2 className="size-4 shrink-0 text-emerald-600" />
-              <div>
-                <span className="font-medium">Connected to Zerodha</span>
-                <span className="ml-2 text-xs text-emerald-600">
-                  Session expires {formatTs(status.expires_at)}
-                </span>
-              </div>
-            </>
-          ) : (
-            <>
-              <LogOut className="size-4 shrink-0 text-gray-400" />
-              <span>Not connected. Saved snapshots remain available; open connection guidance to sign in.</span>
-            </>
-          )}
-        </div>
-      ) : null}
-
-      {configured && showRedirectDetails ? (
-        <div className="border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
-          Register this redirect URL in your Kite app:{' '}
-          <code className="font-mono text-xs">{`${URLs.frontend}/zerodha/callback`}</code>
-        </div>
-      ) : null}
-
-      <div className="border border-gray-200 bg-white px-4 py-3 text-sm">
-        <a
-          href="#saved-portfolio-snapshots"
-          className="font-semibold text-violet-700 underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gray-950"
-        >
-          View saved snapshot
-        </a>
-        <p className="mt-1 text-gray-600">
-          View any saved portfolio data without signing in to Zerodha. Reconnect separately to sync new provider data.
-        </p>
-      </div>
-
-      {!status?.connected && (
-        <details className="border border-gray-200 bg-white">
-          <summary className="cursor-pointer px-4 py-3 text-sm font-medium text-gray-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gray-950">
-            Connection guidance
-            <span className="ml-2 text-xs font-normal text-gray-500">Review login options separately from saved data</span>
-          </summary>
-          <div className="border-t border-gray-200 p-4">
-            <ZerodhaConnectionGuide
-              configured={configured}
-              loginUrl={loginUrl}
-              redirectUrl={`${URLs.frontend}/zerodha/callback`}
-              connecting={connectingPopup}
-              onQuickConnect={handlePopupConnect}
-            >
-              {configured ? (
-                <ManualTokenForm
-                  onConnected={() => {
-                    const baselineCapturedAt = portfolioOverview?.latest?.captured_at ?? null;
-                    fetchStatus().then(() => {
-                      fetchOrders();
-                      pollPortfolioOverview(baselineCapturedAt);
-                    });
-                  }}
-                />
-              ) : null}
-            </ZerodhaConnectionGuide>
+        {/* Error */}
+        {error && (
+          <div className="flex items-start gap-3 border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+            <AlertCircle className="mt-0.5 size-4 shrink-0" />
+            <span>{error}</span>
+            <button onClick={() => setError(null)} className="ml-auto text-red-600 hover:text-red-800">✕</button>
           </div>
-        </details>
-      )}
-
-      <section
-        id="saved-portfolio-snapshots"
-        aria-label="Saved portfolio snapshots"
-        tabIndex={-1}
-        className="scroll-mt-6 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gray-950"
-      >
-        {portfolioError && !selectedSnapshot && !loadingPortfolio ? (
-          <div role="alert" className="border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-800">
-            <h2 className="font-semibold">Saved snapshots unavailable</h2>
-            <p className="mt-1">{portfolioError}</p>
-            <p className="mt-1">Saved data could not be loaded. This does not mean it was erased.</p>
-          </div>
-        ) : (
-          <PortfolioSnapshotsPanel
-            connected={Boolean(status?.connected)}
-            overview={portfolioOverview}
-            selectedSnapshot={selectedSnapshot}
-            selectedSnapshotDate={selectedSnapshotDate}
-            loading={loadingPortfolio}
-            selecting={selectingSnapshot}
-            syncing={syncingPortfolio}
-            error={portfolioError}
-            onSelectSnapshot={handleSelectSnapshot}
-            onSync={handleSyncPortfolio}
-          />
         )}
-      </section>
 
-      {/* Connected — orders + place order */}
-      {status?.connected && (
-        <>
-          {/* Place order section */}
-          <div className="border border-gray-200 bg-white shadow-sm">
-            <button
-              onClick={() => setShowOrderForm((v) => !v)}
-              className="flex w-full items-center justify-between border-b border-gray-200 px-5 py-3 text-left"
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <StatusRevealButton
+            active={showConnectionDetails}
+            label={status?.connected ? 'Show Zerodha connection details' : 'Show Zerodha login status'}
+            onClick={() => setShowConnectionDetails((current) => !current)}
+            className={cn(
+              status?.connected
+                ? 'border-emerald-200 text-emerald-700 hover:bg-emerald-50 focus-visible:bg-emerald-50'
+                : 'border-gray-200 text-gray-600 hover:bg-gray-100',
+            )}
+          >
+            {status?.connected ? <CheckCircle2 className="size-4" /> : <LogOut className="size-4" />}
+          </StatusRevealButton>
+          {configured ? (
+            <StatusRevealButton
+              active={showRedirectDetails}
+              label="Show Zerodha redirect URL details"
+              onClick={() => setShowRedirectDetails((current) => !current)}
+              className="border-blue-200 text-blue-700 hover:bg-blue-50 focus-visible:bg-blue-50"
             >
-              <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">
-                Place Order
-              </span>
-              {showOrderForm ? (
-                <ChevronUp className="size-4 text-gray-400" />
-              ) : (
-                <ChevronDown className="size-4 text-gray-400" />
-              )}
-            </button>
-            {showOrderForm && (
-              <div className="p-5">
-                <PlaceOrderForm onPlaced={fetchOrders} />
-              </div>
+              <Link2 className="size-4" />
+            </StatusRevealButton>
+          ) : null}
+        </div>
+
+        {showConnectionDetails ? (
+          <div
+            className={cn(
+              'flex items-center gap-3 border px-4 py-3 text-sm',
+              status?.connected
+                ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                : 'border-gray-200 bg-gray-50 text-gray-600',
+            )}
+          >
+            {status?.connected ? (
+              <>
+                <CheckCircle2 className="size-4 shrink-0 text-emerald-600" />
+                <div>
+                  <span className="font-medium">Connected to Zerodha</span>
+                  <span className="ml-2 text-xs text-emerald-600">
+                    Session expires {formatTs(status.expires_at)}
+                  </span>
+                </div>
+              </>
+            ) : (
+              <>
+                <LogOut className="size-4 shrink-0 text-gray-400" />
+                <span>Not connected. Saved snapshots remain available; open connection guidance to sign in.</span>
+              </>
             )}
           </div>
+        ) : null}
 
-          {/* Orders table */}
-          <div className="border border-gray-200 bg-white shadow-sm">
-            <div className="flex items-center justify-between border-b border-gray-200 px-5 py-3">
-              <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">
-                Today&apos;s Orders
-              </span>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={fetchOrders}
-                disabled={loadingOrders}
+        {configured && showRedirectDetails ? (
+          <div className="border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+            Register this redirect URL in your Kite app:{' '}
+            <code className="font-mono text-xs">{`${URLs.frontend}/zerodha/callback`}</code>
+          </div>
+        ) : null}
+
+        {!status?.connected && (
+          <details className="border border-gray-200 bg-white">
+            <summary className="cursor-pointer px-4 py-3 text-sm font-medium text-gray-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gray-950">
+              Connection guidance
+              <span className="ml-2 text-xs font-normal text-gray-500">Review login options separately from saved data</span>
+            </summary>
+            <div className="border-t border-gray-200 p-4">
+              <ZerodhaConnectionGuide
+                configured={configured}
+                loginUrl={loginUrl}
+                redirectUrl={`${URLs.frontend}/zerodha/callback`}
+                connecting={connectingPopup}
+                onQuickConnect={handlePopupConnect}
               >
-                <RefreshCw className={cn('size-3.5', loadingOrders && 'animate-spin')} />
-              </Button>
+                {configured ? (
+                  <ManualTokenForm
+                    onConnected={() => {
+                      const baselineCapturedAt = portfolioOverview?.latest?.captured_at ?? null;
+                      fetchStatus().then(() => {
+                        fetchOrders();
+                        pollPortfolioOverview(baselineCapturedAt);
+                      });
+                    }}
+                  />
+                ) : null}
+              </ZerodhaConnectionGuide>
             </div>
-            <div className="p-5">
-              {loadingOrders ? (
-                <div className="flex items-center gap-2 text-sm text-gray-400">
-                  <Loader2 className="size-4 animate-spin" /> Loading orders…
+          </details>
+        )}
+
+        <section
+          id="saved-portfolio-snapshots"
+          aria-label="Saved portfolio snapshots"
+          tabIndex={-1}
+          className="scroll-mt-6 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gray-950"
+        >
+          {portfolioError && !selectedSnapshot && !loadingPortfolio ? (
+            <div role="alert" className="border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-800">
+              <h2 className="font-semibold">Saved snapshots unavailable</h2>
+              <p className="mt-1">{portfolioError}</p>
+              <p className="mt-1">Saved data could not be loaded. This does not mean it was erased.</p>
+            </div>
+          ) : (
+            <PortfolioSnapshotsPanel
+              connected={Boolean(status?.connected)}
+              overview={portfolioOverview}
+              selectedSnapshot={selectedSnapshot}
+              selectedSnapshotDate={selectedSnapshotDate}
+              loading={loadingPortfolio}
+              selecting={selectingSnapshot}
+              syncing={syncingPortfolio}
+              error={portfolioError}
+              onSelectSnapshot={handleSelectSnapshot}
+              onSync={handleSyncPortfolio}
+            />
+          )}
+        </section>
+
+        {/* Connected — orders + place order */}
+        {status?.connected && (
+          <>
+            {/* Place order section */}
+            <div className="border border-gray-200 bg-white shadow-sm">
+              <button
+                onClick={() => setShowOrderForm((v) => !v)}
+                className="flex w-full items-center justify-between border-b border-gray-200 px-5 py-3 text-left"
+              >
+                <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+                  Place Order
+                </span>
+                {showOrderForm ? (
+                  <ChevronUp className="size-4 text-gray-400" />
+                ) : (
+                  <ChevronDown className="size-4 text-gray-400" />
+                )}
+              </button>
+              {showOrderForm && (
+                <div className="p-5">
+                  <PlaceOrderForm onPlaced={fetchOrders} />
                 </div>
-              ) : (
-                <OrdersTable orders={orders} />
               )}
             </div>
-          </div>
-        </>
-      )}
-      <PortfolioWorkflowSlot market="zerodha" />
-    </div>
+
+            {/* Orders table */}
+            <div className="border border-gray-200 bg-white shadow-sm">
+              <div className="flex items-center justify-between border-b border-gray-200 px-5 py-3">
+                <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+                  Today&apos;s Orders
+                </span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={fetchOrders}
+                  disabled={loadingOrders}
+                >
+                  <RefreshCw className={cn('size-3.5', loadingOrders && 'animate-spin')} />
+                </Button>
+              </div>
+              <div className="p-5">
+                {loadingOrders ? (
+                  <div className="flex items-center gap-2 text-sm text-gray-400">
+                    <Loader2 className="size-4 animate-spin" /> Loading orders…
+                  </div>
+                ) : (
+                  <OrdersTable orders={orders} />
+                )}
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+    </BrokerPortfolioTabs>
   );
 }
