@@ -871,6 +871,12 @@ function getLatestMatchingRebalanceRuns(
   );
 }
 
+function sameFrozenScore(saved: unknown, current: number | null) {
+  if (saved === current) return true;
+  if (typeof saved !== "number" || current === null || !Number.isFinite(saved) || !Number.isFinite(current)) return false;
+  return Math.abs(saved - current) <= 8 * Number.EPSILON * Math.max(Math.abs(saved), Math.abs(current));
+}
+
 function canonicalBasketInputs(value: unknown): string {
   if (Array.isArray(value)) return "[" + value.map(canonicalBasketInputs).join(",") + "]";
   if (value !== null && typeof value === "object") {
@@ -4971,7 +4977,7 @@ export function RebalanceWorkflowSections({
         const sequence = technical.auto_rebalance_sequence;
         try {
           const [history, hashes] = await Promise.all([
-            apiService.getAutoRebalanceHistoryDetail("india", sequence), auditResponseHashes([...rebalance, technical]),
+            apiService.getAutoRebalanceHistoryDetail("india", sequence), auditResponseHashes([...rebalance, technical], technical),
           ]);
           if (generation !== zerodhaPreparation.current) return;
           const stage = history.stages.find(s => s.stage === "actionables");
@@ -4985,7 +4991,7 @@ export function RebalanceWorkflowSections({
               canonicalBasketInputs(frozen.formula) === canonicalBasketInputs(scoreMatrixFormulaConfig) &&
               rows.length === actionRows.length && rows.length > 0 && actionRows.every(row => rows.some(saved =>
                 saved.exchange === row.stock.exchange && saved.symbol === row.stock.symbol && saved.action === row.formulaAction &&
-                saved.score === row.formulaScore))) setVerifiedBasketFormula(canonicalBasketInputs(scoreMatrixFormulaConfig));
+                sameFrozenScore(saved.score, row.formulaScore)))) setVerifiedBasketFormula(canonicalBasketInputs(scoreMatrixFormulaConfig));
         } catch { /* Keep the basket provisional until the saved calculation can be confirmed. */ }
       }
       if (generation !== zerodhaPreparation.current) return;
@@ -7368,7 +7374,7 @@ ${zerodhaExecutionMode === "direct_market"
             ...summarizeRun(completedTechnicalRun),
             ...getRunProgress(completedTechnicalRun),
             finalInputs: { formula_version: market === "india" ? "score-matrix-v2" : "score-matrix-v1", formula: scoreMatrixFormulaConfig, rebalance_run_ids: rebalanceInputs.map(run => run.id),
-              response_hashes: await auditResponseHashes([...rebalanceInputs, completedTechnicalRun]) },
+              response_hashes: await auditResponseHashes([...rebalanceInputs, completedTechnicalRun], completedTechnicalRun) },
             lastRunId: completedTechnicalRun.id,
             recommendedStocks: countUniqueStocksFromRun(completedTechnicalRun),
           });
@@ -7411,7 +7417,7 @@ ${zerodhaExecutionMode === "direct_market"
             scorecard_job_id: generatedThreatInput?.analysis.job_id ?? null,
             captured_at: actionablesCompletedAt, formula: scoreMatrixFormulaConfig,
             rebalance_run_id: finalRebalanceInputs[0].id, rebalance_run_ids: finalRebalanceInputs.map(run => run.id), technical_run_id: generatedTechnicalRun.id,
-            response_hashes: await auditResponseHashes([...finalRebalanceInputs, generatedTechnicalRun]),
+            response_hashes: await auditResponseHashes([...finalRebalanceInputs, generatedTechnicalRun], generatedTechnicalRun),
             input_listing_count: finalConsensus.length, final_listing_count: finalRows.length,
             excluded_non_buy_listings: finalConsensus.filter(stock => !finalRows.some(row => row.stock.key === stock.key))
               .map(stock => ({ exchange: stock.exchange, symbol: stock.symbol, reason: "All valid models returned zero-position non-buy; no executable allocation" })),

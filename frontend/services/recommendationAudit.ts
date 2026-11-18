@@ -3,8 +3,13 @@ import { URLs } from "@/lib/urls";
 import type { AuditComparison, AuditFormula, AuditVerification, AuditVerifyRequest } from "@/types/recommendationAudit";
 import type { RunResponse } from "@/types/api";
 
-export async function auditResponseHashes(runs: RunResponse[]) {
-  const pairs = await Promise.all(runs.flatMap(run => run.run_jobs).map(async link => {
+export async function auditResponseHashes(runs: RunResponse[], technicalSource?: RunResponse) {
+  const marker = technicalSource?.prompt?.match(/\[TECHNICAL_REBALANCE_SOURCES_V1\]([\s\S]*?)\[\/TECHNICAL_REBALANCE_SOURCES_V1\]/);
+  const selected = marker ? JSON.parse(marker[1]).job_ids : null;
+  if (marker && (!Array.isArray(selected) || !selected.every(Number.isSafeInteger))) throw new Error("Invalid Technical source manifest.");
+  const links = runs.flatMap(run => run.run_jobs.filter(link =>
+    !selected || run.id === technicalSource?.id || selected.includes(link.job_id)));
+  const pairs = await Promise.all(links.map(async link => {
     const recovery = (link.job.runtime_metadata_json as Record<string, unknown> | null)?.partial_recovery as { original_response_hash?: string } | undefined;
     if (recovery?.original_response_hash && /^[a-f0-9]{64}$/.test(recovery.original_response_hash)) {
       return [link.job_id, recovery.original_response_hash] as const;

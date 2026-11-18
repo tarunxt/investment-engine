@@ -589,7 +589,8 @@ for (const rawScore of [3.033333333333333, -3.033333333333333, 0, null]) {
     await h.runWorkflow("zerodha");
     const frozen = h.durable.get("india:42:actionables").summary.frozen_final;
     assert.equal(frozen.schema, "workflow-final-v2");
-    assert.equal(frozen.formula_version, "score-matrix-v1");
+    assert.equal(frozen.formula_version, "score-matrix-v2");
+    assert.equal(h.durable.get("india:42:technical").summary.final_inputs.formula_version, frozen.formula_version);
     assert.equal(frozen.scorePolicy, "score-matrix-raw-effective-v2");
     assert.equal(frozen.rows[0].score, rawScore);
     assert.equal(frozen.rows[0].rawScore, rawScore);

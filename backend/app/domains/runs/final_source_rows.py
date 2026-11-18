@@ -42,6 +42,13 @@ OVERFLOW = "Unaligned source cells (not scored)"
 
 
 def rebalance_rows(job):
+    if status(job) == "failed" and getattr(job, "response", None) and "invalid output contract" in str(getattr(job, "error_message", "")).lower():
+        from types import SimpleNamespace
+        from app.domains.jobs.partial_output import project_partial_output
+        # Hashes verify the original ORM response. Mirror only the UI's deterministic read projection.
+        job = SimpleNamespace(status=job.status, response=job.response, prompt=job.prompt,
+                              error_message=job.error_message, runtime_metadata_json=job.runtime_metadata_json)
+        project_partial_output(job)
     if status(job) not in {"completed", "partial"} or not job.response:
         return []
     if len(job.response) > 2_000_000:
