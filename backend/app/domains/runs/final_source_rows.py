@@ -45,12 +45,30 @@ def rebalance_rows(job):
         raise UnverifiableFinal("Source output exceeds final verification bound")
     blocks, findings = parse_markdown(job.response)
     tables = [block for block in blocks if block.kind == "table"]
-    # The frontend's recommendation parser flattens pipe lines. More than one
-    # table, empty cells, escaped pipes or links cannot be certified by this
-    # positional subset, even where the preserving backend parser reads them.
-    if any(block.kind == "text" and "|" in block.text for block in blocks) or len(tables) != 1 or findings or "\\|" in job.response or re.search(r"&(?:#\w+|[a-zA-Z]+);", job.response):
-        raise UnverifiableFinal("Rebalance source table cannot be mapped without ambiguity")
+    if len(tables) != 1 or findings:
+        raise UnverifiableFinal("Rebalance source requires one well-formed recommendation table")
     table = tables[0]
+    # The recommendation parser starts at the header. A report title before it
+    # is display text; pipe-delimited content after it could be another row.
+    for block in blocks:
+        if block.kind != "text":
+            continue
+        for line in block.text.splitlines():
+            if "|" in line and not (block.index < table.index and re.fullmatch(
+                r"\s*#{1,6}\s+[^|]+\|\s*Recommended Rebalance\s*\|[^|]+(?:\|[^|]+)*", line, re.I
+            )):
+                raise UnverifiableFinal("Unexpected pipe-delimited text outside the recommendation table")
+    if "\\|" in table.text:
+        raise UnverifiableFinal("Escaped separator in Rebalance source table")
+    # HTML ampersands in narrative rationale cannot affect a score or listing.
+    # Inspect the original cells before the Markdown parser decodes entities.
+    for index, line in enumerate(table.text.splitlines()):
+        for col, cell in enumerate(line.strip().strip("|").split("|")):
+            entities = re.findall(r"&(?:#\w+|[a-zA-Z]+);", cell)
+            if entities and not (index >= 2 and col < len(table.headers)
+                                 and table.headers[col].startswith("Rationale ")
+                                 and all(entity == "&amp;" for entity in entities)):
+                raise UnverifiableFinal("Ambiguous encoded value in Rebalance source table")
     if len(table.rows) > 500:
         raise UnverifiableFinal("Source output exceeds final listing bound")
     labels = {column.label for column in REBALANCE_COLUMNS}

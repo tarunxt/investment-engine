@@ -75,7 +75,7 @@ def source_calculations(payload, *, sources, jobs_by_run, market):
         technical = match[2] if match else None
         # Symbol-only or decorated aliases in source can otherwise match the UI
         # while bypassing this exact listing map. Reject that ambiguity.
-        if any(re.sub(r"[^A-Z0-9]", "", other[1]) == re.sub(r"[^A-Z0-9]", "", key[1]) and other != key for other in selected):
+        if match is None and any(re.sub(r"[^A-Z0-9]", "", other[1]) == re.sub(r"[^A-Z0-9]", "", key[1]) and other != key for other in selected):
             raise UnverifiableFinal("Technical listing match is ambiguous across exchanges")
         direction = technical_direction(technical, technical_source.prompt) if technical else None
         calculation = calculate_listing(rows, formula, technical, direction=direction, market=market)
