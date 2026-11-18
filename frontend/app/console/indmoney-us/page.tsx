@@ -1,6 +1,6 @@
 'use client';
 
-import { PortfolioWorkflowSlot } from '@/app/console/_components/WorkflowSurfaceSlots';
+import { BrokerPortfolioTabs } from '@/app/console/_components/BrokerPortfolioTabs';
 import { useCallback, useEffect, useState } from 'react';
 
 import { IndMoneyUsSnapshotWorkspace } from './_components/IndMoneyUsSnapshotWorkspace';
@@ -144,21 +144,20 @@ export default function IndMoneyUsPage() {
   };
 
   return (
-    <>
-    <IndMoneyUsSnapshotWorkspace
-      overview={overview}
-      selectedSnapshot={selectedSnapshot}
-      selectedSnapshotId={selectedSnapshotId}
-      loading={loading}
-      selecting={selecting}
-      saving={saving}
-      loadError={loadError}
-      saveError={saveError}
-      onRefresh={handleRefreshDisplayedData}
-      onCreateSnapshot={handleCreateSnapshot}
-      onSelectSnapshot={handleSelectSnapshot}
-    />
-    <PortfolioWorkflowSlot market="indmoneyUs" />
-    </>
+    <BrokerPortfolioTabs market="indmoneyUs">
+      <IndMoneyUsSnapshotWorkspace
+        overview={overview}
+        selectedSnapshot={selectedSnapshot}
+        selectedSnapshotId={selectedSnapshotId}
+        loading={loading}
+        selecting={selecting}
+        saving={saving}
+        loadError={loadError}
+        saveError={saveError}
+        onRefresh={handleRefreshDisplayedData}
+        onCreateSnapshot={handleCreateSnapshot}
+        onSelectSnapshot={handleSelectSnapshot}
+      />
+    </BrokerPortfolioTabs>
   );
 }
