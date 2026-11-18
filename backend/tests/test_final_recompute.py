@@ -164,3 +164,30 @@ def test_explicit_unknown_scores_and_zero_units_remain_distinct(inputs):
     assert result['estimate']['units'] is None  # Hold carries no executable estimate.
     assert result['estimate']['amount'] is None
     assert all(term['score'] is None for term in result['weighted_rows'][:6])
+
+
+def test_report_title_and_encoded_rationale_preserve_calculation(inputs):
+    payload, context = inputs
+    job = context["jobs_by_run"][10][0]
+    original = source_calculations(payload, **context)
+    lines = job.response.splitlines()
+    cells = lines[2].strip("|").split("|")
+    col = [name.strip() for name in lines[0].strip("|").split("|")].index("Rationale Cruxx")
+    cells[col] = " P&amp;L reflects unrealised gains "
+    lines[2] = "|" + "|".join(cells) + "|"
+    job.response = "## 18 November | Recommended Rebalance | Portfolio | Provider\n\n" + "\n".join(lines)
+    assert source_calculations(payload, **context) == original
+    job.response += "\n\nUnverified | extra row"
+    with pytest.raises(UnverifiableFinal):
+        source_calculations(payload, **context)
+
+
+def test_technical_exact_venue_precedes_symbol_alias(inputs):
+    payload, context = inputs
+    job = context["jobs_by_run"][20][0]
+    row = job.response.splitlines()[-1].replace("| NSE |", "| BSE |")
+    job.response += "\n" + row
+    assert ("NSE", "FIXTUREEQ") in source_calculations(payload, **context)
+    job.response = "\n".join(job.response.splitlines()[:2] + [row])
+    with pytest.raises(UnverifiableFinal, match="ambiguous across exchanges"):
+        source_calculations(payload, **context)
