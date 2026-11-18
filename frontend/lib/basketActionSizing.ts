@@ -1,6 +1,7 @@
 import { excelRound } from "./basketDisplayCalculations";
 
 export type BasketActionSizingInput = {
+  targetShares?: number | null;
   totalAssets: number | null; currentWeight: number | null; targetWeight: number | null;
   upstoxLtp: number | null; holdingQuantity: number | null;
 };
@@ -19,7 +20,7 @@ export function basketActionSizing(input: BasketActionSizingInput) {
     totalAssets: assets, currentWeight: current, targetWeight: target, price, holdingQuantity: holding,
     difference, rawAmount, rawStocks: null as number | null, roundedStocks: null as number | null,
     sellCap: null as number | null, stocks: null as number | null, amount: null as number | null,
-    fullExit: false, direction: "Unavailable", reason: "" as string,
+    targetShares: input.targetShares, fullExit: false, direction: "Unavailable", reason: "" as string,
   };
   if (target === 0 && holding !== null) {
     result.fullExit = true;
@@ -37,6 +38,16 @@ export function basketActionSizing(input: BasketActionSizingInput) {
   else if (difference !== null && difference < 0 && holding === null) result.reason = "Current exact-venue holdings are unavailable, so the sell quantity cannot be capped safely.";
   else if (rawAmount === null || !finite(rawAmount / price!)) result.reason = "The requested calculation is outside the finite numeric range.";
   if (result.reason) return result;
+  if (input.targetShares !== undefined) {
+    if (input.targetShares == null || !Number.isSafeInteger(input.targetShares) || input.targetShares < 0 || holding === null) {
+      result.reason = "Verified issuer allocation and whole-share holdings are required.";
+      return result;
+    }
+    result.stocks = input.targetShares - holding;
+    result.amount = result.stocks * price!;
+    result.direction = result.stocks > 0 ? "Buy" : result.stocks < 0 ? "Sell" : "Hold";
+    return result;
+  }
   result.rawStocks = rawAmount! / price!;
   result.roundedStocks = excelRound(result.rawStocks);
   if (Object.is(result.roundedStocks, -0)) result.roundedStocks = 0;

@@ -23,7 +23,7 @@ async def validate_frozen_final(db, payload, *, user_id, portfolio, sequence, al
     legacy = payload['schema'] == 'workflow-final-v1'
     if legacy and not allow_legacy:
         raise HTTPException(422, 'New final captures require workflow-final-v2 source recomputation')
-    if not legacy and (payload.get('formula_version') != 'score-matrix-v1' or payload.get('scorePolicy') != 'score-matrix-raw-effective-v2'):
+    if not legacy and (payload.get('formula_version') not in {'score-matrix-v1', 'score-matrix-v2'} or payload.get('scorePolicy') != 'score-matrix-raw-effective-v2'):
         raise HTTPException(422, 'Unsupported final formula or score policy version')
     if len(json.dumps(payload)) > 2_000_000:
         raise HTTPException(422, 'Frozen final exceeds audit size limit')
@@ -114,7 +114,7 @@ async def validate_frozen_final(db, payload, *, user_id, portfolio, sequence, al
                 if not rebuild and payload.get("scorecard_job_id") != source_id:
                     raise HTTPException(409, "Final scorecard job differs from the Technical source")
                 payload["scorecard_job_id"] = source_id
-                scorecards = await verified_scorecards(db, source_id, user_id, portfolio, sequence)
+                scorecards = await verified_scorecards(db, source_id, user_id, portfolio, sequence, legacy_evidence=payload.get("formula_version") == "score-matrix-v1")
                 observations = manifest.get("rows")
                 if not isinstance(observations, list) or len(observations) > 500:
                     raise HTTPException(422, "Invalid scorecard observations")
@@ -138,6 +138,9 @@ async def validate_frozen_final(db, payload, *, user_id, portfolio, sequence, al
                 if len(calculations) > 500 or len(json.dumps(payload)) > 2_000_000:
                     raise HTTPException(422, "Rebuilt final exceeds audit size limit")
             verify_recomputed_rows(payload, calculations, raw_field='rawScore', effective_field='effectiveScore')
+            if payload.get("formula_version") == "score-matrix-v2":
+                for row in payload["rows"]:
+                    row["source_coverage"] = calculations[(row["exchange"], row["symbol"])]["source_coverage"]
         except (UnverifiableFinal, ArithmeticError) as exc:
             raise HTTPException(422, f'Final calculation could not be verified: {exc}') from exc
 
@@ -153,7 +156,7 @@ async def validate_frozen_final(db, payload, *, user_id, portfolio, sequence, al
             payload["actionable_ranking"] = {"version": "weighted-98-1-1-v1", "rows": ranking}
 
 
-async def verified_scorecards(db, job_id, user_id, portfolio, sequence):
+async def verified_scorecards(db, job_id, user_id, portfolio, sequence, *, legacy_evidence=False):
     from app.domains.zerodha.threats import parse_zerodha_threat_report
 
     tables = {}
@@ -167,7 +170,7 @@ async def verified_scorecards(db, job_id, user_id, portfolio, sequence):
         job = (await db.execute(select(Job).where(Job.id == job_id, Job.user_id == user_id))).scalar_one()
         if str(getattr(job.status, "value", job.status)).lower() not in {"completed", "partial"}:
             raise HTTPException(409, "Scorecard job is not complete")
-        report = parse_zerodha_threat_report(job.response, job.prompt or "") or {}
+        report = parse_zerodha_threat_report(job.response, job.prompt or "", legacy_evidence=legacy_evidence) or {}
         tables = {table["key"]: table["rows"] for table in report.get("tables", [])}
     threats = {row["Exchange"] + ":" + row["Stock Symbol"]: float(row["Stock Threat /100"])
                for row in tables.get("stock_threat_scores", []) if row["Stock Threat /100"] != "Unknown"}

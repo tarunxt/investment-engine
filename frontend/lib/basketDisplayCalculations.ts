@@ -134,11 +134,11 @@ export function formatBasketDisplayCurrency(value: number | null | undefined, cu
   return new Intl.NumberFormat(currency === 'USD' ? 'en-US' : 'en-IN', { style: 'currency', currency, maximumFractionDigits: 2 }).format(value);
 }
 
-export function verifiedFetchedDisplayQuote(quotes: { instrument: string; price: number; as_of: string; source: string }[], symbol: string, exchange: string) {
+export function verifiedFetchedDisplayQuote(quotes: { instrument: string; isin?: string; price: number; as_of: string; source: string }[], symbol: string, exchange: string) {
   const matches = quotes.filter(quote => quote.instrument === `${exchange.toUpperCase()}:${symbol.toUpperCase()}`);
   if (matches.length !== 1) return null;
   const quote = matches[0];
-  return typeof quote.price === 'number' && Number.isFinite(quote.price) && quote.price > 0 && Number.isFinite(Date.parse(quote.as_of)) && typeof quote.source === 'string' && quote.source ? { price: quote.price, asOf: quote.as_of, source: quote.source } : null;
+  return typeof quote.price === 'number' && Number.isFinite(quote.price) && quote.price > 0 && Number.isFinite(Date.parse(quote.as_of)) && typeof quote.source === 'string' && quote.source ? { price: quote.price, asOf: quote.as_of, source: quote.source, ...(quote.isin ? { isin: quote.isin } : {}) } : null;
 }
 
 export function validDisplayPrice(value: number | null | undefined): number | null {
@@ -247,4 +247,61 @@ export function indmoneyHolding(snapshot: { parse_status: string; captured_at: s
   const holding = matches[0];
   const value = (input: number | null | undefined) => typeof input === 'number' && Number.isFinite(input) && input >= 0 ? input : null;
   return holding ? { currentValue: value(holding.current_value), investedValue: value(holding.invested_value), quantity: value(holding.quantity) } : { currentValue: 0, investedValue: 0, quantity: 0 };
+}
+
+export type IndiaAllocationListing = {
+  key: string; isin: string | null; score: number | null; price: number | null; holding: number | null;
+};
+type IndiaVenueTarget = {
+  issuer: string; issuerScore: number | null; issuerWeight: number; weight: number;
+  shares: number | null; price: number | null; reason: string;
+};
+
+// Rank the equity once. Keep existing positions first and route new shares to one venue.
+export function allocateIndiaEquities(listings: IndiaAllocationListing[], parameters: DisplayParameters, assets: number | null) {
+  const groups = new Map<string, IndiaAllocationListing[]>();
+  const venues = new Map<string, IndiaVenueTarget>();
+  for (const row of listings) {
+    if (!row.isin || !/^[A-Z]{2}[A-Z0-9]{9}[0-9]$/.test(row.isin)) continue;
+    const members = groups.get(row.isin) ?? [];
+    members.push(row);
+    groups.set(row.isin, members);
+  }
+  const scores = Array.from(groups, ([key, rows]) => ({
+    key, score: rows.every(row => row.score != null && Number.isFinite(row.score))
+      ? rows.reduce((sum, row) => sum + row.score!, 0) / rows.length : null,
+  }));
+  const allocation = allocateDisplayScores(scores, parameters);
+  for (const {key: issuer, score} of scores) {
+    const members = groups.get(issuer)!.slice().sort((left, right) =>
+      (right.holding ?? 0) - (left.holding ?? 0) || left.key.localeCompare(right.key));
+    const weight = allocation.weights.get(issuer) ?? 0;
+    const eligible = score != null && parameters.valid;
+    const priced = assets != null && Number.isFinite(assets) && assets > 0 && members.every(row =>
+      row.holding != null && Number.isSafeInteger(row.holding) && row.holding >= 0 &&
+      (row.price != null && Number.isFinite(row.price) && row.price > 0 || row.holding === 0 && weight === 0));
+    const reason = !eligible ? "Issuer score or parameters unavailable" : score <= 0 ? "Nonpositive issuer score" :
+      !allocation.weights.has(issuer) ? "Outside positive-score rank cutoff" :
+      weight === parameters.normalised / 100 ? "Issuer weight cap applied" : "Proportional issuer allocation";
+    // Work in paise. Floor the budget and whole-share targets so even one share cannot breach the cap.
+    const budget = priced && eligible ? Math.floor(weight * assets! * 100 + 1e-7) : null;
+    const amounts = members.map(() => 0);
+    if (budget != null) {
+      let remaining = budget;
+      members.forEach((row, i) => {
+        const held = row.holding! * Math.round((row.price ?? 0) * 100);
+        amounts[i] = Math.min(remaining, held);
+        remaining -= amounts[i];
+      });
+      amounts[0] += remaining;
+    }
+    members.forEach((row, i) => {
+      const shares = eligible && weight === 0 ? 0 : budget == null || !row.price ? null :
+        Math.floor(amounts[i] / Math.round(row.price * 100));
+      const venueWeight = members.length === 1 ? weight : budget && assets ? amounts[i] / (assets * 100) : 0;
+      venues.set(row.key, {issuer, issuerScore: score, issuerWeight: weight, weight: venueWeight, shares,
+        price: row.price, reason: !priced && weight > 0 ? "Verified prices and quantities required at each venue" : reason});
+    });
+  }
+  return {venues, denominator: allocation.denominator};
 }

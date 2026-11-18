@@ -38,7 +38,17 @@ def status(job):
     return str(getattr(job.status, "value", job.status)).lower()
 
 
+OVERFLOW = "Unaligned source cells (not scored)"
+
+
 def rebalance_rows(job):
+    if status(job) == "failed" and getattr(job, "response", None) and "invalid output contract" in str(getattr(job, "error_message", "")).lower():
+        from types import SimpleNamespace
+        from app.domains.jobs.partial_output import project_partial_output
+        # Hashes verify the original ORM response. Mirror only the UI's deterministic read projection.
+        job = SimpleNamespace(status=job.status, response=job.response, prompt=job.prompt,
+                              error_message=job.error_message, runtime_metadata_json=job.runtime_metadata_json)
+        project_partial_output(job)
     if status(job) not in {"completed", "partial"} or not job.response:
         return []
     if len(job.response) > 2_000_000:
@@ -65,6 +75,9 @@ def rebalance_rows(job):
     for index, line in enumerate(table.text.splitlines()):
         for col, cell in enumerate(line.strip().strip("|").split("|")):
             entities = re.findall(r"&(?:#\w+|[a-zA-Z]+);", cell)
+            if index >= 2 and col == len(table.headers) - 1 and table.headers[col] == OVERFLOW:
+                # Isolated, never interpreted as formula inputs.
+                continue
             if entities and not (index >= 2 and col < len(table.headers)
                                  and (table.headers[col] == "Technical Setup" or table.headers[col].startswith("Rationale "))
                                  and all(entity == "&amp;" for entity in entities)):
@@ -74,13 +87,14 @@ def rebalance_rows(job):
     labels = {column.label for column in REBALANCE_COLUMNS}
     if (len(set(table.headers)) != len(table.headers) or ACTION_HEADER not in table.headers
             or not {"Exchange Symbol", "Stock Symbol"}.issubset(table.headers)
-            or any(header not in labels for header in table.headers)):
+            or any(header not in labels and not (header == OVERFLOW and i == len(table.headers) - 1) for i, header in enumerate(table.headers))):
         raise UnverifiableFinal("Rebalance source requires unambiguous canonical headers")
     result, identities = [], set()
     for cells in table.rows:
-        if any(not isinstance(cell, str) or not cell.strip() for cell in cells):
+        if any(not isinstance(cell, str) or not cell.strip() for header, cell in zip(table.headers, cells) if header != OVERFLOW):
             raise UnverifiableFinal("Blank source cells have ambiguous frontend positions")
         row = dict(zip(table.headers, cells))
+        row.pop(OVERFLOW, None)
         exchange, symbol = row["Exchange Symbol"], row["Stock Symbol"]
         # Prefix/suffix aliases and decorated symbols require an explicit
         # matching contract; do not silently merge source listing identities.
@@ -148,6 +162,12 @@ def technical_rows(job):
             raise UnverifiableFinal("Technical source requires explicit undecorated values")
         result.append(row)
     return result
+
+
+def missing_chart(row):
+    return (row.get("Bias", "").strip().lower() in {"neutral", "unresolved", "unavailable"}
+            and row.get("Confidence Score", "").strip().lower() == "unavailable"
+            and re.fullmatch(r"unavailable(?:\s*[-–—:]\s*.+)?", row.get("Primary Setup", "").strip(), re.I) is not None)
 
 
 def technical_direction(row, prompt):

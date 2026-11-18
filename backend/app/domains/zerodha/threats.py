@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.domains.runs.threat_evidence import snapshot_manifest, scorecard_instruction, stock_scorecards, comparison_table, portfolio_summary, assessment_list
+from app.domains.runs.threat_evidence import audited_evidence, snapshot_manifest, scorecard_instruction, stock_scorecards, comparison_table, portfolio_summary, assessment_list
 from dataclasses import dataclass
 from datetime import date, datetime
 import re
@@ -501,7 +501,7 @@ def is_zerodha_threat_job(job: Job | None) -> bool:
     return bool(job and THREAT_JOB_MARKER in (job.prompt or ""))
 
 
-def parse_zerodha_threat_report(markdown: str | None, prompt: str = "") -> dict[str, Any] | None:
+def parse_zerodha_threat_report(markdown: str | None, prompt: str = "", *, legacy_evidence: bool = False) -> dict[str, Any] | None:
     text = (markdown or "").strip()
     if not text:
         return None
@@ -535,8 +535,15 @@ def parse_zerodha_threat_report(markdown: str | None, prompt: str = "") -> dict[
     marker = next((line.removeprefix("[SCORECARD_UNIVERSE_V1]") for line in prompt.splitlines()
                    if line.startswith("[SCORECARD_UNIVERSE_V1]")), None)
     manifest = json.loads(marker) if marker else None
-    cards = stock_scorecards(evidence["rows"])
-    universe = assessment_list(manifest, cards) if manifest else set(cards)
+    raw_evidence = evidence["rows"]
+    listings = {(r.get("Exchange", "").strip().upper(), r.get("Symbol", "").strip().upper()) for r in raw_evidence}
+    universe = assessment_list(manifest, listings) if manifest else {key for key in listings if all(key)}
+    if legacy_evidence:
+        cards = stock_scorecards(raw_evidence)
+    else:
+        accepted, dispositions = audited_evidence(raw_evidence, universe)
+        cards = stock_scorecards(accepted)
+        evidence = {"columns": [*evidence["columns"], "Category ID", "Disposition"], "rows": dispositions}
     cards = {listing: card for listing, card in cards.items() if listing in universe}
     if universe:
         if manifest:
@@ -554,7 +561,7 @@ def parse_zerodha_threat_report(markdown: str | None, prompt: str = "") -> dict[
             card = cards.get((exchange, symbol), {"score": None, "provisional": True, "evidence": []})
             value = card["score"]
             scores.append(dict(zip(columns, [exchange, symbol, "Unknown" if value is None else f"{value:.2f}",
-                "Provisional" if card["provisional"] else "Complete",
+                ("Unassessed" if value is None and not legacy_evidence else "Provisional") if card["provisional"] else "Complete",
                 "20%+ conditional downside" if any(r.get("Impact") == "5" for r in card["evidence"]) else "—"])))
         tables.append({"key": "stock_threat_scores", "title": "Stock Threat", "columns": columns, "rows": scores})
         category_columns = ["Exchange", "Stock Symbol", "Category", "Threat /100", "Leading event", "Runner-up"]

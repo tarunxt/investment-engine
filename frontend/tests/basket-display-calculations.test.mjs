@@ -827,3 +827,24 @@ test('quote effect fixture owns polling timers, visibility listeners and aborted
  await finish(pending[4]);assert.equal(h.timers.size,1);render(false,'b',['NSE:BBB']);h.flush();assert.equal(pending[4].signal.aborted,true);assert.equal(h.timers.size,0);assert.equal(h.listeners.size,0);
  render(true,'b',['NSE:BBB']);h.flush();assert.equal(pending.length,6);h.unmount();assert.equal(pending[5].signal.aborted,true);assert.equal(h.listeners.size,0);await finish(pending[5]);assert.equal(h.timers.size,0);
 });
+
+test('India issuer policy sizes dual listings once and floors the post-rounding exposure', () => {
+  const rows = [
+    {key:'BSE:TWIN', isin:'IN0000000001', score:1, price:37, holding:34},
+    {key:'NSE:TWIN', isin:'IN0000000001', score:3, price:38, holding:0},
+    {key:'NSE:OTHER', isin:'IN0000000002', score:2, price:91, holding:0},
+    {key:'NSE:NEG', isin:'IN0000000003', score:-1, price:50, holding:2},
+    {key:'NSE:UNKNOWN', isin:null, score:3, price:5, holding:0},
+  ];
+  const {venues, denominator} = math.allocateIndiaEquities(rows, math.defaultDisplayParameters(), 10000);
+  assert.equal(denominator, 4);
+  assert.equal(venues.get('BSE:TWIN').issuerWeight, 0.095);
+  assert.equal(venues.get('BSE:TWIN').shares, 25);
+  assert.equal(venues.get('NSE:TWIN').shares, 0);
+  assert.equal(venues.get('NSE:OTHER').shares, 10);
+  assert.equal(venues.get('NSE:NEG').reason, 'Nonpositive issuer score');
+  assert.equal(venues.has('NSE:UNKNOWN'), false);
+  const twoHeld = rows.map(row => row.key === 'NSE:TWIN' ? {...row,holding:5} : row);
+  const result = math.allocateIndiaEquities(twoHeld, math.defaultDisplayParameters(), 10000).venues;
+  assert.ok(result.get('BSE:TWIN').shares <= 34 && result.get('NSE:TWIN').shares <= 5);
+});

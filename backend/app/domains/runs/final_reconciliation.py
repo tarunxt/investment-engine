@@ -61,7 +61,7 @@ async def historical_inputs(db, workflow, technical_id):
             "rebalance_run_ids": frozen["rebalance_run_ids"], "response_hashes": revisions}
 
 
-async def recover_final(db, workflow):
+async def recover_final(db, workflow, *, corrected=False):
     stages = {stage.stage: stage for stage in workflow.stages}
     final = stages.get("actionables")
     if final is None or final.status not in {"processing", "running", "completed"}:
@@ -71,16 +71,22 @@ async def recover_final(db, workflow):
         if not stage or stage.status not in {"partial", "completed", "skipped"} or not stage.completed_at:
             raise HTTPException(409, f"Missing terminal {name} stage evidence")
     saved = (final.summary_json or {}).get("frozen_final")
-    if saved:
+    if corrected:
+        existing = (final.summary_json or {}).get("corrected_final_v2")
+        if existing:
+            return existing
+    elif saved:
         return saved
     technical = stages["technical"]
     receipt = (technical.summary_json or {}).get("final_inputs")
+    if receipt is None and corrected and isinstance(saved, dict) and saved.get("schema") == "workflow-final-v2":
+        receipt = saved
     if receipt is None and technical.run_id:
         receipt = await historical_inputs(db, workflow, technical.run_id)
     if not isinstance(receipt, dict) or not technical.run_id:
         raise HTTPException(409, "No saved final calculation or exact Stage 5 formula and source revisions for this run")
     captured = {
-        "schema": "workflow-final-v2", "formula_version": "score-matrix-v1",
+        "schema": "workflow-final-v2", "formula_version": "score-matrix-v2" if corrected else receipt.get("formula_version", "score-matrix-v1"),
         "scorePolicy": "score-matrix-raw-effective-v2", "technical_run_id": technical.run_id,
         "broker": workflow.portfolio, "workflow_sequence": workflow.sequence,
         "captured_at": datetime.now(timezone.utc).isoformat(), "rows": [],

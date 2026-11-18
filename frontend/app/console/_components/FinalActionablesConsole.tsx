@@ -1772,15 +1772,17 @@ export function ScoreMatrixButton({
   formulaConfig = DEFAULT_SCORE_MATRIX_FORMULA_CONFIG,
   onOpenDetail,
   className,
+  workflowScale = false,
 }: {
   detail: ScoreMatrixDetail;
   formulaConfig?: ScoreMatrixFormulaConfig;
   onOpenDetail: (detail: ScoreMatrixDetail) => void;
   className?: string;
+  workflowScale?: boolean;
 }) {
   const configuredDetail = applyScoreMatrixFormulaConfig(detail, formulaConfig);
   const validationSummary = getScoreMatrixValidationSummary(configuredDetail);
-  const displayScore = validationSummary.displayScore;
+  const displayScore = workflowScale || configuredDetail.supplementalInputs ? configuredDetail.calculatedScore : validationSummary.displayScore;
   const warningTitle = validationSummary.finalScoreOutOfRange
     ? validationSummary.finalScoreMessage
     : validationSummary.parameterIssues.length
@@ -1806,10 +1808,12 @@ export function ScoreMatrixButton({
         ? `Open consolidated score matrix for ${detail.stockSymbol}. Warning: ${warningTitle}`
         : `Open consolidated score matrix for ${detail.stockSymbol}`}
     >
-      {configuredDetail.supplementalInputs && displayScore !== null ? (
+      {(workflowScale || configuredDetail.supplementalInputs) && displayScore !== null ? (
         <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
           {validationSummary.hasIssues && <AlertTriangle className="size-3.5 text-rose-700" />}
-          {((Math.max(-3, Math.min(3, displayScore)) + 3) * 100 / 6).toFixed(2)} / 100
+          <span>{((Math.max(-3, Math.min(3, displayScore)) + 3) * 100 / 6).toFixed(2)} / 100
+            {validationSummary.displayScore != null && <small className="block text-slate-600">Base {((Math.max(-3, Math.min(3, validationSummary.displayScore)) + 3) * 100 / 6).toFixed(2)}</small>}
+          </span>
         </span>
       ) : validationSummary.hasIssues ? (
         <span className="inline-flex items-center gap-1.5 whitespace-nowrap font-semibold text-rose-700">
@@ -2759,7 +2763,7 @@ function isMarkdownSeparator(cells: string[]) {
 
 function parseTechnicalScanResponse(
   response: string,
-  meta: Pick<TechnicalScanResult, "runId" | "jobId" | "provider" | "model" | "createdAt" | "runLabel">,
+  meta: Pick<TechnicalScanResult, "runId" | "jobId" | "provider" | "model" | "createdAt" | "runLabel"> & { market?: SwingTradeMarket | null },
 ): TechnicalScanResult[] {
   const lines = response.split(/\r?\n/);
   const results: TechnicalScanResult[] = [];
@@ -2833,7 +2837,7 @@ function parseTechnicalScanResponse(
         confidenceScore: confidenceIndex >= 0 ? normalizeScanCell(cells[confidenceIndex] || "") : "",
         bias,
         premarketTrend: premarketTrendIndex >= 0 ? normalizeScanCell(cells[premarketTrendIndex] || "") : "",
-        last5CandlesTrend: last5CandlesTrendIndex >= 0 ? normalizeScanCell(cells[last5CandlesTrendIndex] || "") : "",
+        last5CandlesTrend: meta.market === "india" && /^(neutral|unresolved|unavailable)$/.test(rawBias) && /^unavailable(?:\s*[-–—:]\s*.+)?$/i.test(primarySetup) && /^unavailable$/i.test(normalizeScanCell(cells[confidenceIndex] || "")) ? "Unavailable" : last5CandlesTrendIndex >= 0 ? normalizeScanCell(cells[last5CandlesTrendIndex] || "") : "",
         triggerLevel: triggerIndex >= 0 ? normalizeScanCell(cells[triggerIndex] || "") : "",
         invalidationLevel: invalidationIndex >= 0 ? normalizeScanCell(cells[invalidationIndex] || "") : "",
         ...meta,
@@ -4087,7 +4091,7 @@ async function fetchNativeHistoricalMatrix(item: FinalActionableHistoryItem | nu
   const decode = (saved: FinalActionableHistoryItem): ScoreMatrixDetail | null => {
       if (saved.market !== market || normalizeStockSymbol(saved.stock_symbol) !== normalizeStockSymbol(symbol) || saved.covered_at !== target.coveredAt
           || saved.rebalance_run_id !== target.runId || (item && saved.workflow_id !== item.workflow_id)
-          || saved.formula_version !== "score-matrix-v1") return null;
+          || !["score-matrix-v1", "score-matrix-v2"].includes(saved.formula_version)) return null;
       const detail = saved.formula_inputs_json;
       if (!detail || normalizeStockSymbol(String(detail.stockSymbol ?? "")) !== normalizeStockSymbol(symbol)
           || detail.rebalanceSourceRunId !== saved.rebalance_run_id
@@ -7866,7 +7870,7 @@ export function buildFinalActionableHistoryItems(
       action_units: estimate.units,
       amount: estimate.amount,
       technical_scan_run_id: row.detail.technicalScanSourceRunId,
-      formula_version: "score-matrix-v1",
+      formula_version: row.market === "india" ? "score-matrix-v2" : "score-matrix-v1",
       formula_inputs_json: row.detail as unknown as Record<string, unknown>,
       source_run_ids_json: sourceRunIds,
       snapshot_json: {
