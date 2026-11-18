@@ -647,11 +647,13 @@ function summarizeThreat(
   const diagnostics = readFailureDiagnostics(analysis.runtime_metadata_json);
   const paired = analysis.report?.tables.find(table => table.key === "pairwise_scores")?.rows;
   const portfolioRisk = analysis.report?.tables.find(table => table.key === "portfolio_threat_score")?.rows[0];
+  const assessed = analysis.report?.tables.find(table => table.key === "stock_threat_scores")?.rows;
+  const coverage = assessed ? ` · ${assessed.filter(row => row["Stock Threat /100"] !== "Unknown").length} of ${assessed.length} listings scored` : "";
   const validPairs = paired?.reduce((n, row) => n + Number(row["Valid comparisons"]), 0);
   const expectedPairs = paired?.reduce((n, row) => n + Number(row.Expected), 0);
   return {
     pairCoverage: validPairs == null || expectedPairs == null ? undefined : `${validPairs / 2} / ${expectedPairs / 2} comparisons`,
-    portfolioThreat: portfolioRisk ? `${portfolioRisk["Portfolio Threat /100"]} / 100 · ${portfolioRisk["Assessed value"]} of holdings value assessed` : undefined,
+    portfolioThreat: portfolioRisk ? `${portfolioRisk["Portfolio Threat /100"]} / 100 · ${portfolioRisk["Assessed value"]} of holdings value assessed${coverage}` : undefined,
     completedAt: analysis.updated_at ?? analysis.created_at,
     provider: analysis.provider,
     model: analysis.model,
@@ -867,6 +869,15 @@ function getLatestMatchingRebalanceRuns(
   return marketRuns.filter(
     (run) => extractRebalanceInputFingerprint(run.prompt) === fingerprint,
   );
+}
+
+function canonicalBasketInputs(value: unknown): string {
+  if (Array.isArray(value)) return "[" + value.map(canonicalBasketInputs).join(",") + "]";
+  if (value !== null && typeof value === "object") {
+    const fields = Object.entries(value).sort(([a], [b]) => a.localeCompare(b));
+    return "{" + fields.map(([key, val]) => JSON.stringify(key) + ":" + canonicalBasketInputs(val)).join(",") + "}";
+  }
+  return JSON.stringify(value);
 }
 
 const ZERODHA_BASKET_ACTIONS = new Set<ActionCategory>([
@@ -2981,6 +2992,7 @@ function ScopedZerodhaBasketPreviewDialog({
   const [marketNoticeOpen, setMarketNoticeOpen] = useState(false);
   const [selectedMatrixDetail, setSelectedMatrixDetail] = useState<ScoreMatrixDetail | null>(null);
   const [basketInfoOpen, setBasketInfoOpen] = useState(false);
+  const [priceReviews, setPriceReviews] = useState<Set<string>>(new Set());
   const [manualDraftUnits, setManualDraftUnits] = useState<Record<string, number>>({});
   const [unitsDetailId, setUnitsDetailId] = useState<string | null>(null);
   const [localHiddenColumns, setHiddenColumns] = useState<string[]>([]);
@@ -3000,7 +3012,7 @@ function ScopedZerodhaBasketPreviewDialog({
   const quoteRows = allocationUniverse.map(row => row.stock);
   const quoteInstruments = (tradingViewMarket === "us" ? [...quoteRows, ...orders] : quoteRows)
     .map(row => `${row.exchange.toUpperCase()}:${row.symbol.toUpperCase()}`);
-  const columnNames = { ...(tradingViewMarket === "us" ? { "Vendor LTP": "Alpaca IEX LTP" } : {}), ...columnPreferences?.names } as Record<string, string>;
+  const columnNames = { ...(tradingViewMarket === "india" ? { "Score": "Workflow final score", "Consensus": "Votes for proposed trade", "Action": "Score-based action", "Side": "Trade side", "Action New": "Proposed trade" } : {}), ...(tradingViewMarket === "us" ? { "Vendor LTP": "Alpaca IEX LTP" } : {}), ...columnPreferences?.names } as Record<string, string>;
   const quoteRead = useBasketDisplayQuotes(open, tradingViewMarket, quoteInstruments, detailsData.portfolioSnapshot ? `${tradingViewMarket}:${detailsData.portfolioSnapshot.snapshot_date}:${detailsData.portfolioSnapshot.captured_at}:${ltpRefreshedAt ?? "initial"}` : null);
   const providerPriceCell = (symbol: string, exchange: string) => {
     const quote = verifiedFetchedDisplayQuote(tradingViewMarket === "india" ? (quoteRead.upstoxQuotes ?? []).filter(row => row.source.startsWith("Upstox ")) : quoteRead.quotes, symbol, exchange);
@@ -3020,6 +3032,16 @@ function ScopedZerodhaBasketPreviewDialog({
     const currentDetail = currentOrder?.detail ?? row.detail;
     const holding = tradingViewMarket === "india" ? kiteHoldingQuantity(detailsData.portfolioSnapshot as ZerodhaPortfolioSnapshotDetail | null, row.stock.symbol, row.stock.exchange) : null;
     const upstox = verifiedFetchedDisplayQuote((quoteRead.upstoxQuotes ?? []).filter(quote => quote.source.startsWith("Upstox ")), row.stock.symbol, row.stock.exchange);
+    const snapshot = detailsData.portfolioSnapshot as ZerodhaPortfolioSnapshotDetail | null;
+    const exact = tradingViewMarket === "india" ? snapshot?.holdings?.filter(h => stockIdentity(h.tradingsymbol, h.exchange) === stockIdentity(row.stock.symbol, row.stock.exchange)) ?? [] : [];
+    const idsForVenue = new Set([...exact.map(h => h.isin), upstox?.isin].filter((s): s is string => Boolean(s)));
+    const issuer = idsForVenue.size === 1 ? [...idsForVenue][0] : null;
+    const hasOutsideHolding = issuer && snapshot?.holdings?.some(h => h.isin === issuer && !allocationUniverse.some(item => stockIdentity(item.stock.symbol, item.stock.exchange) === stockIdentity(h.tradingsymbol, h.exchange)));
+    const modelPrices = row.stock.rows.map(({meta, cells}) => ({
+      job: meta.jobId, provider: meta.provider, time: meta.createdAt,
+      price: validDisplayPrice(Number(String(cells["Price Per Unit"] ?? "").replace(/,/g, ""))),
+      fields: Object.entries(cells).filter(([header, value]) => header.startsWith("Score Rationale") && /^-?\d+(?:\.\d+)?$/.test(String(value).trim()) && Math.abs(Number(value)) <= 3).length,
+    }));
     const usHolding = tradingViewMarket === "us" && !row.stock.identityIssue && row.stock.usIdentity?.holdingSafe !== false ? indmoneyHolding(detailsData.portfolioSnapshot as IndMoneyUsPortfolioSnapshotDetail | null, row.stock.symbol, row.stock.exchange, allocationUniverse.map(item => item.stock)) : null;
     const vendor = tradingViewMarket === "us" ? verifiedFetchedDisplayQuote(quoteRead.quotes, row.stock.symbol, row.stock.exchange) : null;
     const ids = [...new Set([...row.stock.rows.map(source => source.meta.runId), ...(currentDetail.technicalScanSourceRunId ? [currentDetail.technicalScanSourceRunId] : [])])];
@@ -3028,10 +3050,10 @@ function ScopedZerodhaBasketPreviewDialog({
       const sameMarket = run && ["rebalance", "technical", "swing", "threats"].some(stage => isAnalysisRunForStage(run, stage as "rebalance" | "technical" | "swing" | "threats", tradingViewMarket));
       return { runId, createdAt: parseApiTimestamp(run?.created_at)?.toISOString() ?? "", completed: run?.status === "completed", status: run?.status, market: sameMarket ? tradingViewMarket : null };
     });
-    return { verifiedUsIdentity: row.stock.usIdentity?.listing ? {securityId:row.stock.usIdentity.listing.security_id,exchangeAliases:row.stock.usIdentity.holdingSafe ? ["US"] : []} : undefined, identityIssue: row.stock.identityIssue, vendorReady: (quoteRead.vendorQuotes ?? []).find(quote => quote.instrument === stockIdentity(row.stock.symbol, row.stock.exchange))?.eligible_for_readiness === true, investedValue: usHolding?.investedValue ?? null, vendorLtp: vendor?.price ?? null, vendorSource: vendor?.source, vendorAsOf: vendor?.asOf, currentValue: tradingViewMarket === "us" ? usHolding?.currentValue ?? null : currentWeights.valid ? currentWeights.values.get(stockIdentity(row.stock.symbol, row.stock.exchange)) ?? 0 : null, holdingQuantity: tradingViewMarket === "us" ? usHolding?.quantity ?? null : holding?.quantity ?? null, holdingAsOf: holding?.asOf, holdingSource: holding?.source, upstoxLtp: upstox?.price ?? null, upstoxAsOf: upstox?.asOf, upstoxSource: upstox?.source, symbol: row.stock.symbol, exchange: row.stock.exchange, score: currentOrder ? currentDetail.calculatedScore : row.formulaScore, action: currentOrder ? getZerodhaBasketActionForPercent(currentOrder) : row.formulaAction, scoreSources, ...displayQuote(row.stock.symbol, row.stock.exchange) };
+    return { isin: hasOutsideHolding ? null : issuer, modelPrices, verifiedUsIdentity: row.stock.usIdentity?.listing ? {securityId:row.stock.usIdentity.listing.security_id,exchangeAliases:row.stock.usIdentity.holdingSafe ? ["US"] : []} : undefined, identityIssue: row.stock.identityIssue, vendorReady: (quoteRead.vendorQuotes ?? []).find(quote => quote.instrument === stockIdentity(row.stock.symbol, row.stock.exchange))?.eligible_for_readiness === true, investedValue: usHolding?.investedValue ?? null, vendorLtp: vendor?.price ?? null, vendorSource: vendor?.source, vendorAsOf: vendor?.asOf, currentValue: tradingViewMarket === "us" ? usHolding?.currentValue ?? null : currentWeights.valid ? currentWeights.values.get(stockIdentity(row.stock.symbol, row.stock.exchange)) ?? 0 : null, holdingQuantity: tradingViewMarket === "us" ? usHolding?.quantity ?? null : holding?.quantity ?? null, holdingAsOf: holding?.asOf, holdingSource: holding?.source, upstoxLtp: upstox?.price ?? null, upstoxAsOf: upstox?.asOf, upstoxSource: upstox?.source, symbol: row.stock.symbol, exchange: row.stock.exchange, score: currentOrder ? currentDetail.calculatedScore : row.formulaScore, action: currentOrder ? getZerodhaBasketActionForPercent(currentOrder) : row.formulaAction, scoreSources, ...displayQuote(row.stock.symbol, row.stock.exchange) };
   };
   const calculationStocks = allocationUniverse.map(displayStock);
-  const displayCalculations = useBasketDisplayCalculations(open, tradingViewMarket, calculationStocks, portfolioAssets.totalAssets, detailsData.portfolioSnapshot?.captured_at ?? null, basketBrokerLabel, { portfolioValue: portfolioAssets.portfolioValue, availableMargin: portfolioAssets.availableMargin });
+  const displayCalculations = useBasketDisplayCalculations(open, tradingViewMarket, calculationStocks, portfolioAssets.totalAssets, detailsData.portfolioSnapshot?.captured_at ?? null, basketBrokerLabel, { portfolioValue: portfolioAssets.portfolioValue, availableMargin: portfolioAssets.availableMargin }, tradingViewMarket === "india" ? "issuer-v2" : "listing-v1");
   const legacyDisplayOnlyRows = allocationUniverse.filter(row => !orders.some(order => order.symbol === row.stock.symbol && order.exchange === row.stock.exchange));
   const visibleScore = (_score: number | null) => true;
   const buildEditableRow = (existing: ZerodhaBasketPreviewOrder | undefined, row?: DashboardActionRow): ZerodhaBasketPreviewOrder => {
@@ -3051,7 +3073,7 @@ function ScopedZerodhaBasketPreviewDialog({
       percent: direction === 'SELL' && holding?.quantity ? (units ?? 0) / holding.quantity * 100 : 100,
       orderKind: 'Market', wholeShareReview: tradingViewMarket === 'india' ? existing?.wholeShareReview : undefined, stock: existing?.stock ?? row!.stock, detail: existing?.detail ?? row!.detail,
       technicalScan: existing?.technicalScan ?? null,
-      draftContext: { action, originalAction: existing ? getZerodhaBasketActionForPercent(existing) : row!.formulaAction, suggestedUnits: suggested, source: tradingViewMarket === "india" ? upstox?.source : displayQuote(stock.symbol, stock.exchange).ltpSource, asOf: tradingViewMarket === "india" ? upstox?.asOf : displayQuote(stock.symbol, stock.exchange).ltpAsOf },
+      draftContext: { action, originalAction: existing ? existing.detail.calculatedAction : row!.formulaAction, suggestedUnits: suggested, source: tradingViewMarket === "india" ? upstox?.source : displayQuote(stock.symbol, stock.exchange).ltpSource, asOf: tradingViewMarket === "india" ? upstox?.asOf : displayQuote(stock.symbol, stock.exchange).ltpAsOf },
     };
   };
   const basketRows = [
@@ -3092,6 +3114,23 @@ function ScopedZerodhaBasketPreviewDialog({
   const orderCalculation = (order: ZerodhaBasketPreviewOrder) => displayCalculations.metrics?.({ symbol: order.symbol, exchange: order.exchange, score: order.detail.calculatedScore, ...displayQuote(order.symbol, order.exchange) });
   const groupForOrder = (order: ZerodhaBasketPreviewOrder) => typeof displayCalculations.metrics === "function" ? basketActionGroup(orderCalculation(order)?.comparison.action) : getZerodhaBasketActionForPercent(order);
   const groupForDisplay = (row: DashboardActionRow) => typeof displayCalculations.metrics === "function" ? basketActionGroup(displayCalculations.metrics(displayStock(row)).comparison.action) : row.formulaAction;
+  const indiaSource = (order: ZerodhaBasketPreviewOrder) => calculationStocks.find(stock => stockIdentity(stock.symbol, stock.exchange) === stockIdentity(order.symbol, order.exchange));
+  const priceReviewKey = (order: ZerodhaBasketPreviewOrder) => JSON.stringify([order.exchange, order.symbol, order.price, order.draftContext?.asOf, indiaSource(order)?.modelPrices]);
+  const divergent = (order: ZerodhaBasketPreviewOrder) => indiaSource(order)?.modelPrices.some(model => model.price && order.price && Math.abs(order.price / model.price - 1) >= 0.10);
+  const issuerDraftIssue = (order: ZerodhaBasketPreviewOrder) => {
+    const source = indiaSource(order);
+    if (!source?.isin || calculationStocks.some(s => !s.isin)) return "Provisional allocation: a security identity is missing, conflicts, or has holdings outside this basket.";
+    const members = calculationStocks.filter(stock => stock.isin === source.isin);
+    if (members.some(stock => stock.holdingQuantity == null || !stock.upstoxLtp && stock.holdingQuantity !== 0)) return "Combined holdings or exact-venue prices are unavailable.";
+    const selections = selectedOrders.filter(item => indiaSource(item)?.isin === source.isin);
+    const additions = selections.filter(item => item.side === "BUY");
+    if (additions.length && selections.some(item => item.side === "SELL")) return "Opposing trades for the same equity require review.";
+    if (additions.length > 1) return "Route this equity's purchase to one venue.";
+    const held = members.reduce((n, stock) => n + (stock.holdingQuantity ?? 0) * (stock.upstoxLtp ?? 0), 0);
+    const projected = selections.reduce((n, item) => n + (item.side === "BUY" ? 1 : -1) * (item.amount ?? 0), held);
+    if (selections.length && (portfolioAssets.totalAssets == null || projected > portfolioAssets.totalAssets * displayCalculations.parameters.normalised / 100 + 0.001)) return "Selected units exceed the combined issuer weight cap.";
+    return null;
+  };
   const rowDraftIssues = (order: ZerodhaBasketPreviewOrder) => !isZerodhaPreview ? [
     ...(order.stock.identityIssue ? [order.stock.identityIssue] : []),
     ...(!draftDirection(order.draftContext?.action) ? ["Action New has no buy or sell direction."] : []),
@@ -3104,6 +3143,8 @@ function ScopedZerodhaBasketPreviewDialog({
     ...(calculationStocks.find(stock => stockIdentity(stock.symbol, stock.exchange) === stockIdentity(order.symbol, order.exchange))?.scoreSources?.some(source => !source.completed) ? ["Source output is partial or incomplete; review required."] : []),
   ] : [
     ...editableDraftIssues(order),
+    ...[issuerDraftIssue(order)].filter((reason): reason is string => Boolean(reason)),
+    ...(divergent(order) && !priceReviews.has(priceReviewKey(order)) ? ["Model price differs from the venue quote by at least 10%. Review price provenance before execution."] : []),
     ...(order.wholeShareReview && order.wholeShareReview !== "exit" ? ["Existing whole-share choice requires explicit review."] : []),
     ...(!directMarketAvailable || !marketStatus.open || executionMode !== 'direct_market' ? ['Market execution requires enabled direct broker access during regular market hours.'] : []),
   ];
@@ -3363,6 +3404,7 @@ function ScopedZerodhaBasketPreviewDialog({
                                 </td>
                                 <td className="whitespace-nowrap px-4 py-3">
                                   <ConsensusBreakupButton stock={order.stock} action={getZerodhaBasketActionForPercent(order)} />
+                                  {isZerodhaPreview && <details className="text-xs text-slate-600"><summary>Rationale coverage {indiaSource(order)?.modelPrices.filter(m => m.fields === 6).length ?? 0}/{order.stock.rows?.length ?? 0} jobs</summary>{indiaSource(order)?.modelPrices.map(m => <div key={m.job}>#{m.job} {m.provider} · {m.fields}/6 scored · model ₹{m.price ?? "unavailable"} · job {m.time}</div>)}<div>Upstox ₹{order.price ?? "unavailable"} · last trade {order.draftContext?.asOf ?? "unavailable"}</div>{divergent(order) && <button type="button" className="text-blue-700 underline" disabled={priceReviews.has(priceReviewKey(order))} onClick={() => setPriceReviews(previous => new Set([...previous, priceReviewKey(order)]))}>{priceReviews.has(priceReviewKey(order)) ? "Price difference reviewed" : "Acknowledge this price difference"}</button>}</details>}
                                 </td>
                                 <td className="whitespace-nowrap px-4 py-3 text-slate-700">{isZerodhaPreview ? order.draftContext?.originalAction ?? getZerodhaBasketActionForPercent(order) : getZerodhaBasketActionForPercent(order)}</td>
                                 <td className="px-4 py-3">
@@ -4673,7 +4715,7 @@ export function RebalanceWorkflowSections({
   const [zerodhaBasketLoading, setZerodhaBasketLoading] = useState(false);
   const [zerodhaBasketPlacing, setZerodhaBasketPlacing] = useState(false);
   const [zerodhaBasketSubmission, setZerodhaBasketSubmission] = useState<ZerodhaBasketSubmission | null>(null);
-  const [zerodhaOrderSubmissionBlockedReason, setZerodhaOrderSubmissionBlockedReason] = useState<string | null>(null);
+  const [brokerOrderBlock, setZerodhaOrderSubmissionBlockedReason] = useState<string | null>(null);
   const [zerodhaBasketError, setZerodhaBasketError] = useState<string | null>(null);
   const [zerodhaAllocationUniverse, setZerodhaAllocationUniverse] = useState<DashboardActionRow[]>([]);
   const [zerodhaBasketOrders, setZerodhaBasketOrders] = useState<ZerodhaBasketPreviewOrder[]>([]);
@@ -4690,6 +4732,9 @@ export function RebalanceWorkflowSections({
     error: null,
   });
   const { scoreMatrixFormulaConfig, setScoreMatrixFormulaConfig, zerodhaBasketBuyThreshold, setZerodhaBasketBuyThreshold, zerodhaBasketBuyThresholdDraft, setZerodhaBasketBuyThresholdDraft, indmoneyBasketBuyThreshold, setIndmoneyBasketBuyThreshold, indmoneyBasketBuyThresholdDraft, setIndmoneyBasketBuyThresholdDraft, buyThresholdSaveError, buyThresholdPersistence } = useWorkflowConfiguration();
+  const [verifiedBasketFormula, setVerifiedBasketFormula] = useState<string | null>(null);
+  const zerodhaOrderSubmissionBlockedReason = brokerOrderBlock ?? (verifiedBasketFormula === canonicalBasketInputs(scoreMatrixFormulaConfig) ? null :
+    "Provisional basket. The workflow final, formula and source revisions must match the server record. Open workflow history to reconcile the saved inputs.");
   const [selectedZerodhaBasketIds, setSelectedZerodhaBasketIds] = useState<Set<string>>(new Set());
   const [indmoneyBasketOpen, setIndmoneyBasketOpen] = useState(false);
   const [indmoneyBasketLoading, setIndmoneyBasketLoading] = useState(false);
@@ -4865,6 +4910,7 @@ export function RebalanceWorkflowSections({
   const indmoneyPreparation = useRef(0);
   const openZerodhaBasketPreview = useCallback(async () => {
     const generation = ++zerodhaPreparation.current;
+    setVerifiedBasketFormula(null);
     setZerodhaAllocationUniverse([]);
     setZerodhaBasketOrders([]);
     setZerodhaBasketHistoryRuns([]);
@@ -4918,6 +4964,31 @@ export function RebalanceWorkflowSections({
           .sort((left, right) => parseTimestampMs(right) - parseTimestampMs(left))[0] ?? null,
       );
       const actionRows = buildDashboardActionRows(stocks, "india", technicalScans, scoreMatrixFormulaConfig);
+      const rebalance = getLatestMatchingRebalanceRuns(runs, "india");
+      const technicalIds = [...new Set(actionRows.map(row => row.detail?.technicalScanSourceRunId))];
+      const technical = technicalIds.length === 1 ? runs.find(run => run.id === technicalIds[0]) : null;
+      if (technical?.auto_rebalance_sequence && !stockFlowResult.value.warning) {
+        const sequence = technical.auto_rebalance_sequence;
+        try {
+          const [history, hashes] = await Promise.all([
+            apiService.getAutoRebalanceHistoryDetail("india", sequence), auditResponseHashes([...rebalance, technical]),
+          ]);
+          if (generation !== zerodhaPreparation.current) return;
+          const stage = history.stages.find(s => s.stage === "actionables");
+          const corrected = stage?.summary?.corrected_final_v2;
+          const frozen = (corrected ?? stage?.summary?.frozen_final) as Record<string, unknown> | undefined;
+          const rows = Array.isArray(frozen?.rows) ? frozen.rows : [];
+          if ((stage?.status === "completed" || corrected) && frozen?.schema === "workflow-final-v2" && frozen.formula_version === "score-matrix-v2" &&
+              frozen.broker === "india" && frozen.workflow_sequence === sequence && frozen.technical_run_id === technical.id &&
+              canonicalBasketInputs(frozen.rebalance_run_ids) === canonicalBasketInputs(rebalance.map(r => r.id)) &&
+              canonicalBasketInputs(frozen.response_hashes) === canonicalBasketInputs(hashes) &&
+              canonicalBasketInputs(frozen.formula) === canonicalBasketInputs(scoreMatrixFormulaConfig) &&
+              rows.length === actionRows.length && rows.length > 0 && actionRows.every(row => rows.some(saved =>
+                saved.exchange === row.stock.exchange && saved.symbol === row.stock.symbol && saved.action === row.formulaAction &&
+                saved.score === row.formulaScore))) setVerifiedBasketFormula(canonicalBasketInputs(scoreMatrixFormulaConfig));
+        } catch { /* Keep the basket provisional until the saved calculation can be confirmed. */ }
+      }
+      if (generation !== zerodhaPreparation.current) return;
       const orders = buildZerodhaBasketPreviewOrders(
         actionRows,
         technicalScans,
@@ -7296,7 +7367,7 @@ ${zerodhaExecutionMode === "direct_market"
           await markCompleted(portfolio, "technical", {
             ...summarizeRun(completedTechnicalRun),
             ...getRunProgress(completedTechnicalRun),
-            finalInputs: { formula: scoreMatrixFormulaConfig, rebalance_run_ids: rebalanceInputs.map(run => run.id),
+            finalInputs: { formula_version: market === "india" ? "score-matrix-v2" : "score-matrix-v1", formula: scoreMatrixFormulaConfig, rebalance_run_ids: rebalanceInputs.map(run => run.id),
               response_hashes: await auditResponseHashes([...rebalanceInputs, completedTechnicalRun]) },
             lastRunId: completedTechnicalRun.id,
             recommendedStocks: countUniqueStocksFromRun(completedTechnicalRun),
@@ -7334,7 +7405,7 @@ ${zerodhaExecutionMode === "direct_market"
             buildTechnicalScanMap([generatedTechnicalRun]), scoreMatrixFormulaConfig)
             .map(row => ({ ...row, coveredAt: actionablesCompletedAt, runId: finalRebalanceInputs[0].id }));
           const frozenFinal = {
-            schema: "workflow-final-v2", formula_version: "score-matrix-v1",
+            schema: "workflow-final-v2", formula_version: market === "india" ? "score-matrix-v2" : "score-matrix-v1",
             scorePolicy: "score-matrix-raw-effective-v2",
             broker: runMetadata.auto_rebalance_portfolio, workflow_sequence: runMetadata.auto_rebalance_sequence,
             scorecard_job_id: generatedThreatInput?.analysis.job_id ?? null,

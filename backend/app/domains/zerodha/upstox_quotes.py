@@ -105,7 +105,7 @@ def normalize_quotes(data, requested, now):
         if traded.timestamp() <= 0 or age < 0:
             continue
         freshness = "recent last trade" if age <= RECENT_TRADE_AGE else "older last trade; market may be closed or instrument illiquid"
-        quotes.append({"instrument": instrument, "price": price, "as_of": traded.isoformat(),
+        quotes.append({"instrument": instrument, "isin": key.partition("|")[2], "price": price, "as_of": traded.isoformat(),
                        "source": ("Upstox /market-quote/quotes last_price · exact venue · exchange last trade time · "
                                   f"{freshness} · trade age {int(age)}s · retrieved {now.isoformat()} · display only; not an execution quote")})
     return quotes

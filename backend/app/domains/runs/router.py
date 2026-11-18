@@ -773,10 +773,20 @@ async def update_auto_rebalance_stage(
         stage=stage, run_id=effective_run_id, job_id=effective_job_id,
         expected_status=status if stage in LLM_STAGES and status in {"completed", "partial"} else None,
     )
+    if "corrected_final_v2" in body.summary:
+        raise HTTPException(422, detail="Corrected calculations are generated from saved sources")
     if "frozen_final" in body.summary:
         if stage != "actionables":
             raise HTTPException(422, detail="Final capture belongs only to the actionables stage")
         from .frozen_final import validate_frozen_final
+        capture = body.summary["frozen_final"]
+        if isinstance(capture, dict) and capture.get("formula_version") == "score-matrix-v2":
+            technical_stage = next((item for item in workflow.stages if item.stage == "technical"), None)
+            receipt = (technical_stage.summary_json or {}).get("final_inputs") if technical_stage else None
+            keys = ("formula_version", "formula", "rebalance_run_ids", "response_hashes")
+            if (not isinstance(receipt, dict) or technical_stage.run_id != capture.get("technical_run_id")
+                    or any(capture.get(key) != receipt.get(key) for key in keys)):
+                raise HTTPException(409, detail="Final inputs differ from the saved Technical stage receipt")
         await validate_frozen_final(db, body.summary["frozen_final"], user_id=current_user.id,
                                    portfolio=portfolio, sequence=sequence,
                                    allow_legacy=bool(was_terminal and stage_record
@@ -859,6 +869,24 @@ async def update_auto_rebalance_stage(
     if not response:
         raise HTTPException(500, detail="Auto-rebalance stage could not be serialized")
     return response
+
+
+@router.post("/auto-rebalance-history/india/{sequence}/replay-score-v2")
+async def replay_india_score(sequence: int, db: AsyncSession = Depends(get_async_db),
+                            current_user: User = Depends(get_current_user)):
+    from .final_reconciliation import recover_final
+    workflow = (await db.execute(select(AutoRebalanceWorkflow).where(
+        AutoRebalanceWorkflow.user_id == current_user.id, AutoRebalanceWorkflow.portfolio == "india",
+        AutoRebalanceWorkflow.sequence == sequence,
+    ).options(selectinload(AutoRebalanceWorkflow.stages)).with_for_update())).scalar_one_or_none()
+    if workflow is None:
+        raise HTTPException(404, "Workflow not found")
+    replay = await recover_final(db, workflow, corrected=True)
+    final = next(stage for stage in workflow.stages if stage.stage == "actionables")
+    if "corrected_final_v2" not in (final.summary_json or {}):
+        final.summary_json = {**(final.summary_json or {}), "corrected_final_v2": replay}
+        await db.commit()
+    return {"formula_version": replay["formula_version"], "listings": len(replay["rows"]), "sequence": sequence}
 
 
 @router.post("/auto-rebalance-history/{portfolio}/{sequence}/reconcile", response_model=AutoRebalanceStageResponse)

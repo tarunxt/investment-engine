@@ -70,6 +70,9 @@ def source_calculations(payload, *, sources, jobs_by_run, market, scorecards=Non
             raise UnverifiableFinal("Equal-time conflicting Technical rows require exact source selection")
         selected[key] = (when, job_id, row)
     result = {}
+    audited = payload.get("formula_version") == "score-matrix-v2"
+    from .final_source_rows import missing_chart
+    from .final_score_math import numeric
     for key, rows in grouped.items():
         match = selected.get(key)
         technical = match[2] if match else None
@@ -77,7 +80,10 @@ def source_calculations(payload, *, sources, jobs_by_run, market, scorecards=Non
         # while bypassing this exact listing map. Reject that ambiguity.
         if match is None and any(re.sub(r"[^A-Z0-9]", "", other[1]) == re.sub(r"[^A-Z0-9]", "", key[1]) and other != key for other in selected):
             raise UnverifiableFinal("Technical listing match is ambiguous across exchanges")
-        direction = technical_direction(technical, technical_source.prompt) if technical else None
+        unavailable = technical and missing_chart(technical)
+        if audited and unavailable:
+            technical = {**technical, "Last 5 candles trend": "Unavailable"}
+        direction = technical_direction(technical, technical_source.prompt) if technical and not unavailable else None
         # The workflow passes a portfolio snapshot but no verified US listing
         # map to buildConsensusRows. usIdentityHolding leaves that position
         # unknown, even if model rows contain a suggested current quantity.
@@ -85,6 +91,13 @@ def source_calculations(payload, *, sources, jobs_by_run, market, scorecards=Non
                                         market=market, unresolved_holding=market == "us",
                                         supplemental=(scorecards or {}).get(":".join(key)))
         calculation["valid_suggestions"] = len(output_jobs)
+        calculation["source_coverage"] = [{
+            "job_id": job.id,
+            "used_fields": [field for field, header in RATIONALE_HEADERS.items()
+                            if (value := numeric(row.get(header), strict=True)) is not None and -3 <= value <= 3],
+            "excluded_fields": [field for field, header in RATIONALE_HEADERS.items()
+                                if (value := numeric(row.get(header), strict=True)) is None or not -3 <= value <= 3],
+        } for (_, job), row in zip(grouped_jobs[key], rows)]
         calculation["technical_job_id"] = match[1] if match else None
         if market == "us":
             venue = {"AMEX": "NYSEAMERICAN", "ARCA": "NYSEARCA"}.get(key[0], key[0])

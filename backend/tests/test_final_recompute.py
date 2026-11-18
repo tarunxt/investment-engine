@@ -230,3 +230,38 @@ def test_us_workflow_preserves_unresolved_listing_and_snapshot_position(inputs):
     assert c["inputs"]["currentUnits"] is None
     assert c["estimate"]["currentInvestmentAmount"] is None
     assert c["action"] == "Buy New"
+
+
+def test_named_overflow_is_isolated_and_unsafe_field_still_rejected():
+    from app.domains.runs.final_source_rows import rebalance_rows, OVERFLOW
+    headers = ["Exchange Symbol", "Stock Symbol", ACTION_HEADER, "Score Rationale Cruxx", OVERFLOW]
+    job = SimpleNamespace(id=4, status="partial", response=table(headers, [
+        ["NSE", "FIXTURE", "Hold", "-", "unaligned &#124; 2"],
+        ["BSE", "OTHER", "Trim", "1", ""],
+    ]))
+    rows = rebalance_rows(job)
+    assert [r[ACTION_HEADER] for r in rows] == ["Hold", "Trim"]
+    assert rows[0]["Score Rationale Cruxx"] == "-" and all(OVERFLOW not in row for row in rows)
+    job.response = job.response.replace("| Hold |", "| Hold&#124; |")
+    with pytest.raises(UnverifiableFinal, match="encoded"):
+        rebalance_rows(job)
+
+
+def test_missing_chart_differs_from_an_observed_flat_chart():
+    from app.domains.runs.final_source_rows import missing_chart
+    missing = {"Bias": "Neutral", "Primary Setup": "Unavailable – no dated chart", "Confidence Score": "Unavailable"}
+    assert missing_chart(missing)
+    assert not missing_chart({**missing, "Primary Setup": "Range", "Confidence Score": "5"})
+
+
+def test_category_labels_and_specific_evidence():
+    from app.domains.runs.threat_evidence import audited_evidence
+    common = dict(Exchange="NSE", Symbol="FIXTURE", Scenario="S1", Likelihood="3", Impact="2",
+                  Rationale="Specific event exposure", Confidence="Low", **{"As of": "2026-11-12"})
+    accepted, records = audited_evidence([
+        {**common, "Category": "1 geopolitics/trade", "Source": "https://example.com/release/15"},
+        {**common, "Category": "2 global economy", "Source": "https://example.com/"},
+        {**common, "Category": "2 geopolitics/trade", "Source": "https://example.com/release/16"},
+    ])
+    assert [r["Category"] for r in accepted] == ["1"]
+    assert [r["Disposition"].split(":")[0] for r in records] == ["Accepted", "Excluded", "Excluded"]

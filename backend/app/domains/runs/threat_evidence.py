@@ -1,5 +1,6 @@
 """Stage 3 evidence contract shared by the India and US threat reports."""
 from collections import defaultdict
+import re
 from datetime import date
 from urllib.parse import urlparse
 
@@ -23,12 +24,88 @@ Likelihood 1 remote, 2 plausible, 3 observable precursors, 4 likely with concret
 Impact 1 below 2%, 2 from 2 to under 5%, 3 from 5 to under 10%, 4 from 10 to under 20%,
 5 at least 20%. Use 0 only for documented absence of adverse exposure. Use Unknown when
 evidence is inadequate. Use scenario CLEAR only for verified category-wide absence.
-Provide dated source URL, ISO evidence date, downside range, rationale, confidence
+Use the numeric category ID. Cite a specific dated article, filing or data release for each claim.
+A publisher homepage cannot substantiate a scenario. Provide dated source URL, ISO evidence date, downside range, rationale, confidence
 (high/medium/low), and one row per scenario and listing. Never infer absence from missing news.
 After evidence append ## Pairwise comparisons with header Left | Right | Winner | Rationale.
 Compare each unordered pair of distinct holdings and contenders once over the same swing horizon,
 using trend, relative strength, volume, catalysts and risk/reward. Use EXCHANGE:SYMBOL on both sides.
 Winner is one of those exact listing IDs, TIE or UNKNOWN. Explain each judgement."""
+
+
+CATEGORY_LABELS = (
+    ("geopolitics trade", "geopolitics and trade"),
+    ("global economy", "global financial conditions"),
+    ("domestic economy", "domestic economy and monetary conditions", "domestic economy monetary"),
+    ("domestic policy", "domestic policy and regulation", "domestic policy regulation"),
+    ("sector technology", "sector and technology"),
+    ("company balance sheet", "company governance balance sheet", "company and governance"),
+    ("physical operational", "physical and operational"),
+    ("liquidity positioning", "market liquidity"),
+)
+
+
+def category_id(value):
+    text = re.sub(r"[^a-z0-9]+", " ", value.strip().lower()).strip()
+    text = re.sub(r"\b(indian|india|us|u s|american)\b", "domestic", text)
+    number, _, label = text.partition(" ")
+    if number.isdigit():
+        category = int(number)
+        if 1 <= category <= 8 and (not label or label in CATEGORY_LABELS[category - 1]):
+            return category
+    else:
+        for category, labels in enumerate(CATEGORY_LABELS, 1):
+            if text in labels:
+                return category
+    raise ValueError("Unrecognised or contradictory category")
+
+
+def audited_evidence(rows, universe=None):
+    accepted, records, appearances, definitions = [], [], defaultdict(list), defaultdict(set)
+    for row in rows:
+        record = {**row, "Disposition": "Accepted"}
+        records.append(record)
+        try:
+            listing = tuple(row.get(key, "").strip().upper() for key in ("Exchange", "Symbol"))
+            if not all(listing) or universe is not None and listing not in universe:
+                raise ValueError("Missing or out-of-universe listing")
+            category = category_id(row.get("Category", ""))
+            record["Category ID"] = str(category)
+            url = urlparse(row.get("Source", ""))
+            if url.scheme not in ("https", "http") or not url.hostname or not url.path.strip("/"):
+                raise ValueError("Specific evidence URL missing")
+            try:
+                date.fromisoformat(row.get("As of", ""))
+            except ValueError:
+                raise ValueError("Evidence date missing or invalid") from None
+            scenario = row.get("Scenario", "").strip().lower()
+            if not scenario or scenario == "unknown" or not row.get("Rationale", "").strip():
+                raise ValueError("Scenario or rationale unavailable")
+            if row.get("Confidence", "").strip().lower() not in {"low", "medium", "high"}:
+                raise ValueError("Confidence unavailable")
+            if scenario == "clear":
+                if row.get("Impact") != "0":
+                    raise ValueError("CLEAR requires documented zero impact")
+            else:
+                if row.get("Impact", "").lower() == "unknown":
+                    raise ValueError("Impact unassessed")
+                likelihood = int(row.get("Likelihood", ""))
+                event_score(likelihood, int(row.get("Impact", "")))
+                definitions[scenario].add((category, likelihood))
+            appearances[(listing, category if scenario == "clear" else None, scenario)].append(record)
+            accepted.append((listing, category, scenario, row, record))
+        except (KeyError, ValueError) as exc:
+            record["Disposition"] = "Excluded: " + str(exc)
+    normalized = []
+    occupied = {(listing, cat) for listing, cat, scenario, _, _ in accepted if scenario != "clear"}
+    for listing, cat, scenario, row, record in accepted:
+        if len(appearances[(listing, cat if scenario == "clear" else None, scenario)]) > 1 or len(definitions[scenario]) > 1:
+            record["Disposition"] = "Excluded: duplicate or conflicting scenario"
+        elif scenario == "clear" and (listing, cat) in occupied:
+            record["Disposition"] = "Excluded: CLEAR conflicts with a reported event"
+        else:
+            normalized.append({**row, "Category": str(cat), "Confidence": row["Confidence"].strip().lower()})
+    return normalized, records
 
 
 def stock_scorecards(rows):
