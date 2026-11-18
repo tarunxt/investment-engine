@@ -39,7 +39,7 @@ export function PortfolioWorkflowSlot({ market }: { market: WorkflowMarket }) {
     register({ target, market });
     return () => register(null);
   }, [market, target, register]);
-  return <section id={market === "zerodha" ? "india-workflow" : "us-workflow"} tabIndex={-1} className="mt-8 min-w-0 scroll-mt-6" ref={setTarget} aria-label={market === "zerodha" ? "India portfolio workflow" : "US portfolio workflow"} />;
+  return <section id={market === "zerodha" ? "india-workflow" : "us-workflow"} tabIndex={-1} className="min-w-0 scroll-mt-16" ref={setTarget} aria-label={market === "zerodha" ? "India portfolio workflow" : "US portfolio workflow"} />;
 }
 
 export function DashboardStockFlowSlot({ deferred = false }: { deferred?: boolean }) {

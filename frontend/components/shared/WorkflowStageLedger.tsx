@@ -18,13 +18,14 @@ export function WorkflowStageLedgerViews({ market, view, onChange, portfolioOnly
   view: WorkflowLedgerView;
   onChange: (market: "zerodha" | "indmoneyUs", view: WorkflowLedgerView) => void;
 }) {
+  if (portfolioOnly) return null;
   return <nav aria-label="Automated rebalance views" className="mb-3 flex flex-wrap gap-2">
     {([
       { label: "India stage ledger", market: "zerodha", view: "ledger" },
       { label: "US stage ledger", market: "indmoneyUs", view: "ledger" },
       { label: "Saved evidence and configuration", market, view: "evidence" },
       { label: "Run and order controls", market, view: "execution" },
-    ] as const).filter(item => !portfolioOnly || (item.market === market && item.view === "ledger")).map(item => {
+    ] as const).map(item => {
       const active = market === item.market && view === item.view;
       return <button key={item.label} type="button" aria-pressed={active}
         onClick={() => onChange(item.market, item.view)}
