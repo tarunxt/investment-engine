@@ -153,6 +153,10 @@ def technical_rows(job):
 def technical_direction(row, prompt):
     # Captured prompt registry is the exact approved set used by this workflow.
     from app.domains.recommendation_audit.technical import captured_setup_directions
+    from app.domains.jobs.technical_prices import unavailable_technical_setup
+    if unavailable_technical_setup(row):
+        # The UI parses this explicit confidence placeholder as null (zero weight).
+        return None
     registry = captured_setup_directions(prompt)
     primary = row.get("Primary Setup", "").strip().casefold()
     direction = registry.get(primary)
