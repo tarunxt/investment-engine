@@ -116,7 +116,12 @@ async def validate_frozen_final(db, payload, *, user_id, portfolio, sequence, al
                     raise HTTPException(409, "Final scorecard job differs from the Technical source")
                 payload["scorecard_job_id"] = source_id
                 scorecards, digest = await verified_scorecards(db, source_id, user_id, portfolio, sequence)
-                for observation in manifest["rows"]:
+                observations = manifest.get("rows")
+                if not isinstance(observations, list) or len(observations) > 500:
+                    raise HTTPException(422, "Invalid scorecard observations")
+                for observation in observations:
+                    if not isinstance(observation, dict) or not isinstance(observation.get("listing"), str):
+                        raise HTTPException(422, "Invalid scorecard listing")
                     listing = observation["listing"]
                     pair, threat = scorecards.get(listing, (None, None))
                     if observation.get("pairwise") != pair or observation.get("stock_threat") != threat:
@@ -154,6 +159,8 @@ async def verified_scorecards(db, job_id, user_id, portfolio, sequence):
 
     tables = {}
     digest = None
+    if job_id is None:
+        raise HTTPException(422, "Scorecard manifest is missing its job identity")
     if job_id is not None:
         if type(job_id) is not int or job_id <= 0:
             raise HTTPException(422, "Invalid scorecard job identity")
@@ -163,7 +170,7 @@ async def verified_scorecards(db, job_id, user_id, portfolio, sequence):
         if str(getattr(job.status, "value", job.status)).lower() not in {"completed", "partial"}:
             raise HTTPException(409, "Scorecard job is not complete")
         digest = hashlib.sha256((job.response or "").encode()).hexdigest()
-        report = parse_zerodha_threat_report(job.response) or {}
+        report = parse_zerodha_threat_report(job.response, job.prompt or "") or {}
         tables = {table["key"]: table["rows"] for table in report.get("tables", [])}
     threats = {row["Exchange"] + ":" + row["Stock Symbol"]: float(row["Stock Threat /100"])
                for row in tables.get("stock_threat_scores", []) if row["Stock Threat /100"] != "Unknown"}

@@ -151,3 +151,18 @@ def portfolio_summary(cards, values):
     return {"score": summary["score"], "leading_scenario": leader,
             "assessed_weight": sum(weights[key] for key, card in mapped.items() if card and card["score"] is not None),
             "contributors": detail[leader]["contributors"][:3] if leader else []}
+
+def assessment_list(manifest, evidence_listings):
+    """Resolve venue-less holdings only when the response identifies one venue."""
+    observed = defaultdict(set)
+    for exchange, symbol in evidence_listings:
+        observed[symbol].add(exchange)
+    listings = set()
+    for listing in [*manifest["holdings"], *manifest["contenders"]]:
+        exchange, separator, symbol = listing.upper().partition(":")
+        if not separator or not symbol:
+            continue
+        if exchange in {"", "US"} and len(observed[symbol]) == 1:
+            exchange = next(iter(observed[symbol]))
+        listings.add((exchange, symbol))
+    return listings

@@ -3627,7 +3627,7 @@ function InputSelectionDialog({
     threats:
       threatInputRationale(candidates, selectedIds, loading, error),
     swing:
-      "Use the upcoming Threat Scan output plus the latest completed threat report so Swing Scan can avoid names blocked by current guardrails while still having fallback risk context.",
+      "Swing Scan discovers contenders using the selected market and swing prompt. The next stage assesses threats across holdings and contenders.",
     rebalance:
       "Default: only the upcoming Swing output from this workflow. Saved Swing jobs are included only when you explicitly select them. Opening this picker never changes your choices. Latest saved stage outputs are shown with their timestamps, including scans from before the latest market close.",
     technical:

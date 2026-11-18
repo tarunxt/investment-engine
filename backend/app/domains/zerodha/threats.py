@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.domains.runs.threat_evidence import snapshot_manifest, scorecard_instruction, stock_scorecards, comparison_table, portfolio_summary
+from app.domains.runs.threat_evidence import snapshot_manifest, scorecard_instruction, stock_scorecards, comparison_table, portfolio_summary, assessment_list
 from dataclasses import dataclass
 from datetime import date, datetime
 import re
@@ -532,12 +532,15 @@ def parse_zerodha_threat_report(markdown: str | None, prompt: str = "") -> dict[
         )
 
     evidence = _parse_markdown_table(sections.get("threat_score_evidence", ""))
-    if evidence["rows"]:
-        cards = stock_scorecards(evidence["rows"])
-        marker = next((line.removeprefix("[SCORECARD_UNIVERSE_V1]") for line in prompt.splitlines()
-                       if line.startswith("[SCORECARD_UNIVERSE_V1]")), None)
-        if marker:
-            portfolio = portfolio_summary(cards, json.loads(marker)["holdings"])
+    marker = next((line.removeprefix("[SCORECARD_UNIVERSE_V1]") for line in prompt.splitlines()
+                   if line.startswith("[SCORECARD_UNIVERSE_V1]")), None)
+    manifest = json.loads(marker) if marker else None
+    cards = stock_scorecards(evidence["rows"])
+    universe = assessment_list(manifest, cards) if manifest else set(cards)
+    cards = {listing: card for listing, card in cards.items() if listing in universe}
+    if universe:
+        if manifest:
+            portfolio = portfolio_summary(cards, manifest["holdings"])
             if portfolio:
                 columns = ["Portfolio Threat /100", "Leading scenario", "Assessed value", "Largest contributors"]
                 values = ["Unknown" if portfolio["score"] is None else f"{portfolio['score']:.2f}",
@@ -547,17 +550,33 @@ def parse_zerodha_threat_report(markdown: str | None, prompt: str = "") -> dict[
                                   "columns": columns, "rows": [dict(zip(columns, values))]})
         columns = ["Exchange", "Stock Symbol", "Stock Threat /100", "Coverage", "Extreme impact"]
         scores = []
-        for (exchange, symbol), card in sorted(cards.items()):
+        for exchange, symbol in sorted(universe):
+            card = cards.get((exchange, symbol), {"score": None, "provisional": True, "evidence": []})
             value = card["score"]
             scores.append(dict(zip(columns, [exchange, symbol, "Unknown" if value is None else f"{value:.2f}",
                 "Provisional" if card["provisional"] else "Complete",
                 "20%+ conditional downside" if any(r.get("Impact") == "5" for r in card["evidence"]) else "—"])))
         tables.append({"key": "stock_threat_scores", "title": "Stock Threat", "columns": columns, "rows": scores})
+        category_columns = ["Exchange", "Stock Symbol", "Category", "Threat /100", "Leading event", "Runner-up"]
+        category_names = ["Geopolitics and trade", "Global financial conditions", "Domestic economy",
+                          "Domestic policy", "Sector and technology", "Company and governance",
+                          "Physical and operational", "Market liquidity"]
+        category_rows = []
+        for exchange, symbol in sorted(universe):
+            categories = cards.get((exchange, symbol), {}).get("categories", {})
+            for category, name in enumerate(category_names, start=1):
+                result = categories.get(category, {})
+                leaders = result.get("leading_events", [])
+                values = [exchange, symbol, name, str(result["score"]) if result.get("score") is not None else "Unknown",
+                          leaders[0][0] if leaders else "—", leaders[1][0] if len(leaders) > 1 else "—"]
+                category_rows.append(dict(zip(category_columns, values)))
+        tables.append({"key": "stock_threat_categories", "title": "Threat categories",
+                       "columns": category_columns, "rows": category_rows})
         tables.append({"key": "threat_score_evidence", "title": "Threat score evidence", **evidence})
 
     pairs = _parse_markdown_table(sections.get("pairwise_comparisons", ""))
-    if pairs["rows"] and evidence["rows"]:
-        listings = [f"{exchange}:{symbol}" for exchange, symbol in cards]
+    if universe:
+        listings = [f"{exchange}:{symbol}" for exchange, symbol in universe]
         comparisons = comparison_table(pairs["rows"], listings)
         columns = ["Listing", "Pairwise /100", "Valid comparisons", "Expected"]
         tables.append({"key": "pairwise_scores", "title": "Pairwise scorecard", "columns": columns,
