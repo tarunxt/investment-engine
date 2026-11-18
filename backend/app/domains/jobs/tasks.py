@@ -1415,7 +1415,7 @@ def execute_ai_job(self, job_id: int) -> None:
                 return result
         provider = OwnedProvider()
         from app.domains.jobs.technical_prices import (
-            MissingTechnicalListings, merge_technical_rows, missing_listing_prompt,
+            MissingTechnicalListings, UnavailableTechnicalCoverage, merge_technical_rows, missing_listing_prompt,
             technical_identity_instructions, validate_technical_prices, normalize_technical_rows,
         )
         prompt_to_execute += technical_identity_instructions(job.prompt)
@@ -1447,6 +1447,9 @@ def execute_ai_job(self, job_id: int) -> None:
         for attempt in range(_MAX_STOCK_REPAIR_ATTEMPTS + 1):
             try:
                 validate_technical_prices(job.prompt, content)
+                break
+            except UnavailableTechnicalCoverage as unavailable:
+                partial_price_notice = str(unavailable)
                 break
             except MissingTechnicalListings as missing:
                 if set(missing.ids) <= excluded_prices and missing.accepted_count > 0:

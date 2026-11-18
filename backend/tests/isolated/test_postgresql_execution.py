@@ -207,6 +207,7 @@ class ExecutionHarness:
                 'app.domains.jobs.technical_prices', validate_technical_prices=technical,
                 normalize_technical_rows=technical_prices.normalize_technical_rows,
                 MissingTechnicalListings=technical_prices.MissingTechnicalListings,
+                UnavailableTechnicalCoverage=technical_prices.UnavailableTechnicalCoverage,
                 merge_technical_rows=technical_prices.merge_technical_rows,
                 missing_listing_prompt=technical_prices.missing_listing_prompt,
                 technical_identity_instructions=technical_prices.technical_identity_instructions,

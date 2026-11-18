@@ -60,13 +60,13 @@ def rebalance_rows(job):
                 raise UnverifiableFinal("Unexpected pipe-delimited text outside the recommendation table")
     if "\\|" in table.text:
         raise UnverifiableFinal("Escaped separator in Rebalance source table")
-    # HTML ampersands in narrative rationale cannot affect a score or listing.
+    # Allow literal ampersands in descriptive setup and rationale text.
     # Inspect the original cells before the Markdown parser decodes entities.
     for index, line in enumerate(table.text.splitlines()):
         for col, cell in enumerate(line.strip().strip("|").split("|")):
             entities = re.findall(r"&(?:#\w+|[a-zA-Z]+);", cell)
             if entities and not (index >= 2 and col < len(table.headers)
-                                 and table.headers[col].startswith("Rationale ")
+                                 and (table.headers[col] == "Technical Setup" or table.headers[col].startswith("Rationale "))
                                  and all(entity == "&amp;" for entity in entities)):
                 raise UnverifiableFinal("Ambiguous encoded value in Rebalance source table")
     if len(table.rows) > 500:

@@ -166,13 +166,14 @@ def test_explicit_unknown_scores_and_zero_units_remain_distinct(inputs):
     assert all(term['score'] is None for term in result['weighted_rows'][:6])
 
 
-def test_report_title_and_encoded_rationale_preserve_calculation(inputs):
+@pytest.mark.parametrize("header", ["Rationale Cruxx", "Technical Setup"])
+def test_report_title_and_encoded_description_preserve_calculation(inputs, header):
     payload, context = inputs
     job = context["jobs_by_run"][10][0]
     original = source_calculations(payload, **context)
     lines = job.response.splitlines()
     cells = lines[2].strip("|").split("|")
-    col = [name.strip() for name in lines[0].strip("|").split("|")].index("Rationale Cruxx")
+    col = [name.strip() for name in lines[0].strip("|").split("|")].index(header)
     cells[col] = " P&amp;L reflects unrealised gains "
     lines[2] = "|" + "|".join(cells) + "|"
     job.response = "## 18 November | Recommended Rebalance | Portfolio | Provider\n\n" + "\n".join(lines)
@@ -193,22 +194,39 @@ def test_technical_exact_venue_precedes_symbol_alias(inputs):
         source_calculations(payload, **context)
 
 
-def test_saved_unavailable_technical_rows_keep_lineage_and_zero_confidence_weight(inputs):
-    from app.domains.jobs.technical_prices import validate_technical_prices
+@pytest.mark.parametrize(("primary", "bias"), [
+    ("Unavailable – no live data", "Unresolved"),
+    ("Unavailable – no dated chart data retrieved", "Unavailable"),
+])
+def test_saved_unavailable_technical_rows_keep_lineage_and_zero_confidence_weight(inputs, primary, bias):
+    from app.domains.jobs.technical_prices import UnavailableTechnicalCoverage, validate_technical_prices
 
     payload, context = inputs
     job = context["jobs_by_run"][20][0]
     job.response = table(
         ["Exchange Symbol", "Stock Symbol", "Primary Setup", "Bias", "Confidence Score",
          "Premarket trend", "Last 5 candles trend"],
-        [["NSE", "FIXTUREEQ", "Unavailable – no live data", "Unresolved", "Unavailable", "0", "Unavailable"]],
+        [["NSE", "FIXTUREEQ", primary, bias, "Unavailable", "0", "Unavailable"]],
     )
-    with pytest.raises(ValueError, match="no usable chart data for any of 1 listings"):
+    with pytest.raises(UnavailableTechnicalCoverage, match="no usable chart data for any of 1 listings"):
         validate_technical_prices("## Technical Scan Input Bundle", job.response)
     calculation = source_calculations(payload, **context)[("NSE", "FIXTUREEQ")]
     confidence = next(row for row in calculation["weighted_rows"] if row["id"] == "technical-scan-confidence")
     assert confidence["score"] is None and confidence["multiplier"] == 0
     assert calculation["technical_job_id"] == job.id
-    job.response = job.response.replace("Unresolved | Unavailable", "Unresolved | 8")
+    job.response = job.response.replace(f"{bias} | Unavailable | 0", f"{bias} | 8 | 0")
     with pytest.raises(UnverifiableFinal, match="approved direction"):
         source_calculations(payload, **context)
+
+
+def test_us_workflow_preserves_unresolved_listing_and_snapshot_position(inputs):
+    payload, context = inputs
+    context["market"] = "us"
+    for jobs in context["jobs_by_run"].values():
+        for job in jobs:
+            job.response = job.response.replace("| NSE |", "| NASDAQ |")
+    c = source_calculations(payload, **context)[("NASDAQ", "FIXTUREEQ")]
+    assert c["inputs"]["stockKey"] == "unresolved:NASDAQ:FIXTUREEQ:?"
+    assert c["inputs"]["currentUnits"] is None
+    assert c["estimate"]["currentInvestmentAmount"] is None
+    assert c["action"] == "Buy New"

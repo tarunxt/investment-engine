@@ -78,10 +78,18 @@ def source_calculations(payload, *, sources, jobs_by_run, market):
         if match is None and any(re.sub(r"[^A-Z0-9]", "", other[1]) == re.sub(r"[^A-Z0-9]", "", key[1]) and other != key for other in selected):
             raise UnverifiableFinal("Technical listing match is ambiguous across exchanges")
         direction = technical_direction(technical, technical_source.prompt) if technical else None
-        calculation = calculate_listing(rows, formula, technical, direction=direction, market=market)
+        # The workflow passes a portfolio snapshot but no verified US listing
+        # map to buildConsensusRows. usIdentityHolding leaves that position
+        # unknown, even if model rows contain a suggested current quantity.
+        calculation = calculate_listing(rows, formula, technical, direction=direction,
+                                        market=market, unresolved_holding=market == "us")
         calculation["valid_suggestions"] = len(output_jobs)
         calculation["technical_job_id"] = match[1] if match else None
-        stock_key = f"{key[0]}:{key[1]}" if sum(other[1] == key[1] for other in grouped) > 1 else key[1]
+        if market == "us":
+            venue = {"AMEX": "NYSEAMERICAN", "ARCA": "NYSEARCA"}.get(key[0], key[0])
+            stock_key = f"unresolved:{venue}:{key[1]}:?"
+        else:
+            stock_key = f"{key[0]}:{key[1]}" if sum(other[1] == key[1] for other in grouped) > 1 else key[1]
         # The UI selects newest provider creation time for this lineage field.
         def timestamp(item):
             when = getattr(item[1], "created_at", None)
