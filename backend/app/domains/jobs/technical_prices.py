@@ -21,6 +21,10 @@ class MissingTechnicalListings(ValueError):
 
 def technical_identity_instructions(prompt: str) -> str:
     if not ANCHORS.search(prompt):
+        if prompt.lstrip().startswith('## Technical Scan Input Bundle'):
+            return ('\nResearch the latest available completed daily session for each listing. '
+                    'An intraday live quote is not required for daily chart analysis. '
+                    'If dated chart evidence is unavailable, report that explicitly.')
         return ''
     return ('\nThe instrument field is the stable listing ID (EXCHANGE:SYMBOL). '
             'Return each ID exactly once by copying its two components into '
@@ -55,9 +59,25 @@ def merge_technical_rows(previous: str, supplement: str) -> str:
     return '\n'.join(lines)
 
 
+def unavailable_technical_setup(row):
+    """Recognize a reported data outage without treating it as a directional signal."""
+    return (row.get('Bias', '').strip().casefold() == 'unresolved'
+            and row.get('Confidence Score', '').strip().casefold() == 'unavailable'
+            and re.fullmatch(r'unavailable\s*[-–—]\s*no live data',
+                             row.get('Primary Setup', '').strip(), re.I) is not None)
+
+
 def validate_technical_prices(prompt: str, content: str) -> None:
     match = ANCHORS.search(prompt)
     if not match:
+        if prompt.lstrip().startswith('## Technical Scan Input Bundle'):
+            rows = [dict(zip(block.headers, row))
+                    for block in parse_markdown(content)[0]
+                    if block.kind == 'table' and 'Primary Setup' in block.headers
+                    for row in block.rows]
+            if rows and all(unavailable_technical_setup(row) for row in rows):
+                raise ValueError(f'Technical Scan returned no usable chart data for any of {len(rows)} listings. '
+                                 'Retry Technical Scan with a web-enabled model or restored market data.')
         return
     anchors = json.loads(match[1])
     expected = {a['instrument']: float(a['price']) for a in anchors}
