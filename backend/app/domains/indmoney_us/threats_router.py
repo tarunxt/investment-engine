@@ -139,7 +139,8 @@ async def run_threat_analysis(
         "parse_status": latest_snapshot.parse_status,
         "reported_holdings_count": latest_snapshot.reported_holdings_count,
     })
-    prompt = build_indmoney_us_threat_prompt(latest_snapshot, contenders=body.contenders if body else [])
+    prompt = (build_indmoney_us_threat_prompt(latest_snapshot, contenders=body.contenders)
+              if body and body.contenders else build_indmoney_us_threat_prompt(latest_snapshot))
     redis = _get_redis()
     try:
         use_case = CreateJobUseCase(

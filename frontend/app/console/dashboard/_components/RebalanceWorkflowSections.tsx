@@ -7356,7 +7356,7 @@ ${zerodhaExecutionMode === "direct_market"
             rows: workflowRanking(frozenFinal.rows, generatedThreatInput?.analysis.report).map(item => {
               const row = frozenFinal.rows.find(r => r.exchange + ":" + r.symbol === item.listing);
               return {...item, score: row?.effectiveScore == null ? null : (row.effectiveScore + 3) * 100 / 6};
-            })};
+            }).sort((a, b) => (b.score ?? -1) - (a.score ?? -1) || (a.listing < b.listing ? -1 : a.listing > b.listing ? 1 : 0))};
           const savedFinal = await markCompleted(portfolio, "actionables", {
             completedAt: actionablesCompletedAt, runStatus: "saved calculation",
             rebalanceInputs: finalRebalanceInputs.length, recommendedStocks: finalRows.length, frozenFinal: {...frozenFinal, actionable_ranking},

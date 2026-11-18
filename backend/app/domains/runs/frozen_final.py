@@ -105,7 +105,6 @@ async def validate_frozen_final(db, payload, *, user_id, portfolio, sequence, al
         try:
             manifest_line = next((line for line in technical.prompt.splitlines() if line.startswith("[WORKFLOW_SCORECARDS_V1]")), None)
             scorecards = {}
-            digest = None
             if manifest_line:
                 try:
                     manifest = json.loads(manifest_line.removeprefix("[WORKFLOW_SCORECARDS_V1]"))
@@ -115,7 +114,7 @@ async def validate_frozen_final(db, payload, *, user_id, portfolio, sequence, al
                 if not rebuild and payload.get("scorecard_job_id") != source_id:
                     raise HTTPException(409, "Final scorecard job differs from the Technical source")
                 payload["scorecard_job_id"] = source_id
-                scorecards, digest = await verified_scorecards(db, source_id, user_id, portfolio, sequence)
+                scorecards = await verified_scorecards(db, source_id, user_id, portfolio, sequence)
                 observations = manifest.get("rows")
                 if not isinstance(observations, list) or len(observations) > 500:
                     raise HTTPException(422, "Invalid scorecard observations")
@@ -151,14 +150,13 @@ async def validate_frozen_final(db, payload, *, user_id, portfolio, sequence, al
                 ranking.append({"listing": listing, "stock_threat": threat, "pairwise": pair,
                                 "score": None if effective is None else (effective + 3) * 100 / 6})
             ranking.sort(key=lambda r: (r["score"] is None, -(r["score"] or 0), r["listing"]))
-            payload["actionable_ranking"] = {"version": "weighted-98-1-1-v1", "source_hash": digest, "rows": ranking}
+            payload["actionable_ranking"] = {"version": "weighted-98-1-1-v1", "rows": ranking}
 
 
 async def verified_scorecards(db, job_id, user_id, portfolio, sequence):
     from app.domains.zerodha.threats import parse_zerodha_threat_report
 
     tables = {}
-    digest = None
     if job_id is None:
         raise HTTPException(422, "Scorecard manifest is missing its job identity")
     if job_id is not None:
@@ -169,11 +167,10 @@ async def verified_scorecards(db, job_id, user_id, portfolio, sequence):
         job = (await db.execute(select(Job).where(Job.id == job_id, Job.user_id == user_id))).scalar_one()
         if str(getattr(job.status, "value", job.status)).lower() not in {"completed", "partial"}:
             raise HTTPException(409, "Scorecard job is not complete")
-        digest = hashlib.sha256((job.response or "").encode()).hexdigest()
         report = parse_zerodha_threat_report(job.response, job.prompt or "") or {}
         tables = {table["key"]: table["rows"] for table in report.get("tables", [])}
     threats = {row["Exchange"] + ":" + row["Stock Symbol"]: float(row["Stock Threat /100"])
                for row in tables.get("stock_threat_scores", []) if row["Stock Threat /100"] != "Unknown"}
     pairs = {row["Listing"]: float(row["Pairwise /100"]) for row in tables.get("pairwise_scores", [])
              if row["Pairwise /100"] != "Unknown"}
-    return {key: (pairs.get(key), threats.get(key)) for key in pairs.keys() | threats.keys()}, digest
+    return {key: (pairs.get(key), threats.get(key)) for key in pairs.keys() | threats.keys()}

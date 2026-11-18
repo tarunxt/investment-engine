@@ -2276,7 +2276,7 @@ function buildScoreMatrixDetail(
   );
   const { finalScore: detailedRationaleFinalScore, denominator: detailedRationaleDenominator } =
     calculateWeightedRationaleScore(detailedRationaleRows, formulaConfig.detailedRationaleDenominator);
-  const supplementalInputs = technicalScan?.exchangeSymbol.toUpperCase() === stock.exchange.toUpperCase()
+  const supplementalInputs = technicalScan?.supplementalInputs && technicalScan.exchangeSymbol.toUpperCase() === stock.exchange.toUpperCase()
     && technicalScan.stockSymbol.toUpperCase() === stock.symbol.toUpperCase() ? technicalScan.supplementalInputs : undefined;
   const calculatedScore = supplementalInputs ? weightedSigned(detailedRationaleFinalScore ?? meanScore, supplementalInputs) : detailedRationaleFinalScore ?? meanScore;
 

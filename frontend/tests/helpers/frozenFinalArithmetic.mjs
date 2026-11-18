@@ -5,12 +5,14 @@ import { readFileSync } from 'node:fs';
 process.on('uncaughtException', error => { console.error(error.message); process.exit(1); });
 const root = new URL('../../', import.meta.url);
 const files = [
+  new URL('lib/workflowScorecardRanking.ts', root),
+  new URL('lib/usSecurityIdentity.ts', root),
   new URL('lib/technicalSetups.ts', root),
   new URL('lib/scoreMatrixMath.ts', root),
   new URL('app/console/_components/FinalActionablesConsole.tsx', root),
 ];
 const functions = new Set([
-  'buildScoreMatrixDetail', 'buildDetailedRationaleScoreRows', 'getTechnicalScanScoreMultiplier',
+  'weightedSigned', 'buildScoreMatrixDetail', 'buildDetailedRationaleScoreRows', 'getTechnicalScanScoreMultiplier',
   'getTechnicalScanConfidence', 'formatTechnicalScanConfidenceValue', 'getFallbackTechnicalConfidence',
   'normalizeEmptyTechnicalValue', 'normalizeScanCell', 'stripInlineCitations', 'stripMarkdownLinks',
   'resolveApprovedTechnicalSetup', 'getApprovedSetupByName', 'normalizeSetupLookupKey',
@@ -42,7 +44,7 @@ const summarizeRationales=()=>'', formatQuantity=String, formatCurrency=String, 
 `;
 for (const url of files) {
   const source = readFileSync(url, 'utf8');
-  if (url.pathname.endsWith('scoreMatrixMath.ts')) { code += source + '\n'; continue; }
+  if (url.pathname.endsWith('scoreMatrixMath.ts') || url.pathname.endsWith('usSecurityIdentity.ts')) { code += source + '\n'; continue; }
   const ast = ts.createSourceFile(url.pathname, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   for (const statement of ast.statements) {
     if (ts.isFunctionDeclaration(statement) && functions.has(statement.name?.text)) code += statement.getText(ast) + '\n';

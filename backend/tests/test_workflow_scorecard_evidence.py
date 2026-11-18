@@ -23,3 +23,38 @@ def test_pairwise_ignores_unknown_and_reports_coverage():
     result = comparison_table(rows, ["NSE:A", "NSE:B", "NSE:C"])
     assert result["NSE:A"] == {"score": 50, "expected": 2, "completed": 1}
     assert result["NSE:C"]["score"] is None
+
+
+def test_weighted_final_matches_renderer_in_both_markets():
+    import json
+    import shutil
+    import subprocess
+    from pathlib import Path
+    from math import isclose
+    from app.domains.recommendation_audit.schemas import Formula
+    from app.domains.runs.final_score_math import ACTION_HEADER, RATIONALE_HEADERS, calculate_listing
+
+    root = Path(__file__).resolve().parents[2]
+    if not shutil.which("node") or not (root / "frontend/node_modules/typescript").exists():
+        import pytest
+        pytest.skip("Component parity requires installed frontend dependencies")
+    config = json.loads(json.dumps(Formula().model_dump(), default=float))
+    fixtures = []
+    for market, exchange in [("india", "NSE"), ("us", "NASDAQ")]:
+        source = {**dict.fromkeys(RATIONALE_HEADERS.values(), "0"), "Exchange Symbol": exchange,
+                  "Stock Symbol": "TEST", ACTION_HEADER: "Hold", "Current Units": "10"}
+        technical = {"stockSymbol": "TEST", "exchangeSymbol": exchange, "runId": 20, "jobId": 21,
+                     "primarySetup": "Support bounce", "secondarySetups": "", "bias": "bullish",
+                     "confidenceScore": "0", "premarketTrend": "0", "last5CandlesTrend": "0",
+                     "supplementalInputs": {"stock_threat": 68, "pairwise": 100}}
+        fixtures.append({"rows": [source], "technical": technical, "formula": config, "market": market})
+    result = subprocess.run(["node", str(root / "frontend/tests/helpers/frozenFinalArithmetic.mjs")],
+                            input=json.dumps(fixtures), text=True, capture_output=True, check=True)
+    for fixture, rendered in zip(fixtures, json.loads(result.stdout), strict=True):
+        calculated = calculate_listing(fixture["rows"], config, {"Confidence Score": "0", "Premarket trend": "0",
+                                       "Last 5 candles trend": "0"}, direction="bullish",
+                                       market=fixture["market"], supplemental=(100, 68))
+        signed = rendered["detail"]["calculatedScore"]
+        assert isclose(signed, calculated["effective_score"])
+        assert isclose((signed + 3) * 100 / 6, 50.32)
+        assert rendered["detail"]["calculatedAction"] == calculated["action"]

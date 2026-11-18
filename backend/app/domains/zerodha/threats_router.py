@@ -126,7 +126,8 @@ async def run_threat_analysis(
             detail="No Zerodha portfolio snapshot found. Sync your portfolio first.",
         )
 
-    prompt = build_zerodha_threat_prompt(latest_snapshot, contenders=body.contenders if body else [])
+    prompt = (build_zerodha_threat_prompt(latest_snapshot, contenders=body.contenders)
+              if body and body.contenders else build_zerodha_threat_prompt(latest_snapshot))
     redis = _get_redis()
     try:
         use_case = CreateJobUseCase(

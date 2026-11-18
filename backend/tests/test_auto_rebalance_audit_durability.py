@@ -553,6 +553,7 @@ async def test_own_stage_identity_ignores_quoted_prior_scan_content(audit_db, st
 
 @pytest.mark.anyio
 async def test_late_job_link_must_belong_to_already_linked_run(audit_db):
+    swing_run_id = 400 + routes.AUTO_REBALANCE_STAGE_ORDER.index("swing")
     await seed_verified_workflow(audit_db)
     async with audit_db.sessions() as db:
         db.add(Job(id=500, user_id=7, prompt="Swing scan", provider="test", model="test",
@@ -564,11 +565,11 @@ async def test_late_job_link_must_belong_to_already_linked_run(audit_db):
     assert error.value.status_code == 422 and "does not belong" in error.value.detail
     async with audit_db.sessions() as db:
         stage = (await db.execute(select(AutoRebalanceWorkflowStage).where(AutoRebalanceWorkflowStage.stage == "swing"))).scalar_one()
-        assert stage.run_id == 402 and stage.job_id is None
-        db.add(RunJob(run_id=402, job_id=500))
+        assert stage.run_id == swing_run_id and stage.job_id is None
+        db.add(RunJob(run_id=swing_run_id, job_id=500))
         await db.commit()
     result = await write(audit_db, "swing", "processing", job_id=500)
-    assert (result.run_id, result.job_id, result.status) == (402, 500, "completed")
+    assert (result.run_id, result.job_id, result.status) == (swing_run_id, 500, "completed")
 
 
 @pytest.mark.anyio
@@ -657,15 +658,16 @@ async def test_broker_failure_leaves_recoverable_outbox_and_delivery_is_idempote
 @pytest.mark.anyio
 @pytest.mark.parametrize("job_status,expected", [("completed", "queued"), ("failed", "queued"), ("processing", None)])
 async def test_partial_run_uses_aggregate_outcome_with_a_terminal_linked_provider_job(audit_db, email_queue, job_status, expected):
+    swing_run_id = 400 + routes.AUTO_REBALANCE_STAGE_ORDER.index("swing")
     await seed_verified_workflow(audit_db)
     async with audit_db.sessions() as db:
-        run = await db.get(Run, 402)
+        run = await db.get(Run, swing_run_id)
         run.status = JobStatus.PARTIAL
         db.add(Job(id=500, user_id=7, prompt="Swing scan", provider="test", model="test",
                    auto_rebalance_portfolio="india", auto_rebalance_sequence=42,
                    auto_rebalance_label="India Run #42 (Swing Scan)", status=JobStatus(job_status)))
         await db.flush()
-        db.add(RunJob(run_id=402, job_id=500))
+        db.add(RunJob(run_id=swing_run_id, job_id=500))
         stage = (await db.execute(select(AutoRebalanceWorkflowStage).where(AutoRebalanceWorkflowStage.stage == "swing"))).scalar_one()
         stage.status = "partial"
         stage.job_id = 500
