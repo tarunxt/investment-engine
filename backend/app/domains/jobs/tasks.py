@@ -1416,7 +1416,7 @@ def execute_ai_job(self, job_id: int) -> None:
         provider = OwnedProvider()
         from app.domains.jobs.technical_prices import (
             MissingTechnicalListings, merge_technical_rows, missing_listing_prompt,
-            technical_identity_instructions, validate_technical_prices,
+            technical_identity_instructions, validate_technical_prices, normalize_technical_rows,
         )
         prompt_to_execute += technical_identity_instructions(job.prompt)
         with provider_usage_phase("initial_generation"):
@@ -1439,11 +1439,19 @@ def execute_ai_job(self, job_id: int) -> None:
             raise RuntimeError(
                 f"{job.provider}/{job.model} returned empty output after generation"
             )
+        price_evidence = []
+        content, excluded_prices = normalize_technical_rows(job.prompt, content, price_evidence)
+        if price_evidence:
+            runtime_metadata_json = {**(runtime_metadata_json or {}), "technical_price_evidence": price_evidence}
+        partial_price_notice = None
         for attempt in range(_MAX_STOCK_REPAIR_ATTEMPTS + 1):
             try:
                 validate_technical_prices(job.prompt, content)
                 break
             except MissingTechnicalListings as missing:
+                if set(missing.ids) <= excluded_prices and missing.accepted_count > 0:
+                    partial_price_notice = "Technical price validation excluded listings: " + ", ".join(missing.ids)
+                    break
                 if attempt == _MAX_STOCK_REPAIR_ATTEMPTS:
                     raise
                 repair_prompt = missing_listing_prompt(job.prompt, missing.ids)
@@ -1461,11 +1469,15 @@ def execute_ai_job(self, job_id: int) -> None:
             )
             if _job_was_cancelled(repo, job_id):
                 return
+            supplement, rejected = normalize_technical_rows(repair_prompt, repair.content or "", price_evidence)
+            excluded_prices.update(rejected)
+            if price_evidence:
+                runtime_metadata_json = {**(runtime_metadata_json or {}), "technical_price_evidence": price_evidence}
             try:
-                validate_technical_prices(repair_prompt, repair.content or "")
+                validate_technical_prices(repair_prompt, supplement)
             except MissingTechnicalListings:
                 pass  # A partial supplement can still contribute validated rows.
-            content = merge_technical_rows(content, repair.content or "")
+            content = merge_technical_rows(content, supplement)
         if _requires_generic_table_output(job.prompt):
             if _is_rebalance_output(job.prompt):
                 content, rebalance_table_issue, _parsed_rebalance_rows = _validate_rebalance_table_content(content, job.prompt)
@@ -1671,12 +1683,12 @@ def execute_ai_job(self, job_id: int) -> None:
 
         from app.domains.jobs.partial_output import has_partial_output, PARTIAL_NOTICE
         completion_metadata = with_output_validation(runtime_metadata_json)
-        partial_usage = has_partial_output(completion_metadata)
+        partial_usage = bool(partial_price_notice) or has_partial_output(completion_metadata)
         _update_job_status(
             repo,
             job,
             JobStatus.PARTIAL if partial_usage else JobStatus.COMPLETED,
-            error_message=PARTIAL_NOTICE if partial_usage else None,
+            error_message=partial_price_notice or (PARTIAL_NOTICE if partial_usage else None),
             response=content,
             tokens_in=tokens_in,
             tokens_out=tokens_out,
