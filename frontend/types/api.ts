@@ -599,6 +599,7 @@ export interface PolymarketEventRuntimeMetadata {
 }
 
 export interface PortfolioEventRunRequest {
+  contenders?: string[];
   provider?: string | null;
   model?: string | null;
   auto_rebalance_portfolio?: AutoRebalancePortfolioKey | null;

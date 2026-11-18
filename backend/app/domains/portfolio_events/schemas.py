@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.shared.types import JobStatus
 
@@ -30,6 +30,7 @@ class PortfolioAnalysisHistoryItemResponse(BaseModel):
 
 
 class PortfolioEventRunRequest(BaseModel):
+    contenders: list[str] = Field(default_factory=list, max_length=500)
     provider: str | None = None
     model: str | None = None
     auto_rebalance_portfolio: str | None = None

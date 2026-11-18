@@ -126,7 +126,7 @@ async def run_threat_analysis(
             detail="No Zerodha portfolio snapshot found. Sync your portfolio first.",
         )
 
-    prompt = build_zerodha_threat_prompt(latest_snapshot)
+    prompt = build_zerodha_threat_prompt(latest_snapshot, contenders=body.contenders if body else [])
     redis = _get_redis()
     try:
         use_case = CreateJobUseCase(
@@ -249,7 +249,7 @@ async def _serialize_threat_job(
     include_history: bool = True,
 ) -> ZerodhaThreatAnalysisResponse:
     metadata = extract_threat_prompt_metadata(job.prompt or "")
-    parsed = parse_zerodha_threat_report(job.response)
+    parsed = parse_zerodha_threat_report(job.response, job.prompt or "")
     if include_history:
         parsed = await _augment_report_with_urgent_history(db, job, parsed)
     return ZerodhaThreatAnalysisResponse(

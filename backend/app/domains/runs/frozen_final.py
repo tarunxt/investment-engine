@@ -18,6 +18,8 @@ async def validate_frozen_final(db, payload, *, user_id, portfolio, sequence, al
     if (payload.get('broker', portfolio) != portfolio
             or payload.get('workflow_sequence', sequence) != sequence):
         raise HTTPException(409, 'Frozen calculation belongs to another workflow')
+    if "actionable_ranking" in payload and "scorecard_job_id" not in payload:
+        raise HTTPException(422, "Weighted final requires scorecard provenance")
     legacy = payload['schema'] == 'workflow-final-v1'
     if legacy and not allow_legacy:
         raise HTTPException(422, 'New final captures require workflow-final-v2 source recomputation')
@@ -101,7 +103,27 @@ async def validate_frozen_final(db, payload, *, user_id, portfolio, sequence, al
                 memberships.add((link.run_id, link.job_id))
                 jobs_by_run[link.run_id].append(known_jobs[link.job_id])
         try:
-            calculations = source_calculations(payload, sources=sources, jobs_by_run=jobs_by_run, market=market)
+            manifest_line = next((line for line in technical.prompt.splitlines() if line.startswith("[WORKFLOW_SCORECARDS_V1]")), None)
+            scorecards = {}
+            digest = None
+            if manifest_line:
+                try:
+                    manifest = json.loads(manifest_line.removeprefix("[WORKFLOW_SCORECARDS_V1]"))
+                    source_id = manifest["job_id"]
+                except (KeyError, ValueError, TypeError) as exc:
+                    raise HTTPException(422, "Invalid scorecard manifest") from exc
+                if not rebuild and payload.get("scorecard_job_id") != source_id:
+                    raise HTTPException(409, "Final scorecard job differs from the Technical source")
+                payload["scorecard_job_id"] = source_id
+                scorecards, digest = await verified_scorecards(db, source_id, user_id, portfolio, sequence)
+                for observation in manifest["rows"]:
+                    listing = observation["listing"]
+                    pair, threat = scorecards.get(listing, (None, None))
+                    if observation.get("pairwise") != pair or observation.get("stock_threat") != threat:
+                        raise HTTPException(409, "Scorecard observations differ from the saved job")
+            elif payload.get("scorecard_job_id") is not None:
+                raise HTTPException(409, "Missing Technical scorecard manifest")
+            calculations = source_calculations(payload, sources=sources, jobs_by_run=jobs_by_run, market=market, scorecards=scorecards)
             if rebuild:
                 from .final_reconciliation import materialize_rows
                 if manifest_data is None or not calculations:
@@ -114,3 +136,37 @@ async def validate_frozen_final(db, payload, *, user_id, portfolio, sequence, al
             verify_recomputed_rows(payload, calculations, raw_field='rawScore', effective_field='effectiveScore')
         except (UnverifiableFinal, ArithmeticError) as exc:
             raise HTTPException(422, f'Final calculation could not be verified: {exc}') from exc
+
+        if "scorecard_job_id" in payload:
+            ranking = []
+            for row in payload["rows"]:
+                listing = row["exchange"] + ":" + row["symbol"]
+                pair, threat = scorecards.get(listing, (None, None))
+                effective = row["effectiveScore"]
+                ranking.append({"listing": listing, "stock_threat": threat, "pairwise": pair,
+                                "score": None if effective is None else (effective + 3) * 100 / 6})
+            ranking.sort(key=lambda r: (r["score"] is None, -(r["score"] or 0), r["listing"]))
+            payload["actionable_ranking"] = {"version": "weighted-98-1-1-v1", "source_hash": digest, "rows": ranking}
+
+
+async def verified_scorecards(db, job_id, user_id, portfolio, sequence):
+    from app.domains.zerodha.threats import parse_zerodha_threat_report
+
+    tables = {}
+    digest = None
+    if job_id is not None:
+        if type(job_id) is not int or job_id <= 0:
+            raise HTTPException(422, "Invalid scorecard job identity")
+        await validate_execution(db, user_id=user_id, portfolio=portfolio, sequence=sequence,
+                                 stage="threats", run_id=None, job_id=job_id)
+        job = (await db.execute(select(Job).where(Job.id == job_id, Job.user_id == user_id))).scalar_one()
+        if str(getattr(job.status, "value", job.status)).lower() not in {"completed", "partial"}:
+            raise HTTPException(409, "Scorecard job is not complete")
+        digest = hashlib.sha256((job.response or "").encode()).hexdigest()
+        report = parse_zerodha_threat_report(job.response) or {}
+        tables = {table["key"]: table["rows"] for table in report.get("tables", [])}
+    threats = {row["Exchange"] + ":" + row["Stock Symbol"]: float(row["Stock Threat /100"])
+               for row in tables.get("stock_threat_scores", []) if row["Stock Threat /100"] != "Unknown"}
+    pairs = {row["Listing"]: float(row["Pairwise /100"]) for row in tables.get("pairwise_scores", [])
+             if row["Pairwise /100"] != "Unknown"}
+    return {key: (pairs.get(key), threats.get(key)) for key in pairs.keys() | threats.keys()}, digest

@@ -1,4 +1,5 @@
 "use client";
+import { readScorecardManifest, weightedSigned, type SupplementalInputs } from "@/lib/workflowScorecardRanking";
 import { groupUsIdentityRows, usIdentityHolding, type VerifiedUsListing, type UsIdentity } from "@/lib/usSecurityIdentity";
 import { useReviewDialog } from "@/hooks/useReviewDialog";
 import { withFinalActionablesReadDeadline } from "@/lib/finalActionablesReadDeadline";
@@ -245,6 +246,7 @@ type ScoreMatrixContext = {
 };
 
 export type ScoreMatrixDetail = {
+  supplementalInputs?: SupplementalInputs;
   calculationPolicy?: string;
   stockKey: string;
   stockSymbol: string;
@@ -358,6 +360,7 @@ export type StockConsensus = {
 };
 
 export type TechnicalScanResult = {
+  supplementalInputs?: SupplementalInputs;
   market?: SwingTradeMarket | null;
   stockSymbol: string;
   exchangeSymbol: string;
@@ -2273,7 +2276,9 @@ function buildScoreMatrixDetail(
   );
   const { finalScore: detailedRationaleFinalScore, denominator: detailedRationaleDenominator } =
     calculateWeightedRationaleScore(detailedRationaleRows, formulaConfig.detailedRationaleDenominator);
-  const calculatedScore = detailedRationaleFinalScore ?? meanScore;
+  const supplementalInputs = technicalScan?.exchangeSymbol.toUpperCase() === stock.exchange.toUpperCase()
+    && technicalScan.stockSymbol.toUpperCase() === stock.symbol.toUpperCase() ? technicalScan.supplementalInputs : undefined;
+  const calculatedScore = supplementalInputs ? weightedSigned(detailedRationaleFinalScore ?? meanScore, supplementalInputs) : detailedRationaleFinalScore ?? meanScore;
 
   const context: ScoreMatrixContext = {
     currentUnits,
@@ -2294,6 +2299,7 @@ function buildScoreMatrixDetail(
   const calculatedUnitsChange = resolveMatrixUnitsForAction(calculatedAction, context);
 
   return {
+    ...(supplementalInputs ? { supplementalInputs } : {}),
     stockKey: stock.key,
     stockSymbol: stock.symbol,
     stockName: stock.representative["Stock Name"] || stock.symbol,
@@ -2373,7 +2379,7 @@ function applyScoreMatrixEdits(
       typeof denominatorOverride === "number" && Number.isFinite(denominatorOverride) ? denominatorOverride : null,
       true, // The editor displays the effective denominator after missing-value exclusion.
     );
-  const calculatedScore = detailedRationaleFinalScore ?? detail.meanScore;
+  const calculatedScore = detail.supplementalInputs ? weightedSigned(detailedRationaleFinalScore ?? detail.meanScore, detail.supplementalInputs) : detailedRationaleFinalScore ?? detail.meanScore;
   const context: ScoreMatrixContext = {
     currentUnits: detail.currentUnits,
     meanScore: detail.meanScore,
@@ -2848,7 +2854,11 @@ export function buildTechnicalScanMap(runs: RunResponse[], parsedSources?: Techn
         const metadataKey = JSON.stringify(meta);
         const cached = parsedSources?.get(link);
         if (cached?.response === job.response && cached.metadataKey === metadataKey) return cached.rows;
-        const rows = parseTechnicalScanResponse(job.response, meta);
+        const scorecards = run.prompt?.includes("[WORKFLOW_SCORECARDS_V1]") ? readScorecardManifest(run.prompt) : null;
+        const rows = parseTechnicalScanResponse(job.response, meta).map(row => {
+          const inputs = scorecards?.get(row.exchangeSymbol.toUpperCase() + ":" + row.stockSymbol.toUpperCase());
+          return inputs ? {...row, supplementalInputs: inputs} : row;
+        });
         parsedSources?.set(link, { response: job.response, metadataKey, rows });
         return rows;
       }),

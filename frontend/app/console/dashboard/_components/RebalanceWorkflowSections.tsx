@@ -12,6 +12,7 @@ import { AnalysisOnlyRunControl } from "@/components/shared/AnalysisOnlyRunContr
 import { WorkflowStageLedger, WorkflowStageLedgerViews, type WorkflowLedgerView } from "@/components/shared/WorkflowStageLedger";
 import { WorkflowRunBoundary } from "@/app/console/automated-rebalance/_components/WorkflowRunBoundary";
 
+import { workflowRanking } from "@/lib/workflowScorecardRanking";
 import { type WorkflowStageKey, type StageState, type StageErrorDetail, type StageInfo, STAGE_ORDER, STAGE_METADATA, getStageTileLabel, parseTimestampMs, formatDuration, formatInrCost, WorkflowStageTile } from "@/components/shared/WorkflowStageTile";
 
 import Link from "next/link";
@@ -135,9 +136,7 @@ import {
 import {
   technicalInputPlanIssue,
   deduplicateStageRunInputs,
-  deduplicateThreatStageInputs,
   getSelectedStageRunIds,
-  getSelectedThreatJobIds,
   selectStageRunInputs,
   type ThreatStageInput,
 } from "@/lib/rebalanceStageInputs";
@@ -646,7 +645,13 @@ function summarizeThreat(
 ) {
   const errorMessage = analysis.error_message?.trim() ?? null;
   const diagnostics = readFailureDiagnostics(analysis.runtime_metadata_json);
+  const paired = analysis.report?.tables.find(table => table.key === "pairwise_scores")?.rows;
+  const portfolioRisk = analysis.report?.tables.find(table => table.key === "portfolio_threat_score")?.rows[0];
+  const validPairs = paired?.reduce((n, row) => n + Number(row["Valid comparisons"]), 0);
+  const expectedPairs = paired?.reduce((n, row) => n + Number(row.Expected), 0);
   return {
+    pairCoverage: validPairs == null || expectedPairs == null ? undefined : `${validPairs / 2} / ${expectedPairs / 2} comparisons`,
+    portfolioThreat: portfolioRisk ? `${portfolioRisk["Portfolio Threat /100"]} / 100 · ${portfolioRisk["Assessed value"]} of holdings value assessed` : undefined,
     completedAt: analysis.updated_at ?? analysis.created_at,
     provider: analysis.provider,
     model: analysis.model,
@@ -1775,7 +1780,7 @@ function buildNextCandidate(
 ): InputSelectionCandidate {
   const labelByStage: Record<InputSelectionStage, string> = {
     threats: "Upcoming portfolio snapshot",
-    swing: "Upcoming Threat Scan output",
+    swing: "Market and swing scan prompt",
     rebalance: "Upcoming Swing Scan output",
     technical: "Upcoming Rebalance Scan output",
     actionables: "Upcoming Technical Scan output",
@@ -1903,7 +1908,7 @@ function getLatestStageRun(
   return sortRunsByLatestTimestamp(matchingRuns)[0];
 }
 
-function countUniqueStocksFromRun(run: RunResponse) {
+function listingsFromSwingRun(run: RunResponse) {
   const listings = new Set<string>();
   for (const { job } of run.run_jobs ?? []) {
     if (job?.status !== "completed") continue;
@@ -1922,7 +1927,11 @@ function countUniqueStocksFromRun(run: RunResponse) {
       listings.add(`${cells[exchangeIndex] ?? ""}:${symbol}`.toUpperCase());
     }
   }
-  return listings.size || null;
+  return [...listings];
+}
+
+function countUniqueStocksFromRun(run: RunResponse) {
+  return listingsFromSwingRun(run).length || null;
 }
 
 function summarizeRunForIdleTile(
@@ -5713,6 +5722,8 @@ ${zerodhaExecutionMode === "direct_market"
           recommended_stocks: info.recommendedStocks ?? null,
           rebalance_inputs: info.rebalanceInputs ?? null,
           ...(info.finalInputs ? { final_inputs: info.finalInputs } : {}),
+          ...(info.pairCoverage ? { pair_coverage: info.pairCoverage } : {}),
+          ...(info.portfolioThreat ? { portfolio_threat: info.portfolioThreat } : {}),
           ...(info.frozenFinal ? { frozen_final: info.frozenFinal } : {}),
           cost_usd: info.costUsd ?? null,
           cost_inr: info.costInr ?? null,
@@ -6086,30 +6097,7 @@ ${zerodhaExecutionMode === "direct_market"
             });
           }
         } else if (stage === "swing") {
-          const latest =
-            portfolio === "zerodha"
-              ? (await apiService.zerodhaThreatsLatest()).analysis
-              : (await apiService.indmoneyUsThreatsLatest()).analysis;
-          if (
-            latest &&
-            isUsableStageJob({
-              status: latest.status,
-              response: latest.report?.raw_markdown,
-            })
-          ) {
-            candidates.push({
-              id: `threat:${latest.job_id}`,
-              source: "threat",
-              label: `${latest.provider}/${latest.model}`,
-              jobNo: `#${latest.job_id}`,
-              timestamp: latest.created_at,
-              status: latest.status,
-              costUsd: latest.estimated_cost ?? null,
-              error: latest.error_message ?? null,
-              content: latest.report?.raw_markdown ?? null,
-              market,
-            });
-          }
+          candidates = [{...nextCandidate, content: buildSwingTradePrompt(market, getSwingTradeDefaultInvestmentAmount(market))}];
         } else if (stage !== "actionables") {
           const runs = await fetchDashboardRecentFullRuns();
           if (stage === "rebalance") {
@@ -6785,15 +6773,6 @@ ${zerodhaExecutionMode === "direct_market"
           if (issues.length) throw new Error(issues.join("\n"));
         } },
       ];
-      if (shouldRunCurrentStage("swing")) checks.push({ label: "Saved Threats inputs", run: async () => {
-        const ids = getSelectedThreatJobIds(selectedInputs[portfolio].swing);
-        const inputs = await Promise.all(ids.map(async jobId => ({
-          identity: { kind: "threat-job" as const, market, stage: "threats" as const, jobId },
-          analysis: portfolio === "zerodha" ? await apiService.zerodhaThreatJob(jobId) : await apiService.indmoneyUsThreatJob(jobId),
-          origin: "selected" as const,
-        })));
-        deduplicateThreatStageInputs(inputs, market);
-      } });
       for (const stage of ["rebalance", "technical"] as const) {
         if (!shouldRunCurrentStage(stage)) continue;
         checks.push({ label: `Saved ${stage} inputs`, run: async () => {
@@ -7067,14 +7046,60 @@ ${zerodhaExecutionMode === "direct_market"
 
         if (stopIfRequested()) return;
 
+        currentStage = "swing";
+        if (shouldRunCurrentStage("swing")) {
+          try {
+          markRunning(portfolio, "swing", {
+            totalLlms: swingTargets.length,
+            completedLlms: 0,
+          });
+          const swingRun = await apiService.createRun(
+            buildRunPayload({
+              prompt: buildSwingTradePrompt(
+                market,
+                getSwingTradeDefaultInvestmentAmount(market),
+              ),
+              targets: swingTargets,
+              sheetName: getSwingTradeDefaultExportSheetName(market),
+              runMetadata,
+              scanLabel: "Swing Scan",
+            }),
+          );
+          const completedSwingRun = await waitForRunWithStageHandling(
+            portfolio,
+            "swing",
+            swingRun.id,
+          );
+          generatedSwingRun = completedSwingRun;
+          await markCompleted(portfolio, "swing", {
+            ...summarizeRun(completedSwingRun),
+            ...getRunProgress(completedSwingRun),
+            lastRunId: completedSwingRun.id,
+            recommendedStocks: countUniqueStocksFromRun(completedSwingRun),
+          });
+          } catch (error) {
+            continueAfterStageFailure("swing", error);
+          }
+        } else {
+          completeSkippedStage(
+            portfolio,
+            "swing",
+            "Using latest completed swing scan",
+          );
+        }
+
+        finishedStages.add("swing");
+        if (stopIfRequested()) return;
+
         currentStage = "threats";
         if (shouldRunCurrentStage("threats")) {
           try {
             markRunning(portfolio, "threats", { totalLlms: 1, completedLlms: 0 });
+            const contenders = generatedSwingRun ? listingsFromSwingRun(generatedSwingRun) : [];
             const queuedThreat =
               portfolio === "zerodha"
-                ? await apiService.zerodhaRunThreats({ ...threatTargets[0], ...runMetadata })
-                : await apiService.indmoneyUsRunThreats({ ...threatTargets[0], ...runMetadata, ...(workflowSnapshot && "id" in workflowSnapshot ? { expected_snapshot_id: workflowSnapshot.id } : {}) });
+                ? await apiService.zerodhaRunThreats({ ...threatTargets[0], ...runMetadata, contenders })
+                : await apiService.indmoneyUsRunThreats({ ...threatTargets[0], ...runMetadata, contenders, ...(workflowSnapshot && "id" in workflowSnapshot ? { expected_snapshot_id: workflowSnapshot.id } : {}) });
             if (portfolio === "indmoneyUs" && workflowSnapshot && "id" in workflowSnapshot && (!("snapshot_id" in queuedThreat) || queuedThreat.snapshot_id !== workflowSnapshot.id)) {
               throw new Error("Threats scan source does not match the reviewed portfolio snapshot.");
             }
@@ -7128,73 +7153,6 @@ ${zerodhaExecutionMode === "direct_market"
         }
 
         finishedStages.add("threats");
-        if (stopIfRequested()) return;
-
-        currentStage = "swing";
-        if (shouldRunCurrentStage("swing")) {
-          try {
-          markRunning(portfolio, "swing", {
-            totalLlms: swingTargets.length,
-            completedLlms: 0,
-          });
-          const swingInputSelection = selectedInputs[portfolio].swing;
-          const selectedThreatIds = getSelectedThreatJobIds(swingInputSelection);
-          const selectedThreatInputs: ThreatStageInput[] = await retryWorkflowRead(
-            () => Promise.all(selectedThreatIds.map(async (jobId): Promise<ThreatStageInput> => ({
-              identity: { kind: "threat-job", market, stage: "threats", jobId },
-              analysis: portfolio === "zerodha"
-                ? await apiService.zerodhaThreatJob(jobId)
-                : await apiService.indmoneyUsThreatJob(jobId),
-              origin: "selected",
-            }))),
-            "selected threat scan inputs",
-            () => cancelRequestedRef.current || !isCurrentWorkflowOwner(runtimeOwner),
-          );
-          const selectedThreatParts = deduplicateThreatStageInputs([
-            ...(swingInputSelection.has("swing:next") && generatedThreatInput ? [generatedThreatInput] : []),
-            ...selectedThreatInputs,
-          ], market).map(({ analysis, origin }) =>
-            `## ${origin === "generated" ? "Next" : "Selected"} Threat Scan #${analysis.job_id}\n\n${analysis.report!.raw_markdown.trim()}`,
-          );
-          const threatAppendix = selectedThreatParts.length
-            ? `\n\n---\n\n# User-selected Threat Scan Inputs\n\n${selectedThreatParts.join("\n\n---\n\n")}`
-            : "";
-          const swingRun = await apiService.createRun(
-            buildRunPayload({
-              prompt: `${buildSwingTradePrompt(
-                market,
-                getSwingTradeDefaultInvestmentAmount(market),
-              )}${threatAppendix}`,
-              targets: swingTargets,
-              sheetName: getSwingTradeDefaultExportSheetName(market),
-              runMetadata,
-              scanLabel: "Swing Scan",
-            }),
-          );
-          const completedSwingRun = await waitForRunWithStageHandling(
-            portfolio,
-            "swing",
-            swingRun.id,
-          );
-          generatedSwingRun = completedSwingRun;
-          await markCompleted(portfolio, "swing", {
-            ...summarizeRun(completedSwingRun),
-            ...getRunProgress(completedSwingRun),
-            lastRunId: completedSwingRun.id,
-            recommendedStocks: countUniqueStocksFromRun(completedSwingRun),
-          });
-          } catch (error) {
-            continueAfterStageFailure("swing", error);
-          }
-        } else {
-          completeSkippedStage(
-            portfolio,
-            "swing",
-            "Using latest completed swing scan",
-          );
-        }
-
-        finishedStages.add("swing");
         if (stopIfRequested()) return;
 
         currentStage = "rebalance";
@@ -7316,9 +7274,14 @@ ${zerodhaExecutionMode === "direct_market"
           const instruments = consensus.map(stock => `${stock.exchange}:${stock.symbol}`);
           const priceEvidence = market === "india" ? await resolveTechnicalPriceEvidence(instruments,
             keys => apiService.zerodhaDisplayQuotes(keys)) : "";
+          const scorecardManifest = generatedThreatInput ? "\n[WORKFLOW_SCORECARDS_V1]" + JSON.stringify({
+            job_id: generatedThreatInput.analysis.job_id,
+            rows: workflowRanking(consensus.map(stock => ({ exchange: stock.exchange, symbol: stock.symbol, effectiveScore: null })),
+              generatedThreatInput.analysis.report).map(({listing, pairwise, stock_threat}) => ({listing, pairwise, stock_threat})),
+          }) : "";
           const technicalRun = await apiService.createRun(
             buildRunPayload({
-              prompt: buildTechnicalScanPrompt(consensus, market) + priceEvidence + `\n[TECHNICAL_REBALANCE_SOURCES_V1]${JSON.stringify({ run_ids: rebalanceInputs.map(run => run.id), job_ids: rebalanceInputs.flatMap(run => run.run_jobs.map(link => link.job_id)) })}[/TECHNICAL_REBALANCE_SOURCES_V1]`,
+              prompt: buildTechnicalScanPrompt(consensus, market) + priceEvidence + scorecardManifest + `\n[TECHNICAL_REBALANCE_SOURCES_V1]${JSON.stringify({ run_ids: rebalanceInputs.map(run => run.id), job_ids: rebalanceInputs.flatMap(run => run.run_jobs.map(link => link.job_id)) })}[/TECHNICAL_REBALANCE_SOURCES_V1]`,
               targets: [technicalTargets[0]],
               runMetadata,
               scanLabel: "Technical Scan",
@@ -7375,6 +7338,7 @@ ${zerodhaExecutionMode === "direct_market"
             schema: "workflow-final-v2", formula_version: "score-matrix-v1",
             scorePolicy: "score-matrix-raw-effective-v2",
             broker: runMetadata.auto_rebalance_portfolio, workflow_sequence: runMetadata.auto_rebalance_sequence,
+            scorecard_job_id: generatedThreatInput?.analysis.job_id ?? null,
             captured_at: actionablesCompletedAt, formula: scoreMatrixFormulaConfig,
             rebalance_run_id: finalRebalanceInputs[0].id, rebalance_run_ids: finalRebalanceInputs.map(run => run.id), technical_run_id: generatedTechnicalRun.id,
             response_hashes: await auditResponseHashes([...finalRebalanceInputs, generatedTechnicalRun]),
@@ -7388,9 +7352,14 @@ ${zerodhaExecutionMode === "direct_market"
               scorePolicy: "score-matrix-raw-effective-v2", estimate: row.formulaEstimate,
               formula_inputs: row.detail, valid_suggestions: row.stock.totalSuggestions })),
           };
+          const actionable_ranking = {version: "weighted-98-1-1-v1",
+            rows: workflowRanking(frozenFinal.rows, generatedThreatInput?.analysis.report).map(item => {
+              const row = frozenFinal.rows.find(r => r.exchange + ":" + r.symbol === item.listing);
+              return {...item, score: row?.effectiveScore == null ? null : (row.effectiveScore + 3) * 100 / 6};
+            })};
           const savedFinal = await markCompleted(portfolio, "actionables", {
             completedAt: actionablesCompletedAt, runStatus: "saved calculation",
-            rebalanceInputs: finalRebalanceInputs.length, recommendedStocks: finalRows.length, frozenFinal,
+            rebalanceInputs: finalRebalanceInputs.length, recommendedStocks: finalRows.length, frozenFinal: {...frozenFinal, actionable_ranking},
           });
           if (savedFinal?.saved === false) {
             updateStage(portfolio, "actionables", {
@@ -8004,7 +7973,7 @@ ${zerodhaExecutionMode === "direct_market"
                     : () => void openIndmoneyBasketPreview()
                   : undefined
               }
-              placeOrderLabel={section.portfolio === "indmoneyUs" ? "Final Order" : "Place Order"}
+              placeOrderLabel="Place Order"
               onCalculationsClick={
                 stage === "actionables"
                   ? () => {

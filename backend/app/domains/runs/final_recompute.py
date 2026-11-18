@@ -24,7 +24,7 @@ def equivalent(actual, expected):
     return type(actual) is type(expected) and actual == expected
 
 
-def source_calculations(payload, *, sources, jobs_by_run, market):
+def source_calculations(payload, *, sources, jobs_by_run, market, scorecards=None):
     formula = payload.get("formula")
     required = {"detailedRationaleMultipliers", "detailedRationaleDenominator", "actionScores", "technicalScanMultipliers", "scoreSymbolThresholds"}
     if not isinstance(formula, dict) or set(formula) != required:
@@ -82,7 +82,8 @@ def source_calculations(payload, *, sources, jobs_by_run, market):
         # map to buildConsensusRows. usIdentityHolding leaves that position
         # unknown, even if model rows contain a suggested current quantity.
         calculation = calculate_listing(rows, formula, technical, direction=direction,
-                                        market=market, unresolved_holding=market == "us")
+                                        market=market, unresolved_holding=market == "us",
+                                        supplemental=(scorecards or {}).get(":".join(key)) if technical else None)
         calculation["valid_suggestions"] = len(output_jobs)
         calculation["technical_job_id"] = match[1] if match else None
         if market == "us":
