@@ -122,3 +122,17 @@ async def test_reconcile_exact_sources_twice(audit_db, stored_capture):
     workflow, count, _ = await snapshot(audit_db)
     assert (workflow.status, count) == ('partial', 6)
     assert audit_db.dispatch.call_count == first_dispatch_count
+
+    # The corrected calculation is stored separately and is idempotent, including after reload.
+    from app.domains.runs.router import replay_india_score
+    for _ in range(2):
+        async with audit_db.sessions() as db:
+            replay = await replay_india_score(42, db, OWNER)
+            assert replay == {"formula_version": "score-matrix-v2", "listings": 1, "sequence": 42}
+    async with audit_db.sessions() as db:
+        final = (await db.execute(select(AutoRebalanceWorkflowStage).where(
+            AutoRebalanceWorkflowStage.stage == "actionables"))).scalar_one()
+        assert final.summary_json["frozen_final"] == results[0]
+        coverage = final.summary_json["corrected_final_v2"]["rows"][0]["source_coverage"][0]
+        assert coverage["job_id"] == 11 and len(coverage["used_fields"]) == 6
+    assert audit_db.dispatch.call_count == first_dispatch_count

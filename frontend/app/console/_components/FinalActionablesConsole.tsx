@@ -1772,15 +1772,17 @@ export function ScoreMatrixButton({
   formulaConfig = DEFAULT_SCORE_MATRIX_FORMULA_CONFIG,
   onOpenDetail,
   className,
+  workflowScale = false,
 }: {
   detail: ScoreMatrixDetail;
   formulaConfig?: ScoreMatrixFormulaConfig;
   onOpenDetail: (detail: ScoreMatrixDetail) => void;
   className?: string;
+  workflowScale?: boolean;
 }) {
   const configuredDetail = applyScoreMatrixFormulaConfig(detail, formulaConfig);
   const validationSummary = getScoreMatrixValidationSummary(configuredDetail);
-  const displayScore = configuredDetail.calculatedScore;
+  const displayScore = workflowScale || configuredDetail.supplementalInputs ? configuredDetail.calculatedScore : validationSummary.displayScore;
   const warningTitle = validationSummary.finalScoreOutOfRange
     ? validationSummary.finalScoreMessage
     : validationSummary.parameterIssues.length
@@ -1806,7 +1808,7 @@ export function ScoreMatrixButton({
         ? `Open consolidated score matrix for ${detail.stockSymbol}. Warning: ${warningTitle}`
         : `Open consolidated score matrix for ${detail.stockSymbol}`}
     >
-      {configuredDetail.supplementalInputs && displayScore !== null ? (
+      {(workflowScale || configuredDetail.supplementalInputs) && displayScore !== null ? (
         <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
           {validationSummary.hasIssues && <AlertTriangle className="size-3.5 text-rose-700" />}
           <span>{((Math.max(-3, Math.min(3, displayScore)) + 3) * 100 / 6).toFixed(2)} / 100

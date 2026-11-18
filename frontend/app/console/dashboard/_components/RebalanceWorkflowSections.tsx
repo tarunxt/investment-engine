@@ -3046,6 +3046,7 @@ function ScopedZerodhaBasketPreviewDialog({
     const modelPrices = row.stock.rows.map(({meta, cells}) => ({
       job: meta.jobId, provider: meta.provider, time: meta.createdAt,
       price: validDisplayPrice(Number(String(cells["Price Per Unit"] ?? "").replace(/,/g, ""))),
+      excluded: Object.entries(cells).filter(([header, value]) => header.startsWith("Score Rationale") && (!/^-?\d+(?:\.\d+)?$/.test(String(value).trim()) || Math.abs(Number(value)) > 3)).map(([header]) => header.replace(/^Score Rationale\s*[-–]?\s*/, "")),
       fields: Object.entries(cells).filter(([header, value]) => header.startsWith("Score Rationale") && /^-?\d+(?:\.\d+)?$/.test(String(value).trim()) && Math.abs(Number(value)) <= 3).length,
     }));
     const usHolding = tradingViewMarket === "us" && !row.stock.identityIssue && row.stock.usIdentity?.holdingSafe !== false ? indmoneyHolding(detailsData.portfolioSnapshot as IndMoneyUsPortfolioSnapshotDetail | null, row.stock.symbol, row.stock.exchange, allocationUniverse.map(item => item.stock)) : null;
@@ -3406,11 +3407,11 @@ function ScopedZerodhaBasketPreviewDialog({
                                   </div>
                                 </td>
                                 <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-800">
-                                  <ScoreMatrixButton detail={order.detail} formulaConfig={formulaConfig} onOpenDetail={setSelectedMatrixDetail} />
+                                  <ScoreMatrixButton workflowScale={isZerodhaPreview} detail={order.detail} formulaConfig={formulaConfig} onOpenDetail={setSelectedMatrixDetail} />
                                 </td>
                                 <td className="whitespace-nowrap px-4 py-3">
                                   <ConsensusBreakupButton stock={order.stock} action={getZerodhaBasketActionForPercent(order)} />
-                                  {isZerodhaPreview && <details className="text-xs text-slate-600"><summary>Rationale coverage {indiaSource(order)?.modelPrices.filter(m => m.fields === 6).length ?? 0}/{order.stock.rows?.length ?? 0} jobs</summary>{indiaSource(order)?.modelPrices.map(m => <div key={m.job}>#{m.job} {m.provider} · {m.fields}/6 scored · model ₹{m.price ?? "unavailable"} · job {m.time}</div>)}<div>Upstox ₹{order.price ?? "unavailable"} · last trade {order.draftContext?.asOf ?? "unavailable"}</div>{divergent(order) && <button type="button" className="text-blue-700 underline" disabled={priceReviews.has(priceReviewKey(order))} onClick={() => setPriceReviews(previous => new Set([...previous, priceReviewKey(order)]))}>{priceReviews.has(priceReviewKey(order)) ? "Price difference reviewed" : "Acknowledge this price difference"}</button>}</details>}
+                                  {isZerodhaPreview && <details className="text-xs text-slate-600"><summary>Rationale coverage {indiaSource(order)?.modelPrices.filter(m => m.fields === 6).length ?? 0}/{order.stock.rows?.length ?? 0} jobs</summary>{indiaSource(order)?.modelPrices.map(m => <div key={m.job}>#{m.job} {m.provider} · {m.fields}/6 scored · model ₹{m.price ?? "unavailable"} · job {m.time}{m.excluded.length ? ` · excluded: ${m.excluded.join(", ")}` : ""}</div>)}<div>Upstox ₹{order.price ?? "unavailable"} · last trade {order.draftContext?.asOf ?? "unavailable"}</div>{divergent(order) && <button type="button" className="text-blue-700 underline" disabled={priceReviews.has(priceReviewKey(order))} onClick={() => setPriceReviews(previous => new Set([...previous, priceReviewKey(order)]))}>{priceReviews.has(priceReviewKey(order)) ? "Price difference reviewed" : "Acknowledge this price difference"}</button>}</details>}
                                 </td>
                                 <td className="whitespace-nowrap px-4 py-3 text-slate-700">{isZerodhaPreview ? order.draftContext?.originalAction ?? getZerodhaBasketActionForPercent(order) : getZerodhaBasketActionForPercent(order)}</td>
                                 <td className="px-4 py-3">
@@ -3473,7 +3474,7 @@ function ScopedZerodhaBasketPreviewDialog({
                               return <tr key={`display-only:${row.id}`} data-display-only="true" className="bg-white transition">
                                 <td className="px-4 py-3"><input type="checkbox" disabled aria-label={`${row.stock.exchange} ${row.stock.symbol} display only; no executable order`} className="size-4 rounded border-slate-300" /></td>
                                 <td className="whitespace-nowrap px-4 py-3 font-bold text-slate-950"><div className="inline-flex items-center gap-1.5"><StockDetailsButton stock={row.stock} formulaConfig={formulaConfig} market={tradingViewMarket} technicalScan={null} detailsData={detailsData} historicalRows={historicalRows} /><span className="text-xs font-semibold text-slate-500">{row.stock.exchange}</span><TradingViewSymbolLink symbol={row.stock.symbol} market={tradingViewMarket} exchange={row.stock.exchange}>{row.stock.symbol}</TradingViewSymbolLink></div></td>
-                                <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-800"><ScoreMatrixButton detail={row.detail} formulaConfig={formulaConfig} onOpenDetail={setSelectedMatrixDetail} /></td>
+                                <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-800"><ScoreMatrixButton workflowScale={isZerodhaPreview} detail={row.detail} formulaConfig={formulaConfig} onOpenDetail={setSelectedMatrixDetail} /></td>
                                 <td className="whitespace-nowrap px-4 py-3"><ConsensusBreakupButton stock={row.stock} action={row.formulaAction} /></td>
                                 <td className="whitespace-nowrap px-4 py-3 text-slate-700">{row.formulaAction}</td>
                                 <td className="px-4 py-3">{side ? <span className={cn("rounded-full px-3 py-1 text-xs font-bold", side === "BUY" ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700")}>{side}</span> : <span title="Hold has no order side">Not applicable</span>}</td>
@@ -4739,8 +4740,8 @@ export function RebalanceWorkflowSections({
   });
   const { scoreMatrixFormulaConfig, setScoreMatrixFormulaConfig, zerodhaBasketBuyThreshold, setZerodhaBasketBuyThreshold, zerodhaBasketBuyThresholdDraft, setZerodhaBasketBuyThresholdDraft, indmoneyBasketBuyThreshold, setIndmoneyBasketBuyThreshold, indmoneyBasketBuyThresholdDraft, setIndmoneyBasketBuyThresholdDraft, buyThresholdSaveError, buyThresholdPersistence } = useWorkflowConfiguration();
   const [verifiedBasketFormula, setVerifiedBasketFormula] = useState<string | null>(null);
-  const zerodhaOrderSubmissionBlockedReason = brokerOrderBlock ?? (verifiedBasketFormula === canonicalBasketInputs(scoreMatrixFormulaConfig) ? null :
-    "Provisional basket. The workflow final, formula and source revisions must match the server record. Open workflow history to reconcile the saved inputs.");
+  const zerodhaOrderSubmissionBlockedReason = [brokerOrderBlock, verifiedBasketFormula === canonicalBasketInputs(scoreMatrixFormulaConfig) ? null :
+    "Provisional basket. The workflow final, formula and source revisions must match the server record. Open workflow history to replay the saved inputs."].filter(Boolean).join(" ") || null;
   const [selectedZerodhaBasketIds, setSelectedZerodhaBasketIds] = useState<Set<string>>(new Set());
   const [indmoneyBasketOpen, setIndmoneyBasketOpen] = useState(false);
   const [indmoneyBasketLoading, setIndmoneyBasketLoading] = useState(false);
