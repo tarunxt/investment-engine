@@ -191,3 +191,24 @@ def test_technical_exact_venue_precedes_symbol_alias(inputs):
     job.response = "\n".join(job.response.splitlines()[:2] + [row])
     with pytest.raises(UnverifiableFinal, match="ambiguous across exchanges"):
         source_calculations(payload, **context)
+
+
+def test_saved_unavailable_technical_rows_keep_lineage_and_zero_confidence_weight(inputs):
+    from app.domains.jobs.technical_prices import validate_technical_prices
+
+    payload, context = inputs
+    job = context["jobs_by_run"][20][0]
+    job.response = table(
+        ["Exchange Symbol", "Stock Symbol", "Primary Setup", "Bias", "Confidence Score",
+         "Premarket trend", "Last 5 candles trend"],
+        [["NSE", "FIXTUREEQ", "Unavailable – no live data", "Unresolved", "Unavailable", "0", "Unavailable"]],
+    )
+    with pytest.raises(ValueError, match="no usable chart data for any of 1 listings"):
+        validate_technical_prices("## Technical Scan Input Bundle", job.response)
+    calculation = source_calculations(payload, **context)[("NSE", "FIXTUREEQ")]
+    confidence = next(row for row in calculation["weighted_rows"] if row["id"] == "technical-scan-confidence")
+    assert confidence["score"] is None and confidence["multiplier"] == 0
+    assert calculation["technical_job_id"] == job.id
+    job.response = job.response.replace("Unresolved | Unavailable", "Unresolved | 8")
+    with pytest.raises(UnverifiableFinal, match="approved direction"):
+        source_calculations(payload, **context)
