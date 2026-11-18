@@ -106,7 +106,7 @@ def weighted_score(rows, override=None):
     return score, denominator
 
 
-def calculate_listing(rows, formula, technical=None, *, direction=None, market):
+def calculate_listing(rows, formula, technical=None, *, direction=None, market, unresolved_holding=False):
     """Rows are source cells; technical is the selected source Technical row."""
     actions = [normalize_action(row.get(ACTION_HEADER)) for row in rows]
     mean_action = mean([ACTION_VALUES.get(action) for action in actions])
@@ -150,8 +150,8 @@ def calculate_listing(rows, formula, technical=None, *, direction=None, market):
     rationale, denominator = weighted_score(weighted, formula.get("detailedRationaleDenominator"))
     raw = rationale if rationale is not None else mean_action
     effective = max(-3, min(3, raw)) if raw is not None else None
-    current = mean([numeric(row.get("Current Units")) for row in rows])
-    value = mean([current_value(row) for row in rows])
+    current = None if unresolved_holding else mean([numeric(row.get("Current Units")) for row in rows])
+    value = None if unresolved_holding else mean([current_value(row) for row in rows])
     changes = [signed_units(row, action) for row, action in zip(rows, actions)]
     mean_change = mean(changes)
     bullish = mean([change for change in changes if change is not None and change > 0])
