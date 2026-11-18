@@ -217,3 +217,16 @@ def test_saved_unavailable_technical_rows_keep_lineage_and_zero_confidence_weigh
     job.response = job.response.replace(f"{bias} | Unavailable | 0", f"{bias} | 8 | 0")
     with pytest.raises(UnverifiableFinal, match="approved direction"):
         source_calculations(payload, **context)
+
+
+def test_us_workflow_preserves_unresolved_listing_and_snapshot_position(inputs):
+    payload, context = inputs
+    context["market"] = "us"
+    for jobs in context["jobs_by_run"].values():
+        for job in jobs:
+            job.response = job.response.replace("| NSE |", "| NASDAQ |")
+    c = source_calculations(payload, **context)[("NASDAQ", "FIXTUREEQ")]
+    assert c["inputs"]["stockKey"] == "unresolved:NASDAQ:FIXTUREEQ:?"
+    assert c["inputs"]["currentUnits"] is None
+    assert c["estimate"]["currentInvestmentAmount"] is None
+    assert c["action"] == "Buy New"
