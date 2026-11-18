@@ -50,7 +50,7 @@ function extract(start, end) {
 const callbacks = extract("  const getAuditSession = useCallback(", "  // Poll ownership changes");
 const workflow = extract("  const runWorkflow = useCallback(", "  const syncPortfolioNow = useCallback(");
 const executable = compile(`${callbacks}\n${workflow}\nreturn { getAuditSession, recordAutoRebalanceStage, markCompleted, runWorkflow };`);
-const stages = ["sync", "threats", "swing", "rebalance", "technical", "actionables"];
+const stages = ["sync", "swing", "threats", "rebalance", "technical", "actionables"];
 const metadata = (portfolio = "india", sequence = 42) => ({ auto_rebalance_portfolio: portfolio, auto_rebalance_sequence: sequence, auto_rebalance_label: `${portfolio} ${sequence}` });
 const deferred = () => {
   let resolve;
@@ -148,7 +148,7 @@ function harness({ analysisOnly = false, formulaScore = 0, intercept, read, emai
     buildTechnicalScanMap: () => ({}), resolveTechnicalPriceEvidence: quoteRead ? priceExports.resolveTechnicalPriceEvidence : async () => "", buildTechnicalScanPrompt: () => "technical",
     buildDashboardActionRows: rows => rows.map(stock => ({ stock, formulaAction: "Hold", formulaScore, formulaEstimate: {}, detail: {} })),
     getSelectedThreatJobIds: () => [], deduplicateThreatStageInputs: (input) => input,
-    buildRunPayload: (payload) => payload, summarizeRun: () => ({ runStatus: "completed" }), getRunProgress: () => ({ completedLlms: 1, totalLlms: 1 }), countUniqueStocksFromRun: () => 1,
+    buildRunPayload: (payload) => payload, summarizeRun: () => ({ runStatus: "completed" }), getRunProgress: () => ({ completedLlms: 1, totalLlms: 1 }), countUniqueStocksFromRun: () => 1, listingsFromSwingRun: () => ["NSE:TEST"], workflowRanking: () => [],
     getStageTileLabel: (stage) => stage, normalizeError: (error) => error.message,
     RecordedWorkflowStageFailure: class extends Error {}, WORKFLOW_COMPLETION_RESET_DELAY_MS: 1,
     getWorkflowRunCost: () => 0,
@@ -515,7 +515,7 @@ test("kill during stage audit records cancellation on an unstarted stage and pre
   assert.equal(h.durable.get("india:42:swing").status, "completed");
   const cancelled = h.auditWrites.filter(({ payload }) => payload.status === "cancelled");
   assert.equal(cancelled.length, 1);
-  assert.equal(cancelled[0].stage, "rebalance");
+  assert.equal(cancelled[0].stage, "threats");
   assert.equal(h.view.states.zerodha.swing.state, "completed");
   assert.equal(h.view.audits.zerodha.status, "saved");
   assert.equal(h.emails.length, 0);

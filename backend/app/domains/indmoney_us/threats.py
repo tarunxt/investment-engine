@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from app.domains.runs.threat_evidence import snapshot_manifest, scorecard_instruction
 from dataclasses import dataclass
 from datetime import date, datetime
 import re
@@ -27,7 +28,9 @@ class IndMoneyUsThreatPromptMetadata:
     captured_at: datetime | None
 
 
-def build_indmoney_us_threat_prompt(snapshot: IndMoneyUsPortfolioSnapshot) -> str:
+
+
+def build_indmoney_us_threat_prompt(snapshot: IndMoneyUsPortfolioSnapshot, *, contenders=()) -> str:
     captured_at_ist = snapshot.captured_at.astimezone(IST)
     current_value = snapshot.current_value or 0.0
     holdings = sorted(
@@ -113,6 +116,10 @@ def build_indmoney_us_threat_prompt(snapshot: IndMoneyUsPortfolioSnapshot) -> st
         "Use the analysis brief below verbatim as the core instruction:",
         "",
         THREAT_ANALYSIS_PROMPT,
+        "Assess these additional Stage 2 contenders alongside holdings: " + ", ".join(
+            item for item in contenders if re.fullmatch(r"[A-Za-z0-9._&:-]{1,64}", item)),
+        snapshot_manifest(snapshot, "us", contenders),
+        scorecard_instruction("US"),
     ]
     return "\n".join(prompt_sections).strip()
 
@@ -148,8 +155,8 @@ def is_indmoney_us_threat_job(job: Job | None) -> bool:
     return bool(job and THREAT_JOB_MARKER in (job.prompt or ""))
 
 
-def parse_indmoney_us_threat_report(markdown: str | None) -> dict[str, Any] | None:
-    return parse_zerodha_threat_report(markdown)
+def parse_indmoney_us_threat_report(markdown: str | None, prompt: str = "") -> dict[str, Any] | None:
+    return parse_zerodha_threat_report(markdown, prompt)
 
 
 def parse_indmoney_us_threat_urgent_actionables(

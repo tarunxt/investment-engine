@@ -68,7 +68,7 @@ AUTO_REBALANCE_LABEL_PREFIXES = {
     "indmoney_us": "IndMoney US Run",
 }
 AUTO_REBALANCE_STAGE_ORDER: tuple[AutoRebalanceStageKey, ...] = (
-    "sync", "threats", "swing", "rebalance", "technical", "actionables",
+    "sync", "swing", "threats", "rebalance", "technical", "actionables",
 )
 AUTO_REBALANCE_ACTIVE_STATUSES = {"queued", "pending", "processing", "running"}
 AUTO_REBALANCE_TERMINAL_STATUSES = {

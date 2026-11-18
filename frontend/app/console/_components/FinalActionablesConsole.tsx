@@ -1,4 +1,5 @@
 "use client";
+import { readScorecardManifest, weightedSigned, type SupplementalInputs } from "@/lib/workflowScorecardRanking";
 import { groupUsIdentityRows, usIdentityHolding, type VerifiedUsListing, type UsIdentity } from "@/lib/usSecurityIdentity";
 import { useReviewDialog } from "@/hooks/useReviewDialog";
 import { withFinalActionablesReadDeadline } from "@/lib/finalActionablesReadDeadline";
@@ -245,6 +246,7 @@ type ScoreMatrixContext = {
 };
 
 export type ScoreMatrixDetail = {
+  supplementalInputs?: SupplementalInputs;
   calculationPolicy?: string;
   stockKey: string;
   stockSymbol: string;
@@ -358,6 +360,9 @@ export type StockConsensus = {
 };
 
 export type TechnicalScanResult = {
+  scorecardUniverse?: Map<string, SupplementalInputs>;
+  scorecardSources?: number[];
+  supplementalInputs?: SupplementalInputs;
   market?: SwingTradeMarket | null;
   stockSymbol: string;
   exchangeSymbol: string;
@@ -1801,7 +1806,12 @@ export function ScoreMatrixButton({
         ? `Open consolidated score matrix for ${detail.stockSymbol}. Warning: ${warningTitle}`
         : `Open consolidated score matrix for ${detail.stockSymbol}`}
     >
-      {validationSummary.hasIssues ? (
+      {configuredDetail.supplementalInputs && displayScore !== null ? (
+        <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+          {validationSummary.hasIssues && <AlertTriangle className="size-3.5 text-rose-700" />}
+          {((Math.max(-3, Math.min(3, displayScore)) + 3) * 100 / 6).toFixed(2)} / 100
+        </span>
+      ) : validationSummary.hasIssues ? (
         <span className="inline-flex items-center gap-1.5 whitespace-nowrap font-semibold text-rose-700">
           <AlertTriangle className="size-3.5 shrink-0" />
           <ScoreTriangleIcon score={displayScore} className="text-rose-700" />
@@ -1862,7 +1872,7 @@ function getLatestTechnicalScanSourceMeta(scanMap: TechnicalScanMap) {
     .filter((scan, index, scans) => scans.findIndex((candidate) => candidate.runId === scan.runId && candidate.jobId === scan.jobId) === index)
     .sort((a, b) => parseTimestampMs(b.createdAt) - parseTimestampMs(a.createdAt))[0];
   return latestScan
-    ? { label: formatTechnicalScanSourceLabel(latestScan), runId: latestScan.runId }
+    ? { label: formatTechnicalScanSourceLabel(latestScan), runId: latestScan.runId, cardSource: latestScan }
     : { label: null, runId: null };
 }
 
@@ -2202,6 +2212,7 @@ function buildScoreMatrixDetail(
   formulaConfig: ScoreMatrixFormulaConfig = DEFAULT_SCORE_MATRIX_FORMULA_CONFIG,
   technicalScanSourceLabel?: string | null,
   technicalScanSourceRunId?: number | null,
+  cardSource?: TechnicalScanResult,
 ): ScoreMatrixDetail {
   const entries: ScoreMatrixEntry[] = (stock.consensusRows ?? stock.rows).map((row) => {
     const action = normalizeAction(row.cells[ACTION_HEADER] || "");
@@ -2273,7 +2284,12 @@ function buildScoreMatrixDetail(
   );
   const { finalScore: detailedRationaleFinalScore, denominator: detailedRationaleDenominator } =
     calculateWeightedRationaleScore(detailedRationaleRows, formulaConfig.detailedRationaleDenominator);
-  const calculatedScore = detailedRationaleFinalScore ?? meanScore;
+  const source = technicalScan?.scorecardUniverse ? technicalScan : cardSource;
+  const sameRebalanceSources = source?.scorecardSources && stock.rows.every(row => source.scorecardSources!.includes(row.meta.runId));
+  const supplementalInputs = sameRebalanceSources
+    ? source?.scorecardUniverse?.get(stock.exchange.toUpperCase() + ":" + stock.symbol.toUpperCase())
+    : !source && technicalScan?.supplementalInputs ? technicalScan.supplementalInputs : undefined;
+  const calculatedScore = supplementalInputs ? weightedSigned(detailedRationaleFinalScore ?? meanScore, supplementalInputs) : detailedRationaleFinalScore ?? meanScore;
 
   const context: ScoreMatrixContext = {
     currentUnits,
@@ -2294,6 +2310,7 @@ function buildScoreMatrixDetail(
   const calculatedUnitsChange = resolveMatrixUnitsForAction(calculatedAction, context);
 
   return {
+    ...(supplementalInputs ? { supplementalInputs } : {}),
     stockKey: stock.key,
     stockSymbol: stock.symbol,
     stockName: stock.representative["Stock Name"] || stock.symbol,
@@ -2373,7 +2390,7 @@ function applyScoreMatrixEdits(
       typeof denominatorOverride === "number" && Number.isFinite(denominatorOverride) ? denominatorOverride : null,
       true, // The editor displays the effective denominator after missing-value exclusion.
     );
-  const calculatedScore = detailedRationaleFinalScore ?? detail.meanScore;
+  const calculatedScore = detail.supplementalInputs ? weightedSigned(detailedRationaleFinalScore ?? detail.meanScore, detail.supplementalInputs) : detailedRationaleFinalScore ?? detail.meanScore;
   const context: ScoreMatrixContext = {
     currentUnits: detail.currentUnits,
     meanScore: detail.meanScore,
@@ -2848,7 +2865,19 @@ export function buildTechnicalScanMap(runs: RunResponse[], parsedSources?: Techn
         const metadataKey = JSON.stringify(meta);
         const cached = parsedSources?.get(link);
         if (cached?.response === job.response && cached.metadataKey === metadataKey) return cached.rows;
-        const rows = parseTechnicalScanResponse(job.response, meta);
+        const scorecards = run.prompt?.includes("[WORKFLOW_SCORECARDS_V1]") ? readScorecardManifest(run.prompt) : null;
+        const sources = scorecards ? run.prompt.match(/\[TECHNICAL_REBALANCE_SOURCES_V1\](.*?)\[\/TECHNICAL_REBALANCE_SOURCES_V1\]/)?.[1] : null;
+        let rebalanceIds: number[] = [];
+        if (sources) {
+          try {
+            const parsed = JSON.parse(sources).run_ids;
+            if (Array.isArray(parsed) && parsed.every(Number.isSafeInteger)) rebalanceIds = parsed;
+          } catch { /* Invalid source manifests supply no scorecards. */ }
+        }
+        const rows = parseTechnicalScanResponse(job.response, meta).map(row => {
+          const inputs = scorecards?.get(row.exchangeSymbol.toUpperCase() + ":" + row.stockSymbol.toUpperCase());
+          return scorecards && rebalanceIds.length ? {...row, scorecardUniverse: scorecards, scorecardSources: rebalanceIds, supplementalInputs: inputs} : row;
+        });
         parsedSources?.set(link, { response: job.response, metadataKey, rows });
         return rows;
       }),
@@ -6581,6 +6610,7 @@ function buildActionablesCalculationRows(
       formulaConfig,
       technicalScanSourceMeta.label,
       technicalScanSourceMeta.runId,
+      technicalScanSourceMeta.cardSource,
     );
     const meanModeCells = buildSummaryRowCells(stock, detail, detail.meanModeAction, detail.meanModeUnitsChange);
     const formulaCells = buildSummaryRowCells(stock, detail, detail.calculatedAction, detail.calculatedUnitsChange);
@@ -7934,6 +7964,7 @@ export function buildDashboardActionRows(
       formulaConfig,
       technicalScanSourceMeta.label,
       technicalScanSourceMeta.runId,
+      technicalScanSourceMeta.cardSource,
     );
     const formulaAction = detail.calculatedAction;
     return {

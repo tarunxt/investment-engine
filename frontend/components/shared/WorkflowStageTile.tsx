@@ -61,6 +61,8 @@ export type StageInfo = {
   recommendedStocks?: number | null;
   rebalanceInputs?: number | null;
   finalInputs?: Record<string, unknown>;
+  pairCoverage?: string;
+  portfolioThreat?: string;
   frozenFinal?: Record<string, unknown>;
 };
 
@@ -68,8 +70,8 @@ export type StageTileRow = { label: string; value: string; detail?: string | nul
 
 export const STAGE_ORDER: WorkflowStageKey[] = [
   "sync",
-  "threats",
   "swing",
+  "threats",
   "rebalance",
   "technical",
   "actionables",

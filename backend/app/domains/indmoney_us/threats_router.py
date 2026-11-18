@@ -139,7 +139,8 @@ async def run_threat_analysis(
         "parse_status": latest_snapshot.parse_status,
         "reported_holdings_count": latest_snapshot.reported_holdings_count,
     })
-    prompt = build_indmoney_us_threat_prompt(latest_snapshot)
+    prompt = (build_indmoney_us_threat_prompt(latest_snapshot, contenders=body.contenders)
+              if body and body.contenders else build_indmoney_us_threat_prompt(latest_snapshot))
     redis = _get_redis()
     try:
         use_case = CreateJobUseCase(
@@ -263,7 +264,7 @@ async def _serialize_threat_job(
     include_history: bool = True,
 ) -> IndMoneyUsThreatAnalysisResponse:
     metadata = extract_indmoney_us_threat_prompt_metadata(job.prompt or "")
-    parsed = parse_indmoney_us_threat_report(job.response)
+    parsed = parse_indmoney_us_threat_report(job.response, job.prompt or "")
     if include_history:
         parsed = await _augment_report_with_urgent_history(db, job, parsed)
     return IndMoneyUsThreatAnalysisResponse(

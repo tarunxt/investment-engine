@@ -233,7 +233,7 @@ visit(ast);
 const callbackSource = declarations.get('runWorkflow').initializer.arguments[0].getText(ast);
 const helpers = load(`${declarations.get('buildRunPayload').getText(ast)}\n${declarations.get('RecordedWorkflowStageFailure').getText(ast)}\nexport const STAGE_ORDER = ${declarations.get('STAGE_ORDER').initializer.getText(ast)};\nexport { buildRunPayload, RecordedWorkflowStageFailure };`, { recommendationAuditEnabled: false });
 
-async function executeWorkflow({ stages = ['sync', 'threats', 'swing', 'rebalance', 'technical', 'actionables'], selected = {}, runOverrides = {}, threatOverrides = {}, snapshot = portfolioSnapshot,
+async function executeWorkflow({ stages = ['sync', 'swing', 'threats', 'rebalance', 'technical', 'actionables'], selected = {}, runOverrides = {}, threatOverrides = {}, snapshot = portfolioSnapshot,
   sourceHasher = modules['@/lib/outputSourceJobs'].buildOutputSourceJobs, cancelRequestedRef = { current: false }, rebalanceStatus = "completed" } = {}) {
   const created = [];
   const alerts = [];
@@ -301,7 +301,7 @@ async function executeWorkflow({ stages = ['sync', 'threats', 'swing', 'rebalanc
     retryWorkflowRead: async (read) => read(), getSavedStageTargets: () => targets,
     waitForThreatCompletion: async () => threat(99, 'generated').analysis,
     waitForRunWithStageHandling: async (_portfolio, stage) => stage === 'swing' ? generatedSwing : stage === 'rebalance' ? generatedRebalance : { id: 70, run_jobs: [] },
-    summarizeThreat: () => ({}), summarizeRun: () => ({}), getRunProgress: () => ({}), countUniqueStocksFromRun: () => 2,
+    summarizeThreat: () => ({}), summarizeRun: () => ({}), getRunProgress: () => ({}), countUniqueStocksFromRun: () => 2, listingsFromSwingRun: () => ['NASDAQ:AAPL'], workflowRanking: () => [],
     parseTimestampMs: (date) => Date.parse(date), getPreviousMarketClose: () => new Date('2026-10-02T20:00:00Z'),
     getLatestMatchingRebalanceRuns: (runs) => runs.filter((r) => modules['@/lib/rebalanceRunIdentity'].isAnalysisRunForStage(r, 'rebalance', 'us')),
     fetchAllFullRuns: async () => [generatedRebalance],
@@ -328,12 +328,11 @@ test('invalid saved INDmoney snapshot fails sync before any paid stage is queued
 test('offline full workflow keeps six stages and independent model samples while emitting each selected source once', async () => {
   const result = await executeWorkflow();
   assert.deepEqual(result.errors, []);
-  assert.deepEqual(result.completed, ['sync', 'threats', 'swing', 'rebalance', 'technical', 'actionables']);
-  assert.deepEqual(result.created.map((call) => [call.stage, call.targets.length]), [['threats', 1], ['swing', 2], ['rebalance', 2], ['technical', 1]]);
+  assert.deepEqual(result.completed, ['sync', 'swing', 'threats', 'rebalance', 'technical', 'actionables']);
+  assert.deepEqual(result.created.map((call) => [call.stage, call.targets.length]), [['swing', 2], ['threats', 1], ['rebalance', 2], ['technical', 1]]);
   const swingPrompt = result.created.find((call) => call.stage === 'swing').prompt;
-  assert.equal(swingPrompt.match(/Threat Scan #99/g)?.length, 1);
-  assert.equal(swingPrompt.match(/Threat Scan #98/g)?.length, 1);
-  assert.deepEqual(result.threatReads, [99, 98, 99, 98], 'selected historical threats are fetched by their own ID');
+  assert.doesNotMatch(swingPrompt, /Threat Scan #/);
+  assert.deepEqual(result.threatReads, [], 'discovery is independent of Stage 3');
   const rebalancePrompt = result.created.find((call) => call.stage === 'rebalance').prompt;
   for (const jobId of [501, 502, 503]) assert.equal(rebalancePrompt.match(new RegExp(`Bullish rationale ${jobId}`, 'g'))?.length, 1);
   assert.deepEqual(keys(result.consensusInputs[2]), ['60:601', '60:602', '61:603']);
@@ -356,7 +355,7 @@ test('Kill during deferred source hashing prevents the next paid Rebalance call'
   cancelRequestedRef.current = true;
   releaseHashing();
   const result = await pending;
-  assert.deepEqual(result.created.map((call) => call.stage), ['threats', 'swing']);
+  assert.deepEqual(result.created.map((call) => call.stage), ['swing', 'threats']);
   assert.ok(!result.completed.includes('rebalance'));
   assert.ok(!result.completed.includes('technical'));
   assert.ok(result.errors.some((entry) => entry.stage === 'rebalance' && /killed by user/.test(entry.error)));
@@ -369,12 +368,10 @@ test('offline workflow rejects stale/conflicting and out-of-scope sources before
   const conflictingRebalance = run(60, [601, 602], 'rebalance');
   conflictingRebalance.run_jobs[0].job.response += '\nConflicting version';
   const cases = [
-    { runOverrides: { 50: conflict }, expectedStages: ['threats', 'swing'], failed: 'rebalance' },
-    { runOverrides: { 60: conflictingRebalance }, expectedStages: ['threats', 'swing', 'rebalance'], failed: 'technical' },
-    { threatOverrides: { 99: conflictingThreat }, expectedStages: ['threats'], failed: 'swing' },
+    { runOverrides: { 50: conflict }, expectedStages: ['swing', 'threats'], failed: 'rebalance' },
+    { runOverrides: { 60: conflictingRebalance }, expectedStages: ['swing', 'threats', 'rebalance'], failed: 'technical' },
     { stages: ['rebalance'], runOverrides: { 50: run(50, [501], 'swing', 'india') }, expectedStages: [], failed: 'rebalance' },
     { stages: ['technical'], selected: { technical: new Set(['run:60:job:601']) }, runOverrides: { 60: run(60, [601], 'swing') }, expectedStages: [], failed: 'technical' },
-    { stages: ['swing'], threatOverrides: { 99: { ...threat(99).analysis, job_id: 777 } }, expectedStages: [], failed: 'swing' },
     { stages: ['rebalance'], selected: { rebalance: new Set(['run:50:job:999']) }, expectedStages: [], failed: 'rebalance' },
   ];
   for (const { expectedStages, failed, ...options } of cases) {
@@ -396,7 +393,7 @@ test('Next uses only generated runs without historical fallback', async () => {
     rebalance: new Set(['rebalance:next']), technical: new Set(['technical:next']),
   } });
   assert.deepEqual(result.errors, []);
-  assert.deepEqual(result.created.map((call) => [call.stage, call.targets.length]), [['threats', 1], ['swing', 2], ['rebalance', 2], ['technical', 1]]);
+  assert.deepEqual(result.created.map((call) => [call.stage, call.targets.length]), [['swing', 2], ['threats', 1], ['rebalance', 2], ['technical', 1]]);
   assert.deepEqual(keys(result.consensusInputs[1]), ['60:601', '60:602']);
   assert.deepEqual(result.runReads, [], 'Next does not fetch any historical scan');
   const prompt = result.created.find((call) => call.stage === 'rebalance').prompt;
@@ -460,7 +457,7 @@ test('manual rebalance shows actionable validation errors and blocks submit with
 
 test('snapshot drift fails before paid Rebalance', async () => {
   const result = await executeWorkflow({ snapshot: { ...portfolioSnapshot, captured_at: '2026-10-02T21:30:00Z' } });
-  assert.deepEqual(result.created.map(call => call.stage), ['threats', 'swing']);
+  assert.deepEqual(result.created.map(call => call.stage), ['swing', 'threats']);
   assert.match(result.errors[0].error, /different snapshots/);
 });
 

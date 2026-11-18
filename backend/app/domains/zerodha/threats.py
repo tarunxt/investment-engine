@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from app.domains.runs.threat_evidence import snapshot_manifest, scorecard_instruction, stock_scorecards, comparison_table, portfolio_summary, assessment_list
 from dataclasses import dataclass
 from datetime import date, datetime
 import re
+import json
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -392,7 +394,9 @@ class ThreatPromptMetadata:
     captured_at: datetime | None
 
 
-def build_zerodha_threat_prompt(snapshot: ZerodhaPortfolioSnapshot) -> str:
+
+
+def build_zerodha_threat_prompt(snapshot: ZerodhaPortfolioSnapshot, *, contenders=()) -> str:
     captured_at_ist = snapshot.captured_at.astimezone(IST)
     exposure_value = sum((int(h.get("quantity") or 0) + int(h.get("t1_quantity") or 0)) * float(h.get("last_price") or 0) for h in snapshot.holdings or [])
     top_weight = 0.0
@@ -468,6 +472,10 @@ def build_zerodha_threat_prompt(snapshot: ZerodhaPortfolioSnapshot) -> str:
         "Use the analysis brief below verbatim as the core instruction:",
         "",
         THREAT_ANALYSIS_PROMPT,
+        "Assess these additional Stage 2 contenders alongside holdings: " + ", ".join(
+            item for item in contenders if re.fullmatch(r"[A-Za-z0-9._&:-]{1,64}", item)),
+        snapshot_manifest(snapshot, "india", contenders),
+        scorecard_instruction("Indian"),
     ]
     return "\n".join(prompt_sections).strip()
 
@@ -493,7 +501,7 @@ def is_zerodha_threat_job(job: Job | None) -> bool:
     return bool(job and THREAT_JOB_MARKER in (job.prompt or ""))
 
 
-def parse_zerodha_threat_report(markdown: str | None) -> dict[str, Any] | None:
+def parse_zerodha_threat_report(markdown: str | None, prompt: str = "") -> dict[str, Any] | None:
     text = (markdown or "").strip()
     if not text:
         return None
@@ -522,6 +530,60 @@ def parse_zerodha_threat_report(markdown: str | None) -> dict[str, Any] | None:
                 "rows": rows["rows"],
             }
         )
+
+    evidence = _parse_markdown_table(sections.get("threat_score_evidence", ""))
+    marker = next((line.removeprefix("[SCORECARD_UNIVERSE_V1]") for line in prompt.splitlines()
+                   if line.startswith("[SCORECARD_UNIVERSE_V1]")), None)
+    manifest = json.loads(marker) if marker else None
+    cards = stock_scorecards(evidence["rows"])
+    universe = assessment_list(manifest, cards) if manifest else set(cards)
+    cards = {listing: card for listing, card in cards.items() if listing in universe}
+    if universe:
+        if manifest:
+            portfolio = portfolio_summary(cards, manifest["holdings"])
+            if portfolio:
+                columns = ["Portfolio Threat /100", "Leading scenario", "Assessed value", "Largest contributors"]
+                values = ["Unknown" if portfolio["score"] is None else f"{portfolio['score']:.2f}",
+                          portfolio["leading_scenario"] or "Unknown", f"{portfolio['assessed_weight']:.0%}",
+                          ", ".join(f"{key} ({value:.2f} points)" for key, value in portfolio["contributors"])]
+                tables.insert(0, {"key": "portfolio_threat_score", "title": "Portfolio Threat",
+                                  "columns": columns, "rows": [dict(zip(columns, values))]})
+        columns = ["Exchange", "Stock Symbol", "Stock Threat /100", "Coverage", "Extreme impact"]
+        scores = []
+        for exchange, symbol in sorted(universe):
+            card = cards.get((exchange, symbol), {"score": None, "provisional": True, "evidence": []})
+            value = card["score"]
+            scores.append(dict(zip(columns, [exchange, symbol, "Unknown" if value is None else f"{value:.2f}",
+                "Provisional" if card["provisional"] else "Complete",
+                "20%+ conditional downside" if any(r.get("Impact") == "5" for r in card["evidence"]) else "—"])))
+        tables.append({"key": "stock_threat_scores", "title": "Stock Threat", "columns": columns, "rows": scores})
+        category_columns = ["Exchange", "Stock Symbol", "Category", "Threat /100", "Leading event", "Runner-up"]
+        category_names = ["Geopolitics and trade", "Global financial conditions", "Domestic economy",
+                          "Domestic policy", "Sector and technology", "Company and governance",
+                          "Physical and operational", "Market liquidity"]
+        category_rows = []
+        for exchange, symbol in sorted(universe):
+            categories = cards.get((exchange, symbol), {}).get("categories", {})
+            for category, name in enumerate(category_names, start=1):
+                result = categories.get(category, {})
+                leaders = result.get("leading_events", [])
+                values = [exchange, symbol, name, str(result["score"]) if result.get("score") is not None else "Unknown",
+                          leaders[0][0] if leaders else "—", leaders[1][0] if len(leaders) > 1 else "—"]
+                category_rows.append(dict(zip(category_columns, values)))
+        tables.append({"key": "stock_threat_categories", "title": "Threat categories",
+                       "columns": category_columns, "rows": category_rows})
+        tables.append({"key": "threat_score_evidence", "title": "Threat score evidence", **evidence})
+
+    pairs = _parse_markdown_table(sections.get("pairwise_comparisons", ""))
+    if universe:
+        listings = [f"{exchange}:{symbol}" for exchange, symbol in universe]
+        comparisons = comparison_table(pairs["rows"], listings)
+        columns = ["Listing", "Pairwise /100", "Valid comparisons", "Expected"]
+        tables.append({"key": "pairwise_scores", "title": "Pairwise scorecard", "columns": columns,
+                       "rows": [dict(zip(columns, [key, "Unknown" if item["score"] is None else str(item["score"]),
+                                                   str(item["completed"]), str(item["expected"])]))
+                                for key, item in comparisons.items()]})
+        tables.append({"key": "pairwise_comparisons", "title": "Pairwise comparisons", **pairs})
 
     bottom_line_table = _parse_markdown_table(sections.get("bottom_line", ""))
     bottom_line = []
