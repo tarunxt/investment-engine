@@ -25,7 +25,7 @@ try {
  function Fixture(){
  const [market,setMarket]=useState('India'),[view,setView]=useState('ledger'),[state,setState]=useState(new URLSearchParams(location.search).get('fixture')||'loaded'),[checks,setChecks]=useState({});
  const call=(name)=>()=>window.actions.push(name);
- const stages=STAGE_ORDER.map((stage,index)=>{
+ const stages=[...STAGE_ORDER].sort((a,b)=>["sync","threats","swing","rebalance","technical","actionables"].indexOf(a)-["sync","threats","swing","rebalance","technical","actionables"].indexOf(b)).map((stage,index)=>{
  const palette=new URLSearchParams(location.search).get('palette');
  const partial=stage==='rebalance'&&state==='loaded';
  const completed=state==='empty'?null:'2026-10-30T14:13:00Z';
@@ -51,7 +51,7 @@ try {
  <label className="mb-3 block text-xs">Fixture state <select value={state} onChange={e=>setState(e.target.value)}>{['loaded','loading','empty','failed','stale','zero','selection','derived','recovered'].map(s=><option key={s}>{s}</option>)}</select></label>
  <article className="rounded-2xl border border-indigo-200 bg-indigo-50/50 p-4"><div className="flex justify-between gap-3"><div><h2 className="text-xl font-bold text-slate-950">Run {market==='India'?'Zerodha':'Indmoney'} Auto-Rebalance</h2><p className="mt-2 text-sm">Last run: {state==='empty'?'n/a':'30 Oct 19:43'}</p></div><section aria-label="Run controls"><h3 className="text-sm font-semibold">Run controls</h3><button className="mt-2 rounded-lg bg-indigo-700 px-4 py-2 text-white" onClick={call('run')}>Run</button></section></div>
  <div data-palette-tiles hidden={!new URLSearchParams(location.search).has('palette')}>{stages}</div>
- <WorkflowStageLedger enabled view={view} market={market==='India'?'zerodha':'indmoneyUs'} historyHref="#history" onStockFlowClick={call('flow')}>{stages}</WorkflowStageLedger>
+ <WorkflowStageLedger board={new URLSearchParams(location.search).has("board")} enabled view={view} market={market==='India'?'zerodha':'indmoneyUs'} historyHref="#history" onStockFlowClick={call('flow')}>{stages}</WorkflowStageLedger>
  <footer className="mt-3 rounded-xl border border-emerald-100 bg-emerald-50 p-3 text-sm">Cumulative LLM time: 00:08:39 · Total cost incurred in last Auto-rebalance: n/a</footer></article><p id="history">Offline fixture history destination</p></main>;
  }
  createRoot(document.getElementById('root')).render(<Fixture/>);
@@ -69,6 +69,18 @@ try {
  const page=await browser.newPage({viewport:{width:1180,height:757},deviceScaleFactor:1});
  const consoleErrors=[];page.on('pageerror',error=>consoleErrors.push(error.message));
  await page.route('**/*',route=>route.request().url().startsWith(origin)?route.continue():route.abort());
+ await page.goto(origin+'?board=1');
+ const board=page.getByLabel('Rebalance workflow');
+ await board.waitFor();
+ assert.equal(await board.locator('section').count(),4);
+ assert.equal(await board.getByRole('button',{name:'Sync Now',exact:true}).count(),1);
+ assert.equal(await board.getByRole('button',{name:'Place Order',exact:true}).count(),1);
+ assert.equal(await board.getByText('Query Screener',{exact:true}).count(),0);
+ await board.getByRole('button',{name:'Place Order',exact:true}).click();
+ assert.equal(await page.evaluate(()=>window.actions.at(-1)),'order:India');
+ await page.getByRole('button',{name:'US stage ledger',exact:true}).click();
+ await board.getByRole('button',{name:'Place Order',exact:true}).click();
+ assert.equal(await page.evaluate(()=>window.actions.at(-1)),'order:US');
  await page.goto(origin);await page.getByRole('table').waitFor();
  assert.equal(await page.locator('tbody tr').count(),6);
  assert.deepEqual(await page.locator('thead th').allTextContents(),['Stage','Evidence time','Completion / inputs','Stocks','Duration','Error']);

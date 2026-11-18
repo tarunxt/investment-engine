@@ -7903,7 +7903,7 @@ ${zerodhaExecutionMode === "direct_market"
           </div>
         )}
 
-        <WorkflowStageLedger active={runningPortfolio === section.portfolio} market={section.portfolio} enabled={stageLedger} view={ledgerView} historyHref={URLs.routes.console.autoRebalanceRuns(section.portfolio)} onStockFlowClick={() => setStockFlowPortfolio(section.portfolio)}>
+        <WorkflowStageLedger active={runningPortfolio === section.portfolio} market={section.portfolio} board enabled={stageLedger} view={ledgerView} historyHref={URLs.routes.console.autoRebalanceRuns(section.portfolio)} onStockFlowClick={() => setStockFlowPortfolio(section.portfolio)}>
           {STAGE_ORDER.map((stage) => (
             <WorkflowStageTile
               key={stage}

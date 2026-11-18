@@ -39,9 +39,10 @@ export function WorkflowStageLedgerViews({ market, view, onChange, portfolioOnly
 const control = "inline-flex min-h-9 items-center rounded-lg border border-indigo-200 bg-white px-3 py-1.5 text-sm font-medium text-indigo-800 hover:bg-indigo-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600 focus-visible:ring-offset-2";
 
 /** Presentation adapter: the workflow continues to own every value and callback. */
-export function WorkflowStageLedger({ children, enabled, view = "ledger", historyHref, onStockFlowClick, market, active = false }: {
+export function WorkflowStageLedger({ children, enabled, view = "ledger", historyHref, onStockFlowClick, market, active = false, board = false }: {
   children: ReactElement<Stage>[];
   enabled: boolean;
+  board?: boolean;
   active?: boolean;
   view?: WorkflowLedgerView;
   market?: "zerodha" | "indmoneyUs";
@@ -58,6 +59,7 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
     return active && (item.info.state === "idle" || item.info.state === "queued")
       ? { ...item, info: { state: item.info.state } } : item;
   });
+  if (!board) stages.sort((a, b) => STAGE_METADATA[a.stage].step.localeCompare(STAGE_METADATA[b.stage].step));
   const selected = stages.find(item => item.stage === selectedStage) ?? stages[0];
   const openDuration = (item: Stage) => {
     setDurationStage(item);
@@ -73,7 +75,7 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
         <a className={control} href={historyHref}>History</a>
         {!selected.selectable && selected.onClick ? <button type="button" className={control} onClick={selected.onClick}>Open stage</button> : null}
   </div>;
-  if (view === "ledger") {
+  if (board && view === "ledger") {
     const lanes = [
       { title: "Sync portfolio", keys: ["sync"] },
       { title: "Discover contenders", keys: ["swing"] },
@@ -128,7 +130,48 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
       <StageDurationBreakdownDialog open={Boolean(durationStage)} stageLabel={durationStage ? STAGE_METADATA[durationStage.stage].idle : ""} info={durationStage?.info ?? { state: "idle" }} now={durationStage?.now ?? 0} onClose={() => setDurationStage(null)} />
     </div>;
   }
+  const rowValue = (item: Stage, label: string, fallback = "—") => getIdleStageRows(item.stage, item.info, item.now).find(row => row.label === label)?.value ?? fallback;
+  const syncedStockCount = market === "zerodha" ? stages.find(item => item.stage === "sync")?.info.portfolioStockCount : undefined;
   return <div className="mt-4 min-w-0 space-y-3 text-sm text-slate-600">
+    {view === "ledger" ? <div role="region" aria-label="Saved stage ledger, scroll for all columns" tabIndex={0} className="overflow-x-auto rounded-xl border border-indigo-100 bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600">
+      <table className="w-full min-w-[790px] border-collapse text-left text-sm">
+        <caption className="sr-only">Saved workflow stages. Select a stage to inspect its evidence; execution controls are separate.</caption>
+        <thead className="bg-slate-100 text-xs text-slate-700"><tr>{["Stage", "Evidence time", "Completion / inputs", "Stocks", "Duration", "Error"].map(label => <th key={label} scope="col" className="px-3 py-2 font-semibold">{label}</th>)}</tr></thead>
+        <tbody>{stages.map(item => {
+          const upcoming = active && (item.info.state === "idle" || item.info.state === "queued");
+          const rows = getIdleStageRows(item.stage, item.info, item.now);
+          const error = rows.find(row => row.label === "Error")!;
+          const time = rows[0].value;
+          const inspecting = selected.stage === item.stage;
+          const usesSyncStockCount = market === "zerodha" && (item.stage === "sync" || item.stage === "threats");
+          const stockCell = usesSyncStockCount ? String(syncedStockCount ?? "n/a") : rowValue(item, "Stocks recommended");
+          return <tr key={item.stage} className={`border-t border-slate-200 align-top ${getStageLedgerTone(item.info)}`}>
+            <th scope="row" className={`px-3 py-2 font-normal ${inspecting ? "bg-blue-100 shadow-[inset_3px_0_0_var(--color-blue-600)] dark:bg-blue-950/65" : ""}`}>
+              <div className="flex items-start gap-2">
+                {item.selectable ? <input type="checkbox" checked={Boolean(item.selected)} onChange={item.onClick} aria-label={`Select ${getStageTileLabel(item.stage)} for the next run`} className="mt-2 size-4 accent-indigo-700" /> : null}
+                <button type="button" className="rounded text-left font-semibold text-slate-900 hover:text-indigo-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600" aria-pressed={inspecting} aria-controls={detailId} onClick={() => setSelectedStage(item.stage)}>
+                  {STAGE_METADATA[item.stage].step} {getStageTileLabel(item.stage)}
+                  <span className="mt-0.5 block text-xs font-normal capitalize text-slate-500">{item.info.state}{item.info.runStatus ? ` · ${item.info.runStatus}` : ""}</span>
+                  <span className="mt-0.5 block text-xs font-normal text-slate-600">{evidenceLabel(item)}</span>
+                </button>
+              </div>
+            </th>
+            <td className="px-3 py-2 whitespace-nowrap">{upcoming ? null : time}</td>
+            <td className="max-w-56 px-3 py-2">{!upcoming && <>{market && ["threats", "swing", "rebalance", "technical"].includes(item.stage) ? <button type="button" data-auto-rebalance-llm-metric="true" data-workflow-stage={item.stage} data-workflow-portfolio={market === "zerodha" ? "india" : "indmoney_us"} data-workflow-total={item.info.totalLlms ?? undefined}
+              data-workflow-run-id={item.info.activeRunId ?? item.info.lastRunId ?? undefined}
+              data-workflow-job-id={item.info.jobId ?? undefined}
+              data-workflow-sequence={item.info.workflowSequence ?? undefined}
+              data-workflow-passed={item.info.passedLlms ?? undefined}
+              data-workflow-failed={item.info.failedLlms ?? undefined}
+              data-workflow-partial={item.info.partialLlms ?? undefined}
+              aria-label={`Open ${STAGE_METADATA[item.stage].idle} LLM details`} aria-haspopup="dialog" className="rounded text-indigo-700 underline decoration-dotted underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600">{rowValue(item, "LLMs completed")}</button> : rowValue(item, "LLMs completed", item.stage === "actionables" ? `Rebalance inputs ${rowValue(item, "Rebalance inputs")}` : "—")}{rows.some(row => row.label === "Cost incurred") ? <span className="mt-1 block text-xs text-slate-500">Cost incurred: {rowValue(item, "Cost incurred")}</span> : null}</>}</td>
+            <td className="px-3 py-2" title={usesSyncStockCount ? "Holdings count from the latest saved Zerodha portfolio snapshot" : undefined}>{upcoming ? null : stockCell}</td>
+            <td className="px-3 py-2 whitespace-nowrap">{upcoming ? null : rows.some(row => row.label === "Duration") ? <button type="button" aria-haspopup="dialog" aria-label={`Show duration breakdown for ${STAGE_METADATA[item.stage].idle}`} className="rounded text-indigo-700 underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600" onClick={() => openDuration(item)}>{rowValue(item, "Duration")}</button> : "—"}</td>
+            <td className={`max-w-44 px-3 py-2 ${error.detail ? "text-amber-900" : ""}`}>{upcoming ? null : error.value}{!upcoming && error.detail ? <StageErrorDetails stageLabel={STAGE_METADATA[item.stage].idle} info={item.info} row={error} /> : null}</td>
+          </tr>;
+        })}</tbody>
+      </table>
+    </div> : null}
     {view !== "execution" ? <section id={detailId} aria-label="Saved evidence and configuration" className="rounded-xl border border-indigo-100 bg-white p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="font-semibold text-slate-900">Saved evidence and configuration · {getStageTileLabel(selected.stage)}</h3>
