@@ -205,6 +205,7 @@ class ExecutionHarness:
             'app.domains.ai_providers.factory': stub_module('app.domains.ai_providers.factory', ProviderFactory=factory),
             'app.domains.jobs.technical_prices': stub_module(
                 'app.domains.jobs.technical_prices', validate_technical_prices=technical,
+                normalize_technical_rows=technical_prices.normalize_technical_rows,
                 MissingTechnicalListings=technical_prices.MissingTechnicalListings,
                 merge_technical_rows=technical_prices.merge_technical_rows,
                 missing_listing_prompt=technical_prices.missing_listing_prompt,

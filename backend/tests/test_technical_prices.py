@@ -37,3 +37,47 @@ def test_repair_keeps_valid_venue_and_requests_only_missing_venue():
     merged = merge_technical_rows(table(), supplement)
     assert merged.count('Exchange Symbol') == 1
     validate_technical_prices(prompt, merged)
+
+
+def test_bel_trigger_is_separate_from_support_and_invalidation():
+    from app.domains.jobs.technical_prices import normalize_technical_rows
+    prompt = PROMPT.replace('LAURUSLABS', 'BEL').replace('620', '395.9')
+    source = table(trigger='Reclaim above 400 after higher low holds at 382', stop='Close below 378').replace('LAURUSLABS', 'BEL')
+    evidence = []
+    result, excluded = normalize_technical_rows(prompt, source, evidence)
+    assert not excluded
+    assert '| NSE | BEL | 400 | 378 |' in result
+    assert evidence[0]['original'] == 'Reclaim above 400 after higher low holds at 382'
+    assert evidence[0]['price'] == '400'
+    validate_technical_prices(prompt, result)
+    assert normalize_technical_rows(prompt, result, []) == (result, set())
+
+
+@pytest.mark.parametrize('raw', ['620 or 640 EMA', '400–840', '620 or $640', 'above 5%', '20 EMA', 'below 2000', '$620'])
+def test_excludes_only_the_unusable_listing(raw):
+    from app.domains.jobs.technical_prices import MissingTechnicalListings, normalize_technical_rows
+    prompt = '[TECHNICAL_PRICE_ANCHORS_V1]' + json.dumps([
+        {'instrument': 'NSE:ONE', 'price': 620}, {'instrument': 'NSE:TWO', 'price': 620},
+    ]) + '[/TECHNICAL_PRICE_ANCHORS_V1]'
+    source = table().replace('LAURUSLABS', 'ONE') + f'\n| NSE | TWO | {raw} | 610 |'
+    result, excluded = normalize_technical_rows(prompt, source, [])
+    assert excluded == {'NSE:TWO'}
+    assert '| NSE | ONE | 640 | 590 |' in result and 'TWO' not in result
+    with pytest.raises(MissingTechnicalListings) as exc:
+        validate_technical_prices(prompt, result)
+    assert exc.value.accepted_count == 1 and exc.value.ids == ('NSE:TWO',)
+
+
+@pytest.mark.parametrize(('raw', 'expected'), [
+    ('above 630 or 640', '635.00'), ('620–640', '630.00'),
+    ('Trigger levels: ₹610, ₹620 and ₹645', '625.00'),
+    ('between 600.5 and 620', '610.25'),
+])
+def test_ambiguous_price_list_is_recorded_as_estimate(raw, expected):
+    from app.domains.jobs.technical_prices import normalize_technical_rows
+    evidence = []
+    result, excluded = normalize_technical_rows(PROMPT, table(trigger=raw), evidence)
+    assert not excluded and f'| {expected} | 590 |' in result
+    assert evidence[0]['status'] == 'estimated_mean' and evidence[0]['original'] == raw
+    assert len(evidence[0]['candidates']) >= 2
+    validate_technical_prices(PROMPT, result)
