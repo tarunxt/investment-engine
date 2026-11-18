@@ -59,11 +59,15 @@ def merge_technical_rows(previous: str, supplement: str) -> str:
     return '\n'.join(lines)
 
 
+class UnavailableTechnicalCoverage(ValueError):
+    """A research scan returned listings but no usable chart setups."""
+
+
 def unavailable_technical_setup(row):
     """Recognize a reported data outage without treating it as a directional signal."""
-    return (row.get('Bias', '').strip().casefold() == 'unresolved'
+    return (row.get('Bias', '').strip().casefold() in {'unresolved', 'unavailable'}
             and row.get('Confidence Score', '').strip().casefold() == 'unavailable'
-            and re.fullmatch(r'unavailable\s*[-–—]\s*no live data',
+            and re.fullmatch(r'unavailable(?:\s*[-–—:]\s*.+)?',
                              row.get('Primary Setup', '').strip(), re.I) is not None)
 
 
@@ -76,7 +80,7 @@ def validate_technical_prices(prompt: str, content: str) -> None:
                     if block.kind == 'table' and 'Primary Setup' in block.headers
                     for row in block.rows]
             if rows and all(unavailable_technical_setup(row) for row in rows):
-                raise ValueError(f'Technical Scan returned no usable chart data for any of {len(rows)} listings. '
+                raise UnavailableTechnicalCoverage(f'Technical Scan returned no usable chart data for any of {len(rows)} listings. '
                                  'Retry Technical Scan with a web-enabled model or restored market data.')
         return
     anchors = json.loads(match[1])
