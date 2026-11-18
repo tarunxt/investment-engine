@@ -83,7 +83,7 @@ def source_calculations(payload, *, sources, jobs_by_run, market, scorecards=Non
         # unknown, even if model rows contain a suggested current quantity.
         calculation = calculate_listing(rows, formula, technical, direction=direction,
                                         market=market, unresolved_holding=market == "us",
-                                        supplemental=(scorecards or {}).get(":".join(key)) if technical else None)
+                                        supplemental=(scorecards or {}).get(":".join(key)))
         calculation["valid_suggestions"] = len(output_jobs)
         calculation["technical_job_id"] = match[1] if match else None
         if market == "us":

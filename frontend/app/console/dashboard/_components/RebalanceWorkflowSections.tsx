@@ -6379,10 +6379,9 @@ ${zerodhaExecutionMode === "direct_market"
           savedAt = overview.latest?.captured_at ?? null;
           provenance = overview.latest ? `Portfolio snapshot · ${overview.latest.snapshot_date} · ${overview.latest.source}` : null;
         } else if (stage === "threats") {
-          const latest =
-            portfolio === "zerodha"
-              ? (await apiService.zerodhaThreatsLatest()).analysis
-              : (await apiService.indmoneyUsThreatsLatest()).analysis;
+          const latest = requestedRunId ? (portfolio === "zerodha"
+            ? await apiService.zerodhaThreatJob(requestedRunId) : await apiService.indmoneyUsThreatJob(requestedRunId))
+            : (portfolio === "zerodha" ? await apiService.zerodhaThreatsLatest() : await apiService.indmoneyUsThreatsLatest()).analysis;
           savedAt = latest?.updated_at ?? latest?.created_at ?? null;
           provenance = latest ? `Job #${latest.job_id} · ${latest.provider}/${latest.model} · ${latest.status}` : null;
           if (latest?.error_message && !latest.report) savedError = latest.error_message;
@@ -7951,7 +7950,7 @@ ${zerodhaExecutionMode === "direct_market"
               }
               onOutputClick={() => {
                 setActionablesCalculationsPortfolio(null);
-                void showStageOutput(section.portfolio, stage);
+                void showStageOutput(section.portfolio, stage, (stage === "threats" ? states[section.portfolio][stage].jobId : states[section.portfolio][stage].lastRunId) ?? undefined);
               }}
               onSyncNowClick={
                 stage === "sync"
