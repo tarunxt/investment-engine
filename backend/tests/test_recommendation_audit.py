@@ -29,6 +29,13 @@ def sample(scores=(-1, -2, 1, 2, -1, 2), *, current=1, action="Sell All", change
     return {"row": dict(zip(SCORE_FIELDS, scores)) | {"action": action, "current_units": current, "units_change": change, "final_units": final}, "provider": "deepseek", "model": "fixture-model", "job_id": job, "valid": True}
 
 
+@pytest.mark.parametrize("label", ["Buy/Add", "Buy", "Add", "Add more"])
+def test_existing_position_buy_is_one_add_vote_in_audit(label):
+    result = calculate([sample(current=36, action=label, change=10, final=46),
+                        sample(current=36, action="Hold", change=0, final=36, job=2)], formula())
+    assert result["raw_action_counts"] == {"Add more": 1, "Hold": 1}
+
+
 @pytest.fixture
 def db():
     # Full registry imports are required because existing Job/Run mappers share Base.

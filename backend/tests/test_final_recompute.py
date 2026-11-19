@@ -81,6 +81,36 @@ def test_partial_source_recomputation_is_repeatable_and_preserves_inputs(inputs)
     assert context["jobs_by_run"][10][0].response == original_response
 
 
+@pytest.mark.parametrize("alias", ["Buy/Add", "Buy"])
+@pytest.mark.parametrize("market,exchange", [("india", "NSE"), ("us", "NASDAQ")])
+def test_rebalance_existing_position_buy_labels_verify_like_add(inputs, alias, market, exchange):
+    payload, context = inputs
+    context["market"] = market
+    jobs = context["jobs_by_run"][10]
+    add = jobs[0]
+    add.status = "completed"
+    add.response = add.response.replace("NSE", exchange).replace("FIXTUREEQ", "BEL").replace(
+        "| 10 | Add more | 5 | 15 |", "| 36 | Add more | 10 | 46 |")
+    add.response = add.response.replace("| 5 | 100 | 500 |", "| 10 | 100 | 1000 |")
+    hold = deepcopy(add)
+    hold.id, hold.status = 12, "partial"
+    hold.response = add.response.replace("| Add more | 10 | 46 |", "| Hold | 0 | 36 |").replace(
+        "| 10 | 100 | 1000 |", "| 0 | 100 | 0 |")
+    jobs.append(hold)
+    expected = source_calculations(payload, **context)
+    listing = expected[(exchange, "BEL")]
+    assert listing["valid_suggestions"] == 2
+    assert listing["inputs"]["meanScore"] == 0.5
+    assert listing["inputs"]["meanUnitsChange"] == 5
+    add.response = add.response.replace("| Add more |", f"| {alias} |")
+    original = add.response
+    assert source_calculations(payload, **context) == expected
+    assert add.response == original
+    add.response = add.response.replace(f"| {alias} |", "| Buy/Sell |")
+    with pytest.raises(UnverifiableFinal, match="Rebalance source action"):
+        source_calculations(payload, **context)
+
+
 @pytest.mark.parametrize("mutation", ["rawScore", "effectiveScore", "score", "action", "estimate", "listing", "counts", "missing_rows", "extra_rows", "exclusion", "suggestions", "bool_count"])
 def test_forged_client_assertions_fail(inputs, mutation):
     payload, context = inputs

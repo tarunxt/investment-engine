@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import {readFileSync} from 'node:fs';
 import { readScorecardManifest, workflowRanking, weightedSigned } from '../lib/workflowScorecardRanking.ts';
 
 const listing = 'NSE:OIL';
@@ -43,9 +44,11 @@ test('missing, duplicate and invalid stock threat evidence stay distinct', () =>
 
 test('action labels allow complete aliases and reject prose', async () => {
   const {parseActionLabel} = await import('../lib/actionColorScheme.ts');
+  const contract = JSON.parse(readFileSync(new URL('../../backend/app/domains/jobs/rebalance_actions.json', import.meta.url), 'utf8'));
+  for (const [label, expected] of Object.entries(contract)) assert.equal(parseActionLabel(label), expected, label);
   assert.equal(parseActionLabel(' BUY_NEW '), 'Buy New');
   assert.equal(parseActionLabel('reduce'), 'Trim');
-  for (const text of ['Do not sell all', 'Hold, do not add', 'additional information', 'hold2']) {
+  for (const text of ['Do not sell all', 'Hold, do not add', 'additional information', 'hold2', 'Buy/Sell', 'Buy/Add or Hold']) {
     assert.equal(parseActionLabel(text), null);
   }
 });
