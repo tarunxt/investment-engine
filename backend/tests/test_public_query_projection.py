@@ -11,7 +11,7 @@ def require_guard():
 
 
 @pytest.mark.parametrize('market', ['india','us','global'])
-@pytest.mark.parametrize('topic', ['prices','news','earnings','macro'])
+@pytest.mark.parametrize('topic', ['prices','news','earnings','macro','regulation','disclosures'])
 def test_structured_public_fields_project_only_trusted_constants(monkeypatch, market, topic):
     from app.domains.ai_providers.tools import web_search
     from app.domains.ai_providers.tools.public_queries import PUBLIC_MARKETS, PUBLIC_TOPICS, admitted_query

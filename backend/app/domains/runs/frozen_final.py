@@ -133,10 +133,20 @@ async def validate_frozen_final(db, payload, *, user_id, portfolio, sequence, al
                         raise HTTPException(409, "Scorecard observations differ from the saved job")
             elif payload.get("scorecard_job_id") is not None:
                 raise HTTPException(409, "Missing Technical scorecard manifest")
+            from .final_positions import POSITION_POLICY, captured_positions
+            if not stored_record and not rebuild and market == "india" and manifest_line and payload.get("formula_version") == "score-matrix-v2":
+                payload.setdefault("position_policy", POSITION_POLICY)
+            use_positions = payload.get("position_policy") == POSITION_POLICY
+            if "position_policy" in payload and (not use_positions or market != "india" or not manifest_line):
+                raise UnverifiableFinal("Unsupported holding valuation policy or missing Stage 3 source")
+            positions = None
+            if use_positions:
+                prompt = await db.scalar(select(Job.prompt).where(Job.id == source_id, Job.user_id == user_id))
+                positions = captured_positions(prompt or "")
             policy = payload.get("sizing_policy", DIRECTIONAL_SIZING)
             if policy != DIRECTIONAL_SIZING and not (stored_record and policy == ORIGINAL_SIZING):
                 raise UnverifiableFinal("Unsupported final sizing policy")
-            context = dict(sources=sources, jobs_by_run=jobs_by_run, market=market, scorecards=scorecards)
+            context = dict(sources=sources, jobs_by_run=jobs_by_run, market=market, scorecards=scorecards, positions=positions)
             calculations = source_calculations(payload, **context, sizing_policy=policy)
             if rebuild:
                 from .final_reconciliation import materialize_rows
@@ -164,6 +174,11 @@ async def validate_frozen_final(db, payload, *, user_id, portfolio, sequence, al
             payload["sizing_policy"] = policy
             if payload.get("formula_version") == "score-matrix-v2":
                 for row in payload["rows"]:
+                    if use_positions:
+                        provenance = calculations[(row["exchange"], row["symbol"])]["position_valuation"]
+                        if stored_record and row.get("position_valuation") != provenance:
+                            raise UnverifiableFinal("Saved holding valuation provenance differs from Stage 3")
+                        row["position_valuation"] = provenance
                     row["source_coverage"] = calculations[(row["exchange"], row["symbol"])]["source_coverage"]
         except (UnverifiableFinal, ArithmeticError) as exc:
             raise HTTPException(422, f'Final calculation could not be verified: {exc}') from exc

@@ -571,6 +571,10 @@ def parse_zerodha_threat_report(markdown: str | None, prompt: str = "", *, legac
                 ("Unassessed" if value is None and not legacy_evidence else "Provisional") if card["provisional"] else "Complete",
                 "20%+ conditional downside" if any(r.get("Impact") == "5" for r in card["evidence"]) else "—", reason])))
         tables.append({"key": "stock_threat_scores", "title": "Stock Threat", "columns": columns, "rows": scores})
+        supported = sum(row["Stock Threat /100"] != "Unknown" for row in scores)
+        tables.append({"key": "threat_score_coverage", "title": "Threat score coverage",
+                       "columns": ["Scored listings", "Total listings"],
+                       "rows": [{"Scored listings": str(supported), "Total listings": str(len(scores))}]})
         category_columns = ["Exchange", "Stock Symbol", "Category", "Threat /100", "Leading event", "Runner-up"]
         category_names = ["Geopolitics and trade", "Global financial conditions", "Domestic economy",
                           "Domestic policy", "Sector and technology", "Company and governance",

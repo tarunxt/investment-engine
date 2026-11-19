@@ -107,7 +107,7 @@ def weighted_score(rows, override=None):
     return score, denominator
 
 
-def calculate_listing(rows, formula, technical=None, *, direction=None, market, unresolved_holding=False, supplemental=None, legacy=False, sizing_policy=DIRECTIONAL_SIZING):
+def calculate_listing(rows, formula, technical=None, *, direction=None, market, unresolved_holding=False, supplemental=None, legacy=False, sizing_policy=DIRECTIONAL_SIZING, position=None):
     """Rows are source cells; technical is the selected source Technical row."""
     actions = [normalize_action(row.get(ACTION_HEADER)) for row in rows]
     mean_action = mean([ACTION_VALUES.get(action) for action in actions])
@@ -165,6 +165,9 @@ def calculate_listing(rows, formula, technical=None, *, direction=None, market, 
         raw = effective = blend_actionable_score(effective, pair, None if threat is None else 100 - threat)
     current = None if unresolved_holding else mean([numeric(row.get("Current Units")) for row in rows])
     value = None if unresolved_holding else mean([current_value(row) for row in rows])
+    if position is not None:
+        current, position_price = position
+        value = 0 if current == 0 else None if position_price is None else round(current * position_price, 2)
     changes = [signed_units(row, action) for row, action in zip(rows, actions)]
     mean_change = mean(changes)
     bullish = mean([change for change in changes if change is not None and change > 0])
@@ -215,7 +218,9 @@ def calculate_listing(rows, formula, technical=None, *, direction=None, market, 
     amount = None
     price = numeric(rows[0].get("Price Per Unit"))
     if units is not None:
-        if action == "Sell All" and value is not None:
+        if position is not None and action in {"Sell All", "Trim"} and value is None:
+            amount = None
+        elif action == "Sell All" and value is not None:
             amount = value
         elif action == "Trim" and current is not None and current > 0 and value is not None:
             amount = abs(units / current) * value

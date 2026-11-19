@@ -7,7 +7,9 @@ import json
 
 PUBLIC_MARKETS = {'india': 'NIFTY 50', 'us': 'S&P 500', 'global': 'global markets'}
 PUBLIC_TOPICS = {'prices': 'live price today', 'news': 'market news today',
-                 'earnings': 'earnings announcements', 'macro': 'economic data today'}
+                 'earnings': 'earnings announcements', 'macro': 'economic data today',
+                 'regulation': 'regulatory notices and exchange circulars',
+                 'disclosures': 'exchange corporate announcements filings'}
 PUBLIC_QUERIES = frozenset(f'{market} {topic}' for market in PUBLIC_MARKETS.values()
                            for topic in PUBLIC_TOPICS.values())
 

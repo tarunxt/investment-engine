@@ -335,6 +335,7 @@ export function AutoRebalanceHistoryDetailClient({
   const finalSummary = run?.stages.find(stage => stage.stage === "actionables")?.summary;
   const replay = finalSummary?.corrected_final_v2;
   const currentSizing = typeof replay === "object" && replay !== null && "sizing_policy" in replay && replay.sizing_policy === "directional-v2";
+  const snapshotValuation = typeof replay === "object" && replay !== null && ("position_policy" in replay && replay.position_policy === "zerodha-settled-snapshot-v1" || !("scorecard_job_id" in replay));
   const jobs = useMemo(() => run ? [...run.standalone_jobs, ...run.runs.flatMap((item) => item.jobs)] : [], [run]);
 
   return (
@@ -355,7 +356,8 @@ export function AutoRebalanceHistoryDetailClient({
           {verificationMessage && <p role="status">{verificationMessage}</p>}
           {replay != null && <details><summary>Saved replay · score matrix v2</summary><pre className="max-h-96 overflow-auto whitespace-pre-wrap text-xs">{JSON.stringify(replay, null, 2)}</pre></details>}
           {finalSummary?.previous_sizing_replay != null && <details><summary>Previous sizing revision</summary><pre className="max-h-96 overflow-auto whitespace-pre-wrap text-xs">{JSON.stringify(finalSummary.previous_sizing_replay, null, 2)}</pre></details>}
-          {!currentSizing && <Button disabled={reconciling || loading} onClick={() => void reconcile(true)}>{replay ? "Create directional sizing revision" : "Replay saved inputs under score matrix v2"}</Button>}
+          {finalSummary?.previous_valuation_replay != null && <details><summary>Previous holding valuation</summary><pre className="max-h-96 overflow-auto whitespace-pre-wrap text-xs">{JSON.stringify(finalSummary.previous_valuation_replay, null, 2)}</pre></details>}
+          {(!currentSizing || !snapshotValuation) && <Button disabled={reconciling || loading} onClick={() => void reconcile(true)}>{currentSizing ? "Create snapshot valuation revision" : replay ? "Create directional sizing revision" : "Replay saved inputs under score matrix v2"}</Button>}
         </div>}
         {run.stages.filter(stage => stage.stage === "actionables" && stage.summary.frozen_final).map(stage => (
           <details key="frozen-final" className="rounded-xl border bg-white p-4">

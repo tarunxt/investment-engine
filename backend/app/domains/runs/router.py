@@ -774,7 +774,7 @@ async def update_auto_rebalance_stage(
         stage=stage, run_id=effective_run_id, job_id=effective_job_id,
         expected_status=status if stage in LLM_STAGES and status in {"completed", "partial"} else None,
     )
-    if {"corrected_final_v2", "previous_sizing_replay"} & body.summary.keys():
+    if {"corrected_final_v2", "previous_sizing_replay", "previous_valuation_replay"} & body.summary.keys():
         raise HTTPException(422, detail="Corrected calculations are generated from saved sources")
     if "frozen_final" in body.summary:
         if stage != "actionables":
@@ -923,7 +923,8 @@ async def replay_india_score(sequence: int, db: AsyncSession = Depends(get_async
     summary = final.summary_json or {}
     previous = summary.get("corrected_final_v2")
     if previous != replay:
-        archive = {"previous_sizing_replay": previous} if previous is not None else {}
+        archive_key = "previous_valuation_replay" if previous and previous.get("sizing_policy") == "directional-v2" else "previous_sizing_replay"
+        archive = {archive_key: previous} if previous is not None else {}
         final.summary_json = {**summary, **archive, "corrected_final_v2": replay}
         await db.commit()
     return {"formula_version": replay["formula_version"], "listings": len(replay["rows"]), "sequence": sequence}

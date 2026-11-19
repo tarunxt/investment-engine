@@ -1320,7 +1320,7 @@ function buildCurrentValueSnapshotMap(
     indiaSnapshot.holdings.forEach((holding) => {
       const value = {
         units: holding.quantity,
-        currentValue: holding.market_value,
+        currentValue: (holding.quantity ?? 0) > 0 && (holding.market_value ?? 0) <= 0 ? null : holding.market_value,
       };
       indexCurrentValueSnapshot(map, holding.tradingsymbol, value);
       indexCurrentValueSnapshot(map, `${holding.exchange}:${holding.tradingsymbol}`, value);
@@ -1371,12 +1371,19 @@ function buildPositionContext(
 ): PositionContext {
   const snapshot = rows.map((row) => getCurrentValueSnapshotForRow(row.cells, snapshotMap)).find(Boolean);
   if (hasPortfolioSnapshot) {
-    // A complete holdings snapshot also captures stocks that are no longer held.
+    // An absent listing in a complete snapshot has zero settled units.
+    let currentValue = snapshot ? snapshot.currentValue : 0;
+    if (snapshot && currentValue === null && snapshot.units != null && snapshot.units > 0 &&
+        ["NSE", "BSE"].includes(rows[0]?.cells["Exchange Symbol"]?.trim().toUpperCase())) {
+      const fallbackPrice = rows.map(row => parseNumericCell(row.cells["Price Per Unit"]))
+        .find(price => price != null && price > 0);
+      if (fallbackPrice != null) currentValue = Math.round(snapshot.units * fallbackPrice * 100) / 100;
+    }
     return {
       source: "portfolio-snapshot",
       holdingMatch: snapshot ? "matched" : "absent",
       currentUnits: snapshot ? snapshot.units : 0,
-      currentInvestmentAmount: snapshot ? snapshot.currentValue : 0,
+      currentInvestmentAmount: currentValue,
     };
   }
   return {
@@ -7967,7 +7974,9 @@ function buildFormulaActionEstimate(
   let amount: number | null = null;
 
   if (units !== null) {
-    if (action === "Sell All" && currentInvestmentAmount !== null) {
+    if (stock.positionContext?.source === "portfolio-snapshot" && currentInvestmentAmount === null && (action === "Trim" || action === "Sell All")) {
+      amount = null;
+    } else if (action === "Sell All" && currentInvestmentAmount !== null) {
       amount = currentInvestmentAmount;
     } else if (
       action === "Trim" &&

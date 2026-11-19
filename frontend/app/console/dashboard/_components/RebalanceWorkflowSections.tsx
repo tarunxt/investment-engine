@@ -7521,6 +7521,7 @@ ${zerodhaExecutionMode === "direct_market"
             schema: "workflow-final-v2", formula_version: market === "india" ? "score-matrix-v2" : "score-matrix-v1",
             scorePolicy: "score-matrix-raw-effective-v2",
             broker: runMetadata.auto_rebalance_portfolio, workflow_sequence: runMetadata.auto_rebalance_sequence,
+            ...(market === "india" && generatedThreatInput?.analysis.job_id ? {position_policy:"zerodha-settled-snapshot-v1"} : {}),
             scorecard_job_id: generatedThreatInput?.analysis.job_id ?? null,
             captured_at: actionablesCompletedAt, formula: scoreMatrixFormulaConfig,
             rebalance_run_id: finalRebalanceInputs[0].id, rebalance_run_ids: finalRebalanceInputs.map(run => run.id), technical_run_id: generatedTechnicalRun.id,
