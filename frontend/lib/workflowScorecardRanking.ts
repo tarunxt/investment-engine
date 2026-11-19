@@ -1,11 +1,19 @@
 import type { ZerodhaThreatReport } from "@/types/api";
 
-export type RankedListing = { listing: string; score: number | null; pairwise: number | null; stock_threat: number | null };
+export type RankedListing = { listing: string; score: number | null; pairwise: number | null; stock_threat: number | null; comparisons?: number | null };
 
 export function workflowRanking(rows: { exchange: string; symbol: string; effectiveScore: number | null }[], report?: ZerodhaThreatReport | null): RankedListing[] {
   const tables = report?.tables ?? [];
-  const pairwise = new Map(tables.find(t => t.key === "pairwise_scores")?.rows.map(r => [r.Listing, r["Pairwise /100"]]));
-  const threats = new Map(tables.find(t => t.key === "stock_threat_scores")?.rows.map(r => [r.Exchange + ":" + r["Stock Symbol"], r["Stock Threat /100"]]));
+  const uniqueRows = (key: string, listing: (row: Record<string, string>) => string) => {
+    const result = new Map<string, Record<string, string> | null>();
+    for (const row of tables.filter(table => table.key === key).flatMap(table => table.rows)) {
+      const id = listing(row);
+      result.set(id, result.has(id) ? null : row);
+    }
+    return result;
+  };
+  const pairwise = uniqueRows("pairwise_scores", row => row.Listing);
+  const threats = uniqueRows("stock_threat_scores", row => row.Exchange + ":" + row["Stock Symbol"]);
   function observation(text?: string) {
     if (!text?.trim()) return null;
     const n = Number(text);
@@ -13,16 +21,18 @@ export function workflowRanking(rows: { exchange: string; symbol: string; effect
   }
   return rows.map(row => {
     const listing = row.exchange + ":" + row.symbol;
-    const pair = observation(pairwise.get(listing));
-    const threat = observation(threats.get(listing));
-    const weight = 98 + Number(pair !== null) + Number(threat !== null);
-    const score = row.effectiveScore === null ? null :
-      (98 * (row.effectiveScore + 3) * 100 / 6 + (pair ?? 0) + (threat === null ? 0 : 100 - threat)) / weight;
-    return { listing, score, pairwise: pair, stock_threat: threat };
+    const pairRow = pairwise.get(listing);
+    const pair = observation(pairRow?.["Pairwise /100"]);
+    const threat = observation(threats.get(listing)?.["Stock Threat /100"]);
+    const count = pairRow?.["Valid comparisons"]?.trim();
+    const comparisons = count && /^\d+$/.test(count) ? Number(count) : null;
+    const signed = weightedSigned(row.effectiveScore, {pairwise: pair, stock_threat: threat});
+    return { listing, score: signed === null ? null : (signed + 3) * 100 / 6, pairwise: pair, stock_threat: threat, comparisons };
+
   }).sort((a, b) => (b.score ?? -1) - (a.score ?? -1) || a.listing.localeCompare(b.listing));
 }
 
-export type SupplementalInputs = { pairwise: number | null; stock_threat: number | null };
+export type SupplementalInputs = { pairwise: number | null; stock_threat: number | null; comparisons?: number | null; jobId?: number };
 
 export function weightedSigned(base: number | null, inputs?: SupplementalInputs) {
   if (base === null || !inputs || (inputs.pairwise === null && inputs.stock_threat === null)) return base;
@@ -47,7 +57,7 @@ export function readScorecardManifest(prompt: string) {
     for (const row of manifest.rows) {
       if (typeof row?.listing !== "string" || result.has(row.listing) ||
           ![row.pairwise, row.stock_threat].every(n => n === null || (Number.isFinite(n) && n >= 0 && n <= 100))) return null;
-      result.set(row.listing, { pairwise: row.pairwise, stock_threat: row.stock_threat });
+      result.set(row.listing, { pairwise: row.pairwise, stock_threat: row.stock_threat, comparisons: Number.isSafeInteger(row.comparisons) && row.comparisons >= 0 ? row.comparisons : null, jobId: manifest.job_id });
     }
     return result;
   } catch { return null; }

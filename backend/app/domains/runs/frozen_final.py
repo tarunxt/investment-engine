@@ -118,10 +118,14 @@ async def validate_frozen_final(db, payload, *, user_id, portfolio, sequence, al
                 observations = manifest.get("rows")
                 if not isinstance(observations, list) or len(observations) > 500:
                     raise HTTPException(422, "Invalid scorecard observations")
+                observed_listings = set()
                 for observation in observations:
                     if not isinstance(observation, dict) or not isinstance(observation.get("listing"), str):
                         raise HTTPException(422, "Invalid scorecard listing")
                     listing = observation["listing"]
+                    if listing in observed_listings:
+                        raise HTTPException(409, f"Duplicate scorecard observation for {listing}")
+                    observed_listings.add(listing)
                     pair, threat = scorecards.get(listing, (None, None))
                     if observation.get("pairwise") != pair or observation.get("stock_threat") != threat:
                         raise HTTPException(409, "Scorecard observations differ from the saved job")
@@ -172,8 +176,22 @@ async def verified_scorecards(db, job_id, user_id, portfolio, sequence, *, legac
             raise HTTPException(409, "Scorecard job is not complete")
         report = parse_zerodha_threat_report(job.response, job.prompt or "", legacy_evidence=legacy_evidence) or {}
         tables = {table["key"]: table["rows"] for table in report.get("tables", [])}
-    threats = {row["Exchange"] + ":" + row["Stock Symbol"]: float(row["Stock Threat /100"])
-               for row in tables.get("stock_threat_scores", []) if row["Stock Threat /100"] != "Unknown"}
-    pairs = {row["Listing"]: float(row["Pairwise /100"]) for row in tables.get("pairwise_scores", [])
-             if row["Pairwise /100"] != "Unknown"}
+    def unique_scores(rows, listing_key, score_key):
+        scores = {}
+        for row in rows:
+            listing = listing_key(row)
+            value = row.get(score_key)
+            if listing in scores:
+                scores[listing] = None
+                continue
+            try:
+                number = float(value)
+            except (ValueError, TypeError):
+                number = None
+            scores[listing] = number if number is not None and math.isfinite(number) and 0 <= number <= 100 else None
+        return scores
+
+    threats = unique_scores(tables.get("stock_threat_scores", []),
+                            lambda row: row["Exchange"] + ":" + row["Stock Symbol"], "Stock Threat /100")
+    pairs = unique_scores(tables.get("pairwise_scores", []), lambda row: row["Listing"], "Pairwise /100")
     return {key: (pairs.get(key), threats.get(key)) for key in pairs.keys() | threats.keys()}
