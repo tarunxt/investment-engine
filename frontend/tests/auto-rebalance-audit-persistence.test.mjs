@@ -626,3 +626,17 @@ test('actual selective workflow clears cached evidence before each reservation a
     gate=deferred();
   }
 });
+
+test("a rejected final is durably failed, while model work and email are not repeated", async () => {
+  const reason = "Final calculation could not be verified: invalid evidence";
+  const h = harness({ intercept: async ({ stage, payload }) => {
+    if (stage === "actionables" && payload.status === "completed") throw new Error(reason);
+  } });
+  await h.runWorkflow("zerodha");
+  const event = [...h.durable.values()].find(row => row.stage === "actionables");
+  assert.equal(event.status, "failed");
+  assert.equal(event.error_message, reason);
+  assert.equal(h.view.states.zerodha.actionables.state, "failed");
+  assert.equal(h.emails.length, 0);
+  assert.equal(h.modelCalls.length, 3);
+});

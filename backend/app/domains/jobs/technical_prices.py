@@ -20,16 +20,17 @@ class MissingTechnicalListings(ValueError):
 
 
 def technical_identity_instructions(prompt: str) -> str:
+    outage = (' If dated chart evidence is unavailable, use Unavailable for Primary Setup, Confidence Score, '
+              'Last 5 candles trend, Trigger Level and Invalidation Level, and Neutral for Bias.')
     if not ANCHORS.search(prompt):
         if prompt.lstrip().startswith('## Technical Scan Input Bundle'):
             return ('\nResearch the latest available completed daily session for each listing. '
-                    'An intraday live quote is not required for daily chart analysis. '
-                    'If dated chart evidence is unavailable, report that explicitly.')
+                    'An intraday live quote is not required for daily chart analysis.' + outage)
         return ''
     return ('\nThe instrument field is the stable listing ID (EXCHANGE:SYMBOL). '
             'Return each ID exactly once by copying its two components into '
-            'Exchange Symbol and Stock Symbol, respectively. Preserve venue and punctuation. Put a single numeric price in each Trigger Level and Invalidation Level cell. '
-            'Keep confirmation conditions and support levels outside those cells.')
+            'Exchange Symbol and Stock Symbol, respectively. Preserve venue and punctuation. Put a single numeric price in each available Trigger Level and Invalidation Level cell. '
+            'Keep confirmation conditions and support levels outside those cells.' + outage)
 
 
 def missing_listing_prompt(prompt: str, ids: tuple[str, ...]) -> str:
@@ -65,10 +66,24 @@ class UnavailableTechnicalCoverage(ValueError):
 
 def unavailable_technical_setup(row):
     """Recognize a reported data outage without treating it as a directional signal."""
-    return (row.get('Bias', '').strip().casefold() in {'unresolved', 'unavailable'}
-            and row.get('Confidence Score', '').strip().casefold() == 'unavailable'
-            and re.fullmatch(r'unavailable(?:\s*[-–—:]\s*.+)?',
-                             row.get('Primary Setup', '').strip(), re.I) is not None)
+    if row.get('Bias', '').strip().casefold() not in {'neutral', 'unresolved', 'unavailable'}:
+        return False
+    if row.get('Confidence Score', '').strip().casefold() != 'unavailable':
+        return False
+    # Some providers explain the outage in prose. Explicitly absent chart
+    # fields carry the same meaning regardless of the wording of that note.
+    if all(row.get(field, '').strip().casefold() == 'unavailable'
+           for field in ('Last 5 candles trend', 'Trigger Level', 'Invalidation Level')):
+        return True
+    return re.fullmatch(r'(?:(?:chart data|evidence)\s+)?unavailable(?:\s*[-–—:]\s*.+)?',
+                        row.get('Primary Setup', '').strip(), re.I) is not None
+
+
+def _unpriced_outage(headers, cells):
+    row = dict(zip(headers, cells))
+    return (all(row.get(field, '').strip().casefold() == 'unavailable'
+                for field in ('Trigger Level', 'Invalidation Level'))
+            and unavailable_technical_setup(row))
 
 
 def validate_technical_prices(prompt: str, content: str) -> None:
@@ -81,7 +96,7 @@ def validate_technical_prices(prompt: str, content: str) -> None:
                     for row in block.rows]
             if rows and all(unavailable_technical_setup(row) for row in rows):
                 raise UnavailableTechnicalCoverage(f'Technical Scan returned no usable chart data for any of {len(rows)} listings. '
-                                 'Retry Technical Scan with a web-enabled model or restored market data.')
+                                 'Chart-dependent inputs are unavailable for the final calculation.')
         return
     anchors = json.loads(match[1])
     expected = {a['instrument']: float(a['price']) for a in anchors}
@@ -89,6 +104,7 @@ def validate_technical_prices(prompt: str, content: str) -> None:
         raise ValueError('Technical broker price anchors are missing or invalid')
     blocks, _ = parse_markdown(content)
     seen = set()
+    outages = set()
     for block in blocks:
         if block.kind != 'table':
             continue
@@ -106,6 +122,9 @@ def validate_technical_prices(prompt: str, content: str) -> None:
             if key not in expected or key in seen:
                 raise ValueError(f'Technical output has unexpected or duplicate listing {key}')
             seen.add(key)
+            if _unpriced_outage(block.headers, row):
+                outages.add(key)
+                continue
             for field in required[2:]:
                 raw = values[field].strip().replace(',', '')
                 if not re.fullmatch(r'\d+(?:\.\d+)?', raw):
@@ -114,7 +133,9 @@ def validate_technical_prices(prompt: str, content: str) -> None:
                 if not math.isfinite(price) or abs(price / expected[key] - 1) > .25:
                     raise ValueError(f'Technical {field} differs by over 25% from broker anchor for {key}; reconcile price basis/corporate actions')
     if seen != set(expected):
-        raise MissingTechnicalListings((key for key in expected if key not in seen), len(seen))
+        raise MissingTechnicalListings((key for key in expected if key not in seen), len(seen - outages))
+    if outages == seen:
+        raise UnavailableTechnicalCoverage(f'Technical Scan returned no usable chart data for any of {len(seen)} listings.')
 
 
 # A leading directional clause names the actionable level. A trailing support
@@ -188,6 +209,8 @@ def normalize_technical_rows(prompt, content, evidence):
             if key not in expected or key in seen:
                 raise ValueError(f'Technical output has unexpected or duplicate listing {key}')
             seen.add(key)
+            if _unpriced_outage(block.headers, row):
+                continue
             cells = list(row)
             changed = False
             for field in fields:

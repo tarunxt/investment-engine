@@ -361,3 +361,18 @@ test('canonical US identity tuple encoding cannot merge distinct listings contai
  const run=oneUsJob([modelRow(1,{'Stock Symbol':'SIM01','Exchange Symbol':'NASDAQ'}),modelRow(1,{'Stock Symbol':'SIM02','Exchange Symbol':'NYSE'})]);
  const stocks=helpers.buildConsensusRows([run],'us',null,[run],[a,b]);assert.equal(stocks.length,2);assert.equal(new Set(stocks.map(stock=>stock.key)).size,2);
 });
+
+test('completed and explicitly chart-unavailable partial jobs retain the same technical lineage', () => {
+  const response = '| Exchange Symbol | Stock Symbol | Primary Setup | Bias | Premarket trend | Last 5 candles trend | Confidence Score | Trigger Level | Invalidation Level |\n|---|---|---|---|---|---|---|---|---|\n| NSE | BEL | Evidence unavailable – no dated chart data retrieved | Neutral | 0 | 0 | Unavailable | Unavailable | Unavailable |';
+  const job = { provider: 'synthetic', model: 'fixture', status: 'completed', created_at: timestamp, response };
+  const run = { id: 20, status: 'completed', created_at: timestamp,
+    prompt: '## Technical Scan Input Bundle\n[SCORING_POLICY_V3]\nMarket: India equities\n\nStock list',
+    run_jobs: [{job_id: 2366, job}] };
+  const saved = Object.values(helpers.buildTechnicalScanMap([run]))[0];
+  assert.equal(saved.last5CandlesTrend, 'Unavailable');
+  assert.equal(saved.jobId, 2366);
+  job.status = 'partial';
+  assert.deepEqual(helpers.buildTechnicalScanMap([run]), {});
+  job.runtime_metadata_json = {technical_chart_coverage:'unavailable'};
+  assert.deepEqual(Object.values(helpers.buildTechnicalScanMap([run]))[0], saved);
+});

@@ -2868,17 +2868,25 @@ function parseTechnicalScanResponse(
           ? "bullish"
           : "neutral";
 
+      const confidenceScore = confidenceIndex >= 0 ? normalizeScanCell(cells[confidenceIndex] || "") : "";
+      const last5 = last5CandlesTrendIndex >= 0 ? normalizeScanCell(cells[last5CandlesTrendIndex] || "") : "";
+      const trigger = triggerIndex >= 0 ? normalizeScanCell(cells[triggerIndex] || "") : "";
+      const invalidation = invalidationIndex >= 0 ? normalizeScanCell(cells[invalidationIndex] || "") : "";
+      const chartUnavailable = /^(neutral|unresolved|unavailable)$/.test(rawBias)
+        && /^unavailable$/i.test(confidenceScore)
+        && ([last5, trigger, invalidation].every(value => /^unavailable$/i.test(value))
+          || /^(?:(?:chart data|evidence)\s+)?unavailable(?:\s*[-–—:]\s*.+)?$/i.test(primarySetup));
       parsedFromTable.push({
         stockSymbol,
         exchangeSymbol,
         primarySetup,
         secondarySetups,
-        confidenceScore: confidenceIndex >= 0 ? normalizeScanCell(cells[confidenceIndex] || "") : "",
+        confidenceScore,
         bias,
         premarketTrend: premarketTrendIndex >= 0 ? normalizeScanCell(cells[premarketTrendIndex] || "") : "",
-        last5CandlesTrend: meta.market === "india" && /^(neutral|unresolved|unavailable)$/.test(rawBias) && /^unavailable(?:\s*[-–—:]\s*.+)?$/i.test(primarySetup) && /^unavailable$/i.test(normalizeScanCell(cells[confidenceIndex] || "")) ? "Unavailable" : last5CandlesTrendIndex >= 0 ? normalizeScanCell(cells[last5CandlesTrendIndex] || "") : "",
-        triggerLevel: triggerIndex >= 0 ? normalizeScanCell(cells[triggerIndex] || "") : "",
-        invalidationLevel: invalidationIndex >= 0 ? normalizeScanCell(cells[invalidationIndex] || "") : "",
+        last5CandlesTrend: chartUnavailable ? "Unavailable" : last5,
+        triggerLevel: trigger,
+        invalidationLevel: invalidation,
         ...meta,
       });
     }
@@ -2895,7 +2903,10 @@ export function buildTechnicalScanMap(runs: RunResponse[], parsedSources?: Techn
     .flatMap((run) =>
       (run.run_jobs ?? []).flatMap((link) => {
         const job = link.job;
-        if (!job || job.status !== "completed" || !job.response) return [];
+        if (!job?.response) return [];
+        const chartOutage = job.runtime_metadata_json && "technical_chart_coverage" in job.runtime_metadata_json
+          && job.runtime_metadata_json.technical_chart_coverage === "unavailable";
+        if (job.status !== "completed" && !(job.status === "partial" && chartOutage)) return [];
         const meta = {
           market: getAnalysisRunIdentity(run).market,
           runId: run.id,

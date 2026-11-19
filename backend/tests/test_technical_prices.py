@@ -81,3 +81,19 @@ def test_ambiguous_price_list_is_recorded_as_estimate(raw, expected):
     assert evidence[0]['status'] == 'estimated_mean' and evidence[0]['original'] == raw
     assert len(evidence[0]['candidates']) >= 2
     validate_technical_prices(PROMPT, result)
+
+
+def test_anchored_no_chart_rows_retain_identity_and_reject_invented_prices():
+    from app.domains.jobs.technical_prices import UnavailableTechnicalCoverage, normalize_technical_rows
+
+    source = ("| Exchange Symbol | Stock Symbol | Primary Setup | Bias | Confidence Score | Last 5 candles trend | Trigger Level | Invalidation Level |\n"
+              "|---|---|---|---|---|---|---|---|\n"
+              "| NSE | LAURUSLABS | Evidence unavailable | Neutral | Unavailable | Unavailable | Unavailable | Unavailable |")
+    assert normalize_technical_rows(PROMPT, source, []) == (source, set())
+    with pytest.raises(UnavailableTechnicalCoverage):
+        validate_technical_prices(PROMPT, source)
+    with pytest.raises(ValueError, match="unexpected or duplicate"):
+        validate_technical_prices(PROMPT, source.replace("LAURUSLABS", "OTHER"))
+    with pytest.raises(ValueError, match="over 25%"):
+        validate_technical_prices(PROMPT, source.replace("| Unavailable | Unavailable | Unavailable | Unavailable |",
+                                                          "| Unavailable | Unavailable | 9000 | 620 |"))

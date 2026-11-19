@@ -289,3 +289,31 @@ Portfolio holdings table:
         saved = deepcopy(stage.summary_json)
         await replay_india_score(42, db, OWNER)
         assert saved == stage.summary_json
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("rejected", [True, False])
+async def test_failed_actionables_only_replays_confirmed_verification_rejections(audit_db, stored_capture, rejected):
+    from test_auto_rebalance_audit_durability import OWNER, snapshot
+    from app.domains.runs.router import replay_india_score
+    async with audit_db.sessions() as db:
+        technical = await db.get(Run, 20)
+        technical.status = JobStatus.COMPLETED
+        technical.prompt += '\n[TECHNICAL_REBALANCE_SOURCES_V1]{"run_ids":[10],"job_ids":[11]}[/TECHNICAL_REBALANCE_SOURCES_V1]'
+        await db.commit()
+    for stage in ('sync', 'threats', 'swing'):
+        await write(audit_db, stage, 'skipped')
+    await write(audit_db, 'rebalance', 'partial', run_id=10)
+    await write(audit_db, 'technical', 'completed', run_id=20, summary={
+        'final_inputs': {key: stored_capture[key] for key in ('formula', 'rebalance_run_ids', 'response_hashes')}})
+    await write(audit_db, 'actionables', 'processing')
+    reason = 'Final calculation could not be verified: unaudited setup' if rejected else 'Model request failed'
+    await write(audit_db, 'actionables', 'failed', error_message=reason)
+    async with audit_db.sessions() as db:
+        if rejected:
+            assert (await replay_india_score(42, db, OWNER))['listings'] == 1
+        else:
+            with pytest.raises(HTTPException, match='eligible for reconciliation'):
+                await replay_india_score(42, db, OWNER)
+    workflow, _, _ = await snapshot(audit_db)
+    assert workflow.status == 'failed'

@@ -66,7 +66,9 @@ async def historical_inputs(db, workflow, technical_id):
 async def recover_final(db, workflow, *, corrected=False):
     stages = {stage.stage: stage for stage in workflow.stages}
     final = stages.get("actionables")
-    if final is None or final.status not in {"processing", "running", "completed"}:
+    rejected_capture = (corrected and final is not None and final.status == "failed"
+                        and (final.error_message or "").startswith("Final calculation could not be verified:"))
+    if final is None or (final.status not in {"processing", "running", "completed"} and not rejected_capture):
         raise HTTPException(409, "No started Actionables stage is eligible for reconciliation")
     for name in ("sync", "threats", "swing", "rebalance", "technical"):
         stage = stages.get(name)

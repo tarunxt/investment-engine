@@ -77,3 +77,13 @@ test('input titles, prompt titles and saved run labels repeat the card name', ()
   }
   assert.match(workflow, /STAGE_METADATA\[stage\]\.idle\} Output/);
 });
+
+test('rejected final verification is light red, including previously cached unconfirmed failures', () => {
+  const { getStageLedgerTone: tone } = evaluate(tile, ['getStageLedgerTone', 'getStageBackgroundClass', 'hasStagePartialOutput']);
+  assert.equal(tone({state:'failed', runStatus:'Verification failed'}), 'bg-red-50');
+  assert.equal(tone({state:'idle', runStatus:'Verification failed'}), 'bg-red-50');
+  assert.equal(tone({state:'completed', runStatus:'Completion unconfirmed', error:'Final calculation could not be verified: missing evidence'}), 'bg-red-50');
+  assert.equal(tone({state:'completed', runStatus:'Completion unconfirmed', error:'Network timeout'}), 'bg-amber-50');
+  assert.equal(tone({state:'completed', runStatus:'partial'}), 'bg-amber-50');
+  assert.equal(tone({state:'running'}), 'bg-yellow-50');
+});
