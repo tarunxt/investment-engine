@@ -42,6 +42,8 @@ export function historicalStageInfo(stage?: AutoRebalanceStageResponse): StageIn
     costInr: number('cost_inr'),
     partialNotice: typeof summary.partial_notice === 'string' ? summary.partial_notice : null,
     error: stage.error_message,
+    evidenceCoverage: typeof summary.evidence_coverage === 'string' ? summary.evidence_coverage : undefined,
+    distinctModels: number('distinct_models') ?? undefined,
     pairCoverage: typeof summary.pair_coverage === 'string' ? summary.pair_coverage : undefined,
     portfolioThreat: typeof summary.portfolio_threat === 'string' ? summary.portfolio_threat : undefined,
     frozenFinal: typeof summary.frozen_final === 'object' && summary.frozen_final !== null ? summary.frozen_final as Record<string, unknown> : undefined,

@@ -93,6 +93,15 @@ def test_component_arithmetic_parity():
     custom["actionScores"]["Add more"] = 4
     custom["detailedRationaleMultipliers"]["cruxx"] = 101
     fixtures.append({"rows": [source_row()], "technical": None, "formula": custom, "market": "india"})
+    icici = [source_row(**{ACTION_HEADER: "Trim", "Exchange Symbol": "BSE", "Stock Symbol": "ICICIBANK",
+                           "Current Units": "34", "Units Change": change}) for change in ("-10", "-12")]
+    config = formula()
+    config["detailedRationaleMultipliers"]["mean-mode-action"] = 0
+    fixtures.append({"rows": icici, "technical": None, "formula": config, "market": "india"})
+    corrected = calculate_listing(icici, config, market="india")
+    assert corrected["action"] == "Add more"
+    assert corrected["inputs"]["meanUnitsChange"] == -11
+    assert corrected["estimate"]["units"] is None and corrected["estimate"]["amount"] is None
     before = deepcopy(fixtures)
     run = subprocess.run(["node", str(root / "frontend/tests/helpers/frozenFinalArithmetic.mjs")],
                          input=json.dumps(fixtures), capture_output=True, text=True, check=False)

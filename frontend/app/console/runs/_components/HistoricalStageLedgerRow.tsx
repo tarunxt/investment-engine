@@ -34,7 +34,7 @@ export function HistoricalStageLedgerRow({ stage, info, now, onClick, onOutputCl
   </div>;
   return <tr className="border-t border-slate-200 align-top dark:border-slate-700">
     <th scope="row" className="px-2 py-3 text-left font-semibold">{label}</th>
-    <td className="px-2 py-3">{info.runStatus || 'Not recorded'}</td>
+    <td className="px-2 py-3">{info.runStatus || 'Not recorded'}{info.evidenceCoverage && <div>{info.evidenceCoverage}</div>}{info.distinctModels != null && <div>{info.totalLlms ?? '?'} jobs · {info.distinctModels} distinct {info.distinctModels === 1 ? 'model' : 'models'}</div>}</td>
     <td className="px-2 py-3">{formatCompactStageTime(info.completedAt ?? (stage === 'sync' ? null : info.startedAt))}</td>
     <td className="px-2 py-3">{stage === 'sync' ? '—' : stage === 'actionables' ? `Rebalance inputs ${info.rebalanceInputs ?? 'n/a'}` : formatLlmCompletion(info)}</td>
     <td className="px-2 py-3">{stage === 'sync' ? '—' : formatRecommendedStockProgress(info)}</td>

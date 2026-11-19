@@ -630,8 +630,10 @@ function summarizeRun(run: RunResponse) {
     null;
   return {
     completedAt: run.updated_at ?? firstJob?.updated_at ?? run.created_at,
-    provider: jobs.length > 1 ? `${jobs.length} LLMs` : firstJob?.provider,
-    model: jobs.length > 1 ? "Model mix" : firstJob?.model,
+    distinctModels: jobs.length && jobs.every(job => job.model?.trim())
+      ? new Set(jobs.map(job => job.model.trim().toLowerCase())).size : undefined,
+    provider: jobs.length > 1 ? `${jobs.length} jobs` : firstJob?.provider,
+    model: jobs.length > 1 ? [...new Set(jobs.map(job => job.model).filter(Boolean))].join(", ") : firstJob?.model,
     runStatus: failedJobs.length && jobs.some(job => job.status === "completed") ? "partial" : run.status,
     exportStatus: run.export_status ?? firstJob?.export_status,
     costUsd: costUsd || null,
@@ -647,6 +649,10 @@ function summarizeThreat(
 ) {
   const errorMessage = analysis.error_message?.trim() ?? null;
   const diagnostics = readFailureDiagnostics(analysis.runtime_metadata_json);
+  const evidence = analysis.report?.tables.find(table => table.key === "threat_score_evidence");
+  const evidenceCoverage = evidence?.columns.includes("Disposition")
+    ? `${evidence.rows.filter(row => row.Disposition === "Accepted").length}/${evidence.rows.length} rows accepted`
+    : undefined;
   const paired = analysis.report?.tables.find(table => table.key === "pairwise_scores")?.rows;
   const portfolioRisk = analysis.report?.tables.find(table => table.key === "portfolio_threat_score")?.rows[0];
   const assessed = analysis.report?.tables.find(table => table.key === "stock_threat_scores")?.rows;
@@ -654,6 +660,7 @@ function summarizeThreat(
   const validPairs = paired?.reduce((n, row) => n + Number(row["Valid comparisons"]), 0);
   const expectedPairs = paired?.reduce((n, row) => n + Number(row.Expected), 0);
   return {
+    evidenceCoverage,
     pairCoverage: validPairs == null || expectedPairs == null ? undefined : `${validPairs / 2} / ${expectedPairs / 2} comparisons`,
     portfolioThreat: portfolioRisk ? `${portfolioRisk["Portfolio Threat /100"]} / 100 · ${portfolioRisk["Assessed value"]} of holdings value assessed${coverage}` : undefined,
     completedAt: analysis.updated_at ?? analysis.created_at,
@@ -2052,6 +2059,8 @@ function summarizeAutoRebalanceHistoryStage(
         ...(item.run_id ? [`Run #${item.run_id}`] : []),
         ...(item.job_id ? [`Job #${item.job_id}`] : []),
       ] },
+      evidenceCoverage: typeof summary.evidence_coverage === "string" ? summary.evidence_coverage : undefined,
+      distinctModels: getAutoRebalanceSummaryNumber(summary, "distinct_models") ?? undefined,
       completedLlms,
       passedLlms: getAutoRebalanceSummaryNumber(summary, "passed_llms") ?? Math.max(0, (item.completed_provider_count ?? 0) - (item.partial_provider_count ?? 0)),
       partialLlms: getAutoRebalanceSummaryNumber(summary, "partial_llms") ?? item.partial_provider_count ?? 0,
@@ -5895,6 +5904,8 @@ ${zerodhaExecutionMode === "direct_market"
           recommended_stocks: info.recommendedStocks ?? null,
           rebalance_inputs: info.rebalanceInputs ?? null,
           ...(info.finalInputs ? { final_inputs: info.finalInputs } : {}),
+          ...(info.evidenceCoverage ? { evidence_coverage: info.evidenceCoverage } : {}),
+          ...(info.distinctModels != null ? { distinct_models: info.distinctModels } : {}),
           ...(info.pairCoverage ? { pair_coverage: info.pairCoverage } : {}),
           ...(info.portfolioThreat ? { portfolio_threat: info.portfolioThreat } : {}),
           ...(info.frozenFinal ? { frozen_final: info.frozenFinal } : {}),

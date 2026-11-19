@@ -174,13 +174,13 @@ def calculate_listing(rows, formula, technical=None, *, direction=None, market, 
     elif action in {"Sell All", "Trim"} and current == 0:
         units_change = 0
     elif action == "Sell All":
-        units_change = -abs(current) if (current or 0) > 0 else -abs(bearish) if bearish is not None else -abs(mean_change) if mean_change is not None else None
+        units_change = -abs(current) if (current or 0) > 0 else -bearish if bearish is not None else 0 if mean_change == 0 and bullish is None else None
     elif action == "Trim":
-        units_change = -abs(current * 0.5) if (current or 0) > 0 else -abs(bearish) if bearish is not None else -abs(mean_change) if mean_change is not None else 0
+        units_change = -abs(current * 0.5) if (current or 0) > 0 else -bearish if bearish is not None else 0 if mean_change == 0 and bullish is None else None
     elif action == "Hold":
         units_change = 0
     else:
-        units_change = abs(bullish) if bullish is not None else abs(mean_change) if mean_change is not None else None
+        units_change = bullish if bullish is not None else 0 if mean_change == 0 and bearish is None else None
     # buildConsensusRows replaces the representative's Total Buy Amount with
     # the consensus action mean before buildFormulaActionEstimate reads it.
     consensus_action = "Hold"

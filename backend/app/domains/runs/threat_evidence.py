@@ -27,6 +27,10 @@ Impact 1 below 2%, 2 from 2 to under 5%, 3 from 5 to under 10%, 4 from 10 to und
 5 at least 20%. Use 0 only for documented absence of adverse exposure. Use Unknown when
 evidence is inadequate. Use scenario CLEAR only for verified category-wide absence.
 Use the numeric category ID. Cite a specific dated article, filing or data release for each claim.
+Before scoring, look up each distinct scenario once. Open the underlying filing, bulletin or article
+and verify its title, publication date and claim on that page. Reuse that verified citation across
+affected listings only when it supports their exposure. If retrieval is unavailable or the document
+cannot be verified, enter Unknown for the source and unsupported scores. Never construct a URL or date.
 A publisher homepage cannot substantiate a scenario. Provide dated source URL, ISO evidence date, downside range, rationale, confidence
 (high/medium/low), and one row per scenario and listing. Never infer absence from missing news.
 After evidence append ## Pairwise comparisons with header Left | Right | Winner | Rationale.

@@ -2138,30 +2138,33 @@ function resolveMatrixUnitsForAction(
   if (action === "Sell All") {
     if ((context.currentUnits ?? 0) > 0) return -Math.abs(context.currentUnits || 0);
     if (context.bearishMeanUnits !== null) return -Math.abs(context.bearishMeanUnits);
-    return context.meanUnitsChange !== null ? -Math.abs(context.meanUnitsChange) : null;
+    return context.meanUnitsChange === 0 && context.bullishMeanUnits === null ? 0 : null;
   }
 
   if (action === "Trim") {
     const currentUnits = context.currentUnits ?? 0;
     if (currentUnits > 0) return -Math.abs(currentUnits * 0.5);
     if (context.bearishMeanUnits !== null) return -Math.abs(context.bearishMeanUnits);
-    if (context.meanUnitsChange !== null) return -Math.abs(context.meanUnitsChange);
-    return 0;
+    return context.meanUnitsChange === 0 && context.bullishMeanUnits === null ? 0 : null;
   }
 
   if (action === "Hold") return 0;
 
   if (context.bullishMeanUnits !== null) return Math.abs(context.bullishMeanUnits);
-  return context.meanUnitsChange !== null ? Math.abs(context.meanUnitsChange) : null;
+  return context.meanUnitsChange === 0 && context.bearishMeanUnits === null ? 0 : null;
 }
 
 function evaluateScoreMatrixRules(context: ScoreMatrixContext) {
   const meanScore = clampScoreToGuardrail(context.calculatedScore ?? context.meanScore ?? 0) ?? 0;
   const hasPosition = (context.currentUnits ?? 0) > 0;
   const positiveAction: ActionCategory = hasPosition ? "Add more" : "Buy New";
-  const positiveUnitsStrategy = hasPosition
-    ? "Add more using the average bullish units change."
-    : "Buy New using the average bullish units change.";
+  const positiveUnitsStrategy = context.bullishMeanUnits === null && context.bearishMeanUnits !== null
+    ? "Buy quantity unavailable. Model unit changes only support selling."
+    : `${ACTION_CATEGORY_LABEL[positiveAction]} using the average bullish units change.`;
+  const sellSizeUnavailable = context.currentUnits === null && context.bearishMeanUnits === null;
+  const missingSellReason = context.bullishMeanUnits !== null
+    ? "Sell quantity unavailable. Model unit changes only support buying."
+    : "Sell quantity unavailable without holdings or sell-side model units.";
 
   const rules: Array<Omit<ScoreMatrixRuleEvaluation, "matched"> & { matches: boolean }> = [
     {
@@ -2205,7 +2208,7 @@ function evaluateScoreMatrixRules(context: ScoreMatrixContext) {
       label: "[-2, -1)",
       when: "Exact bounded Calculated Score is at least -2 and less than -1.",
       action: "Trim",
-      unitsStrategy: "Trim 50% of current units.",
+      unitsStrategy: sellSizeUnavailable ? missingSellReason : "Trim 50% of current units.",
       summary: "Moderate bearish score trims half of the current position.",
       matches: meanScore >= -2 && meanScore < -1,
     },
@@ -2214,7 +2217,7 @@ function evaluateScoreMatrixRules(context: ScoreMatrixContext) {
       label: "[-3, -2)",
       when: "Exact bounded Calculated Score is at least -3 and less than -2.",
       action: "Sell All",
-      unitsStrategy: "Sell 100% of current units.",
+      unitsStrategy: sellSizeUnavailable ? missingSellReason : "Sell 100% of current units.",
       summary: "Strong bearish score exits the full current position.",
       matches: meanScore >= -3 && meanScore < -2,
     },
@@ -2381,7 +2384,7 @@ function buildScoreMatrixDetail(
         action: calculatedAction,
         actionScore: calculatedScore,
         unitsChange: calculatedUnitsChange,
-        note: `${deferred ? calculatedScore === null ? "Score unavailable" : "Holdings unavailable" : matchedRule.summary} Position: ${getPositionContextLabel(stock)}.`,
+        note: `${deferred ? calculatedScore === null ? "Score unavailable" : "Holdings unavailable" : calculatedUnitsChange === null ? matchedRule.summary + " " + matchedRule.unitsStrategy : matchedRule.summary} Position: ${getPositionContextLabel(stock)}.`,
         isSummary: true,
         isCalculated: true,
       },
@@ -2475,7 +2478,7 @@ function applyScoreMatrixEdits(
       action: deferred ? null : matchedRule.action,
       actionScore: calculatedScore,
       unitsChange: calculatedUnitsChange,
-      note: deferred ? calculatedScore === null ? "Score unavailable" : "Holdings unavailable" : matchedRule.summary,
+      note: deferred ? calculatedScore === null ? "Score unavailable" : "Holdings unavailable" : calculatedUnitsChange === null ? matchedRule.summary + " Quantity unavailable for this action." : matchedRule.summary,
     }
     : row);
 

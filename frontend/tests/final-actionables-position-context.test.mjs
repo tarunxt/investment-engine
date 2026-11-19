@@ -144,6 +144,14 @@ test('dissent and distinct same-model jobs remain visible in the consensus and f
   assert.equal(detail.rows.filter((row) => !row.isSummary).length, 3);
 });
 
+test('automatic sizing requires model units in the requested direction when holdings cannot size the trade', () => {
+  const context = { currentUnits: null, bullishMeanUnits: 11, bearishMeanUnits: null, meanUnitsChange: 11 };
+  for (const action of ['Trim', 'Sell All']) assert.equal(helpers.resolveMatrixUnitsForAction(action, context), null);
+  const sells = { currentUnits: 34, bullishMeanUnits: null, bearishMeanUnits: 11, meanUnitsChange: -11 };
+  assert.equal(helpers.resolveMatrixUnitsForAction('Add more', sells), null);
+  assert.equal(helpers.resolveMatrixUnitsForAction('Trim', sells), -17);
+});
+
 test('known-zero holdings never fall back to model sell sizes, while unknown holdings retain the fallback', () => {
   for (const [action, score] of [['Sell All', -3], ['Trim', -1.5]]) {
     const scores = Object.fromEntries(parser.REBALANCE_HEADER_ORDER.filter((header) => header.startsWith('Score Rationale')).map((header) => [header, String(score)]));

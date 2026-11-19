@@ -61,6 +61,8 @@ export type StageInfo = {
   recommendedStocks?: number | null;
   rebalanceInputs?: number | null;
   finalInputs?: Record<string, unknown>;
+  evidenceCoverage?: string;
+  distinctModels?: number;
   pairCoverage?: string;
   portfolioThreat?: string;
   frozenFinal?: Record<string, unknown>;
@@ -316,6 +318,8 @@ export function getLlmStageTileRows(info: StageInfo, now: number): StageTileRow[
   return [
     { label: "Last Scan", value: formatCompactStageTime(info.completedAt ?? info.startedAt) },
     { label: "LLMs completed", value: formatLlmCompletion(info) },
+    ...(info.evidenceCoverage ? [{label: "Threat evidence", value: info.evidenceCoverage}] : []),
+    ...(info.distinctModels != null ? [{label: "Model coverage", value: `${info.totalLlms ?? "?"} jobs · ${info.distinctModels} distinct model${info.distinctModels === 1 ? "" : "s"}`}] : []),
     { label: "Stocks recommended", value: formatRecommendedStockProgress(info) },
     { label: "Duration", value: formatDuration(info.startedAt, info.endedAt, now) ?? "n/a" },
     { label: "Cost incurred", value: formatInrCost(info.costInr) },
