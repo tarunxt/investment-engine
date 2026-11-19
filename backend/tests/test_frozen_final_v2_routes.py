@@ -1,9 +1,11 @@
 """Real route/transaction checks for versioned source recomputation."""
 from copy import deepcopy
 import hashlib
+from types import SimpleNamespace
 
+import httpx
 import pytest
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException
 from sqlalchemy import select
 
 # Reuse the existing isolated SQLite/no-network route fixture and its writers.
@@ -96,7 +98,7 @@ async def test_running_sources_fail_before_arithmetic(audit_db, stored_capture):
 
 
 @pytest.mark.anyio
-async def test_reconcile_exact_sources_twice(audit_db, stored_capture):
+async def test_reconcile_exact_sources_twice(audit_db, stored_capture, monkeypatch):
     from test_auto_rebalance_audit_durability import OWNER, snapshot
     from app.domains.runs.router import reconcile_auto_rebalance
     async with audit_db.sessions() as db:
@@ -124,11 +126,33 @@ async def test_reconcile_exact_sources_twice(audit_db, stored_capture):
     assert audit_db.dispatch.call_count == first_dispatch_count
 
     # The corrected calculation is stored separately and is idempotent, including after reload.
-    from app.domains.runs.router import replay_india_score
-    for _ in range(2):
+    from app.core.recovery import RecoveryMiddleware
+    from app.domains.runs import router as routes
+
+    async def get_db():
         async with audit_db.sessions() as db:
-            replay = await replay_india_score(42, db, OWNER)
-            assert replay == {"formula_version": "score-matrix-v2", "listings": 1, "sequence": 42}
+            yield db
+
+    monkeypatch.setenv("CREDX_RECOVERY_MODE", "1")
+    app = FastAPI()
+    app.include_router(routes.router)
+    app.add_middleware(RecoveryMiddleware)
+    app.dependency_overrides[routes.get_async_db] = get_db
+    path = "/runs/auto-rebalance-history/india/42/replay-score-v2"
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        assert (await client.post(path)).status_code in {401, 403}
+        app.dependency_overrides[routes.get_current_user] = lambda: SimpleNamespace(id=8)
+        assert (await client.post(path)).status_code == 404
+        app.dependency_overrides[routes.get_current_user] = lambda: OWNER
+        for _ in range(2):
+            response = await client.post(path)
+            assert response.status_code == 200, response.text
+            assert response.json() == {"formula_version": "score-matrix-v2", "listings": 1, "sequence": 42}
+        for blocked in (path.replace("/india/", "/us/"), path.replace("/42/", "/0/"),
+                        path.replace("replay-score-v2", "reconcile"), path + "/extra",
+                        "/runs/auto-rebalance-completion-email"):
+            response = await client.post(blocked)
+            assert response.status_code == 503 and response.json()["code"] == "RECOVERY_CONTAINMENT"
     async with audit_db.sessions() as db:
         final = (await db.execute(select(AutoRebalanceWorkflowStage).where(
             AutoRebalanceWorkflowStage.stage == "actionables"))).scalar_one()
