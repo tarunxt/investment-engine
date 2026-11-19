@@ -121,6 +121,12 @@ function scenario(weights, mode) {
     (b.score??-Infinity)-(a.score??-Infinity)||a.key.localeCompare(b.key));
   return {mode,weights,rankings,historicalMeans,listingResults,allocation};
 }
+function actionBand(score) {
+  if (score == null) return null;
+  if (score >= 1) return 'Positive';
+  if (score >= -1) return 'Hold';
+  return score >= -2 ? 'Trim' : 'Sell All';
+}
 const baseline=scenario(baselineWeights,'current-run-only');
 const original=new Map(baseline.allocation?.map(r=>[r.listing,r]));
 if (v?.schema === 'india-valuation-v2' || baseline.allocation) {
@@ -133,6 +139,11 @@ for (const mode of ['current-run-only','full-window']) for (const weights of [ba
   const result=scenario(weights,mode), trades=result.allocation;
   console.log(JSON.stringify({...result,sequence:record.workflow_sequence,valuationAsOf:v?.asOf??null,
     coverage:v && v.historyAvailable !== false ? {eligiblePrior:totalPrior,comparablePrior} : null,
+    thresholdCrossings:result.rankings.flatMap(({key,signed}) => {
+      const from=actionBand(rows.get(key).score), to=actionBand(signed);
+      return from !== null && to !== null && from !== to ? [{listing:key,from,to}] : [];
+    }),
+    assets:v?.assets ?? null,
     changedRanks:result.rankings.filter((r,i)=>r.key!==baseline.rankings[i].key).length,
     changedWindowRanks:result.historicalMeans.every(r=>r.score!=null) && baseline.historicalMeans.every(r=>r.score!=null)
       ? result.historicalMeans.filter((r,i)=>r.key!==baseline.historicalMeans[i].key).length : null,

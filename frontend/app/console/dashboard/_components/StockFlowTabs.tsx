@@ -663,7 +663,7 @@ function RebalanceStockFlowSubwidget({
                         <td className="px-4 py-3 text-sm font-semibold text-slate-950">{row.stock.exchange}:{row.stock.symbol}</td>
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-2">
-                            <ActionBadge action={row.formulaAction ?? (row.formulaScore == null ? "Score unavailable" : "Holdings unavailable")} />
+                            {row.formulaAction ? <ActionBadge action={row.formulaAction} /> : row.formulaScore == null ? "Score unavailable" : "Holdings unavailable"}
                             {isAboveBuyThreshold(row, buyThreshold) ? (
                               <span className="whitespace-nowrap rounded-full bg-emerald-600 px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-white">Above threshold</span>
                             ) : null}
