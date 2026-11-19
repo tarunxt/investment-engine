@@ -116,7 +116,7 @@ test('actual hydrated page preserves data and all three views at desktop and nar
       for (const name of ['Top Allocation', 'Top Gainers', 'Laggards', 'Reconciliation', 'Market Indices']) assert.equal(await page.getByRole('heading', { name, exact: true }).count(), 1);
       await screenshot(page, `${width}-saved-partial`);
       await page.getByText('Source details', { exact: true }).click();
-      assert.match(await page.locator('details').filter({ has: page.getByText('Source details', { exact: true }) }).innerText(), /no direct API[\s\S]*manual paste/i);
+      assert.match(await page.locator('details').filter({ has: page.getByText('Source details', { exact: true }) }).innerText(), /Paste the INDmoney portfolio screen[\s\S]*Source: manual paste/i);
       await screenshot(page, `${width}-source-details`);
       await page.getByText('Source details', { exact: true }).click();
       const reads = await page.evaluate(() => window.fixture.reads);

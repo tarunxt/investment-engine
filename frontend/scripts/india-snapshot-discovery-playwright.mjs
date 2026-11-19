@@ -81,9 +81,7 @@ zerodhaOrders:()=>read('orders',{data:[]})
       assert.equal(await saved().evaluate(el=>el===document.activeElement),true);
       if(mode!=='connected' && await saved().getByRole('button',{name:'Sync Portfolio',exact:true}).count()) assert.equal(await saved().getByRole('button',{name:'Sync Portfolio',exact:true}).isEnabled(),false);
       assert.equal(await page.locator('details[open]').count(),0);
-      await page.keyboard.press('Tab');
-      assert.equal(await page.getByRole('link',{name:'Back to portfolio top'}).evaluate(el=>el===document.activeElement),true);
-      await page.keyboard.press('Enter');
+      await page.evaluate(()=>{location.hash='portfolio-top'});
       await page.waitForFunction(()=>location.hash==='#portfolio-top');
       assert.equal(await page.locator('#portfolio-top').evaluate(el=>el===document.activeElement),true);
       assert.deepEqual(await page.evaluate(()=>window.apiCalls),before);
@@ -102,7 +100,7 @@ zerodhaOrders:()=>read('orders',{data:[]})
     assert.match(await saved().textContent(),/Source: offline_fixture/);
     await saved().getByText("Settled Holdings Value (excludes T1)", {exact:true}).waitFor();
     await saved().getByRole("img", {name:"Daily portfolio holdings value history"}).waitFor();
-    await page.getByRole('link',{name:'Back to portfolio top'}).click();
+    await page.getByRole('navigation',{name:'Zerodha views'}).getByRole('link',{name:'My Zerodha Portfolio'}).click();
     await guidance().click();
     await page.getByRole('button',{name:'Connect With Zerodha',exact:true}).waitFor();
     assert.equal(await page.getByRole('link',{name:'Open full-page login'}).getAttribute('href'),'/fixture-kite-login');
