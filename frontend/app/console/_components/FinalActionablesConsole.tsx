@@ -266,6 +266,7 @@ export type ScoreMatrixDetail = {
   rules: ScoreMatrixRuleEvaluation[];
   detailedRationaleRows: DetailedRationaleScoreRow[];
   detailedRationaleFinalScore: number | null;
+  configuredBaseDivisor?: number | null;
   detailedRationaleDenominator: number;
   rebalanceSourceLabel: string | null;
   rebalanceSourceRunId: number | null;
@@ -1601,6 +1602,7 @@ export function getScoreMatrixValidationSummary(detail: ScoreMatrixDetail): Scor
       return [getDetailedRationaleRowIssue(row) ?? rangeIssue];
     });
   const parameterIssues = detail.detailedRationaleRows
+    .filter(row => row.multiplier !== 0 || getDetailedRationaleRowRangeIssue(row) !== null)
     .map(getDetailedRationaleRowIssue)
     .filter((issue): issue is ScoreMatrixValidationIssue => issue !== null);
 
@@ -1774,6 +1776,7 @@ export function ScoreMatrixButton({
   className,
   workflowScale = false,
   originalDenominator,
+  savedScore,
 }: {
   detail: ScoreMatrixDetail;
   formulaConfig?: ScoreMatrixFormulaConfig;
@@ -1781,6 +1784,7 @@ export function ScoreMatrixButton({
   className?: string;
   workflowScale?: boolean;
   originalDenominator?: number;
+  savedScore?: {score: number; divisor?: number; jobId?: number; comparisons?: number | null; pairwise?: number | null};
 }) {
   const configuredDetail = applyScoreMatrixFormulaConfig(detail, formulaConfig);
   const validationSummary = getScoreMatrixValidationSummary(configuredDetail);
@@ -1831,6 +1835,8 @@ export function ScoreMatrixButton({
         <ScoreSymbol score={configuredDetail.calculatedScore} formulaConfig={formulaConfig} />
       )}
       {workflowScale && <small className="block text-left font-normal text-slate-600">
+        {savedScore && displayScore != null && (Math.abs(savedScore.score - Math.max(-3, Math.min(3, displayScore))) > 1e-8 || (savedScore.divisor != null && savedScore.divisor !== configuredDetail.detailedRationaleDenominator)) && <span className="block text-amber-800">Saved revision {((savedScore.score + 3) * 100 / 6).toFixed(2)} / 100 · divisor {savedScore.divisor ?? "unrecorded"}</span>}
+        {savedScore?.jobId != null && <span className="block">Saved pairwise {savedScore.pairwise ?? "unavailable"} · {savedScore.comparisons ?? "unknown"} comparisons · job #{savedScore.jobId}</span>}
         {cards}/3 scorecards used
         {base == null && <span className="block">Base unavailable</span>}
         {pair == null && <span className="block">Pairwise unavailable</span>}
@@ -2509,6 +2515,7 @@ function applyScoreMatrixFormulaConfig(
         multiplier: formulaConfig.detailedRationaleMultipliers[row.id] ?? row.multiplier,
       };
     }),
+    configuredBaseDivisor: formulaConfig.detailedRationaleDenominator,
     detailedRationaleDenominator: formulaConfig.detailedRationaleDenominator ?? detail.detailedRationaleDenominator,
   };
 
@@ -5328,6 +5335,11 @@ function DetailedRationaleScoreSection({
   onFocusCalculation?: (target: ActionablesCalculationFocusTarget) => void;
 }) {
   const validationSummary = useMemo(() => getScoreMatrixValidationSummary(detail), [detail]);
+  const activeRows = detail.detailedRationaleRows.filter(row =>
+    row.score !== null && Number.isFinite(row.score) && row.multiplier !== 0 && !isScoreMatrixRowOutOfBounds(row));
+  const sum = activeRows.reduce((total, row) => total + (row.score ?? 0) * row.multiplier, 0);
+  const activeWeight = activeRows.reduce((total, row) => total + Math.abs(row.multiplier), 0);
+  const cards = detail.supplementalInputs;
   const openCalculationColumn = (row: DetailedRationaleScoreRow) => {
     const header = getDetailedRationaleCalculationHeader(row);
     if (!header) return;
@@ -5370,7 +5382,7 @@ function DetailedRationaleScoreSection({
           ) : formatScoreParameterHeading(row.parameter)}
           {row.missingReason ? (
             <p className="mt-1 max-w-2xl text-xs leading-5 text-amber-700">
-              {formatScoreMissingReason(row.missingReason)}
+              {row.multiplier === 0 ? `Informational · zero scoring weight. ${row.missingReason}` : formatScoreMissingReason(row.missingReason)}
             </p>
           ) : null}
           {rangeIssue ? (
@@ -5521,6 +5533,14 @@ function DetailedRationaleScoreSection({
               </div>
             ) : (`/ ${detail.detailedRationaleDenominator || "—"}`)}
           </div>
+        </div>
+        <div className="space-y-1 border-t border-slate-200 px-4 py-3 text-sm">
+          <p>Base weighted sum {formatScoreValue(sum)} · active multiplier total {formatScoreValue(activeWeight)} · configured divisor {detail.configuredBaseDivisor === undefined ? "unrecorded" : detail.configuredBaseDivisor ?? "automatic"} · effective divisor {formatScoreValue(detail.detailedRationaleDenominator)} · missing-input weight {formatScoreValue(getMissingScoreDenominatorWeight(detail.detailedRationaleRows))}</p>
+          {cards && <>
+            <p>Scorecard source {cards.jobId ? `job #${cards.jobId}` : "job identifier unavailable"} · Technical run {detail.technicalScanSourceRunId ?? "unavailable"}</p>
+            <p>Base weight 98 · Pairwise {cards.pairwise ?? "unavailable"} / 100 (weight {cards.pairwise == null ? 0 : 1}, {cards.comparisons ?? "unknown"} valid comparisons)</p>
+            <p>Stock Threat {cards.stock_threat == null ? "has no usable value in the saved scorecard inputs (weight 0)" : `${cards.stock_threat} / 100 · safety contribution ${100 - cards.stock_threat} (weight 1)`}</p>
+          </>}
         </div>
         {!readOnly ? <div className="border-t border-slate-200 px-4 py-3"><AllocationScoreContext rawScore={detail.calculatedScore} /></div> : null}
         {validationSummary.finalScoreMessage ? (

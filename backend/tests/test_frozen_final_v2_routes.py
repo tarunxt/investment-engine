@@ -148,6 +148,15 @@ async def test_reconcile_exact_sources_twice(audit_db, stored_capture, monkeypat
             response = await client.post(path)
             assert response.status_code == 200, response.text
             assert response.json() == {"formula_version": "score-matrix-v2", "listings": 1, "sequence": 42}
+        verification = path.replace("replay-score-v2", "score-verification")
+        for _ in range(2):
+            response = await client.get(verification)
+            assert response.status_code == 200, response.text
+            assert response.json()["verified"] is True
+            assert response.json()["record"]["workflow_sequence"] == 42
+        app.dependency_overrides[routes.get_current_user] = lambda: SimpleNamespace(id=8)
+        assert (await client.get(verification)).status_code == 404
+        app.dependency_overrides[routes.get_current_user] = lambda: OWNER
         for blocked in (path.replace("/india/", "/us/"), path.replace("/42/", "/0/"),
                         path.replace("replay-score-v2", "reconcile"), path + "/extra",
                         "/runs/auto-rebalance-completion-email"):

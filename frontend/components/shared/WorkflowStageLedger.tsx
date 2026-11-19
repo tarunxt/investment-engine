@@ -120,7 +120,7 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
               <h4 className="font-semibold">Merge contenders</h4>
               <p>{item.info.recommendedStocks != null ? item.info.recommendedStocks + " unique listings" : "Awaiting scan evidence"}</p></div>}
             {item.stage === "threats" && <div className="mt-2 rounded-lg border p-3 text-sm">
-              <h4 className="font-semibold">Pairwise scorecard</h4><p>{item.info.pairCoverage ?? (item.info.state === "running" ? "Assessing stock pairs" : "No saved comparisons")}</p>
+              <h4 className="font-semibold">Pairwise scorecard</h4><p>{item.info.pairCoverage ?? (item.info.state === "running" ? "Assessing stock pairs" : "Comparison count unavailable in this stage summary")}</p>
               {item.onOutputClick && <button type="button" className={control} onClick={item.onOutputClick}>Saved output</button>}
             </div>}
             {item.onPlaceOrderClick && <button type="button" className="mt-2 w-full rounded-lg bg-indigo-700 p-2 text-white" onClick={item.onPlaceOrderClick}>Place Order</button>}
