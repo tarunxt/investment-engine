@@ -4,7 +4,7 @@ import re
 from datetime import timezone
 from collections import defaultdict
 
-from .final_score_math import ACTIONS, RATIONALE_HEADERS, calculate_listing
+from .final_score_math import ACTIONS, DIRECTIONAL_SIZING, RATIONALE_HEADERS, calculate_listing
 from .final_source_rows import UnverifiableFinal, rebalance_rows, technical_rows, technical_direction
 
 
@@ -24,7 +24,7 @@ def equivalent(actual, expected):
     return type(actual) is type(expected) and actual == expected
 
 
-def source_calculations(payload, *, sources, jobs_by_run, market, scorecards=None):
+def source_calculations(payload, *, sources, jobs_by_run, market, scorecards=None, sizing_policy=DIRECTIONAL_SIZING):
     formula = payload.get("formula")
     required = {"detailedRationaleMultipliers", "detailedRationaleDenominator", "actionScores", "technicalScanMultipliers", "scoreSymbolThresholds"}
     if not isinstance(formula, dict) or set(formula) != required:
@@ -88,7 +88,7 @@ def source_calculations(payload, *, sources, jobs_by_run, market, scorecards=Non
         # map to buildConsensusRows. usIdentityHolding leaves that position
         # unknown, even if model rows contain a suggested current quantity.
         calculation = calculate_listing(rows, formula, technical, direction=direction,
-                                        market=market, unresolved_holding=market == "us",
+                                        market=market, sizing_policy=sizing_policy, unresolved_holding=market == "us",
                                         legacy="[SCORING_POLICY_V3]" not in technical_source.prompt,
                                         supplemental=(scorecards or {}).get(":".join(key)))
         calculation["valid_suggestions"] = len(output_jobs)
@@ -145,7 +145,13 @@ def verify_recomputed_rows(payload, calculations, *, raw_field, effective_field)
                            ("estimate", expected["estimate"]), ("valid_suggestions", expected["valid_suggestions"]),
                            ("scorePolicy", "score-matrix-raw-effective-v2")):
             if key not in row or not equivalent(row[key], value) or key == "valid_suggestions" and type(row[key]) is not int:
-                raise UnverifiableFinal(f"Final {key} differs from source recomputation")
+                listing = f"{row['exchange']}:{row['symbol']}"
+                if key == "estimate" and isinstance(row.get(key), dict):
+                    for field, expected_value in value.items():
+                        if field not in row[key] or not equivalent(row[key][field], expected_value):
+                            raise UnverifiableFinal(
+                                f"{listing} estimate.{field}: saved {row[key].get(field)!r}, recomputed {expected_value!r}")
+                raise UnverifiableFinal(f"Final {key} differs from source recomputation for {listing}")
         verify_formula_inputs(row.get("formula_inputs"), expected, score_fields={"calculatedScore": expected["raw_score"]})
 
 

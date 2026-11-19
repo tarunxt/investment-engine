@@ -5,6 +5,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from datetime import datetime, timezone
+from copy import deepcopy
 import json
 import re
 
@@ -773,13 +774,15 @@ async def update_auto_rebalance_stage(
         stage=stage, run_id=effective_run_id, job_id=effective_job_id,
         expected_status=status if stage in LLM_STAGES and status in {"completed", "partial"} else None,
     )
-    if "corrected_final_v2" in body.summary:
+    if {"corrected_final_v2", "previous_sizing_replay"} & body.summary.keys():
         raise HTTPException(422, detail="Corrected calculations are generated from saved sources")
     if "frozen_final" in body.summary:
         if stage != "actionables":
             raise HTTPException(422, detail="Final capture belongs only to the actionables stage")
         from .frozen_final import validate_frozen_final
-        capture = body.summary["frozen_final"]
+        capture = deepcopy(body.summary["frozen_final"])
+        body.summary = {**body.summary, "frozen_final": capture}
+        prior = (stage_record.summary_json or {}).get("frozen_final") if stage_record and was_terminal else None
         if isinstance(capture, dict) and capture.get("formula_version") == "score-matrix-v2":
             technical_stage = next((item for item in workflow.stages if item.stage == "technical"), None)
             receipt = (technical_stage.summary_json or {}).get("final_inputs") if technical_stage else None
@@ -789,6 +792,7 @@ async def update_auto_rebalance_stage(
                 raise HTTPException(409, detail="Final inputs differ from the saved Technical stage receipt")
         await validate_frozen_final(db, body.summary["frozen_final"], user_id=current_user.id,
                                    portfolio=portfolio, sequence=sequence,
+                                   stored_record=prior is not None and prior == capture,
                                    allow_legacy=bool(was_terminal and stage_record
                                        and isinstance((stage_record.summary_json or {}).get("frozen_final"), dict)
                                        and stage_record.summary_json["frozen_final"].get("schema") == "workflow-final-v1"))
@@ -874,7 +878,6 @@ async def update_auto_rebalance_stage(
 @router.get("/auto-rebalance-history/india/{sequence}/score-verification")
 async def verify_saved_india_score(sequence: int, db: AsyncSession = Depends(get_async_db),
                                    current_user: User = Depends(get_current_user)):
-    from copy import deepcopy
     from .frozen_final import validate_frozen_final
 
     workflow = (await db.execute(select(AutoRebalanceWorkflow).where(
@@ -897,7 +900,7 @@ async def verify_saved_india_score(sequence: int, db: AsyncSession = Depends(get
     candidate = deepcopy(record)
     evidence = {}
     try:
-        await validate_frozen_final(db, candidate, user_id=current_user.id, portfolio="india", sequence=sequence, scorecard_evidence=evidence)
+        await validate_frozen_final(db, candidate, user_id=current_user.id, portfolio="india", sequence=sequence, scorecard_evidence=evidence, stored_record=True)
     except HTTPException as error:
         if error.status_code not in (409, 422):
             raise
@@ -917,8 +920,11 @@ async def replay_india_score(sequence: int, db: AsyncSession = Depends(get_async
         raise HTTPException(404, "Workflow not found")
     replay = await recover_final(db, workflow, corrected=True)
     final = next(stage for stage in workflow.stages if stage.stage == "actionables")
-    if "corrected_final_v2" not in (final.summary_json or {}):
-        final.summary_json = {**(final.summary_json or {}), "corrected_final_v2": replay}
+    summary = final.summary_json or {}
+    previous = summary.get("corrected_final_v2")
+    if previous != replay:
+        archive = {"previous_sizing_replay": previous} if previous is not None else {}
+        final.summary_json = {**summary, **archive, "corrected_final_v2": replay}
         await db.commit()
     return {"formula_version": replay["formula_version"], "listings": len(replay["rows"]), "sequence": sequence}
 

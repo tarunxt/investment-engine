@@ -5,6 +5,7 @@ from sqlalchemy import select
 from app.domains.recommendation_audit.models import EvidenceRecord
 from app.domains.recommendation_audit.schemas import Formula
 import json
+from .final_score_math import DIRECTIONAL_SIZING
 from .frozen_final import validate_frozen_final
 
 
@@ -73,12 +74,15 @@ async def recover_final(db, workflow, *, corrected=False):
     saved = (final.summary_json or {}).get("frozen_final")
     if corrected:
         existing = (final.summary_json or {}).get("corrected_final_v2")
-        if existing:
+        if existing and existing.get("sizing_policy") == DIRECTIONAL_SIZING:
             return existing
     elif saved:
         return saved
     technical = stages["technical"]
     receipt = (technical.summary_json or {}).get("final_inputs")
+    if corrected and existing:
+        # Rebuild this exact replay from its captured formula and source hashes.
+        receipt = existing
     if receipt is None and corrected and isinstance(saved, dict) and saved.get("schema") == "workflow-final-v2":
         receipt = saved
     if receipt is None and technical.run_id:
