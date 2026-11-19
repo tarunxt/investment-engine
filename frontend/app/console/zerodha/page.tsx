@@ -7,19 +7,11 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AlertCircle,
   CheckCircle2,
-  ChevronDown,
-  ChevronUp,
   Link2,
   Loader2,
   LogOut,
-  RefreshCw,
-  TrendingDown,
-  TrendingUp,
   Unplug,
 } from 'lucide-react';
-import { SortableTableHeader } from '@/components/shared/SortableTableHeader';
-import { sortItems, type SortState, toggleSortState } from '@/lib/tableSorting';
-import { TradingViewSymbolLink } from '@/components/shared/TradingViewSymbolLink';
 import { Button } from '@/components/ui/button';
 import { PortfolioAnalysisNav } from '@/components/shared/PortfolioAnalysisNav';
 import { apiService, APIError } from '@/services/api';
@@ -29,10 +21,8 @@ import { PortfolioSnapshotsPanel } from './_components/PortfolioSnapshotsPanel';
 import { ZerodhaConnectionGuide } from './_components/ZerodhaConnectionGuide';
 import styles from './_components/IndiaPortfolioNav.module.css';
 import {
-  type ZerodhaOrder,
   type ZerodhaPortfolioOverviewResponse,
   type ZerodhaPortfolioSnapshotDetail,
-  type ZerodhaPlaceOrderRequest,
   type ZerodhaStatusResponse,
 } from '@/types/api';
 
@@ -54,54 +44,6 @@ function formatTs(iso: string | null) {
 function sleep(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
-
-const STATUS_COLORS: Record<string, string> = {
-  COMPLETE: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
-  REJECTED: 'bg-red-50 text-red-700 ring-red-200',
-  CANCELLED: 'bg-gray-50 text-gray-600 ring-gray-200',
-  OPEN: 'bg-blue-50 text-blue-700 ring-blue-200',
-  TRIGGER_PENDING: 'bg-amber-50 text-amber-700 ring-amber-200',
-};
-
-type OrdersSortColumn = 'tradingsymbol' | 'transaction_type' | 'order_type' | 'quantity' | 'price' | 'average_price' | 'status' | 'order_timestamp';
-
-const ORDER_SORT_ACCESSORS = {
-  tradingsymbol: {
-    type: 'text',
-    getValue: (order: ZerodhaOrder) => order.tradingsymbol,
-  },
-  transaction_type: {
-    type: 'text',
-    getValue: (order: ZerodhaOrder) => order.transaction_type,
-  },
-  order_type: {
-    type: 'text',
-    getValue: (order: ZerodhaOrder) => order.order_type,
-  },
-  quantity: {
-    type: 'number',
-    getValue: (order: ZerodhaOrder) => order.quantity,
-  },
-  price: {
-    type: 'number',
-    getValue: (order: ZerodhaOrder) => order.price,
-  },
-  average_price: {
-    type: 'number',
-    getValue: (order: ZerodhaOrder) => order.average_price,
-  },
-  status: {
-    type: 'text',
-    getValue: (order: ZerodhaOrder) => order.status,
-  },
-  order_timestamp: {
-    type: 'number',
-    getValue: (order: ZerodhaOrder) => (order.order_timestamp ? Date.parse(order.order_timestamp) : null),
-  },
-} satisfies Record<
-  OrdersSortColumn,
-  { type: 'number' | 'text'; getValue: (order: ZerodhaOrder) => number | string | null | undefined }
->;
 
 function StatusRevealButton({
   active,
@@ -130,311 +72,6 @@ function StatusRevealButton({
       {children}
       <span className="sr-only">{label}</span>
     </Button>
-  );
-}
-
-// ─── Place-order form ────────────────────────────────────────────────────────
-
-const EXCHANGES = ['NSE', 'BSE', 'NFO', 'MCX'];
-const PRODUCTS = ['CNC', 'MIS', 'NRML'];
-const ORDER_TYPES = ['MARKET', 'LIMIT', 'SL', 'SL-M'];
-
-function PlaceOrderForm({ onPlaced }: { onPlaced: () => void }) {
-  const [form, setForm] = useState<ZerodhaPlaceOrderRequest>({
-    tradingsymbol: '',
-    exchange: 'NSE',
-    transaction_type: 'BUY',
-    order_type: 'MARKET',
-    quantity: 1,
-    product: 'CNC',
-    validity: 'DAY',
-    price: 0,
-    trigger_price: 0,
-  });
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
-
-  const set = (k: keyof ZerodhaPlaceOrderRequest, v: string | number) =>
-    setForm((f) => ({ ...f, [k]: v }));
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSubmitting(true);
-    setError(null);
-    setSuccess(null);
-    try {
-      const res = await apiService.zerodhaPlaceOrder(form);
-      setSuccess(`Order placed — ID: ${res.order_id}`);
-      onPlaced();
-    } catch (err) {
-      setError(normalizeError(err));
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const needsPrice = form.order_type === 'LIMIT' || form.order_type === 'SL';
-  const needsTrigger = form.order_type === 'SL' || form.order_type === 'SL-M';
-
-  return (
-    <form onSubmit={handleSubmit} className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-      {/* Symbol */}
-      <div className="flex flex-col gap-1">
-        <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Symbol</label>
-        <input
-          required
-          placeholder="e.g. RELIANCE"
-          value={form.tradingsymbol}
-          onChange={(e) => set('tradingsymbol', e.target.value.toUpperCase())}
-          className="border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-        />
-      </div>
-
-      {/* Exchange */}
-      <div className="flex flex-col gap-1">
-        <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Exchange</label>
-        <select
-          value={form.exchange}
-          onChange={(e) => set('exchange', e.target.value)}
-          className="border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-        >
-          {EXCHANGES.map((x) => <option key={x}>{x}</option>)}
-        </select>
-      </div>
-
-      {/* Transaction type */}
-      <div className="flex flex-col gap-1">
-        <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Side</label>
-        <div className="flex">
-          {(['BUY', 'SELL'] as const).map((t) => (
-            <button
-              key={t}
-              type="button"
-              onClick={() => set('transaction_type', t)}
-              className={cn(
-                'flex-1 py-2 text-sm font-semibold transition-colors',
-                t === 'BUY'
-                  ? form.transaction_type === 'BUY'
-                    ? 'bg-emerald-600 text-white'
-                    : 'border border-gray-200 text-gray-600 hover:bg-gray-50'
-                  : form.transaction_type === 'SELL'
-                  ? 'bg-red-600 text-white'
-                  : 'border border-gray-200 text-gray-600 hover:bg-gray-50',
-              )}
-            >
-              {t}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Order type */}
-      <div className="flex flex-col gap-1">
-        <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Order type</label>
-        <select
-          value={form.order_type}
-          onChange={(e) => set('order_type', e.target.value)}
-          className="border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-        >
-          {ORDER_TYPES.map((x) => <option key={x}>{x}</option>)}
-        </select>
-      </div>
-
-      {/* Product */}
-      <div className="flex flex-col gap-1">
-        <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Product</label>
-        <select
-          value={form.product}
-          onChange={(e) => set('product', e.target.value)}
-          className="border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-        >
-          {PRODUCTS.map((x) => <option key={x}>{x}</option>)}
-        </select>
-      </div>
-
-      {/* Quantity */}
-      <div className="flex flex-col gap-1">
-        <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Quantity</label>
-        <input
-          type="number"
-          min={1}
-          required
-          value={form.quantity}
-          onChange={(e) => set('quantity', parseInt(e.target.value, 10) || 1)}
-          className="border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-        />
-      </div>
-
-      {needsPrice && (
-        <div className="flex flex-col gap-1">
-          <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Price</label>
-          <input
-            type="number"
-            step="0.05"
-            min={0}
-            value={form.price}
-            onChange={(e) => set('price', parseFloat(e.target.value) || 0)}
-            className="border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
-        </div>
-      )}
-
-      {needsTrigger && (
-        <div className="flex flex-col gap-1">
-          <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Trigger price</label>
-          <input
-            type="number"
-            step="0.05"
-            min={0}
-            value={form.trigger_price}
-            onChange={(e) => set('trigger_price', parseFloat(e.target.value) || 0)}
-            className="border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
-        </div>
-      )}
-
-      {/* Messages + submit */}
-      <div className="sm:col-span-2 lg:col-span-3 flex flex-col gap-3">
-        {error && (
-          <p className="flex items-center gap-2 text-sm text-red-700">
-            <AlertCircle className="size-4 shrink-0" /> {error}
-          </p>
-        )}
-        {success && (
-          <p className="flex items-center gap-2 text-sm text-emerald-700">
-            <CheckCircle2 className="size-4 shrink-0" /> {success}
-          </p>
-        )}
-        <Button
-          type="submit"
-          disabled={submitting}
-          className={cn(
-            'self-start',
-            form.transaction_type === 'BUY' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-red-600 hover:bg-red-700',
-          )}
-        >
-          {submitting ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}
-          {form.transaction_type === 'BUY' ? 'Place Buy Order' : 'Place Sell Order'}
-        </Button>
-      </div>
-    </form>
-  );
-}
-
-// ─── Orders table ────────────────────────────────────────────────────────────
-
-function OrdersTable({ orders }: { orders: ZerodhaOrder[] }) {
-  const [sortState, setSortState] = useState<SortState<OrdersSortColumn>>(null);
-  const sortedOrders = sortItems(orders, sortState, ORDER_SORT_ACCESSORS, (order) => order.order_id);
-
-  if (orders.length === 0) {
-    return <p className="py-8 text-center text-sm text-gray-400">No orders today.</p>;
-  }
-  return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-gray-100 text-left text-xs font-semibold uppercase tracking-wider text-gray-400">
-            <SortableTableHeader
-              label="Symbol"
-              activeDirection={sortState?.column === 'tradingsymbol' ? sortState.direction : null}
-              onToggle={() => setSortState((currentSort) => toggleSortState(currentSort, 'tradingsymbol'))}
-              className="pb-2 pr-4"
-            />
-            <SortableTableHeader
-              label="Side"
-              activeDirection={sortState?.column === 'transaction_type' ? sortState.direction : null}
-              onToggle={() => setSortState((currentSort) => toggleSortState(currentSort, 'transaction_type'))}
-              className="pb-2 pr-4"
-            />
-            <SortableTableHeader
-              label="Type"
-              activeDirection={sortState?.column === 'order_type' ? sortState.direction : null}
-              onToggle={() => setSortState((currentSort) => toggleSortState(currentSort, 'order_type'))}
-              className="pb-2 pr-4"
-            />
-            <SortableTableHeader
-              label="Qty"
-              activeDirection={sortState?.column === 'quantity' ? sortState.direction : null}
-              onToggle={() => setSortState((currentSort) => toggleSortState(currentSort, 'quantity'))}
-              className="pb-2 pr-4"
-            />
-            <SortableTableHeader
-              label="Price"
-              activeDirection={sortState?.column === 'price' ? sortState.direction : null}
-              onToggle={() => setSortState((currentSort) => toggleSortState(currentSort, 'price'))}
-              className="pb-2 pr-4"
-            />
-            <SortableTableHeader
-              label="Avg"
-              activeDirection={sortState?.column === 'average_price' ? sortState.direction : null}
-              onToggle={() => setSortState((currentSort) => toggleSortState(currentSort, 'average_price'))}
-              className="pb-2 pr-4"
-            />
-            <SortableTableHeader
-              label="Status"
-              activeDirection={sortState?.column === 'status' ? sortState.direction : null}
-              onToggle={() => setSortState((currentSort) => toggleSortState(currentSort, 'status'))}
-              className="pb-2 pr-4"
-            />
-            <SortableTableHeader
-              label="Time"
-              activeDirection={sortState?.column === 'order_timestamp' ? sortState.direction : null}
-              onToggle={() => setSortState((currentSort) => toggleSortState(currentSort, 'order_timestamp'))}
-              className="pb-2"
-            />
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-gray-50">
-          {sortedOrders.map((o) => (
-            <tr key={o.order_id} className="hover:bg-gray-50">
-              <td className="py-2.5 pr-4 font-medium text-gray-900">
-                <TradingViewSymbolLink
-                  symbol={o.tradingsymbol}
-                  market="india"
-                  exchange={o.exchange}
-                  className="hover:text-blue-700"
-                >
-                  <span className="underline-offset-4 hover:underline">{o.tradingsymbol}</span>
-                </TradingViewSymbolLink>
-                <span className="ml-1 text-xs text-gray-400">{o.exchange}</span>
-              </td>
-              <td className="py-2.5 pr-4">
-                {o.transaction_type === 'BUY' ? (
-                  <span className="inline-flex items-center gap-1 text-emerald-600">
-                    <TrendingUp className="size-3" /> BUY
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center gap-1 text-red-600">
-                    <TrendingDown className="size-3" /> SELL
-                  </span>
-                )}
-              </td>
-              <td className="py-2.5 pr-4 text-gray-600">{o.order_type}</td>
-              <td className="py-2.5 pr-4 text-gray-700">
-                {o.filled_quantity}/{o.quantity}
-              </td>
-              <td className="py-2.5 pr-4 text-gray-700">{o.price > 0 ? o.price.toFixed(2) : 'MKT'}</td>
-              <td className="py-2.5 pr-4 text-gray-700">
-                {o.average_price > 0 ? o.average_price.toFixed(2) : '—'}
-              </td>
-              <td className="py-2.5 pr-4">
-                <span
-                  className={cn(
-                    'inline-flex items-center px-2 py-0.5 text-xs font-semibold capitalize ring-1',
-                    STATUS_COLORS[o.status] ?? 'bg-gray-50 text-gray-600 ring-gray-200',
-                  )}
-                >
-                  {o.status}
-                </span>
-              </td>
-              <td className="py-2.5 text-xs text-gray-400">{formatTs(o.order_timestamp)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
   );
 }
 
@@ -495,21 +132,18 @@ export default function ZerodhaPage() {
   const [status, setStatus] = useState<ZerodhaStatusResponse | null>(null);
   const [loginUrl, setLoginUrl] = useState('');
   const [configured, setConfigured] = useState(true);
-  const [orders, setOrders] = useState<ZerodhaOrder[]>([]);
   const [portfolioOverview, setPortfolioOverview] = useState<ZerodhaPortfolioOverviewResponse | null>(null);
   const [selectedSnapshot, setSelectedSnapshot] = useState<ZerodhaPortfolioSnapshotDetail | null>(null);
   const [selectedSnapshotDate, setSelectedSnapshotDate] = useState<string | null>(null);
 
   const [loadingStatus, setLoadingStatus] = useState(true);
   const [loadingPortfolio, setLoadingPortfolio] = useState(true);
-  const [loadingOrders, setLoadingOrders] = useState(false);
   const [selectingSnapshot, setSelectingSnapshot] = useState(false);
   const [syncingPortfolio, setSyncingPortfolio] = useState(false);
   const [connectingPopup, setConnectingPopup] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [portfolioError, setPortfolioError] = useState<string | null>(null);
-  const [showOrderForm, setShowOrderForm] = useState(false);
   const [showConnectionDetails, setShowConnectionDetails] = useState(false);
   const [showRedirectDetails, setShowRedirectDetails] = useState(false);
   const popupRef = useRef<Window | null>(null);
@@ -580,18 +214,6 @@ export default function ZerodhaPage() {
       setLoadingPortfolio(false);
     }
   }, [applyPortfolioOverview]);
-
-  const fetchOrders = useCallback(async () => {
-    setLoadingOrders(true);
-    try {
-      const res = await apiService.zerodhaOrders();
-      setOrders(res.data);
-    } catch (err) {
-      setError(normalizeError(err));
-    } finally {
-      setLoadingOrders(false);
-    }
-  }, []);
 
   const pollPortfolioOverview = useCallback(
     async (baselineCapturedAt: string | null) => {
@@ -710,7 +332,6 @@ export default function ZerodhaPage() {
         stopPopupTracking();
         const baselineCapturedAt = portfolioOverview?.latest?.captured_at ?? null;
         fetchStatus().then(() => {
-          fetchOrders();
           pollPortfolioOverview(baselineCapturedAt);
         });
       } else if (ev.data?.type === 'zerodha_error') {
@@ -720,7 +341,7 @@ export default function ZerodhaPage() {
     };
     window.addEventListener('message', handler);
     return () => window.removeEventListener('message', handler);
-  }, [fetchOrders, fetchStatus, pollPortfolioOverview, portfolioOverview?.latest?.captured_at, stopPopupTracking]);
+  }, [fetchStatus, pollPortfolioOverview, portfolioOverview?.latest?.captured_at, stopPopupTracking]);
 
   useEffect(
     () => () => {
@@ -738,16 +359,6 @@ export default function ZerodhaPage() {
     void load();
   }, [fetchPortfolioOverview, fetchStatus]);
 
-  useEffect(() => {
-    if (!status?.connected) return;
-
-    const loadOrders = async () => {
-      await fetchOrders();
-    };
-
-    void loadOrders();
-  }, [status?.connected, fetchOrders]);
-
   const handleDisconnect = async () => {
     setDisconnecting(true);
     try {
@@ -759,7 +370,6 @@ export default function ZerodhaPage() {
         last_portfolio_sync_at: current?.last_portfolio_sync_at ?? null,
         last_portfolio_snapshot_date: current?.last_portfolio_snapshot_date ?? null,
       }));
-      setOrders([]);
     } catch (err) {
       setError(normalizeError(err));
     } finally {
@@ -922,7 +532,6 @@ export default function ZerodhaPage() {
                     onConnected={() => {
                       const baselineCapturedAt = portfolioOverview?.latest?.captured_at ?? null;
                       fetchStatus().then(() => {
-                        fetchOrders();
                         pollPortfolioOverview(baselineCapturedAt);
                       });
                     }}
@@ -960,59 +569,6 @@ export default function ZerodhaPage() {
             />
           )}
         </section>
-
-        {/* Connected — orders + place order */}
-        {status?.connected && (
-          <>
-            {/* Place order section */}
-            <div className="border border-gray-200 bg-white shadow-sm">
-              <button
-                onClick={() => setShowOrderForm((v) => !v)}
-                className="flex w-full items-center justify-between border-b border-gray-200 px-5 py-3 text-left"
-              >
-                <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">
-                  Place Order
-                </span>
-                {showOrderForm ? (
-                  <ChevronUp className="size-4 text-gray-400" />
-                ) : (
-                  <ChevronDown className="size-4 text-gray-400" />
-                )}
-              </button>
-              {showOrderForm && (
-                <div className="p-5">
-                  <PlaceOrderForm onPlaced={fetchOrders} />
-                </div>
-              )}
-            </div>
-
-            {/* Orders table */}
-            <div className="border border-gray-200 bg-white shadow-sm">
-              <div className="flex items-center justify-between border-b border-gray-200 px-5 py-3">
-                <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">
-                  Today&apos;s Orders
-                </span>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={fetchOrders}
-                  disabled={loadingOrders}
-                >
-                  <RefreshCw className={cn('size-3.5', loadingOrders && 'animate-spin')} />
-                </Button>
-              </div>
-              <div className="p-5">
-                {loadingOrders ? (
-                  <div className="flex items-center gap-2 text-sm text-gray-400">
-                    <Loader2 className="size-4 animate-spin" /> Loading orders…
-                  </div>
-                ) : (
-                  <OrdersTable orders={orders} />
-                )}
-              </div>
-            </div>
-          </>
-        )}
       </div>
     </BrokerPortfolioTabs>
   );
