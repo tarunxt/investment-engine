@@ -56,20 +56,21 @@ class ZerodhaCredentialRepository:
     def __init__(self, db: AsyncSession) -> None:
         self._db = db
 
-    async def _get_stored(self, user_id: int) -> ZerodhaCredential | None:
+    async def get_stored(self, user_id: int) -> ZerodhaCredential | None:
         result = await self._db.execute(
             select(ZerodhaCredential).where(ZerodhaCredential.user_id == user_id)
+            .execution_options(populate_existing=True)
         )
         cred = result.scalar_one_or_none()
         return cred
 
     async def get_by_user(self, user_id: int) -> ZerodhaCredential | None:
-        cred = await self._get_stored(user_id)
+        cred = await self.get_stored(user_id)
         return cred if _matches_app(cred) else None
 
     async def get_plaintext_token(self, user_id: int) -> str | None:
         """Return the decrypted access token and stamp last_used_at."""
-        cred = await self._get_stored(user_id)
+        cred = await self.get_stored(user_id)
         token = token_for_credential(cred) if cred else None
         if not token:
             return None

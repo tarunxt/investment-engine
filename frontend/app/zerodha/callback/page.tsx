@@ -2,12 +2,15 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { use } from 'react';
+import Link from 'next/link';
+import { URLs } from '@/lib/urls';
+import { takeKiteSettingsLogin } from '@/lib/kiteSettingsLogin';
 import { apiService } from '@/services/api';
 
 export default function ZerodhaCallbackPage({
   searchParams,
 }: {
-  searchParams: Promise<{ request_token?: string; status?: string; message?: string }>;
+  searchParams: Promise<{ request_token?: string; status?: string; message?: string; broker_state?: string }>;
 }) {
   const params = use(searchParams);
   const [state, setState] = useState<'loading' | 'success' | 'error'>('loading');
@@ -43,9 +46,21 @@ export default function ZerodhaCallbackPage({
       return;
     }
 
+    let change;
+    try {
+      if (params.broker_state) change = takeKiteSettingsLogin(params.broker_state);
+    } catch (error) {
+      setErrorMsg(error instanceof Error ? error.message : 'Please restart the broker sign-in.');
+      setState('error');
+      return;
+    }
     apiService
-      .zerodhaCallback(request_token)
+      .zerodhaCallback(request_token, change)
       .then(() => {
+        if (params.broker_state) {
+          window.location.replace(URLs.routes.profile.connectedBrokers());
+          return;
+        }
         setState('success');
         notifyHost({ type: 'zerodha_connected' });
         closePopupSoon(900);
@@ -87,6 +102,11 @@ export default function ZerodhaCallbackPage({
           </div>
           <p className="text-sm font-medium text-gray-900">Connection failed</p>
           <p className="mt-1 text-xs text-gray-500">{errorMsg}</p>
+          {params.broker_state && (
+            <Link className="mt-4 inline-block text-sm underline" href={URLs.routes.profile.connectedBrokers()}>
+              Return to Connected Brokers
+            </Link>
+          )}
         </div>
       )}
     </div>

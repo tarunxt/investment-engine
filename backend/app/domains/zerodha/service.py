@@ -171,6 +171,9 @@ class ZerodhaService:
             raise KiteError("The Kite app changed during login. Please reconnect.")
         return data
 
+    async def get_profile(self, access_token: str) -> dict:
+        return await self._request_async("GET", "/user/profile", access_token=access_token, timeout=5.0) or {}
+
     async def get_orders(self, access_token: str) -> list:
         data = await self._request_async("GET", "/orders", access_token=access_token)
         return data or []
@@ -251,8 +254,8 @@ class ZerodhaService:
                 "DELETE",
                 "/session/token",
                 access_token=access_token,
-                headers={"Content-Type": "application/x-www-form-urlencoded"},
-                timeout=15.0,
+                params={"api_key": self.api_key, "access_token": access_token},
+                timeout=5.0,
             )
         except Exception:
             pass  # fire-and-forget; local record is deleted regardless

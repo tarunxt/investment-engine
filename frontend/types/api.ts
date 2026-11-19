@@ -1055,6 +1055,30 @@ export interface ZerodhaLoginUrlResponse {
   order_submission_blocked_reason?: string | null;
 }
 
+export interface KiteBrokerConnection {
+  revision: string;
+  linked: boolean;
+  session_active: boolean;
+  assigned_client_id: string | null;
+  connection_record_created_at: string | null;
+  first_added_at: string | null;
+  login_time: string | null;
+  expires_at: string | null;
+  profile: {
+    client_id: string;
+    name: string | null;
+    email: string | null;
+    masked_pan: string | null;
+    exchanges: string[];
+    products: string[];
+  } | null;
+}
+
+export interface KiteConnectionChange {
+  expected_revision: string;
+  target_client_id?: string;
+}
+
 export interface ZerodhaStatusResponse {
   connected: boolean;
   direct_market_orders_enabled?: boolean;

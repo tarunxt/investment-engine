@@ -26,6 +26,10 @@ const sidebarNavItems = [
     title: "Activity",
     href: URLs.routes.profile.activity(),
   },
+  {
+    title: "Connected Brokers",
+    href: URLs.routes.profile.connectedBrokers(),
+  },
 ];
 
 interface SettingsLayoutProps {
