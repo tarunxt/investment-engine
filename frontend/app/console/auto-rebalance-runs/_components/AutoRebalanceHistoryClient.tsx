@@ -134,7 +134,7 @@ function StageSummary({ stage, portfolio, sequence }: { stage: AutoRebalanceStag
         </div>
         <StatusBadge status={status} />
       </div>
-      {stage.stage === "actionables" && stage.summary.corrected_final_v2 != null && <p className="mt-2 text-xs">Saved score replay available. The stage status above records the original execution.</p>}
+      {stage.stage === "actionables" && stage.summary?.corrected_final_v2 != null && <p className="mt-2 text-xs">Saved score replay available. The stage status above records the original execution.</p>}
       <div className="mt-3 grid gap-2 text-xs text-slate-700 sm:grid-cols-2">
         <span>Started: {formatTime(stage.started_at)}</span>
         <span>Finished: {formatTime(stage.completed_at)}</span>
