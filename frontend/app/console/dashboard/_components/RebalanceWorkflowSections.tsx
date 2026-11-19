@@ -877,6 +877,7 @@ type BasketScoreRevision = {
   capturedAt: string | null;
   replayed: boolean;
   originals: Map<string, number>;
+  saved: Map<string, {score: number; divisor?: number}>;
 };
 
 function sameFrozenScore(saved: unknown, current: number | null) {
@@ -3421,7 +3422,7 @@ function ScopedZerodhaBasketPreviewDialog({
                                   </div>
                                 </td>
                                 <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-800">
-                                  <ScoreMatrixButton workflowScale={isZerodhaPreview} detail={order.detail} originalDenominator={scoreRevision?.originals.get(stockIdentity(order.symbol, order.exchange))} formulaConfig={formulaConfig} onOpenDetail={setSelectedMatrixDetail} />
+                                  <ScoreMatrixButton workflowScale={isZerodhaPreview} detail={order.detail} savedScore={scoreRevision?.saved.get(stockIdentity(order.symbol, order.exchange))} originalDenominator={scoreRevision?.originals.get(stockIdentity(order.symbol, order.exchange))} formulaConfig={formulaConfig} onOpenDetail={setSelectedMatrixDetail} />
                                 </td>
                                 <td className="whitespace-nowrap px-4 py-3">
                                   <ConsensusBreakupButton stock={order.stock} action={getZerodhaBasketActionForPercent(order)} />
@@ -3488,7 +3489,7 @@ function ScopedZerodhaBasketPreviewDialog({
                               return <tr key={`display-only:${row.id}`} data-display-only="true" className="bg-white transition">
                                 <td className="px-4 py-3"><input type="checkbox" disabled aria-label={`${row.stock.exchange} ${row.stock.symbol} display only; no executable order`} className="size-4 rounded border-slate-300" /></td>
                                 <td className="whitespace-nowrap px-4 py-3 font-bold text-slate-950"><div className="inline-flex items-center gap-1.5"><StockDetailsButton stock={row.stock} formulaConfig={formulaConfig} market={tradingViewMarket} technicalScan={null} detailsData={detailsData} historicalRows={historicalRows} /><span className="text-xs font-semibold text-slate-500">{row.stock.exchange}</span><TradingViewSymbolLink symbol={row.stock.symbol} market={tradingViewMarket} exchange={row.stock.exchange}>{row.stock.symbol}</TradingViewSymbolLink></div></td>
-                                <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-800"><ScoreMatrixButton workflowScale={isZerodhaPreview} originalDenominator={scoreRevision?.originals.get(stockIdentity(row.stock.symbol, row.stock.exchange))} detail={row.detail} formulaConfig={formulaConfig} onOpenDetail={setSelectedMatrixDetail} /></td>
+                                <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-800"><ScoreMatrixButton workflowScale={isZerodhaPreview} savedScore={scoreRevision?.saved.get(stockIdentity(row.stock.symbol, row.stock.exchange))} originalDenominator={scoreRevision?.originals.get(stockIdentity(row.stock.symbol, row.stock.exchange))} detail={row.detail} formulaConfig={formulaConfig} onOpenDetail={setSelectedMatrixDetail} /></td>
                                 <td className="whitespace-nowrap px-4 py-3"><ConsensusBreakupButton stock={row.stock} action={row.formulaAction} /></td>
                                 <td className="whitespace-nowrap px-4 py-3 text-slate-700">{row.formulaAction}</td>
                                 <td className="px-4 py-3">{side ? <span className={cn("rounded-full px-3 py-1 text-xs font-bold", side === "BUY" ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700")}>{side}</span> : <span title="Hold has no order side">Not applicable</span>}</td>
@@ -5010,10 +5011,16 @@ export function RebalanceWorkflowSections({
               originals.set(stockIdentity(saved.symbol, saved.exchange), denominator);
             }
           }
+          const saved = new Map<string, {score: number; divisor?: number}>();
+          for (const row of Array.isArray(frozen?.rows) ? frozen.rows : []) {
+            if (typeof row?.effectiveScore === "number" && Number.isFinite(row.effectiveScore)) {
+              saved.set(stockIdentity(row.symbol, row.exchange), {score: row.effectiveScore, divisor: row.formula_inputs?.detailedRationaleDenominator});
+            }
+          }
           setScoreRevision({
             sequence, version: typeof frozen?.formula_version === "string" ? frozen.formula_version : null,
             capturedAt: typeof frozen?.captured_at === "string" ? frozen.captured_at : null,
-            replayed: Boolean(corrected), originals,
+            replayed: Boolean(corrected), originals, saved,
           });
           const rows = Array.isArray(frozen?.rows) ? frozen.rows : [];
           const listingKey = (exchange: string, symbol: string) => JSON.stringify([exchange, symbol]);
