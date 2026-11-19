@@ -871,6 +871,14 @@ function getLatestMatchingRebalanceRuns(
   );
 }
 
+type BasketScoreRevision = {
+  sequence: number;
+  version: string | null;
+  capturedAt: string | null;
+  replayed: boolean;
+  originals: Map<string, number>;
+};
+
 function sameFrozenScore(saved: unknown, current: number | null) {
   if (saved === current) return true;
   if (typeof saved !== "number" || current === null || !Number.isFinite(saved) || !Number.isFinite(current)) return false;
@@ -2942,6 +2950,7 @@ function ScopedZerodhaBasketPreviewDialog({
   tradingViewTitle = "Zerodha India Basket TradingView URLs",
   tradingViewAriaLabel = "Open Zerodha India basket TradingView URL list",
   loadingLabel = "Preparing Zerodha basket…",
+  scoreRevision,
   scoreScanCompletedAt: scoreScanCompletedAtOverride = null,
   primaryButtonLabel,
   basketInfoText = "All rows are visible and selectable. Selection does not assert execution validity. Review the basket here, use protected MARKET for all selected stocks by default whenever direct Kite Connect access is enabled during regular market hours. Market drafts require enabled direct broker access; no silent LIMIT fallback is used.",
@@ -2987,6 +2996,7 @@ function ScopedZerodhaBasketPreviewDialog({
   tradingViewTitle?: string;
   tradingViewAriaLabel?: string;
   loadingLabel?: string;
+  scoreRevision?: BasketScoreRevision | null;
   scoreScanCompletedAt?: string | null;
   primaryButtonLabel?: string;
   basketInfoText?: ReactNode;
@@ -3057,7 +3067,7 @@ function ScopedZerodhaBasketPreviewDialog({
       const sameMarket = run && ["rebalance", "technical", "swing", "threats"].some(stage => isAnalysisRunForStage(run, stage as "rebalance" | "technical" | "swing" | "threats", tradingViewMarket));
       return { runId, createdAt: parseApiTimestamp(run?.created_at)?.toISOString() ?? "", completed: run?.status === "completed", status: run?.status, market: sameMarket ? tradingViewMarket : null };
     });
-    return { isin: hasOutsideHolding ? null : issuer, modelPrices, verifiedUsIdentity: row.stock.usIdentity?.listing ? {securityId:row.stock.usIdentity.listing.security_id,exchangeAliases:row.stock.usIdentity.holdingSafe ? ["US"] : []} : undefined, identityIssue: row.stock.identityIssue, vendorReady: (quoteRead.vendorQuotes ?? []).find(quote => quote.instrument === stockIdentity(row.stock.symbol, row.stock.exchange))?.eligible_for_readiness === true, investedValue: usHolding?.investedValue ?? null, vendorLtp: vendor?.price ?? null, vendorSource: vendor?.source, vendorAsOf: vendor?.asOf, currentValue: tradingViewMarket === "us" ? usHolding?.currentValue ?? null : currentWeights.valid ? currentWeights.values.get(stockIdentity(row.stock.symbol, row.stock.exchange)) ?? 0 : null, holdingQuantity: tradingViewMarket === "us" ? usHolding?.quantity ?? null : holding?.quantity ?? null, holdingAsOf: holding?.asOf, holdingSource: holding?.source, upstoxLtp: upstox?.price ?? null, upstoxAsOf: upstox?.asOf, upstoxSource: upstox?.source, symbol: row.stock.symbol, exchange: row.stock.exchange, score: currentOrder ? currentDetail.calculatedScore : row.formulaScore, action: currentOrder ? getZerodhaBasketActionForPercent(currentOrder) : row.formulaAction, scoreSources, ...displayQuote(row.stock.symbol, row.stock.exchange) };
+    return { modelUnits: currentDetail.meanUnitsChange, isin: hasOutsideHolding ? null : issuer, modelPrices, verifiedUsIdentity: row.stock.usIdentity?.listing ? {securityId:row.stock.usIdentity.listing.security_id,exchangeAliases:row.stock.usIdentity.holdingSafe ? ["US"] : []} : undefined, identityIssue: row.stock.identityIssue, vendorReady: (quoteRead.vendorQuotes ?? []).find(quote => quote.instrument === stockIdentity(row.stock.symbol, row.stock.exchange))?.eligible_for_readiness === true, investedValue: usHolding?.investedValue ?? null, vendorLtp: vendor?.price ?? null, vendorSource: vendor?.source, vendorAsOf: vendor?.asOf, currentValue: tradingViewMarket === "us" ? usHolding?.currentValue ?? null : currentWeights.valid ? currentWeights.values.get(stockIdentity(row.stock.symbol, row.stock.exchange)) ?? 0 : null, holdingQuantity: tradingViewMarket === "us" ? usHolding?.quantity ?? null : holding?.quantity ?? null, holdingAsOf: holding?.asOf, holdingSource: holding?.source, upstoxLtp: upstox?.price ?? null, upstoxAsOf: upstox?.asOf, upstoxSource: upstox?.source, symbol: row.stock.symbol, exchange: row.stock.exchange, score: currentOrder ? currentDetail.calculatedScore : row.formulaScore, action: currentOrder ? getZerodhaBasketActionForPercent(currentOrder) : row.formulaAction, scoreSources, ...displayQuote(row.stock.symbol, row.stock.exchange) };
   };
   const calculationStocks = allocationUniverse.map(displayStock);
   const displayCalculations = useBasketDisplayCalculations(open, tradingViewMarket, calculationStocks, portfolioAssets.totalAssets, detailsData.portfolioSnapshot?.captured_at ?? null, basketBrokerLabel, { portfolioValue: portfolioAssets.portfolioValue, availableMargin: portfolioAssets.availableMargin }, tradingViewMarket === "india" ? "issuer-v2" : "listing-v1");
@@ -3237,6 +3247,10 @@ function ScopedZerodhaBasketPreviewDialog({
                 data-testid="basket-score-scan-completed-at"
               >
                 Last score scan: {formatCompactStageTime(scoreScanCompletedAt)}
+                {isZerodhaPreview && <span className="ml-2">
+                  {scoreRevision ? `Run #${scoreRevision.sequence} · ${scoreRevision.replayed ? "Saved replay" : "Original record"} · ${scoreRevision.version ?? "revision unavailable"}` : "Saved revision unavailable"}
+                  {scoreRevision?.capturedAt && ` · ${formatCompactStageTime(scoreRevision.capturedAt)}`}
+                </span>}
               </p>
             ) : null}
           </div>
@@ -3322,7 +3336,7 @@ function ScopedZerodhaBasketPreviewDialog({
                 {displayCalculations.error ? <p role="alert" className="mb-3 text-red-700">{displayCalculations.error} <button type="button" onClick={displayCalculations.retry} className="underline">Retry historical scores</button></p> : null}
               </div>
               <div className="w-fit min-w-full overflow-clip rounded-2xl border border-slate-200">
-                  <BasketColumnTable hidden={hiddenColumns} order={columnPreferences?.order} names={columnNames} onOpen={setColumnMenu} onRequestRename={setRenameColumn}>
+                  <BasketColumnTable hidden={hiddenColumns} order={columnPreferences?.order} names={isZerodhaPreview && displayCalculations.parameters ? { "Historical Weighted Score": `${displayCalculations.parameters.days}-day mean score (−3 to +3)`, ...columnNames } : columnNames} onOpen={setColumnMenu} onRequestRename={setRenameColumn}>
                   <table className="min-w-[92rem] w-full text-sm">
                     <thead className="sticky top-0 z-10 bg-slate-50">
                       <tr className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
@@ -3407,7 +3421,7 @@ function ScopedZerodhaBasketPreviewDialog({
                                   </div>
                                 </td>
                                 <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-800">
-                                  <ScoreMatrixButton workflowScale={isZerodhaPreview} detail={order.detail} formulaConfig={formulaConfig} onOpenDetail={setSelectedMatrixDetail} />
+                                  <ScoreMatrixButton workflowScale={isZerodhaPreview} detail={order.detail} originalDenominator={scoreRevision?.originals.get(stockIdentity(order.symbol, order.exchange))} formulaConfig={formulaConfig} onOpenDetail={setSelectedMatrixDetail} />
                                 </td>
                                 <td className="whitespace-nowrap px-4 py-3">
                                   <ConsensusBreakupButton stock={order.stock} action={getZerodhaBasketActionForPercent(order)} />
@@ -3474,7 +3488,7 @@ function ScopedZerodhaBasketPreviewDialog({
                               return <tr key={`display-only:${row.id}`} data-display-only="true" className="bg-white transition">
                                 <td className="px-4 py-3"><input type="checkbox" disabled aria-label={`${row.stock.exchange} ${row.stock.symbol} display only; no executable order`} className="size-4 rounded border-slate-300" /></td>
                                 <td className="whitespace-nowrap px-4 py-3 font-bold text-slate-950"><div className="inline-flex items-center gap-1.5"><StockDetailsButton stock={row.stock} formulaConfig={formulaConfig} market={tradingViewMarket} technicalScan={null} detailsData={detailsData} historicalRows={historicalRows} /><span className="text-xs font-semibold text-slate-500">{row.stock.exchange}</span><TradingViewSymbolLink symbol={row.stock.symbol} market={tradingViewMarket} exchange={row.stock.exchange}>{row.stock.symbol}</TradingViewSymbolLink></div></td>
-                                <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-800"><ScoreMatrixButton workflowScale={isZerodhaPreview} detail={row.detail} formulaConfig={formulaConfig} onOpenDetail={setSelectedMatrixDetail} /></td>
+                                <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-800"><ScoreMatrixButton workflowScale={isZerodhaPreview} originalDenominator={scoreRevision?.originals.get(stockIdentity(row.stock.symbol, row.stock.exchange))} detail={row.detail} formulaConfig={formulaConfig} onOpenDetail={setSelectedMatrixDetail} /></td>
                                 <td className="whitespace-nowrap px-4 py-3"><ConsensusBreakupButton stock={row.stock} action={row.formulaAction} /></td>
                                 <td className="whitespace-nowrap px-4 py-3 text-slate-700">{row.formulaAction}</td>
                                 <td className="px-4 py-3">{side ? <span className={cn("rounded-full px-3 py-1 text-xs font-bold", side === "BUY" ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700")}>{side}</span> : <span title="Hold has no order side">Not applicable</span>}</td>
@@ -4739,6 +4753,7 @@ export function RebalanceWorkflowSections({
     error: null,
   });
   const { scoreMatrixFormulaConfig, setScoreMatrixFormulaConfig, zerodhaBasketBuyThreshold, setZerodhaBasketBuyThreshold, zerodhaBasketBuyThresholdDraft, setZerodhaBasketBuyThresholdDraft, indmoneyBasketBuyThreshold, setIndmoneyBasketBuyThreshold, indmoneyBasketBuyThresholdDraft, setIndmoneyBasketBuyThresholdDraft, buyThresholdSaveError, buyThresholdPersistence } = useWorkflowConfiguration();
+  const [scoreRevision, setScoreRevision] = useState<BasketScoreRevision | null>(null);
   const [verifiedBasketFormula, setVerifiedBasketFormula] = useState<string | null>(null);
   const zerodhaOrderSubmissionBlockedReason = [brokerOrderBlock, verifiedBasketFormula === canonicalBasketInputs(scoreMatrixFormulaConfig) ? null :
     "Provisional basket. The workflow final, formula and source revisions must match the server record. Open workflow history to replay the saved inputs."].filter(Boolean).join(" ") || null;
@@ -4918,6 +4933,7 @@ export function RebalanceWorkflowSections({
   const openZerodhaBasketPreview = useCallback(async () => {
     const generation = ++zerodhaPreparation.current;
     setVerifiedBasketFormula(null);
+    setScoreRevision(null);
     setZerodhaAllocationUniverse([]);
     setZerodhaBasketOrders([]);
     setZerodhaBasketHistoryRuns([]);
@@ -4984,6 +5000,19 @@ export function RebalanceWorkflowSections({
           const stage = history.stages.find(s => s.stage === "actionables");
           const corrected = stage?.summary?.corrected_final_v2;
           const frozen = (corrected ?? stage?.summary?.frozen_final) as Record<string, unknown> | undefined;
+          const original = stage?.summary?.frozen_final as Record<string, unknown> | undefined;
+          const originals = new Map<string, number>();
+          for (const saved of Array.isArray(original?.rows) ? original.rows : []) {
+            const denominator = saved?.formula_inputs?.detailedRationaleDenominator;
+            if (typeof denominator === "number" && Number.isFinite(denominator)) {
+              originals.set(stockIdentity(saved.symbol, saved.exchange), denominator);
+            }
+          }
+          setScoreRevision({
+            sequence, version: typeof frozen?.formula_version === "string" ? frozen.formula_version : null,
+            capturedAt: typeof frozen?.captured_at === "string" ? frozen.captured_at : null,
+            replayed: Boolean(corrected), originals,
+          });
           const rows = Array.isArray(frozen?.rows) ? frozen.rows : [];
           if ((stage?.status === "completed" || corrected) && frozen?.schema === "workflow-final-v2" && frozen.formula_version === "score-matrix-v2" &&
               frozen.broker === "india" && frozen.workflow_sequence === sequence && frozen.technical_run_id === technical.id &&
@@ -8289,6 +8318,7 @@ ${zerodhaExecutionMode === "direct_market"
         onRefreshLtp={refreshZerodhaBasketLtp}
         ltpRefreshing={zerodhaBasketLtpRefreshing}
         ltpRefreshedAt={zerodhaBasketLtpRefreshedAt}
+        scoreRevision={scoreRevision}
         scoreScanCompletedAt={zerodhaBasketScoreScanCompletedAt}
         submission={zerodhaBasketSubmission}
         detailsData={zerodhaBasketDetailsData}
