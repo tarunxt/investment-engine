@@ -5,6 +5,7 @@ from sqlalchemy import select
 from app.domains.recommendation_audit.models import EvidenceRecord
 from app.domains.recommendation_audit.schemas import Formula
 import json
+from .final_positions import POSITION_POLICY
 from .final_score_math import DIRECTIONAL_SIZING
 from .frozen_final import validate_frozen_final
 
@@ -74,7 +75,7 @@ async def recover_final(db, workflow, *, corrected=False):
     saved = (final.summary_json or {}).get("frozen_final")
     if corrected:
         existing = (final.summary_json or {}).get("corrected_final_v2")
-        if existing and existing.get("sizing_policy") == DIRECTIONAL_SIZING:
+        if existing and existing.get("sizing_policy") == DIRECTIONAL_SIZING and (not existing.get("scorecard_job_id") or existing.get("position_policy") == POSITION_POLICY):
             return existing
     elif saved:
         return saved
@@ -97,6 +98,8 @@ async def recover_final(db, workflow, *, corrected=False):
         "formula": receipt.get("formula"), "response_hashes": receipt.get("response_hashes"),
         "rebalance_run_ids": receipt.get("rebalance_run_ids"),
     }
+    if corrected and workflow.portfolio == "india" and (receipt.get("scorecard_job_id") or stages["threats"].job_id):
+        captured["position_policy"] = POSITION_POLICY
     await validate_frozen_final(db, captured, user_id=workflow.user_id, portfolio=workflow.portfolio,
                                 sequence=workflow.sequence, rebuild=True)
     return captured

@@ -24,7 +24,7 @@ def equivalent(actual, expected):
     return type(actual) is type(expected) and actual == expected
 
 
-def source_calculations(payload, *, sources, jobs_by_run, market, scorecards=None, sizing_policy=DIRECTIONAL_SIZING):
+def source_calculations(payload, *, sources, jobs_by_run, market, scorecards=None, sizing_policy=DIRECTIONAL_SIZING, positions=None):
     formula = payload.get("formula")
     required = {"detailedRationaleMultipliers", "detailedRationaleDenominator", "actionScores", "technicalScanMultipliers", "scoreSymbolThresholds"}
     if not isinstance(formula, dict) or set(formula) != required:
@@ -87,10 +87,28 @@ def source_calculations(payload, *, sources, jobs_by_run, market, scorecards=Non
         # The workflow passes a portfolio snapshot but no verified US listing
         # map to buildConsensusRows. usIdentityHolding leaves that position
         # unknown, even if model rows contain a suggested current quantity.
+        position = None
+        if positions is not None:
+            captured, holdings = positions
+            units, price = holdings.get(key, (0, None))
+            source = "broker-snapshot" if key in holdings else "absent-from-broker-snapshot"
+            source_job = None
+            if units and price is None:
+                for row, (_, job) in zip(rows, grouped_jobs[key]):
+                    candidate = numeric(row.get("Price Per Unit"), strict=True)
+                    if candidate is not None and candidate > 0:
+                        price, source, source_job = candidate, "provider-price", job.id
+                        break
+                else:
+                    source = "price-unavailable"
+            position = (units, price)
         calculation = calculate_listing(rows, formula, technical, direction=direction,
-                                        market=market, sizing_policy=sizing_policy, unresolved_holding=market == "us",
+                                        market=market, position=position, sizing_policy=sizing_policy, unresolved_holding=market == "us",
                                         legacy="[SCORING_POLICY_V3]" not in technical_source.prompt,
                                         supplemental=(scorecards or {}).get(":".join(key)))
+        if position is not None:
+            calculation["position_valuation"] = {"snapshot_at": captured, "source": source,
+                                                 "price": price, "provider_job_id": source_job}
         calculation["valid_suggestions"] = len(output_jobs)
         calculation["source_coverage"] = [{
             "job_id": job.id,

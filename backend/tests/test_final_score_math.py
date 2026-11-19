@@ -162,3 +162,26 @@ def test_whole_action_labels_and_ambiguous_prose():
     assert normalize_action("reduce") == "Trim"
     for text in ("Do not sell all", "Hold, do not add", "additional information", "hold2"):
         assert normalize_action(text) is None
+
+
+def test_snapshot_value_and_trim_exclude_zero_provider_price_and_unsettled_units():
+    from app.domains.runs.final_positions import captured_positions
+    from app.domains.runs.final_source_rows import UnverifiableFinal
+    prompt = """[THREAT_CAPTURED_AT=2026-11-18T18:44:47+00:00]
+- Holdings count: 1
+Portfolio holdings table:
+| Exchange | Stock Symbol | Units | Settled Units | Live Price |
+| --- | --- | --- | --- | --- |
+| NSE | OIL | 21 | 19 | 435.50 |
+"""
+    _, positions = captured_positions(prompt)
+    rows = [{**source_row(), **{h: "-1.5" for h in RATIONALE_HEADERS.values()},
+             ACTION_HEADER: "Trim", "Units Change": "-9", "Current Units": "19", "Price Per Unit": px}
+            for px in ("435.50", "0")]
+    before = calculate_listing(rows, formula(), market="india")
+    after = calculate_listing(rows, formula(), market="india", position=positions[("NSE", "OIL")])
+    assert after["effective_score"] == before["effective_score"]
+    assert before["estimate"]["amount"] == 1959.75
+    assert after["estimate"] == dict(currentUnits=19, currentInvestmentAmount=8274.5, units=9, amount=3919.5)
+    with pytest.raises(UnverifiableFinal):
+        captured_positions(prompt.replace("count: 1", "count: 2"))

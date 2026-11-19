@@ -237,3 +237,52 @@ async def test_untagged_icici_replay_keeps_verified_formula_and_archives_old_uni
         await db.commit()
         error = await verify_saved_india_score(42, db, OWNER)
         assert not error["verified"] and "BSE:ICICIBANK estimate.units: saved 99, recomputed None" in error["reason"]
+
+
+@pytest.mark.anyio
+async def test_snapshot_valuation_revision_preserves_both_archives(audit_db, stored_capture):
+    from test_auto_rebalance_audit_durability import OWNER
+    from app.domains.runs.router import replay_india_score, verify_saved_india_score
+    prompt = """[ZERODHA_THREATS]
+[THREAT_CAPTURED_AT=2026-01-02T08:00:00+00:00]
+- Holdings count: 1
+Portfolio holdings table:
+| Exchange | Stock Symbol | Settled Units | Live Price |
+| --- | --- | --- | --- |
+| NSE | FIXTUREEQ | 10 | 15.25 |
+"""
+    async with audit_db.sessions() as db:
+        db.add(Job(id=31, user_id=7, prompt=prompt, response="No scored observations", provider="test", model="test",
+                   status=JobStatus.COMPLETED, auto_rebalance_portfolio="india", auto_rebalance_sequence=42,
+                   auto_rebalance_label="India Run #42 (Threats Scan)"))
+        technical = await db.get(Run, 20)
+        technical.status = JobStatus.COMPLETED
+        technical.prompt += '\n[TECHNICAL_REBALANCE_SOURCES_V1]{"run_ids":[10],"job_ids":[11]}[/TECHNICAL_REBALANCE_SOURCES_V1]'
+        technical.prompt += '\n[WORKFLOW_SCORECARDS_V1]{"job_id":31,"rows":[]}'
+        await db.commit()
+    for name in ("sync", "swing"):
+        await write(audit_db, name, "skipped")
+    await write(audit_db, "threats", "completed", job_id=31)
+    await write(audit_db, "rebalance", "partial", run_id=10)
+    await write(audit_db, "technical", "completed", run_id=20, summary={"final_inputs":{
+        "formula":stored_capture["formula"], "rebalance_run_ids":[10], "response_hashes":stored_capture["response_hashes"]}})
+    await write(audit_db, "actionables", "processing")
+    async with audit_db.sessions() as db:
+        await replay_india_score(42, db, OWNER)
+        stage = (await db.scalars(select(AutoRebalanceWorkflowStage).where(AutoRebalanceWorkflowStage.stage=="actionables"))).one()
+        result = await verify_saved_india_score(42, db, OWNER)
+        assert result["verified"], result
+        row = result["record"]["rows"][0]
+        assert row["estimate"]["currentInvestmentAmount"] == 152.5
+        assert row["position_valuation"]["price"] == 15.25
+        previous = deepcopy(result["record"])
+        previous.pop("position_policy")
+        previous["rows"][0].pop("position_valuation")
+        stage.summary_json = {"corrected_final_v2": previous, "previous_sizing_replay": {"version":"original"}}
+        await db.commit()
+        await replay_india_score(42, db, OWNER)
+        assert stage.summary_json["previous_valuation_replay"] == previous
+        assert stage.summary_json["previous_sizing_replay"] == {"version":"original"}
+        saved = deepcopy(stage.summary_json)
+        await replay_india_score(42, db, OWNER)
+        assert saved == stage.summary_json
