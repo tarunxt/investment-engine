@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, type SVGProps } from "react";
-import { AlertCircle, CheckCircle2, FileSpreadsheet, Loader2 } from "lucide-react";
+import { FileSpreadsheet } from "lucide-react";
 import { StageErrorDetails } from "@/components/shared/StageErrorDetails";
 import { cn } from "@/lib/utils";
 import { formatCompactStageTime } from "@/lib/datetime";
@@ -64,6 +64,7 @@ export type StageInfo = {
   evidenceCoverage?: string;
   distinctModels?: number;
   pairCoverage?: string;
+  pairStatus?: "completed" | "partial";
   portfolioThreat?: string;
   frozenFinal?: Record<string, unknown>;
 };
@@ -164,7 +165,7 @@ export function getStageBackgroundClass(state: StageState) {
   if (state === "running") return "bg-yellow-50";
   if (state === "queued") return "bg-sky-50";
   if (state === "completed") return "bg-emerald-50";
-  if (state === "failed") return "bg-red-50";
+  if (state === "failed") return "bg-red-100";
   return "bg-slate-100";
 }
 
@@ -271,6 +272,7 @@ export function isInsufficientBalanceError(error?: string | null) {
 
 export function formatBriefTileError(error?: string | null) {
   if (!error?.trim() || isSheetExportError(error)) return "-";
+  if (/different (?:portfolio )?snapshots|selected portfolio capture is no longer available/i.test(error)) return "Portfolio snapshot mismatch";
   if (/partial(?:ly)?/i.test(error)) return "LLM output partial";
   if (isInsufficientBalanceError(error)) return "Provider credits insufficient";
   if (/timeout|timed?\s*out|deadline/i.test(error)) return "Request timed out";
@@ -287,16 +289,38 @@ export function getTileErrorDetail(error?: string | null) {
 }
 
 /** Execution state and saved result are distinct: an idle page can still show a terminal result. */
+export function getStageOutcome(info: StageInfo) {
+  const status = info.runStatus?.trim().toLowerCase() ?? "";
+  if (info.state === "running" || info.state === "queued") return info.state;
+  if (info.state === "failed" || ["failed", "verification failed", "error", "canceled", "cancelled", "interrupted", "killed", "start failed", "auth expired"].includes(status)) return "failed";
+  if (status === "completion unconfirmed" && info.error?.startsWith("Final calculation could not be verified:")) return "failed";
+  if (status === "completion unconfirmed") return "unconfirmed";
+  if (status === "stale") return "stale";
+  if (hasStagePartialOutput(info)) return "partial";
+  if (info.evidence?.kind === "derived") return "derived";
+  if (status.startsWith("using ") || status === "skipped") return "skipped";
+  if (status.startsWith("paused")) return "paused";
+  if (["pending", "queued"].includes(status)) return "queued";
+  if (["processing", "running"].includes(status)) return "running";
+  if (info.state === "completed" || ["completed", "saved calculation", "synced", "last synced portfolio", "succeeded", "success"].includes(status)) return "completed";
+  return "idle";
+}
+
 export function getStageLedgerTone(info: StageInfo) {
-  const status = info.runStatus?.trim().toLowerCase();
-  if (info.state === "running" || info.state === "queued") return getStageBackgroundClass(info.state);
-  if (info.state === "failed" || ["failed", "verification failed", "error", "canceled", "cancelled", "interrupted"].includes(status ?? "")) return "bg-red-50";
-  if (status === "completion unconfirmed" && info.error?.startsWith("Final calculation could not be verified:")) return "bg-red-50";
-  if (status === "completion unconfirmed" || hasStagePartialOutput(info)) return "bg-amber-50";
-  if (info.state === "completed" || ["completed", "partial", "saved calculation", "synced", "last synced portfolio", "succeeded", "success"].includes(status ?? "")) return "bg-emerald-50";
-  if (["processing", "running"].includes(status ?? "")) return "bg-amber-50";
-  if (["pending", "queued"].includes(status ?? "")) return "bg-sky-50";
-  return getStageBackgroundClass(info.state);
+  const outcome = getStageOutcome(info);
+  if (outcome === "partial" || outcome === "unconfirmed" || outcome === "stale") return "bg-amber-50";
+  if (outcome === "derived" || outcome === "paused" || outcome === "skipped") return getStageBackgroundClass("idle");
+  return getStageBackgroundClass(outcome);
+}
+
+export function StageStatusIcon({ info }: { info: StageInfo }) {
+  const outcome = getStageOutcome(info);
+  const symbols = {
+    completed: "✅", failed: "❌", partial: "⚠️", stale: "⚠️", unconfirmed: "⚠️", queued: "⏳",
+    running: "🔄", derived: "ℹ️", skipped: "⏭️", paused: "⏸️", idle: "○",
+  };
+  const description = info.runStatus || outcome;
+  return <span role="img" aria-label={outcome} title={description} className="ml-1 inline-block align-middle text-xs">{symbols[outcome]}</span>;
 }
 
 export function hasStagePartialOutput(info: StageInfo) {
@@ -499,8 +523,6 @@ export function WorkflowStageTile({
   placeOrderLabel?: string;
   onCalculationsClick?: () => void;
 }) {
-  const isRunning = info.state === "running";
-  const isCompleted = info.state === "completed";
   const stageMeta = STAGE_METADATA[stage];
   const showPromptShortcut = Boolean(onPromptClick);
   const iconButtonClasses =
@@ -568,7 +590,7 @@ export function WorkflowStageTile({
   return (
     <>
     <article
-      className={`relative flex min-h-[17rem] flex-col items-start justify-start rounded-2xl border p-5 text-left align-top shadow-sm transition hover:-translate-y-0.5 hover:shadow-md disabled:cursor-default disabled:hover:translate-y-0 ${getStageClasses(info.state)} ${selectionClasses}`}
+      className={`relative flex min-h-[17rem] flex-col items-start justify-start rounded-2xl border p-5 text-left align-top shadow-sm transition hover:-translate-y-0.5 hover:shadow-md disabled:cursor-default disabled:hover:translate-y-0 ${getStageLedgerTone(info)} ${getStageToneClasses(info.state)} ${selectionClasses}`}
     >
       <button
         type="button"
@@ -627,20 +649,12 @@ export function WorkflowStageTile({
 
       <div className="pointer-events-none relative z-10 w-full px-10 text-center text-base font-semibold text-slate-950">
         <div className="flex min-w-0 items-center justify-center gap-2">
-          {isRunning ? (
-            <Loader2 className="size-4 shrink-0 animate-spin text-amber-600" />
-          ) : info.state === "failed" ? (
-            <AlertCircle className="size-4 shrink-0 text-red-600" />
-          ) : isCompleted ? (
-            <CheckCircle2 className="size-4 shrink-0 text-emerald-600" />
-          ) : null}
-          <span className="truncate">{getStageTileLabel(stage)}</span>
+          <span className="truncate">{getStageTileLabel(stage)}</span><StageStatusIcon info={info} />
         </div>
       </div>
 
       <div className="pointer-events-none relative z-10 mt-6 w-full space-y-2 text-sm leading-5 text-slate-600">
         {stage === "threats" ? <p>{stageMeta.tileDescription}</p> : null}
-        {historical ? <p><span className="font-semibold">Status:</span> {info.runStatus || "Not recorded"}</p> : null}
         {stageRows.map(renderStageRow)}
       </div>
 

@@ -1469,7 +1469,7 @@ class apiServiceClass implements IApiService {
   }
 
   async zerodhaRunThreats(
-    data?: PortfolioEventRunRequest,
+    data?: PortfolioEventRunRequest & { expected_snapshot_captured_at?: string },
   ): Promise<ZerodhaThreatRunResponse> {
     try {
       return await this.post<ZerodhaThreatRunResponse>(
@@ -1487,6 +1487,9 @@ class apiServiceClass implements IApiService {
             throw new Error(
               "Queued Zerodha threats job is missing snapshot metadata.",
             );
+          }
+          if (data?.expected_snapshot_captured_at && Date.parse(analysis.captured_at) !== Date.parse(data.expected_snapshot_captured_at)) {
+            throw new Error("Queued Zerodha threats job uses a different portfolio snapshot.");
           }
           return {
             job_id: analysis.job_id,

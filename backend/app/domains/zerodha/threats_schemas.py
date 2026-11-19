@@ -2,10 +2,14 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from pydantic import BaseModel
+from pydantic import AwareDatetime, BaseModel
 
-from app.domains.portfolio_events.schemas import PortfolioAnalysisHistoryItemResponse
+from app.domains.portfolio_events.schemas import PortfolioAnalysisHistoryItemResponse, PortfolioEventRunRequest
 from app.shared.types import JobStatus
+
+
+class ZerodhaThreatRunRequest(PortfolioEventRunRequest):
+    expected_snapshot_captured_at: AwareDatetime | None = None
 
 
 class ZerodhaThreatSummaryResponse(BaseModel):

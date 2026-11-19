@@ -13,13 +13,11 @@ import {
   Unplug,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { PortfolioAnalysisNav } from '@/components/shared/PortfolioAnalysisNav';
 import { apiService, APIError } from '@/services/api';
 import { cn } from '@/lib/utils';
 import { URLs } from '@/lib/urls';
 import { PortfolioSnapshotsPanel } from './_components/PortfolioSnapshotsPanel';
 import { ZerodhaConnectionGuide } from './_components/ZerodhaConnectionGuide';
-import styles from './_components/IndiaPortfolioNav.module.css';
 import {
   type ZerodhaPortfolioOverviewResponse,
   type ZerodhaPortfolioSnapshotDetail,
@@ -439,9 +437,6 @@ export default function ZerodhaPage() {
               <span>{status ? (status.connected ? 'Connected' : 'Not connected') : 'Connection status unavailable'}</span>
             </p>
           </div>
-          <nav aria-label="Portfolio stages and markets">
-            <PortfolioAnalysisNav portfolio="zerodha" active="portfolio" className={styles.navigation} />
-          </nav>
         </header>
 
         {/* Error */}

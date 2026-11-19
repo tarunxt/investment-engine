@@ -30,3 +30,18 @@ test('both UI sync paths pass their captured owner and cancellation to module he
 test('all workflow and basket polling call sites carry captured owner as their third argument',()=>{const calls=[];function visit(node){if(ts.isCallExpression(node)&&node.expression.getText(ast)==='waitForZerodhaPortfolioSync')calls.push(node);ts.forEachChild(node,visit)}visit(ast);assert.equal(calls.length,3);for(const call of calls){assert.equal(call.arguments.length,3);assert.equal(call.arguments[2].getText(ast),'runtimeOwner');}});
 
 for(const name of ['runWorkflow','syncPortfolioNow'])test(name+' rejects a stale invocation before popup or reservation',async()=>{let callback;function visit(node){if(ts.isVariableDeclaration(node)&&node.name.getText(ast)===name)callback=node.initializer.arguments[0].getText(ast);ts.forEachChild(node,visit)}visit(ast);const owner=load(read('../lib/workflowOwnerLifetime.ts'));owner.setWorkflowOwner(42);const runtimeOwner=owner.captureWorkflowOwner();owner.setWorkflowOwner(43);const run=load('export const callback='+callback,{...owner,runtimeOwner,window:{open:()=>{throw Error('Unexpected popup')}}}).callback;await run('zerodha');});
+
+test('a queued sync with only the previous capture fails before downstream stages', async () => {
+  const previous = '2026-11-19T18:27:00Z';
+  const h = fixture({zerodhaPortfolioOverview: async () => ({latest: {captured_at: previous}})});
+  await assert.rejects(h.waitForZerodhaPortfolioSync(previous, undefined, h.token), /timed out waiting for a new Zerodha snapshot/);
+});
+
+test('sync accepts a fresh capture on its final poll', async () => {
+  const previous = '2026-11-19T18:27:00Z';
+  const next = '2026-11-19T18:33:00Z';
+  let reads = 0;
+  const h = fixture({zerodhaPortfolioOverview: async () => ({latest: {captured_at: ++reads === 3 ? next : previous}})});
+  const result = await h.waitForZerodhaPortfolioSync(previous, undefined, h.token);
+  assert.equal(result.latest.captured_at, next);
+});

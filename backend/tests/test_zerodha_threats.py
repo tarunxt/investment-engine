@@ -145,3 +145,49 @@ def test_zero_settled_t1_holding_is_included_with_total_exposure():
     assert '| BSE | OIL | OIL | 19 |' in table
     assert '8,550.00' in table or '8550.00' in table
     assert 'Settled Units' in table
+
+
+def test_workflow_threats_uses_requested_capture_even_after_a_newer_sync(monkeypatch):
+    import asyncio
+    from unittest.mock import AsyncMock, Mock
+    from app.domains.zerodha import threats_router as routes
+
+    captured = datetime(2026, 11, 19, 18, 27, 11, 357121, tzinfo=timezone.utc)
+    snapshot = SimpleNamespace(snapshot_date=date(2026, 11, 19), captured_at=captured)
+    repo = SimpleNamespace(get_by_user_and_capture=AsyncMock(return_value=snapshot), get_latest_by_user=AsyncMock())
+    monkeypatch.setattr(routes, "ZerodhaPortfolioSnapshotRepository", lambda db: repo)
+    monkeypatch.setattr(routes, "_resolve_threat_target", AsyncMock(return_value=("fixture", "fixture")))
+    build_prompt = Mock(return_value="fixture prompt")
+    monkeypatch.setattr(routes, "build_zerodha_threat_prompt", build_prompt)
+    monkeypatch.setattr(routes, "_get_redis", lambda: SimpleNamespace(aclose=AsyncMock()))
+    execute = AsyncMock(return_value=SimpleNamespace(job_id=1))
+    monkeypatch.setattr(routes, "CreateJobUseCase", lambda **kwargs: SimpleNamespace(execute=execute))
+    job = SimpleNamespace(id=1, status="pending", provider="fixture", model="fixture", created_at=captured)
+    monkeypatch.setattr(routes, "PostgresJobRepository", lambda db: SimpleNamespace(get_for_user=AsyncMock(return_value=job)))
+    request = routes.ZerodhaThreatRunRequest(expected_snapshot_captured_at=captured)
+    response = asyncio.run(routes.run_threat_analysis(request, object(), SimpleNamespace(id=42)))
+    repo.get_by_user_and_capture.assert_awaited_once_with(42, captured)
+    repo.get_latest_by_user.assert_not_awaited()
+    build_prompt.assert_called_once_with(snapshot)
+    assert response.captured_at == captured
+    assert execute.await_args.args[0].prompt == "fixture prompt"
+
+
+def test_missing_owned_capture_rejects_threats_before_queue(monkeypatch):
+    import asyncio
+    from unittest.mock import AsyncMock, Mock
+    import pytest
+    from fastapi import HTTPException
+    from app.domains.zerodha import threats_router as routes
+
+    captured = datetime(2026, 11, 19, tzinfo=timezone.utc)
+    lookup = AsyncMock(return_value=None)
+    monkeypatch.setattr(routes, "ZerodhaPortfolioSnapshotRepository", lambda db: SimpleNamespace(get_by_user_and_capture=lookup))
+    monkeypatch.setattr(routes, "_resolve_threat_target", AsyncMock(return_value=("fixture", "fixture")))
+    queue = Mock()
+    monkeypatch.setattr(routes, "_get_redis", queue)
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(routes.run_threat_analysis(routes.ZerodhaThreatRunRequest(expected_snapshot_captured_at=captured), object(), SimpleNamespace(id=42)))
+    assert error.value.status_code == 409
+    lookup.assert_awaited_once_with(42, captured)
+    queue.assert_not_called()

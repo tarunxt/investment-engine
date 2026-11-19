@@ -3,8 +3,6 @@
 import { formatPortfolioTimestamp } from "@/lib/portfolioTimestamp";
 
 import { useState } from 'react';
-import { PortfolioAnalysisNav } from '@/components/shared/PortfolioAnalysisNav';
-import navStyles from '../../zerodha/_components/IndiaPortfolioNav.module.css';
 import { LastPasteDialog } from './LastPasteDialog';
 import { Eye, Loader2, RefreshCw } from 'lucide-react';
 
@@ -46,7 +44,6 @@ export function IndMoneyUsSnapshotWorkspace({
 
   return (
     <Tabs value={view} onValueChange={setView} className="mx-auto min-w-0 flex-col gap-3">
-      <nav aria-label="US portfolio stages"><PortfolioAnalysisNav portfolio="indmoneyUs" active="portfolio" className={navStyles.navigation} /></nav>
       <TabsList aria-label="US snapshot views" className="h-auto w-full flex-wrap justify-start gap-2 bg-transparent p-0">
         {views.map((item) => (
           <div key={item.value} className="inline-flex items-stretch rounded-md bg-purple-50">

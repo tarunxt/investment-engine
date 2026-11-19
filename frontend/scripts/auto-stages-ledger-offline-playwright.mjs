@@ -147,10 +147,10 @@ try {
  await page.getByRole('button',{name:'India stage ledger',exact:true}).click();assert.equal(await page.getByRole('button',{name:'Place Order',exact:true}).count(),1);assert.equal(await page.getByRole('button',{name:'Final Order',exact:true}).count(),0);
  for(const state of ['loading','empty','failed','stale','zero','selection']){
  await page.getByLabel('Fixture state').selectOption(state);assert.equal(await page.locator('tbody tr').count(),6);
- if(state==='loading')assert.match(await page.locator('tbody').innerText(),/queued/i);
+ if(state==='loading')assert.ok(await page.locator('tbody').getByRole('img',{name:'queued',exact:true}).count()>0);
  if(state==='empty'){assert.match(await page.locator('tbody').innerText(),/Not available/);assert.doesNotMatch(await page.locator('tbody').innerText(),/Passed:2/);}
  if(state==='failed')assert.equal(await page.locator('tbody tr').filter({hasText:'Request timed out'}).count(),1);
- if(state==='stale')assert.match(await page.locator('tbody').innerText(),/stale/i);
+ if(state==='stale')assert.ok(await page.locator('tbody').getByRole('img',{name:'stale',exact:true}).count()>0);
  if(state==='zero'){assert.equal(await page.locator('tbody tr').nth(2).locator('td').nth(2).innerText(),'0');assert.equal(await page.locator('tbody tr').nth(1).locator('td').nth(2).innerText(),'0');}
  if(state==='selection'){const check=page.getByRole('checkbox',{name:/Select Rebalance/});await check.focus();await page.keyboard.press('Space');assert.equal(await check.isChecked(),true);await page.getByRole('button',{name:'Run and order controls',exact:true}).click();assert.match(await page.getByRole('region',{name:'Sync and order controls'}).innerText(),/Next run: Rebalance/);assert.equal(await page.getByRole('checkbox',{name:'Rebalance',exact:true}).isChecked(),true);await page.getByRole('button',{name:'India stage ledger',exact:true}).click();}
  }
@@ -184,7 +184,7 @@ try {
    context.fillRect(0,0,1,1);
    return Array.from(context.getImageData(0,0,1,1).data).join(',');
  };
- const stateClasses={completed:'bg-emerald-50',running:'bg-yellow-50',queued:'bg-sky-50',idle:'bg-slate-100',failed:'bg-red-50'};
+ const stateClasses={completed:'bg-emerald-50',running:'bg-yellow-50',queued:'bg-sky-50',idle:'bg-slate-100',failed:'bg-red-100'};
  for(const dark of [false,true])for(const market of ['India','US']){
    const colours=[];
    for(const [state,background] of Object.entries(stateClasses)){

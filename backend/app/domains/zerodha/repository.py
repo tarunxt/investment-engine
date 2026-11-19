@@ -153,6 +153,17 @@ class ZerodhaPortfolioSnapshotRepository:
         )
         return result.scalar_one_or_none()
 
+    async def get_by_user_and_capture(
+        self, user_id: int, captured_at: datetime,
+    ) -> ZerodhaPortfolioSnapshot | None:
+        result = await self._db.execute(
+            select(ZerodhaPortfolioSnapshot).where(
+                ZerodhaPortfolioSnapshot.user_id == user_id,
+                ZerodhaPortfolioSnapshot.captured_at == captured_at,
+            )
+        )
+        return result.scalar_one_or_none()
+
     async def get_by_user_and_date(
         self,
         user_id: int,

@@ -116,7 +116,7 @@ test('actual hydrated page preserves data and all three views at desktop and nar
       for (const name of ['Top Allocation', 'Top Gainers', 'Laggards', 'Reconciliation', 'Market Indices']) assert.equal(await page.getByRole('heading', { name, exact: true }).count(), 1);
       await screenshot(page, `${width}-saved-partial`);
       await page.getByText('Source details', { exact: true }).click();
-      assert.match(await page.locator('details').filter({ has: page.getByText('Source details', { exact: true }) }).innerText(), /no direct API[\s\S]*manual paste/i);
+      assert.match(await page.locator('details').filter({ has: page.getByText('Source details', { exact: true }) }).innerText(), /Paste the INDmoney portfolio screen[\s\S]*Source: manual paste/i);
       await screenshot(page, `${width}-source-details`);
       await page.getByText('Source details', { exact: true }).click();
       const reads = await page.evaluate(() => window.fixture.reads);
@@ -137,19 +137,13 @@ test('actual hydrated page preserves data and all three views at desktop and nar
       assert.equal(await page.getByRole('button', { name: 'Save Snapshot', exact: true }).isEnabled(), true);
       await screenshot(page, `${width}-paste-draft`);
       const navigation = page.getByRole('navigation', { name: 'US portfolio stages' });
-      for (const [name,suffix] of [['Portfolio',''],['Swing Trade','/swing-trade'],['Threats','/threats'],['Events','/events'],['Rebalance','/rebalance'],['Final Actionables','/final-actionables']]) {
-        assert.equal(await navigation.getByRole('link',{name:'US '+name,exact:true}).getAttribute('href'),'/console/indmoney-us'+suffix);
-      }
+      assert.equal(await navigation.count(), 0);
       await page.getByRole('tab',{name:'Paste snapshot',exact:true}).focus();
       await page.keyboard.press('Home');
       await page.waitForFunction(() => document.activeElement?.textContent === 'Saved US snapshot');
       assert.equal(await page.getByRole('tab', { name: 'Saved US snapshot' }).getAttribute('aria-selected'), 'true');
       assert.equal(await page.evaluate(() => window.fixture.reads), reads, 'view changes must not reload broker or stored records');
       assert.equal(await page.evaluate(() => window.fixture.saves.length), 0, 'view changes must not save');
-      await navigation.getByRole('link', { name: 'US Threats', exact: true }).click();
-      await page.getByRole('heading', { name: 'Local fixture stage destination' }).waitFor();
-      await page.goBack();
-      await waitLoaded(page);
       assert.equal(await page.getByRole('heading', { name: 'INDmoney US snapshot' }).count(), 1);
       assert.equal(await page.evaluate(() => window.fixture.saves.length), 0);
       assert.deepEqual(errors, []);

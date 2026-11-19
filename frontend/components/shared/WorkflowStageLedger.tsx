@@ -5,12 +5,12 @@ import type { RankedListing } from "@/lib/workflowScorecardRanking";
 import { StageDurationBreakdownDialog } from "@/app/console/dashboard/_components/StageDurationBreakdownDialog";
 import { WorkflowTileMenu, type TileAction } from "./WorkflowTileMenu";
 import { StageErrorDetails } from "./StageErrorDetails";
-import { getStageLedgerTone, getIdleStageRows, getStageTileLabel, STAGE_METADATA, type WorkflowStageTile } from "./WorkflowStageTile";
+import { StageStatusIcon, getStageLedgerTone, getIdleStageRows, getStageTileLabel, STAGE_METADATA, type WorkflowStageTile } from "./WorkflowStageTile";
 
 type Stage = ComponentProps<typeof WorkflowStageTile>;
 function evidenceLabel(item: Stage) {
   if (item.info.evidence?.kind === "derived") return "Derived summary · saved final execution not established";
-  if (item.info.evidence?.kind === "saved") return "Historical saved evidence";
+  if (item.info.evidence?.kind === "saved") return null;
   return item.info.state === "idle" ? "Source unavailable" : null;
 }
 export type WorkflowLedgerView = "ledger" | "evidence" | "execution";
@@ -77,8 +77,8 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
     if (!item.selectable && item.onClick) actions.push({ label: "Open stage", onSelect: item.onClick });
     return actions;
   };
-  const tileHeader = (title: string, actions: TileAction[]) => <div className="flex items-start justify-between gap-2">
-    <h4 className="font-semibold">{title}</h4><WorkflowTileMenu title={title} actions={actions} />
+  const tileHeader = (title: string, actions: TileAction[], info?: Stage["info"]) => <div className="flex items-start justify-between gap-2">
+    <h4 className="font-semibold">{title}{info && <StageStatusIcon info={info} />}</h4><WorkflowTileMenu title={title} actions={actions} />
   </div>;
   if (board && view === "ledger") {
     const lanes = [
@@ -102,8 +102,7 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
           if (item.onPlaceOrderClick) actions.push({ label: item.placeOrderLabel ?? "Place Order", onSelect: item.onPlaceOrderClick });
           return <div key={key} className="mb-3">
             <article className={`rounded-lg border border-slate-200 p-3 ${getStageLedgerTone(item.info)}`}>
-              {tileHeader(getStageTileLabel(item.stage), actions)}
-              <p className="text-sm capitalize">{item.info.state} {item.info.runStatus}</p>
+              {tileHeader(getStageTileLabel(item.stage), actions, item.info)}
               {item.selectable && <label className="text-xs"><input type="checkbox" checked={Boolean(item.selected)} onChange={item.onClick} /> Select for next run</label>}
               {!upcoming && <>{label && <p className="text-xs">{label}</p>}
                 <dl className="mt-2 text-xs">{rows.map(row => <div key={row.label} className="flex justify-between gap-2">
@@ -124,10 +123,10 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
               {item.info.portfolioThreat && <p className="mt-2 text-sm">Portfolio Threat · {item.info.portfolioThreat}</p>}
             </article>
             {item.stage === "swing" && <div className="mt-2 rounded-lg border p-3 text-sm">
-              {tileHeader("Merge contenders", [{ label: "Stock Flow", onSelect: onStockFlowClick }, { label: "History", href: historyHref }])}
+              {tileHeader("Merge contenders", [{ label: "Stock Flow", onSelect: onStockFlowClick }, { label: "History", href: historyHref }], item.info.recommendedStocks != null ? item.info : { state: "idle" })}
               <p>{item.info.recommendedStocks != null ? item.info.recommendedStocks + " unique listings" : "Awaiting scan evidence"}</p></div>}
             {item.stage === "threats" && <div className="mt-2 rounded-lg border p-3 text-sm">
-              {tileHeader("Pairwise scorecard", [{ label: "History", href: historyHref }, ...(item.onOutputClick ? [{ label: "Saved output", onSelect: item.onOutputClick }] : [])])}<p>{item.info.pairCoverage ?? (item.info.state === "running" ? "Assessing stock pairs" : "Comparison count unavailable in this stage summary")}</p>
+              {tileHeader("Pairwise scorecard", [{ label: "History", href: historyHref }, ...(item.onOutputClick ? [{ label: "Saved output", onSelect: item.onOutputClick }] : [])], { state: item.info.state === "running" ? "running" : "idle", runStatus: item.info.pairStatus })}<p>{item.info.pairCoverage ?? (item.info.state === "running" ? "Assessing stock pairs" : "Comparison count unavailable in this stage summary")}</p>
             </div>}
           </div>;
         })}
@@ -157,7 +156,7 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
                 {item.selectable ? <input type="checkbox" checked={Boolean(item.selected)} onChange={item.onClick} aria-label={`Select ${getStageTileLabel(item.stage)} for the next run`} className="mt-2 size-4 accent-indigo-700" /> : null}
                 <button type="button" className="rounded text-left font-semibold text-slate-900 hover:text-indigo-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600" aria-pressed={inspecting} aria-controls={detailId} onClick={() => setSelectedStage(item.stage)}>
                   {STAGE_METADATA[item.stage].step} {getStageTileLabel(item.stage)}
-                  <span className="mt-0.5 block text-xs font-normal capitalize text-slate-500">{item.info.state}{item.info.runStatus ? ` · ${item.info.runStatus}` : ""}</span>
+                  <StageStatusIcon info={item.info} />
                   {label && <span className="mt-0.5 block text-xs font-normal text-slate-600">{label}</span>}
                 </button>
               </div>
