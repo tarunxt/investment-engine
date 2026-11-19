@@ -140,10 +140,13 @@ async def test_reconcile_exact_sources_twice(audit_db, stored_capture, monkeypat
     app.dependency_overrides[routes.get_async_db] = get_db
     path = "/runs/auto-rebalance-history/india/42/replay-score-v2"
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        us_path = path.replace("/india/", "/indmoney_us/")
+        assert (await client.post(us_path)).status_code in {401, 403}
         assert (await client.post(path)).status_code in {401, 403}
         app.dependency_overrides[routes.get_current_user] = lambda: SimpleNamespace(id=8)
         assert (await client.post(path)).status_code == 404
         app.dependency_overrides[routes.get_current_user] = lambda: OWNER
+        assert (await client.post(us_path)).status_code == 404  # India workflow with the same sequence stays isolated.
         for _ in range(2):
             response = await client.post(path)
             assert response.status_code == 200, response.text
@@ -157,7 +160,7 @@ async def test_reconcile_exact_sources_twice(audit_db, stored_capture, monkeypat
         app.dependency_overrides[routes.get_current_user] = lambda: SimpleNamespace(id=8)
         assert (await client.get(verification)).status_code == 404
         app.dependency_overrides[routes.get_current_user] = lambda: OWNER
-        for blocked in (path.replace("/india/", "/us/"), path.replace("/42/", "/0/"),
+        for blocked in (us_path.replace("replay-score-v2", "reconcile"), us_path + "/extra", path.replace("/india/", "/us/"), path.replace("/42/", "/0/"),
                         path.replace("replay-score-v2", "reconcile"), path + "/extra",
                         "/runs/auto-rebalance-completion-email"):
             response = await client.post(blocked)
