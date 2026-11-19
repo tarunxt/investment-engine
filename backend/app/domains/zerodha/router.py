@@ -45,7 +45,7 @@ from app.domains.zerodha.schemas import (
     ZerodhaPlaceOrderResponse,
     ZerodhaStatusResponse,
 )
-from app.domains.zerodha.service import KiteError, ZerodhaService
+from app.domains.zerodha.service import KiteError, ZerodhaService, service_for_user
 from app.domains.zerodha.tasks import sync_portfolio_snapshot_task
 from app.infrastructure.database.session import get_async_db
 
@@ -88,7 +88,7 @@ def _order_average_price(order: dict) -> float | None:
 
 
 async def _get_order_average_prices(
-    access_token: str, order_ids: set[str]
+    svc: ZerodhaService, access_token: str, order_ids: set[str]
 ) -> dict[str, float]:
     if not order_ids:
         return {}
@@ -101,7 +101,7 @@ async def _get_order_average_prices(
         if attempt > 0:
             await asyncio.sleep(0.6)
         try:
-            orders = await _svc.get_orders(access_token)
+            orders = await svc.get_orders(access_token)
         except Exception:
             logger.exception(
                 "Failed to read Zerodha order book for average execution prices"
@@ -209,11 +209,11 @@ def _available_margin_from_kite_margins(margins: dict) -> float | None:
             return float(value)
     return None
 
-async def _wait_for_terminal_orders(token: str, order_ids: set[str], timeout_seconds: int, poll_interval_seconds: float) -> tuple[list[dict], bool]:
+async def _wait_for_terminal_orders(svc: ZerodhaService, token: str, order_ids: set[str], timeout_seconds: int, poll_interval_seconds: float) -> tuple[list[dict], bool]:
     deadline = datetime.now(tz=timezone.utc) + timedelta(seconds=timeout_seconds)
     latest: list[dict] = []
     while True:
-        orders = await _svc.get_orders(token)
+        orders = await svc.get_orders(token)
         latest = [order for order in orders if str(order.get("order_id") or "") in order_ids]
         if len(latest) >= len(order_ids) and all(_kite_order_terminal(order) for order in latest):
             return latest, True
@@ -265,11 +265,12 @@ def _snapshot_detail(
 
 @router.get("/login-url", response_model=ZerodhaLoginUrlResponse)
 async def get_login_url(current_user: User = Depends(get_current_user)):
+    svc = service_for_user(current_user.id, _svc)
     return ZerodhaLoginUrlResponse(
-        login_url=_svc.get_login_url() if _svc.is_configured else "",
-        configured=_svc.is_configured,
-        direct_market_orders_enabled=_svc.direct_market_orders_enabled,
-        order_submission_blocked_reason=_svc.order_submission_blocked_reason,
+        login_url=svc.get_login_url() if svc.is_configured else "",
+        configured=svc.is_configured,
+        direct_market_orders_enabled=svc.direct_market_orders_enabled,
+        order_submission_blocked_reason=svc.order_submission_blocked_reason,
     )
 
 
@@ -280,14 +281,15 @@ async def callback(
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
-    if not _svc.is_configured:
+    svc = service_for_user(current_user.id, _svc)
+    if not svc.is_configured:
         raise HTTPException(503, detail="Zerodha is not configured on this server")
 
     ip = _client_ip(request)
     audit = ZerodhaAuditRepository(db)
 
     try:
-        data = await _svc.exchange_token(body.request_token)
+        data = await svc.exchange_token(body.request_token)
     except KiteError as exc:
         await audit.log(
             current_user.id, "token_exchange_failed", ip, {"error": exc.message}
@@ -332,8 +334,8 @@ async def callback(
         connected=True,
         login_time=login_time,
         expires_at=expires_at,
-        direct_market_orders_enabled=_svc.direct_market_orders_enabled,
-        order_submission_blocked_reason=_svc.order_submission_blocked_reason,
+        direct_market_orders_enabled=svc.direct_market_orders_enabled,
+        order_submission_blocked_reason=svc.order_submission_blocked_reason,
     )
 
 
@@ -342,6 +344,7 @@ async def get_status(
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
+    svc = service_for_user(current_user.id, _svc)
     repo = ZerodhaCredentialRepository(db)
     snapshot_repo = ZerodhaPortfolioSnapshotRepository(db)
     cred = await repo.get_by_user(current_user.id)
@@ -357,21 +360,21 @@ async def get_status(
     if not cred:
         return ZerodhaStatusResponse(
             connected=False,
-            direct_market_orders_enabled=_svc.direct_market_orders_enabled,
-            order_submission_blocked_reason=_svc.order_submission_blocked_reason,
+            direct_market_orders_enabled=svc.direct_market_orders_enabled,
+            order_submission_blocked_reason=svc.order_submission_blocked_reason,
             **snapshot_meta,
         )
     if cred.expires_at <= datetime.now(tz=timezone.utc):
         return ZerodhaStatusResponse(
             connected=False,
-            direct_market_orders_enabled=_svc.direct_market_orders_enabled,
-            order_submission_blocked_reason=_svc.order_submission_blocked_reason,
+            direct_market_orders_enabled=svc.direct_market_orders_enabled,
+            order_submission_blocked_reason=svc.order_submission_blocked_reason,
             **snapshot_meta,
         )
     return ZerodhaStatusResponse(
         connected=True,
-        direct_market_orders_enabled=_svc.direct_market_orders_enabled,
-        order_submission_blocked_reason=_svc.order_submission_blocked_reason,
+        direct_market_orders_enabled=svc.direct_market_orders_enabled,
+        order_submission_blocked_reason=svc.order_submission_blocked_reason,
         login_time=cred.login_time,
         expires_at=cred.expires_at,
         **snapshot_meta,
@@ -388,6 +391,7 @@ async def portfolio_quote_capabilities(current_user: User = Depends(get_current_
 @router.get("/portfolio/quotes")
 async def portfolio_display_quotes(instruments: list[str] = Query(min_length=1, max_length=500), db: AsyncSession = Depends(get_async_db), current_user: User = Depends(get_current_user)):
     """Authenticated read-only quote batch; never prepare, modify or submit orders."""
+    svc = service_for_user(current_user.id, _svc)
     from .display_quotes import validate_instruments, read_display_quotes, quote_failure_detail
     try:
         keys = validate_instruments(instruments)
@@ -397,7 +401,7 @@ async def portfolio_display_quotes(instruments: list[str] = Query(min_length=1, 
     if not token:
         raise HTTPException(401, "Not connected to Zerodha. Please login first.")
     try:
-        return await read_display_quotes(_svc, token, keys, user_id=current_user.id)
+        return await read_display_quotes(svc, token, keys, user_id=current_user.id)
     except KiteError as exc:
         status_code, detail = quote_failure_detail(exc)
         logger.warning("Read-only portfolio quote rejected for user %s: %s", current_user.id, detail)
@@ -495,6 +499,7 @@ async def get_orders(
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
+    svc = service_for_user(current_user.id, _svc)
     ip = _client_ip(request)
     repo = ZerodhaCredentialRepository(db)
     audit = ZerodhaAuditRepository(db)
@@ -506,7 +511,7 @@ async def get_orders(
     await audit.log(current_user.id, "token_used", ip, {"operation": "get_orders"})
 
     try:
-        orders = await _svc.get_orders(token)
+        orders = await svc.get_orders(token)
     except KiteError as exc:
         await audit.log(
             current_user.id, "get_orders_failed", ip, {"error": exc.message}
@@ -533,6 +538,7 @@ async def prepare_basket_orders(
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
+    svc = service_for_user(current_user.id, _svc)
     ip = _client_ip(request)
     repo = ZerodhaCredentialRepository(db)
     audit = ZerodhaAuditRepository(db)
@@ -556,7 +562,7 @@ async def prepare_basket_orders(
 
     quote_permission_error: KiteError | None = None
     try:
-        quotes = await _svc.get_quotes(token, instruments)
+        quotes = await svc.get_quotes(token, instruments)
     except KiteError as exc:
         if is_kite_quote_permission_error_message(exc.message):
             quote_permission_error = exc
@@ -657,11 +663,12 @@ async def place_protected_market_orders(
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
+    svc = service_for_user(current_user.id, _svc)
     ip = _client_ip(request)
     repo = ZerodhaCredentialRepository(db)
     audit = ZerodhaAuditRepository(db)
 
-    if not _svc.direct_market_orders_enabled:
+    if not svc.direct_market_orders_enabled:
         raise HTTPException(
             503,
             detail=(
@@ -699,7 +706,7 @@ async def place_protected_market_orders(
         }
         try:
             with manual_zerodha_order_scope():
-                result = await _svc.place_order(token, order_data, variety="regular")
+                result = await svc.place_order(token, order_data, variety="regular")
             results.append(ZerodhaProtectedMarketOrderResult(
                 tradingsymbol=order_data["tradingsymbol"],
                 exchange=order_data["exchange"],
@@ -733,7 +740,7 @@ async def place_protected_market_orders(
         for result in results
         if result.status == "placed" and result.order_id
     }
-    average_prices = await _get_order_average_prices(token, placed_order_ids)
+    average_prices = await _get_order_average_prices(svc, token, placed_order_ids)
     for result in results:
         if result.order_id:
             result.average_price = average_prices.get(str(result.order_id).strip())
@@ -757,11 +764,12 @@ async def place_protected_market_orders_sequenced(
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
+    svc = service_for_user(current_user.id, _svc)
     ip = _client_ip(request)
     repo = ZerodhaCredentialRepository(db)
     audit = ZerodhaAuditRepository(db)
 
-    if not _svc.direct_market_orders_enabled:
+    if not svc.direct_market_orders_enabled:
         raise HTTPException(
             503,
             detail=(
@@ -792,7 +800,7 @@ async def place_protected_market_orders_sequenced(
     for order in sell_orders:
         try:
             with manual_zerodha_order_scope():
-                result = await _svc.place_order(token, _build_protected_market_order_data(order), variety="regular")
+                result = await svc.place_order(token, _build_protected_market_order_data(order), variety="regular")
             order_id = result.get("order_id", "")
             if order_id:
                 sell_order_ids.add(str(order_id))
@@ -809,7 +817,7 @@ async def place_protected_market_orders_sequenced(
     sell_phase_complete = True
     if sell_order_ids and buy_orders and body.wait_for_sell_completion:
         messages.append("Waiting for sell completion before attempting buys.")
-        terminal_sell_orders, sell_phase_complete = await _wait_for_terminal_orders(token, sell_order_ids, body.sell_wait_timeout_seconds, body.poll_interval_seconds)
+        terminal_sell_orders, sell_phase_complete = await _wait_for_terminal_orders(svc, token, sell_order_ids, body.sell_wait_timeout_seconds, body.poll_interval_seconds)
         if not sell_phase_complete:
             messages.append("Sell wait timed out; only refreshed available margin will be used for buys.")
 
@@ -824,7 +832,7 @@ async def place_protected_market_orders_sequenced(
     refreshed_available_margin: float | None = None
     if buy_orders:
         try:
-            refreshed_available_margin = _available_margin_from_kite_margins(await _svc.get_margins(token))
+            refreshed_available_margin = _available_margin_from_kite_margins(await svc.get_margins(token))
         except Exception:
             logger.exception("Failed to refresh Zerodha margins before sequenced BUY phase for user %s", current_user.id)
             messages.append("Could not refresh live margin; buy phase skipped for safety.")
@@ -844,7 +852,7 @@ async def place_protected_market_orders_sequenced(
             unit_price = 0.0
             try:
                 instrument = _instrument_key(order.exchange, order.tradingsymbol)
-                quotes = await _svc.get_quotes(token, [instrument])
+                quotes = await svc.get_quotes(token, [instrument])
                 quote = quotes.get(instrument, {})
                 unit_price = _quote_number(quote, "last_price") or 0.0
             except Exception:
@@ -870,7 +878,7 @@ async def place_protected_market_orders_sequenced(
             buy_order = order.model_copy(update={"quantity": affordable_qty})
             try:
                 with manual_zerodha_order_scope():
-                    result = await _svc.place_order(token, _build_protected_market_order_data(buy_order), variety="regular")
+                    result = await svc.place_order(token, _build_protected_market_order_data(buy_order), variety="regular")
                 buy_results.append(_order_result_from_request(buy_order, "placed", order_id=str(result.get("order_id", ""))))
                 remaining -= affordable_qty * unit_price
                 if affordable_qty < order.quantity:
@@ -906,6 +914,7 @@ async def place_order(
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
+    svc = service_for_user(current_user.id, _svc)
     ip = _client_ip(request)
     repo = ZerodhaCredentialRepository(db)
     audit = ZerodhaAuditRepository(db)
@@ -961,7 +970,7 @@ async def place_order(
     )
 
     try:
-        result = await _svc.place_order(token, order_data, variety=variety)
+        result = await svc.place_order(token, order_data, variety=variety)
     except KiteError as exc:
         await audit.log(
             current_user.id,
@@ -1003,6 +1012,7 @@ async def disconnect(
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
+    svc = service_for_user(current_user.id, _svc)
     ip = _client_ip(request)
     repo = ZerodhaCredentialRepository(db)
     audit = ZerodhaAuditRepository(db)
@@ -1010,11 +1020,12 @@ async def disconnect(
     token = await repo.get_plaintext_token(current_user.id)
     if token:
         await audit.log(current_user.id, "token_used", ip, {"operation": "disconnect"})
-        await _svc.invalidate_token(token)
-        await repo.delete_by_user(current_user.id)
-        await audit.log(current_user.id, "disconnect", ip)
-        await db.commit()
-        logger.info("Zerodha disconnected for user %s", current_user.id)
+        await svc.invalidate_token(token)
+    # Remove a locally stored session even if its issuing app was reassigned.
+    await repo.delete_by_user(current_user.id)
+    await audit.log(current_user.id, "disconnect", ip)
+    await db.commit()
+    logger.info("Zerodha disconnected for user %s", current_user.id)
     return {"message": "Disconnected from Zerodha"}
 
 
