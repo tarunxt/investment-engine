@@ -265,3 +265,40 @@ def test_category_labels_and_specific_evidence():
     ])
     assert [r["Category"] for r in accepted] == ["1"]
     assert [r["Disposition"].split(":")[0] for r in records] == ["Accepted", "Excluded", "Excluded"]
+
+
+@pytest.mark.parametrize("status", ["completed", "partial"])
+@pytest.mark.parametrize("market,exchange", [("india", "NSE"), ("us", "NASDAQ")])
+def test_no_chart_evidence_replays_without_inventing_a_setup(inputs, status, market, exchange):
+    from app.domains.jobs.technical_prices import UnavailableTechnicalCoverage, validate_technical_prices
+
+    payload, context = inputs
+    payload["formula_version"] = "score-matrix-v2"
+    context["market"] = market
+    context["sources"][1].prompt += "\n[SCORING_POLICY_V3]"
+    rebalance = context["jobs_by_run"][10][0]
+    rebalance.response = rebalance.response.replace("| NSE |", f"| {exchange} |")
+    job = context["jobs_by_run"][20][0]
+    job.status = status
+    job.runtime_metadata_json = {"technical_chart_coverage": "unavailable"} if status == "partial" else {}
+    headers = ["Exchange Symbol", "Stock Symbol", "Primary Setup", "Bias", "Confidence Score",
+               "Premarket trend", "Last 5 candles trend", "Trigger Level", "Invalidation Level"]
+    row = [exchange, "FIXTUREEQ", "Evidence unavailable – no dated chart data retrieved", "Neutral",
+           "Unavailable", "0", "Unavailable", "Unavailable", "Unavailable"]
+    job.response = table(headers, [row])
+    with pytest.raises(UnavailableTechnicalCoverage):
+        validate_technical_prices("## Technical Scan Input Bundle", job.response)
+    calculation = source_calculations(payload, **context)[(exchange, "FIXTUREEQ")]
+    terms = {r["id"]: r for r in calculation["weighted_rows"]}
+    assert calculation["technical_job_id"] == job.id
+    assert terms["technical-scan-confidence"]["score"] is None
+    assert terms["last-5-candles-trend"]["score"] is None
+    assert terms["premarket-trend"]["score"] == 0
+    assert calculation["raw_score"] is not None
+    row[2] = "No dated candles were supplied"
+    job.response = table(headers, [row])
+    assert source_calculations(payload, **context)[(exchange, "FIXTUREEQ")] == calculation
+    row[4] = "9"
+    job.response = table(headers, [row])
+    with pytest.raises(UnverifiableFinal, match="approved direction"):
+        source_calculations(payload, **context)

@@ -7595,9 +7595,17 @@ ${zerodhaExecutionMode === "direct_market"
             rebalanceInputs: finalRebalanceInputs.length, recommendedStocks: finalRows.length, frozenFinal: {...frozenFinal, actionable_ranking, ...(valuation ? {valuation} : {})},
           });
           if (savedFinal?.saved === false) {
+            const rejected = savedFinal.error.startsWith("Final calculation could not be verified:");
             updateStage(portfolio, "actionables", {
-              runStatus: "Completion unconfirmed", error: savedFinal.error,
+              state: rejected ? "failed" : "completed",
+              runStatus: rejected ? "Verification failed" : "Completion unconfirmed",
+              error: savedFinal.error,
             });
+            if (rejected) {
+              await recordAutoRebalanceStage(portfolio, "actionables", "failed", {
+                runStatus: "Verification failed", error: savedFinal.error,
+              });
+            }
           }
           await Promise.resolve().then(onDashboardRefresh).catch(error => console.error("Could not refresh dashboard after Actionables", error));
           window.dispatchEvent(new CustomEvent("final-actionables-refresh", {

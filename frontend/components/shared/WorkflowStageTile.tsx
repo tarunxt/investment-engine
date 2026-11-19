@@ -290,7 +290,8 @@ export function getTileErrorDetail(error?: string | null) {
 export function getStageLedgerTone(info: StageInfo) {
   const status = info.runStatus?.trim().toLowerCase();
   if (info.state === "running" || info.state === "queued") return getStageBackgroundClass(info.state);
-  if (info.state === "failed" || ["failed", "error", "canceled", "cancelled", "interrupted"].includes(status ?? "")) return "bg-red-50";
+  if (info.state === "failed" || ["failed", "verification failed", "error", "canceled", "cancelled", "interrupted"].includes(status ?? "")) return "bg-red-50";
+  if (status === "completion unconfirmed" && info.error?.startsWith("Final calculation could not be verified:")) return "bg-red-50";
   if (status === "completion unconfirmed" || hasStagePartialOutput(info)) return "bg-amber-50";
   if (info.state === "completed" || ["completed", "partial", "saved calculation", "synced", "last synced portfolio", "succeeded", "success"].includes(status ?? "")) return "bg-emerald-50";
   if (["processing", "running"].includes(status ?? "")) return "bg-amber-50";

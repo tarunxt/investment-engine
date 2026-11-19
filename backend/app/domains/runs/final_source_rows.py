@@ -11,6 +11,7 @@ from decimal import Decimal, ROUND_HALF_UP
 
 SETUP_DIRECTIONS = json.loads(Path(__file__).with_name("final_score_setups.json").read_text())
 
+from app.domains.jobs.technical_prices import unavailable_technical_setup as missing_chart
 from app.domains.jobs.output_contracts.document import parse_markdown
 from app.domains.jobs.output_contracts.schemas import REBALANCE_COLUMNS
 from .final_score_math import ACTION_HEADER, normalize_action, numeric
@@ -138,7 +139,8 @@ def rebalance_rows(job):
 
 
 def technical_rows(job):
-    if status(job) != "completed" or not job.response:
+    chart_outage = (getattr(job, "runtime_metadata_json", None) or {}).get("technical_chart_coverage") == "unavailable"
+    if not job.response or not (status(job) == "completed" or status(job) == "partial" and chart_outage):
         return []
     if len(job.response) > 2_000_000:
         raise UnverifiableFinal("Source output exceeds final verification bound")
@@ -164,17 +166,10 @@ def technical_rows(job):
     return result
 
 
-def missing_chart(row):
-    return (row.get("Bias", "").strip().lower() in {"neutral", "unresolved", "unavailable"}
-            and row.get("Confidence Score", "").strip().lower() == "unavailable"
-            and re.fullmatch(r"unavailable(?:\s*[-–—:]\s*.+)?", row.get("Primary Setup", "").strip(), re.I) is not None)
-
-
 def technical_direction(row, prompt):
     # Captured prompt registry is the exact approved set used by this workflow.
     from app.domains.recommendation_audit.technical import captured_setup_directions
-    from app.domains.jobs.technical_prices import unavailable_technical_setup
-    if unavailable_technical_setup(row):
+    if missing_chart(row):
         # The UI parses this explicit confidence placeholder as null (zero weight).
         return None
     registry = captured_setup_directions(prompt)

@@ -1449,6 +1449,7 @@ def execute_ai_job(self, job_id: int) -> None:
                 validate_technical_prices(job.prompt, content)
                 break
             except UnavailableTechnicalCoverage as unavailable:
+                runtime_metadata_json = {**(runtime_metadata_json or {}), "technical_chart_coverage": "unavailable"}
                 partial_price_notice = str(unavailable)
                 break
             except MissingTechnicalListings as missing:
