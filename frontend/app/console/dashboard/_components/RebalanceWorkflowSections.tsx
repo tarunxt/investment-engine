@@ -3336,7 +3336,7 @@ function ScopedZerodhaBasketPreviewDialog({
                 {displayCalculations.error ? <p role="alert" className="mb-3 text-red-700">{displayCalculations.error} <button type="button" onClick={displayCalculations.retry} className="underline">Retry historical scores</button></p> : null}
               </div>
               <div className="w-fit min-w-full overflow-clip rounded-2xl border border-slate-200">
-                  <BasketColumnTable hidden={hiddenColumns} order={columnPreferences?.order} names={isZerodhaPreview ? { "Historical Weighted Score": `${displayCalculations.parameters.days}-day mean score (−3 to +3)`, ...columnNames } : columnNames} onOpen={setColumnMenu} onRequestRename={setRenameColumn}>
+                  <BasketColumnTable hidden={hiddenColumns} order={columnPreferences?.order} names={isZerodhaPreview && displayCalculations.parameters ? { "Historical Weighted Score": `${displayCalculations.parameters.days}-day mean score (−3 to +3)`, ...columnNames } : columnNames} onOpen={setColumnMenu} onRequestRename={setRenameColumn}>
                   <table className="min-w-[92rem] w-full text-sm">
                     <thead className="sticky top-0 z-10 bg-slate-50">
                       <tr className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
