@@ -11,7 +11,7 @@ type Stage = ComponentProps<typeof WorkflowStageTile>;
 function evidenceLabel(item: Stage) {
   if (item.info.evidence?.kind === "derived") return "Derived summary · saved final execution not established";
   if (item.info.evidence?.kind === "saved") return "Historical saved evidence";
-  return item.info.state === "idle" ? "Source unavailable" : "Workflow stage state · see History for invocation identity";
+  return item.info.state === "idle" ? "Source unavailable" : null;
 }
 export type WorkflowLedgerView = "ledger" | "evidence" | "execution";
 export function WorkflowStageLedgerViews({ market, view, onChange, portfolioOnly = false }: {
@@ -95,6 +95,7 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
           if (!item) return null;
           const rows = getIdleStageRows(item.stage, item.info, item.now);
           const ranking = item.info.frozenFinal?.actionable_ranking as { rows?: RankedListing[] } | undefined;
+          const label = evidenceLabel(item);
           const upcoming = active && (item.info.state === "idle" || item.info.state === "queued");
           const actions = evidenceActions(item);
           if (item.onSyncNowClick) actions.push({ label: "Sync Now", onSelect: item.onSyncNowClick });
@@ -104,7 +105,7 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
               {tileHeader(getStageTileLabel(item.stage), actions)}
               <p className="text-sm capitalize">{item.info.state} {item.info.runStatus}</p>
               {item.selectable && <label className="text-xs"><input type="checkbox" checked={Boolean(item.selected)} onChange={item.onClick} /> Select for next run</label>}
-              {!upcoming && <><p className="text-xs">{evidenceLabel(item)}</p>
+              {!upcoming && <>{label && <p className="text-xs">{label}</p>}
                 <dl className="mt-2 text-xs">{rows.map(row => <div key={row.label} className="flex justify-between gap-2">
                   <dt>{row.label}</dt><dd>{row.label === "LLMs completed" && market ? <button type="button"
                     data-auto-rebalance-llm-metric="true" data-workflow-stage={item.stage}
@@ -142,6 +143,7 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
         <caption className="sr-only">Saved workflow stages. Select a stage to inspect its evidence; execution controls are separate.</caption>
         <thead className="bg-slate-100 text-xs text-slate-700"><tr>{["Stage", "Evidence time", "Completion / inputs", "Stocks", "Duration", "Error"].map(label => <th key={label} scope="col" className="px-3 py-2 font-semibold">{label}</th>)}</tr></thead>
         <tbody>{stages.map(item => {
+          const label = evidenceLabel(item);
           const upcoming = active && (item.info.state === "idle" || item.info.state === "queued");
           const rows = getIdleStageRows(item.stage, item.info, item.now);
           const error = rows.find(row => row.label === "Error")!;
@@ -156,7 +158,7 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
                 <button type="button" className="rounded text-left font-semibold text-slate-900 hover:text-indigo-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600" aria-pressed={inspecting} aria-controls={detailId} onClick={() => setSelectedStage(item.stage)}>
                   {STAGE_METADATA[item.stage].step} {getStageTileLabel(item.stage)}
                   <span className="mt-0.5 block text-xs font-normal capitalize text-slate-500">{item.info.state}{item.info.runStatus ? ` · ${item.info.runStatus}` : ""}</span>
-                  <span className="mt-0.5 block text-xs font-normal text-slate-600">{evidenceLabel(item)}</span>
+                  {label && <span className="mt-0.5 block text-xs font-normal text-slate-600">{label}</span>}
                 </button>
               </div>
             </th>
