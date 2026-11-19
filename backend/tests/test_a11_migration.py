@@ -18,7 +18,8 @@ def config():
 
 def test_a11_migration_adds_one_revision_to_main_head():
     graph = ScriptDirectory.from_config(config())
-    assert graph.get_heads() == ['jobs_admission_dispatch_001']
+    assert graph.get_heads() == ['kite_account_app_001']
+    assert graph.get_revision('kite_account_app_001').down_revision == 'jobs_admission_dispatch_001'
     assert graph.get_revision('jobs_admission_dispatch_001').down_revision == 'a12_cost_session_merge_001'
     delta = list(graph.iterate_revisions('jobs_admission_dispatch_001', 'a12_cost_session_merge_001'))
     assert [revision.revision for revision in delta] == ['jobs_admission_dispatch_001']
