@@ -9,6 +9,9 @@ import re
 from decimal import Decimal, ROUND_HALF_UP
 from collections import Counter
 
+DIRECTIONAL_SIZING = "directional-v2"
+ORIGINAL_SIZING = "absolute-mean-v1"
+
 ACTIONS = ("Sell All", "Trim", "Add more", "Buy New", "Hold")
 ACTION_VALUES = dict(zip(ACTIONS, (-2, -1, 1, 2, 0)))
 RATIONALE_HEADERS = {
@@ -104,7 +107,7 @@ def weighted_score(rows, override=None):
     return score, denominator
 
 
-def calculate_listing(rows, formula, technical=None, *, direction=None, market, unresolved_holding=False, supplemental=None, legacy=False):
+def calculate_listing(rows, formula, technical=None, *, direction=None, market, unresolved_holding=False, supplemental=None, legacy=False, sizing_policy=DIRECTIONAL_SIZING):
     """Rows are source cells; technical is the selected source Technical row."""
     actions = [normalize_action(row.get(ACTION_HEADER)) for row in rows]
     mean_action = mean([ACTION_VALUES.get(action) for action in actions])
@@ -181,6 +184,12 @@ def calculate_listing(rows, formula, technical=None, *, direction=None, market, 
         units_change = 0
     else:
         units_change = bullish if bullish is not None else 0 if mean_change == 0 and bearish is None else None
+    if sizing_policy == ORIGINAL_SIZING and units_change is None and action is not None:
+        # Historical snapshots used the magnitude of the signed mean as a fallback.
+        if action in {"Add more", "Buy New"} and mean_change is not None:
+            units_change = abs(mean_change)
+        elif action in {"Trim", "Sell All"}:
+            units_change = -abs(mean_change) if mean_change is not None else 0 if action == "Trim" else None
     # buildConsensusRows replaces the representative's Total Buy Amount with
     # the consensus action mean before buildFormulaActionEstimate reads it.
     consensus_action = "Hold"

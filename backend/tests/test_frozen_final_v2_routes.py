@@ -55,7 +55,7 @@ async def test_v2_route_recomputes_raw_effective_and_preserves_first_snapshot(au
     assert first.summary['frozen_final']['rows'][0]['score'] == 74 / 24
     assert first.summary['frozen_final']['rows'][0]['effectiveScore'] == 3
     replay = await write(audit_db, 'actionables', 'completed', summary={'frozen_final': stored_capture})
-    assert replay.summary['frozen_final'] == before
+    assert replay.summary['frozen_final'] == {**before, 'sizing_policy': 'directional-v2'}
     assert stored_capture == before
     forged = deepcopy(stored_capture)
     forged['rows'][0]['effectiveScore'] = 2
@@ -64,7 +64,7 @@ async def test_v2_route_recomputes_raw_effective_and_preserves_first_snapshot(au
     assert error.value.status_code == 422
     async with audit_db.sessions() as db:
         stage = (await db.execute(select(AutoRebalanceWorkflowStage).where(AutoRebalanceWorkflowStage.stage == 'actionables'))).scalar_one()
-        assert stage.summary_json['frozen_final'] == before
+        assert stage.summary_json['frozen_final'] == {**before, 'sizing_policy': 'directional-v2'}
 
 
 @pytest.mark.anyio
@@ -169,3 +169,71 @@ async def test_reconcile_exact_sources_twice(audit_db, stored_capture, monkeypat
         coverage = final.summary_json["corrected_final_v2"]["rows"][0]["source_coverage"][0]
         assert coverage["job_id"] == 11 and len(coverage["used_fields"]) == 6
     assert audit_db.dispatch.call_count == first_dispatch_count
+
+
+@pytest.mark.anyio
+async def test_untagged_icici_replay_keeps_verified_formula_and_archives_old_units(audit_db, stored_capture):
+    """Exercise historical verification, replay, and the basket's verification receipt."""
+    from test_auto_rebalance_audit_durability import OWNER
+    from app.domains.runs.router import replay_india_score, verify_saved_india_score
+
+    async with audit_db.sessions() as db:
+        model = await db.get(Job, 11)
+        technical_job = await db.get(Job, 21)
+        technical = await db.get(Run, 20)
+        technical.status = JobStatus.COMPLETED
+        technical.prompt += '\n[TECHNICAL_REBALANCE_SOURCES_V1]{"run_ids":[10],"job_ids":[11,12]}[/TECHNICAL_REBALANCE_SOURCES_V1]'
+        model.response = model.response.replace("NSE", "BSE").replace("FIXTUREEQ", "ICICIBANK")
+        headers, separator, data = model.response.splitlines()
+        def trim_response(change):
+            columns = [v.strip() for v in headers.strip("|").split("|")]
+            values = [v.strip() for v in data.strip("|").split("|")]
+            for name, value in {"Current Units":"34", "Units Change":str(change), "Final Units":str(34+change),
+                                "Action (Buy/Add/Sell All/Trim/Hold/Buy New)":"Trim", "Price Per Unit":"1600"}.items():
+                values[columns.index(name)] = value
+            return "\n".join([headers, separator, "| " + " | ".join(values) + " |"])
+        model.response = trim_response(-10)
+        second = Job(id=12, user_id=7, prompt="synthetic", response=trim_response(-12), provider="test", model="test", status=JobStatus.PARTIAL)
+        db.add(second)
+        await db.flush()
+        db.add(RunJob(run_id=10, job_id=12, stage=1))
+        technical_job.response = technical_job.response.replace("NSE", "BSE").replace("FIXTUREEQ", "ICICIBANK")
+        hashes = {str(j.id):hashlib.sha256(j.response.encode()).hexdigest() for j in (model,second,technical_job)}
+        await db.commit()
+    for stage in ("sync", "threats", "swing"):
+        await write(audit_db, stage, "skipped")
+    await write(audit_db, "rebalance", "partial", run_id=10)
+    await write(audit_db, "technical", "completed", run_id=20, summary={"final_inputs":{
+        "formula":stored_capture["formula"], "rebalance_run_ids":[10], "response_hashes":hashes}})
+    await write(audit_db, "actionables", "processing")
+    async with audit_db.sessions() as db:
+        await replay_india_score(42, db, OWNER)
+        stage = (await db.scalars(select(AutoRebalanceWorkflowStage).where(AutoRebalanceWorkflowStage.stage=="actionables"))).one()
+        old = deepcopy(stage.summary_json["corrected_final_v2"])
+        old.pop("sizing_policy")
+        row = old["rows"][0]
+        assert row["action"] == "Add more" and row["estimate"]["units"] is None
+        row["estimate"].update(units=11, amount=17600)
+        row["formula_inputs"]["calculatedUnitsChange"] = 11
+        row["formula_inputs"]["rows"][-1]["unitsChange"] = 11
+        stage.summary_json = {"corrected_final_v2":old}
+        await db.commit()
+        first = await verify_saved_india_score(42, db, OWNER)
+        assert first["verified"] and first["record"]["sizing_policy"] == "absolute-mean-v1"
+        await replay_india_score(42, db, OWNER)
+        new = await verify_saved_india_score(42, db, OWNER)
+        assert new["verified"] and new["record"]["sizing_policy"] == "directional-v2"
+        result = new["record"]["rows"][0]
+        assert result["estimate"]["units"] is None and result["estimate"]["amount"] is None
+        assert result["effectiveScore"] == row["effectiveScore"]
+        assert new["record"]["formula"] == old["formula"]
+        assert result["formula_inputs"]["detailedRationaleDenominator"] == row["formula_inputs"]["detailedRationaleDenominator"]
+        assert stage.summary_json["previous_sizing_replay"] == old
+        await replay_india_score(42, db, OWNER)
+        assert stage.summary_json["corrected_final_v2"] == new["record"]
+        bad = deepcopy(stage.summary_json)
+        bad["corrected_final_v2"]["rows"][0]["estimate"]["units"] = 99
+        stage.summary_json = bad
+        await db.commit()
+        error = await verify_saved_india_score(42, db, OWNER)
+        assert not error["verified"] and "BSE:ICICIBANK estimate.units: saved 99, recomputed None" in error["reason"]

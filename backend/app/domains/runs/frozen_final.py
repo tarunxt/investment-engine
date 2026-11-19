@@ -7,12 +7,13 @@ from collections import defaultdict
 from fastapi import HTTPException
 from sqlalchemy import select
 from .auto_rebalance_audit import validate_execution
+from .final_score_math import DIRECTIONAL_SIZING, ORIGINAL_SIZING
 from .models import Run, RunJob
 from .run_identity import analysis_run_identity
 from app.domains.jobs.models import Job
 
 
-async def validate_frozen_final(db, payload, *, user_id, portfolio, sequence, allow_legacy=False, rebuild=False, scorecard_evidence=None):
+async def validate_frozen_final(db, payload, *, user_id, portfolio, sequence, allow_legacy=False, rebuild=False, scorecard_evidence=None, stored_record=False):
     if not isinstance(payload, dict) or payload.get('schema') not in {'workflow-final-v1', 'workflow-final-v2'}:
         raise HTTPException(422, 'Unsupported frozen final schema')
     if (payload.get('broker', portfolio) != portfolio
@@ -132,7 +133,11 @@ async def validate_frozen_final(db, payload, *, user_id, portfolio, sequence, al
                         raise HTTPException(409, "Scorecard observations differ from the saved job")
             elif payload.get("scorecard_job_id") is not None:
                 raise HTTPException(409, "Missing Technical scorecard manifest")
-            calculations = source_calculations(payload, sources=sources, jobs_by_run=jobs_by_run, market=market, scorecards=scorecards)
+            policy = payload.get("sizing_policy", DIRECTIONAL_SIZING)
+            if policy != DIRECTIONAL_SIZING and not (stored_record and policy == ORIGINAL_SIZING):
+                raise UnverifiableFinal("Unsupported final sizing policy")
+            context = dict(sources=sources, jobs_by_run=jobs_by_run, market=market, scorecards=scorecards)
+            calculations = source_calculations(payload, **context, sizing_policy=policy)
             if rebuild:
                 from .final_reconciliation import materialize_rows
                 if manifest_data is None or not calculations:
@@ -142,7 +147,21 @@ async def validate_frozen_final(db, payload, *, user_id, portfolio, sequence, al
                                excluded_non_buy_listings=[])
                 if len(calculations) > 500 or len(json.dumps(payload)) > 2_000_000:
                     raise HTTPException(422, "Rebuilt final exceeds audit size limit")
-            verify_recomputed_rows(payload, calculations, raw_field='rawScore', effective_field='effectiveScore')
+            fields = dict(raw_field="rawScore", effective_field="effectiveScore")
+            try:
+                verify_recomputed_rows(payload, calculations, **fields)
+            except UnverifiableFinal as current_error:
+                # Only database-owned, untagged snapshots span both releases. Match
+                # an entire record against one policy, including every numeric field.
+                if not stored_record or "sizing_policy" in payload or rebuild:
+                    raise
+                historical = source_calculations(payload, **context, sizing_policy=ORIGINAL_SIZING)
+                try:
+                    verify_recomputed_rows(payload, historical, **fields)
+                except UnverifiableFinal as historical_error:
+                    raise UnverifiableFinal(f"{current_error} (historical check: {historical_error})") from historical_error
+                calculations, policy = historical, ORIGINAL_SIZING
+            payload["sizing_policy"] = policy
             if payload.get("formula_version") == "score-matrix-v2":
                 for row in payload["rows"]:
                     row["source_coverage"] = calculations[(row["exchange"], row["symbol"])]["source_coverage"]
