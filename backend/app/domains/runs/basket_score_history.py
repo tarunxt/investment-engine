@@ -22,6 +22,24 @@ def saved_venue(history):
     return next(iter(venues)) if len(venues) == 1 else None
 
 
+def saved_components(detail):
+    """Only use the component values from this observation's original calculation."""
+    if not isinstance(detail, dict):
+        return None
+    supplemental = detail.get('supplementalInputs')
+    if not isinstance(supplemental, dict) or not {'pairwise', 'stock_threat'} <= supplemental.keys():
+        return None
+    base = detail.get('detailedRationaleFinalScore')
+    if base is None:
+        base = detail.get('meanScore')
+    def finite(value):
+        return type(value) in (int, float) and math.isfinite(value)
+    pair, threat = supplemental['pairwise'], supplemental['stock_threat']
+    if not finite(base) or any(v is not None and (not finite(v) or not 0 <= v <= 100) for v in (pair, threat)):
+        return None
+    return {'base': base, 'pair': pair, 'threat': threat}
+
+
 def score_history_view(session, *, user_id, market, symbols, days, as_of, timezone_name):
     if as_of.tzinfo is None: raise ValueError('An offset-aware as-of timestamp is required')
     if days < 1 or days > 3650: raise ValueError('Choose between 1 and 3650 past days')
@@ -39,7 +57,7 @@ def score_history_view(session, *, user_id, market, symbols, days, as_of, timezo
         score = history.score
         completed = run is not None and status_value(run.status) == 'completed' and identity.market == market
         valid = isinstance(score, (int, float)) and not isinstance(score, bool) and math.isfinite(score)
-        observations.append({'id': history.id, 'run_id': history.rebalance_run_id, 'symbol': history.stock_symbol, 'exchange': saved_venue(history), 'covered_at': history.covered_at.replace(tzinfo=timezone.utc).isoformat() if history.covered_at.tzinfo is None else history.covered_at.isoformat(), 'score': score if valid else None, 'action': history.action, 'formula_version': history.formula_version, 'completed': completed, 'eligible': run is not None and status_value(run.status) in {'completed', 'partial'} and identity.market == market, 'run_status': status_value(run.status) if run else None, 'coverage_status': history.coverage_status})
+        observations.append({'components': saved_components(history.formula_inputs_json), 'workflow_sequence': getattr(run, 'auto_rebalance_sequence', None), 'id': history.id, 'run_id': history.rebalance_run_id, 'symbol': history.stock_symbol, 'exchange': saved_venue(history), 'covered_at': history.covered_at.replace(tzinfo=timezone.utc).isoformat() if history.covered_at.tzinfo is None else history.covered_at.isoformat(), 'score': score if valid else None, 'action': history.action, 'formula_version': history.formula_version, 'completed': completed, 'eligible': run is not None and status_value(run.status) in {'completed', 'partial'} and identity.market == market, 'run_status': status_value(run.status) if run else None, 'coverage_status': history.coverage_status})
     # An immutable completed decision is also a recorded score. Never choose a
     # latest revision: disagreeing complete captures for one run remain ambiguous.
     represented = {(row['symbol'], row['exchange'], row['run_id']) for row in observations}
@@ -72,5 +90,6 @@ def score_history_view(session, *, user_id, market, symbols, days, as_of, timezo
             ambiguous += 1; continue
         capture, run, score = candidates[0]
         when = run.created_at.replace(tzinfo=timezone.utc) if run.created_at.tzinfo is None else run.created_at
-        observations.append({'id': f'audit:{capture.id}', 'run_id': run.id, 'symbol': capture.symbol, 'exchange': capture.exchange, 'covered_at': when.isoformat(), 'score': score, 'action': capture.payload['calculation'].get('formula_action'), 'formula_version': 'immutable-captured-formula', 'completed': status_value(run.status) == 'completed', 'eligible': True, 'run_status': status_value(run.status), 'coverage_status': 'suggested'})
+        observations.append({'workflow_sequence': getattr(run, 'auto_rebalance_sequence', None), 'id': f'audit:{capture.id}', 'run_id': run.id, 'symbol': capture.symbol, 'exchange': capture.exchange, 'covered_at': when.isoformat(), 'score': score, 'action': capture.payload['calculation'].get('formula_action'), 'formula_version': 'immutable-captured-formula', 'completed': status_value(run.status) == 'completed', 'eligible': True, 'run_status': status_value(run.status), 'coverage_status': 'suggested'})
     return {'market': market, 'symbols': symbols, 'as_of': end.isoformat(), 'window_start': start.isoformat(), 'timezone': timezone_name, 'days': days, 'truncated': len(rows) > 10000 or len(captures) > 10000, 'ambiguous_complete_runs': ambiguous, 'observations': observations, 'notes': ['Rolling N × 24-hour window: start exclusive, as-of inclusive. Each usable saved score from a completed or partial run counts once, without daily averaging.', 'Unknown/deleted run status, ambiguous venue and invalid scores are excluded. Missing observations are never zero.', 'History is scoped to the authenticated owner and market. No history is regenerated or overwritten.', 'Complete immutable terminal captures may supply an original recorded score when no saved summary exists. Disagreeing complete scores for a run are excluded rather than selecting the latest.']}
+

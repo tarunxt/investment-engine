@@ -12,6 +12,7 @@ import { AnalysisOnlyRunControl } from "@/components/shared/AnalysisOnlyRunContr
 import { WorkflowStageLedger, WorkflowStageLedgerViews, type WorkflowLedgerView } from "@/components/shared/WorkflowStageLedger";
 import { WorkflowRunBoundary } from "@/app/console/automated-rebalance/_components/WorkflowRunBoundary";
 
+import { captureIndiaValuation } from "@/lib/captureIndiaValuation";
 import { workflowRanking } from "@/lib/workflowScorecardRanking";
 import { type WorkflowStageKey, type StageState, type StageErrorDetail, type StageInfo, STAGE_ORDER, STAGE_METADATA, getStageTileLabel, parseTimestampMs, formatDuration, formatInrCost, WorkflowStageTile } from "@/components/shared/WorkflowStageTile";
 
@@ -75,6 +76,7 @@ import {
   StockDetailsButton,
   getTechnicalScanForStock,
   getScoreMatrixValidationSummary,
+  normalizeScoreMatrixFormulaConfig,
   type ScoreMatrixFormulaConfig,
   type ActionCategory,
   type ActionEstimate,
@@ -872,6 +874,9 @@ function getLatestMatchingRebalanceRuns(
 }
 
 type BasketScoreRevision = {
+  formula: ScoreMatrixFormulaConfig | null;
+  differences: string[];
+  divisors: string[];
   sequence: number;
   version: string | null;
   capturedAt: string | null;
@@ -2952,6 +2957,7 @@ function ScopedZerodhaBasketPreviewDialog({
   tradingViewAriaLabel = "Open Zerodha India basket TradingView URL list",
   loadingLabel = "Preparing Zerodha basket…",
   scoreRevision,
+  openSavedBasket,
   scoreScanCompletedAt: scoreScanCompletedAtOverride = null,
   primaryButtonLabel,
   basketInfoText = "All rows are visible and selectable. Selection does not assert execution validity. Review the basket here, use protected MARKET for all selected stocks by default whenever direct Kite Connect access is enabled during regular market hours. Market drafts require enabled direct broker access; no silent LIMIT fallback is used.",
@@ -2997,6 +3003,7 @@ function ScopedZerodhaBasketPreviewDialog({
   tradingViewTitle?: string;
   tradingViewAriaLabel?: string;
   loadingLabel?: string;
+  openSavedBasket?: () => void;
   scoreRevision?: BasketScoreRevision | null;
   scoreScanCompletedAt?: string | null;
   primaryButtonLabel?: string;
@@ -3250,6 +3257,8 @@ function ScopedZerodhaBasketPreviewDialog({
                 Last score scan: {formatCompactStageTime(scoreScanCompletedAt)}
                 {isZerodhaPreview && <span className="ml-2">
                   {scoreRevision ? `Run #${scoreRevision.sequence} · ${scoreRevision.replayed ? "Saved replay" : "Original record"} · ${scoreRevision.version ?? "revision unavailable"}` : "Saved revision unavailable"}
+                  {detailsData.portfolioSnapshot && ` · Holdings ${formatCompactStageTime(detailsData.portfolioSnapshot.captured_at)}`}
+                  {calculationStocks.length > 0 && ` · Upstox quote times: ${[...new Set(calculationStocks.map(stock => stock.upstoxAsOf ? formatCompactStageTime(stock.upstoxAsOf) : "unavailable"))].join(", ")}`}
                   {scoreRevision?.capturedAt && ` · ${formatCompactStageTime(scoreRevision.capturedAt)}`}
                 </span>}
               </p>
@@ -3269,7 +3278,10 @@ function ScopedZerodhaBasketPreviewDialog({
 
         {orderSubmissionBlockedReason ? (
           <div role="alert" className="mx-5 mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+            {scoreRevision?.divisors.length ? <p className="font-semibold">Rationale divisor (basket → saved): {scoreRevision.divisors.join(", ")}</p> : null}
             {orderSubmissionBlockedReason}
+            {scoreRevision?.differences.length ? <details><summary>Affected listings ({scoreRevision.differences.length})</summary>{scoreRevision.differences.join(", ")}</details> : null}
+            {openSavedBasket && <button type="button" className="mt-2 underline" onClick={openSavedBasket}>Open basket with saved scoring settings</button>}
           </div>
         ) : null}
         <div className="min-h-0 flex-1 overflow-auto overscroll-contain p-5">
@@ -4754,10 +4766,12 @@ export function RebalanceWorkflowSections({
     error: null,
   });
   const { scoreMatrixFormulaConfig, setScoreMatrixFormulaConfig, zerodhaBasketBuyThreshold, setZerodhaBasketBuyThreshold, zerodhaBasketBuyThresholdDraft, setZerodhaBasketBuyThresholdDraft, indmoneyBasketBuyThreshold, setIndmoneyBasketBuyThreshold, indmoneyBasketBuyThresholdDraft, setIndmoneyBasketBuyThresholdDraft, buyThresholdSaveError, buyThresholdPersistence } = useWorkflowConfiguration();
+  const [localBasketFormula, setLocalBasketFormula] = useState<ScoreMatrixFormulaConfig | null>(null);
+  const basketFormula = localBasketFormula ?? scoreMatrixFormulaConfig;
   const [scoreRevision, setScoreRevision] = useState<BasketScoreRevision | null>(null);
   const [verificationIssue, setVerificationIssue] = useState("A unique Technical source run and complete basket inputs are required.");
   const [verifiedBasketFormula, setVerifiedBasketFormula] = useState<string | null>(null);
-  const zerodhaOrderSubmissionBlockedReason = [brokerOrderBlock, verifiedBasketFormula === canonicalBasketInputs(scoreMatrixFormulaConfig) ? null :
+  const zerodhaOrderSubmissionBlockedReason = [brokerOrderBlock, verifiedBasketFormula === canonicalBasketInputs(basketFormula) ? null :
     `Provisional basket. ${verifiedBasketFormula ? "The formula changed since verification." : verificationIssue} Open workflow history to check the saved calculation.`].filter(Boolean).join(" ") || null;
   const [selectedZerodhaBasketIds, setSelectedZerodhaBasketIds] = useState<Set<string>>(new Set());
   const [indmoneyBasketOpen, setIndmoneyBasketOpen] = useState(false);
@@ -4860,9 +4874,9 @@ export function RebalanceWorkflowSections({
       "india",
       zerodhaBasketDetailsData.portfolioSnapshot as ZerodhaPortfolioSnapshotDetail | null,
       buildTechnicalScanMap(zerodhaBasketHistoryRuns),
-      scoreMatrixFormulaConfig,
+      basketFormula,
     ),
-    [scoreMatrixFormulaConfig, zerodhaBasketDetailsData.portfolioSnapshot, zerodhaBasketHistoryRuns],
+    [basketFormula, zerodhaBasketDetailsData.portfolioSnapshot, zerodhaBasketHistoryRuns],
   );
 
   const indmoneyBasketHistoricalRows = useMemo(
@@ -4877,7 +4891,8 @@ export function RebalanceWorkflowSections({
   );
 
   const handleScoreMatrixFormulaConfigChange = useCallback((updater: (current: ScoreMatrixFormulaConfig) => ScoreMatrixFormulaConfig) => {
-    setScoreMatrixFormulaConfig((current) => {
+    const updateConfig = localBasketFormula ? (fn: (value: ScoreMatrixFormulaConfig) => ScoreMatrixFormulaConfig) => setLocalBasketFormula(fn(localBasketFormula)) : setScoreMatrixFormulaConfig;
+    updateConfig((current) => {
       const next = updater(current);
       if (zerodhaBasketOpen && zerodhaBasketOrders.length > 0) {
         const currentOrders = zerodhaBasketOrders;
@@ -4922,7 +4937,7 @@ export function RebalanceWorkflowSections({
       setZerodhaBasketSubmission(null);
       return next;
     });
-  }, [setScoreMatrixFormulaConfig, zerodhaBasketDetailsData.portfolioSnapshot, zerodhaBasketOpen, zerodhaBasketOrders]);
+  }, [localBasketFormula, setScoreMatrixFormulaConfig, zerodhaBasketDetailsData.portfolioSnapshot, zerodhaBasketOpen, zerodhaBasketOrders]);
 
   const closeAutoRebalanceCostHistory = useCallback(() => {
     setCostHistoryPortfolio(null);
@@ -4932,7 +4947,9 @@ export function RebalanceWorkflowSections({
 
   const zerodhaPreparation = useRef(0);
   const indmoneyPreparation = useRef(0);
-  const openZerodhaBasketPreview = useCallback(async () => {
+  const openZerodhaBasketPreview = useCallback(async (requested?: {sequence: number; formula: ScoreMatrixFormulaConfig}) => {
+    const formula = requested?.formula ?? scoreMatrixFormulaConfig;
+    setLocalBasketFormula(requested?.formula ?? null);
     const generation = ++zerodhaPreparation.current;
     setVerifiedBasketFormula(null);
     setVerificationIssue("A unique Technical source run and complete basket inputs are required.");
@@ -4989,7 +5006,7 @@ export function RebalanceWorkflowSections({
           .filter((value): value is string => Boolean(value))
           .sort((left, right) => parseTimestampMs(right) - parseTimestampMs(left))[0] ?? null,
       );
-      const actionRows = buildDashboardActionRows(stocks, "india", technicalScans, scoreMatrixFormulaConfig);
+      const actionRows = buildDashboardActionRows(stocks, "india", technicalScans, formula);
       const rebalance = getLatestMatchingRebalanceRuns(runs, "india");
       const technicalIds = [...new Set(actionRows.map(row => row.detail?.technicalScanSourceRunId))];
       const technical = technicalIds.length === 1 ? runs.find(run => run.id === technicalIds[0]) : null;
@@ -5018,7 +5035,18 @@ export function RebalanceWorkflowSections({
               saved.set(stockIdentity(row.symbol, row.exchange), {score: row.effectiveScore, divisor: row.formula_inputs?.detailedRationaleDenominator, jobId: evidence?.job_id, comparisons: evidence?.comparisons, pairwise: evidence?.pairwise});
             }
           }
+          const storedFormula = verification.verified && frozen?.formula && typeof frozen.formula === "object"
+            ? normalizeScoreMatrixFormulaConfig(frozen.formula as Partial<ScoreMatrixFormulaConfig>) : null;
+          const divisors = new Set<string>();
+          const differences = actionRows.filter(row => {
+            const entry = saved.get(stockIdentity(row.stock.symbol, row.stock.exchange));
+            if (entry?.divisor != null && entry.divisor !== row.detail.detailedRationaleDenominator)
+              divisors.add(`${row.detail.detailedRationaleDenominator} → ${entry.divisor}`);
+            return !entry || !sameFrozenScore(entry.score, row.formulaScore) || entry.divisor !== row.detail.detailedRationaleDenominator;
+          }).map(row => stockIdentity(row.stock.symbol, row.stock.exchange));
           setScoreRevision({
+            formula: storedFormula && canonicalBasketInputs(storedFormula) === canonicalBasketInputs(frozen?.formula) ? storedFormula : null,
+            divisors: [...divisors], differences,
             sequence, version: typeof frozen?.formula_version === "string" ? frozen.formula_version : null,
             capturedAt: typeof frozen?.captured_at === "string" ? frozen.captured_at : null,
             replayed: Boolean(corrected), originals, saved,
@@ -5027,6 +5055,7 @@ export function RebalanceWorkflowSections({
           const listingKey = (exchange: string, symbol: string) => JSON.stringify([exchange, symbol]);
           const savedByListing = new Map(rows.map(saved => [listingKey(saved.exchange, saved.symbol), saved]));
           const problems = [
+            requested && sequence !== requested.sequence && "requested workflow sequence",
             !verification.verified && verification.reason,
             !(stage?.status === "completed" || corrected) && "Actionables completion or saved replay",
             (frozen?.schema !== "workflow-final-v2" || frozen.formula_version !== "score-matrix-v2") && "formula version",
@@ -5034,7 +5063,7 @@ export function RebalanceWorkflowSections({
             frozen?.technical_run_id !== technical.id && "Technical source run",
             canonicalBasketInputs(frozen?.rebalance_run_ids) !== canonicalBasketInputs(rebalance.map(r => r.id)) && "Rebalance source runs",
             canonicalBasketInputs(frozen?.response_hashes) !== canonicalBasketInputs(hashes) && "source response revisions",
-            canonicalBasketInputs(frozen?.formula) !== canonicalBasketInputs(scoreMatrixFormulaConfig) && "formula settings",
+            canonicalBasketInputs(frozen?.formula) !== canonicalBasketInputs(formula) && "formula settings",
             (!rows.length || savedByListing.size !== rows.length || rows.length !== actionRows.length ||
               new Set(actionRows.map(row => listingKey(row.stock.exchange, row.stock.symbol))).size !== actionRows.length) && "listing coverage",
             ...actionRows.flatMap(row => {
@@ -5043,8 +5072,8 @@ export function RebalanceWorkflowSections({
                 ? [] : [row.stock.exchange + ":" + row.stock.symbol + " action or score"];
             }),
           ].filter(Boolean);
-          if (problems.length) setVerificationIssue("Could not match " + problems.join(", ") + ".");
-          else setVerifiedBasketFormula(canonicalBasketInputs(scoreMatrixFormulaConfig));
+          if (problems.length) setVerificationIssue("Could not match " + problems.filter(problem => !String(problem).endsWith(" action or score")).concat(problems.some(problem => String(problem).endsWith(" action or score")) ? ["listing actions or scores"] : []).join(", ") + ".");
+          else setVerifiedBasketFormula(canonicalBasketInputs(formula));
         } catch {
           if (generation === zerodhaPreparation.current) setVerificationIssue("Could not read the saved revision or verify its source responses.");
         }
@@ -7488,9 +7517,20 @@ ${zerodhaExecutionMode === "direct_market"
               const row = frozenFinal.rows.find(r => r.exchange + ":" + r.symbol === item.listing);
               return {...item, score: row?.effectiveScore == null ? null : (row.effectiveScore + 3) * 100 / 6};
             }).sort((a, b) => (b.score ?? -1) - (a.score ?? -1) || (a.listing < b.listing ? -1 : a.listing > b.listing ? 1 : 0))};
+          const sourceRuns = [...finalRebalanceInputs, generatedTechnicalRun];
+          const valuation = market === "india" ? await captureIndiaValuation(runMetadata.auto_rebalance_sequence, actionablesCompletedAt,
+            workflowSnapshot as ZerodhaPortfolioSnapshotDetail, finalRows.map(row => {
+              const ids = new Set([...row.stock.rows.map(source => source.meta.runId), row.detail.technicalScanSourceRunId]);
+              const sources = [...ids].map(id => {
+                const run = sourceRuns.find(source => source.id === id);
+                return {runId:id ?? 0, createdAt:parseApiTimestamp(run?.created_at)?.toISOString() ?? "", completed:run?.status === "completed",
+                  status:run?.status, market:run ? "india" as const : null};
+              });
+              return {symbol:row.stock.symbol, exchange:row.stock.exchange, score:row.formulaScore, action:row.formulaAction, sources};
+            })).catch(error => ({schema:"india-valuation-unavailable-v1", reason:normalizeError(error)})) : undefined;
           const savedFinal = await markCompleted(portfolio, "actionables", {
             completedAt: actionablesCompletedAt, runStatus: "saved calculation",
-            rebalanceInputs: finalRebalanceInputs.length, recommendedStocks: finalRows.length, frozenFinal: {...frozenFinal, actionable_ranking},
+            rebalanceInputs: finalRebalanceInputs.length, recommendedStocks: finalRows.length, frozenFinal: {...frozenFinal, actionable_ranking, ...(valuation ? {valuation} : {})},
           });
           if (savedFinal?.saved === false) {
             updateStage(portfolio, "actionables", {
@@ -8344,11 +8384,13 @@ ${zerodhaExecutionMode === "direct_market"
         ltpRefreshing={zerodhaBasketLtpRefreshing}
         ltpRefreshedAt={zerodhaBasketLtpRefreshedAt}
         scoreRevision={scoreRevision}
+        openSavedBasket={scoreRevision?.formula && canonicalBasketInputs(scoreRevision.formula) !== canonicalBasketInputs(basketFormula)
+          ? () => void openZerodhaBasketPreview({sequence: scoreRevision.sequence, formula: scoreRevision.formula!}) : undefined}
         scoreScanCompletedAt={zerodhaBasketScoreScanCompletedAt}
         submission={zerodhaBasketSubmission}
         detailsData={zerodhaBasketDetailsData}
         historicalRows={zerodhaBasketHistoricalRows}
-        formulaConfig={scoreMatrixFormulaConfig}
+        formulaConfig={basketFormula}
         onFormulaConfigChange={handleScoreMatrixFormulaConfigChange}
         buyThreshold={zerodhaBasketBuyThreshold}
         buyThresholdDraft={zerodhaBasketBuyThresholdDraft}
