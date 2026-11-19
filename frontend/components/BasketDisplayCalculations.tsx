@@ -17,7 +17,7 @@ function historyCoverage(rows: readonly { source_run_ids?: unknown; covered_at: 
   return `${coverage} · ${rows.length} run(s) · ${dates.size} distinct date(s)`;
 }
 
-type Stock = { modelUnits?: number | null; isin?: string | null; verifiedUsIdentity?: {securityId:string;exchangeAliases:readonly string[]}; identityIssue?: string | null; investedValue?: number | null; vendorReady?: boolean; vendorLtp?: number | null; vendorAsOf?: string; vendorSource?: string; holdingQuantity?: number | null; holdingAsOf?: string; holdingSource?: string; upstoxLtp?: number | null; upstoxAsOf?: string; upstoxSource?: string; currentValue?: number | null; symbol: string; exchange: string; score: number | null; action?: string | null; ltp: number | null; limitPrice?: number | null; ltpAsOf?: string; ltpSource?: string; quoteLoading?: boolean; scoreSources?: CurrentScoreCalculation['sources'] };
+type Stock = { savedComparison?: {score: number; divisor?: number; currentDivisor: number}; modelUnits?: number | null; isin?: string | null; verifiedUsIdentity?: {securityId:string;exchangeAliases:readonly string[]}; identityIssue?: string | null; investedValue?: number | null; vendorReady?: boolean; vendorLtp?: number | null; vendorAsOf?: string; vendorSource?: string; holdingQuantity?: number | null; holdingAsOf?: string; holdingSource?: string; upstoxLtp?: number | null; upstoxAsOf?: string; upstoxSource?: string; currentValue?: number | null; symbol: string; exchange: string; score: number | null; action?: string | null; ltp: number | null; limitPrice?: number | null; ltpAsOf?: string; ltpSource?: string; quoteLoading?: boolean; scoreSources?: CurrentScoreCalculation['sources'] };
 export function useBasketDisplayQuotes(open: boolean, market: "india" | "us", instruments: string[], scope: string | null = null) {
   const keys = [...new Set(instruments)].sort().join(",");
   const [attempt, setAttempt] = useState(0);
@@ -204,6 +204,15 @@ export function useBasketDisplayCalculations(open: boolean, market: "india" | "u
   const percentAggregate = (value: number | null) => value === null ? "Unavailable" : `${number(value * 100)}%`;
   const unavailableScores = data && !loading && !error && !data.truncated
     ? stocks.filter(stock => means.get(stockIdentity(stock.symbol, stock.exchange))?.score == null) : [];
+  const comparing = Boolean(india && data && !data.truncated && stocks.some(stock => stock.savedComparison));
+  const savedTargets = comparing && data && stocks.every(stock => stock.savedComparison) ? allocateIndiaEquities(stocks.map(stock => {
+    const score = stock.savedComparison!.score;
+    const historical = historicalMean(data, stock.symbol, stock.exchange, { symbol: stock.symbol, exchange: stock.exchange, market,
+      score, ...allocationScoreContract(score), calculatedAt: data.as_of, sources: stock.identityIssue ? [] : stock.scoreSources ?? [] });
+    return {key: stockIdentity(stock.symbol, stock.exchange), isin: stock.isin ?? null, price: stock.upstoxLtp ?? null,
+      holding: stock.holdingQuantity ?? null, score: historical.score};
+  }), parameters, totalAssets) : null;
+  const displayScore = (score: number | null) => score == null ? "Unavailable" : ((Math.max(-3, Math.min(3, score)) + 3) * 100 / 6).toFixed(2);
   const disclosure = <section aria-label="Allocation disclosure" className="my-3 text-sm">
     {unavailableScores.length > 0 && data ? <section aria-label="Unavailable score reasons" className="mb-3 rounded border border-amber-500 p-3 text-amber-900 dark:text-amber-200">
       <h3 className="font-semibold">{unavailableScores.length} stock(s) need eligible score evidence</h3>
@@ -214,6 +223,14 @@ export function useBasketDisplayCalculations(open: boolean, market: "india" | "u
       })}</ul>
       <p>Next: review the source runs in Saved evidence and configuration. Current recommendations need eligible analysis in this window; a new scan requires separate review and may incur LLM costs. Opening this basket does not run a scan or refresh old evidence.</p>
     </section> : null}
+    {comparing && <details open><summary>Saved and current settings compared at the same holdings and prices</summary>
+      <table><thead><tr><th>Listing</th><th>Score /100 (saved → current)</th><th>Divisor (saved → current)</th><th>Target shares (saved → current)</th></tr></thead>
+        <tbody>{stocks.map(stock => {
+          const row = metrics(stock), saved = stock.savedComparison;
+          return <tr key={row.key}><th>{row.key}</th><td>{displayScore(saved?.score ?? null)} → {displayScore(stock.score)}</td>
+            <td>{saved?.divisor ?? "Unavailable"} → {saved?.currentDivisor ?? "Unavailable"}</td>
+            <td>{savedTargets?.venues.get(row.key)?.shares ?? "Unavailable"} → {row.shown?.stocks ?? "Unavailable"}</td></tr>;
+        })}</tbody></table></details>}
     <p>Min Cash {parameters.cash}% is a minimum input, not an exact invested allocation. Weight cap {parameters.normalised}%; caps are not redistributed.</p>
     <table className="w-full text-left"><caption className="text-left">Calculated allocation targets · {market === "india" ? "INR" : "USD"}</caption><tbody>
       <tr><th scope="row">Aggregate target weight</th><td>{percentAggregate(aggregate.weight)}</td></tr>
