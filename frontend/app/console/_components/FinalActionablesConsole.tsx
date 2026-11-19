@@ -259,7 +259,7 @@ export type ScoreMatrixDetail = {
   calculatedScore: number | null;
   meanModeAction: ActionCategory | null;
   meanModeUnitsChange: number | null;
-  calculatedAction: ActionCategory;
+  calculatedAction: ActionCategory | null;
   calculatedUnitsChange: number | null;
   matchedRuleId: string;
   rows: ScoreMatrixEntry[];
@@ -363,6 +363,7 @@ export type StockConsensus = {
 export type TechnicalScanResult = {
   scorecardUniverse?: Map<string, SupplementalInputs>;
   scorecardSources?: number[];
+  legacyScoring?: boolean;
   supplementalInputs?: SupplementalInputs;
   market?: SwingTradeMarket | null;
   stockSymbol: string;
@@ -1113,9 +1114,10 @@ function FinalActionTag({
   action,
   className,
 }: {
-  action: ActionCategory;
+  action: ActionCategory | null;
   className?: string;
 }) {
+  if (action === null) return <span>Action unavailable</span>;
   return (
     <span
       className={cn(
@@ -1245,8 +1247,8 @@ function normalizeAction(value: string): ActionCategory | null {
   return null;
 }
 
-function parseNumericCell(value?: string | null) {
-  const match = String(value || "")
+function parseNumericCell(value?: string | number | null) {
+  const match = String(value ?? "")
     .replace(/,/g, "")
     .match(/-?\d+(?:\.\d+)?/);
   if (!match) return null;
@@ -1254,8 +1256,8 @@ function parseNumericCell(value?: string | null) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function parseStrictNumericCell(value?: string | null) {
-  const normalized = String(value || "")
+function parseStrictNumericCell(value?: string | number | null) {
+  const normalized = String(value ?? "")
     .replace(/,/g, "")
     .trim();
   if (!/^-?\d+(?:\.\d+)?$/.test(normalized)) return null;
@@ -1804,7 +1806,11 @@ export function ScoreMatrixButton({
       type="button"
       onClick={(event) => {
         event.stopPropagation();
-        onOpenDetail(configuredDetail);
+        const cards = configuredDetail.supplementalInputs;
+        const samePair = cards && savedScore?.jobId != null && cards.jobId === savedScore.jobId && cards.pairwise === savedScore.pairwise;
+        onOpenDetail(samePair ? { ...configuredDetail, supplementalInputs: {
+          ...cards, comparisons: savedScore.comparisons ?? cards.comparisons,
+        } } : configuredDetail);
       }}
       className={cn(
         "cursor-pointer rounded px-1.5 py-0.5 transition focus:outline-none focus:ring-2",
@@ -1921,7 +1927,14 @@ function buildDetailedRationaleScoreRows(
     ? null
     : buildMissingTechnicalScanReason(stock, technicalScanSourceLabel);
   const technicalConfidenceValue = getTechnicalScanConfidence(technicalScan, stock.representative);
-  const technicalConfidenceScore = parseNumericCell(technicalConfidenceValue);
+  const legacy = technicalScan?.legacyScoring === true;
+  const rawConfidence = normalizeEmptyTechnicalValue(technicalScan?.confidenceScore);
+  const percent = average((stock.consensusRows ?? stock.rows)
+    .map(row => parseStrictNumericCell(row.cells["Confidence Score (0-100)"]))
+    .filter((n): n is number => n !== null && n >= 0 && n <= 100));
+  const normalized = rawConfidence ? parseStrictNumericCell(rawConfidence) : percent === null ? null : percent / 10;
+  const technicalConfidenceScore = legacy ? parseNumericCell(technicalConfidenceValue)
+    : normalized !== null && normalized >= 0 && normalized <= 10 ? normalized : null;
   const premarketTrendRawValue = technicalScan?.premarketTrend ?? null;
   const premarketTrendActualValue = parseNumericCell(normalizeEmptyTechnicalValue(premarketTrendRawValue));
   const last5CandlesTrendRawValue = technicalScan?.last5CandlesTrend ?? null;
@@ -1935,7 +1948,7 @@ function buildDetailedRationaleScoreRows(
   const meanModeActionScore = meanModeAction
     ? config.actionScores[meanModeAction]
     : null;
-  const effectiveTechnicalConfidenceMultiplier = technicalScan ? technicalConfidenceMultiplier : 0;
+  const effectiveTechnicalConfidenceMultiplier = legacy ? technicalConfidenceMultiplier : 0;
 
   return [
     {
@@ -2329,8 +2342,10 @@ function buildScoreMatrixDetail(
   };
   const rules = evaluateScoreMatrixRules(context);
   const matchedRule = rules.find((rule) => rule.matched) ?? rules[rules.length - 1];
-  const calculatedAction = matchedRule.action;
-  const calculatedUnitsChange = resolveMatrixUnitsForAction(calculatedAction, context);
+  const legacy = (technicalScan ?? cardSource)?.legacyScoring === true;
+  const deferred = !legacy && (calculatedScore === null || calculatedScore >= 1 && currentUnits === null);
+  const calculatedAction = deferred ? null : matchedRule.action;
+  const calculatedUnitsChange = calculatedAction === null ? null : resolveMatrixUnitsForAction(calculatedAction, context);
 
   return {
     ...(supplementalInputs ? { supplementalInputs } : {}),
@@ -2347,14 +2362,14 @@ function buildScoreMatrixDetail(
     meanModeUnitsChange: meanUnitsChange,
     calculatedAction,
     calculatedUnitsChange,
-    matchedRuleId: matchedRule.id,
-    rules,
+    matchedRuleId: deferred ? "" : matchedRule.id,
+    rules: deferred ? rules.map(rule => ({...rule, matched: false})) : rules,
     detailedRationaleRows,
     detailedRationaleFinalScore,
     detailedRationaleDenominator,
     rebalanceSourceLabel,
     rebalanceSourceRunId: rebalanceSourceMeta?.runId ?? null,
-    calculationPolicy: "missing-score-exclusion-v2",
+    calculationPolicy: legacy ? "missing-score-exclusion-v2" : "informational-confidence-v3",
     technicalScanSourceLabel: technicalScanSourceLabelForStock,
     technicalScanSourceRunId: technicalScan?.runId ?? technicalScanSourceRunId ?? null,
     technicalScanSourceJobId: technicalScan?.jobId ?? null,
@@ -2375,7 +2390,7 @@ function buildScoreMatrixDetail(
         action: calculatedAction,
         actionScore: calculatedScore,
         unitsChange: calculatedUnitsChange,
-        note: `${matchedRule.summary} Position: ${getPositionContextLabel(stock)}.`,
+        note: `${deferred ? calculatedScore === null ? "Score unavailable" : "Holdings unavailable" : matchedRule.summary} Position: ${getPositionContextLabel(stock)}.`,
         isSummary: true,
         isCalculated: true,
       },
@@ -2402,6 +2417,7 @@ function applyScoreMatrixEdits(
 ): ScoreMatrixDetail {
   const detailedRationaleRows = detail.detailedRationaleRows.map((row) => {
     const draft = multiplierDrafts[row.id];
+    if (detail.calculationPolicy === "informational-confidence-v3" && row.id === "technical-scan-confidence") return row;
     if (draft === undefined || draft.trim() === "") return row;
     const multiplier = Number(draft);
     return Number.isFinite(multiplier) ? { ...row, multiplier } : row;
@@ -2456,27 +2472,29 @@ function applyScoreMatrixEdits(
     };
   });
   const matchedRule = rules.find((rule) => rule.matched) ?? rules[rules.length - 1];
+  const deferred = detail.calculationPolicy === "informational-confidence-v3" && (calculatedScore === null || calculatedScore >= 1 && context.currentUnits === null);
   const matchedDraft = ruleDrafts[matchedRule.id];
   const manualUnits = matchedDraft?.unitsChange?.trim() ? Number(matchedDraft.unitsChange) : null;
-  const calculatedUnitsChange = manualUnits !== null && Number.isFinite(manualUnits)
+  const calculatedUnitsChange = deferred ? null : manualUnits !== null && Number.isFinite(manualUnits)
     ? manualUnits
     : resolveMatrixUnitsForAction(matchedRule.action, context);
   const rows = detail.rows.map((row) => row.isCalculated
     ? {
       ...row,
-      action: matchedRule.action,
+      action: deferred ? null : matchedRule.action,
       actionScore: calculatedScore,
       unitsChange: calculatedUnitsChange,
-      note: matchedRule.summary,
+      note: deferred ? calculatedScore === null ? "Score unavailable" : "Holdings unavailable" : matchedRule.summary,
     }
     : row);
 
   return {
     ...detail,
     calculatedScore,
-    calculatedAction: matchedRule.action,
+    calculatedAction: deferred ? null : matchedRule.action,
     calculatedUnitsChange,
-    rules,
+    matchedRuleId: deferred ? "" : matchedRule.id,
+    rules: deferred ? rules.map(rule => ({...rule, matched: false})) : rules,
     rows,
     detailedRationaleRows,
     detailedRationaleFinalScore,
@@ -2583,7 +2601,7 @@ function stripInlineCitations(value: string) {
 }
 
 function normalizeScanCell(value?: string | null) {
-  return stripInlineCitations(stripMarkdownLinks(String(value || "")))
+  return stripInlineCitations(stripMarkdownLinks(String(value ?? "")))
     .replace(/^`+|`+$/g, "")
     .trim();
 }
@@ -2886,7 +2904,8 @@ export function buildTechnicalScanMap(runs: RunResponse[], parsedSources?: Techn
           createdAt: job.updated_at ?? job.created_at,
           runLabel: getAutoRebalanceRunDisplayLabel(run),
         };
-        const metadataKey = JSON.stringify(meta);
+        const legacyScoring = !run.prompt?.includes("[SCORING_POLICY_V3]");
+        const metadataKey = JSON.stringify([meta, legacyScoring]);
         const cached = parsedSources?.get(link);
         if (cached?.response === job.response && cached.metadataKey === metadataKey) return cached.rows;
         const scorecards = run.prompt?.includes("[WORKFLOW_SCORECARDS_V1]") ? readScorecardManifest(run.prompt) : null;
@@ -2900,7 +2919,7 @@ export function buildTechnicalScanMap(runs: RunResponse[], parsedSources?: Techn
         }
         const rows = parseTechnicalScanResponse(job.response, meta).map(row => {
           const inputs = scorecards?.get(row.exchangeSymbol.toUpperCase() + ":" + row.stockSymbol.toUpperCase());
-          return scorecards && rebalanceIds.length ? {...row, scorecardUniverse: scorecards, scorecardSources: rebalanceIds, supplementalInputs: inputs} : row;
+          return scorecards && rebalanceIds.length ? {...row, legacyScoring, scorecardUniverse: scorecards, scorecardSources: rebalanceIds, supplementalInputs: inputs} : {...row, legacyScoring};
         });
         parsedSources?.set(link, { response: job.response, metadataKey, rows });
         return rows;
@@ -3169,7 +3188,7 @@ export function buildTechnicalScanPrompt(stocks: StockConsensus[], market: Swing
     )
     .join("\n");
 
-  return `${TECHNICAL_SCAN_MARKER}\nMarket: ${market === "us" ? "US equities" : "India equities"}\n\nStock list:\n| Exchange Symbol | Stock Symbol | Consensus Action | Suggestions Count |\n|---|---|---|---:|\n${stockRows}\n\nApproved Technical Setups list from sidebar:\n${setupListMarkdown()}\n\nAct as a top-tier technical analyst and swing-trading strategist.\n\nObjective:\nFor the stock list given above, search the internet for the latest available technical data, price action, chart structure, moving averages, volume behaviour, RSI/divergence, support-resistance, breakout/breakdown levels, 52-week high/low position, and recent trend strength. Then tag each stock with the most relevant Bullish and/or Bearish setup names from the approved Technical Setups list above.\n\nImportant rules:\n${market === "us" ? "- Carry forward the listing exchange from the selected rebalance output. For unresolved venues verify the exact listing before reporting it. Never emit US as an exchange.\n" : ""}- Use current fresh internet data only. Do not rely on stale memory.\n- Prefer sources such as TradingView, StockCharts, Yahoo Finance, MarketWatch, Investing.com, Screener, NSE/BSE, Nasdaq, Trendlyne, Chartink, StockEdge, or other reliable chart/technical sources.\n- Check at least daily chart data. If possible, also consider weekly chart for broader trend.\n- For Premarket trend: if current scan time is before market opening and the relevant premarket session is open, return only one integer from this exact scale: -3 = very bearish, -2 = bearish, -1 = slightly bearish, 0 = neutral, 1 = slightly bullish, 2 = bullish, 3 = very bullish. If premarket is not applicable, closed, unavailable, or current scan time is not before market opening, return 0.\n- For Last 5 candles trend: analyse the trend of the last 5 daily candles and return only one integer from this exact scale: -3 = very bearish, -2 = bearish, -1 = slightly bearish, 0 = neutral, 1 = slightly bullish, 2 = bullish, 3 = very bullish.\n- Tag only from the approved setup names above. Do not invent, paraphrase, or abbreviate setup names.\n- Every stock must receive a Primary Setup that exactly matches one Setup value from the approved Technical Setups list above.\n- A stock can have more than one tag, but choose one Primary Setup and optionally 1-3 Secondary Setups; every setup name must exactly match an approved Setup value.\n- For bearish setups, treat them as sell/trim/avoid fresh buying/exit weak holdings — not short-selling.\n- For Premarket trend and Last 5 candles trend, return the integer only; do not include words, symbols, explanations, or ranges.\n- For Confidence Score, copy the numeric Confidence value from the approved Technical Setups list for the same Primary Setup. Return only the number, without /10, %, avg text, or LLM counts.\n- Always mention the exact trigger level and invalidation level wherever possible.\n- Do not give generic advice. Make the tagging specific to the latest chart structure.\n\nReturn ONLY this markdown table and no extra prose:\n| ${TECHNICAL_SCAN_TABLE_COLUMNS.join(" | ")} |\n| ${TECHNICAL_SCAN_TABLE_COLUMNS.map(() => "---").join(" | ")} |\n| EXCHANGE | SYMBOL | Exact approved primary setup name | Optional exact approved setup names | Bullish/Bearish/Neutral | -3 to 3 integer only | -3 to 3 integer only | approved confidence number only | exact price/level | exact price/level |`;
+  return `${TECHNICAL_SCAN_MARKER}\n[SCORING_POLICY_V3]\nMarket: ${market === "us" ? "US equities" : "India equities"}\n\nStock list:\n| Exchange Symbol | Stock Symbol | Consensus Action | Suggestions Count |\n|---|---|---|---:|\n${stockRows}\n\nApproved Technical Setups list from sidebar:\n${setupListMarkdown()}\n\nAct as a top-tier technical analyst and swing-trading strategist.\n\nObjective:\nFor the stock list given above, search the internet for the latest available technical data, price action, chart structure, moving averages, volume behaviour, RSI/divergence, support-resistance, breakout/breakdown levels, 52-week high/low position, and recent trend strength. Then tag each stock with the most relevant Bullish and/or Bearish setup names from the approved Technical Setups list above.\n\nImportant rules:\n${market === "us" ? "- Carry forward the listing exchange from the selected rebalance output. For unresolved venues verify the exact listing before reporting it. Never emit US as an exchange.\n" : ""}- Use current fresh internet data only. Do not rely on stale memory.\n- Prefer sources such as TradingView, StockCharts, Yahoo Finance, MarketWatch, Investing.com, Screener, NSE/BSE, Nasdaq, Trendlyne, Chartink, StockEdge, or other reliable chart/technical sources.\n- Check at least daily chart data. If possible, also consider weekly chart for broader trend.\n- For Premarket trend: if current scan time is before market opening and the relevant premarket session is open, return only one integer from this exact scale: -3 = very bearish, -2 = bearish, -1 = slightly bearish, 0 = neutral, 1 = slightly bullish, 2 = bullish, 3 = very bullish. If premarket is not applicable, closed, unavailable, or current scan time is not before market opening, return 0.\n- For Last 5 candles trend: analyse the trend of the last 5 daily candles and return only one integer from this exact scale: -3 = very bearish, -2 = bearish, -1 = slightly bearish, 0 = neutral, 1 = slightly bullish, 2 = bullish, 3 = very bullish.\n- Tag only from the approved setup names above. Do not invent, paraphrase, or abbreviate setup names.\n- Every stock must receive a Primary Setup that exactly matches one Setup value from the approved Technical Setups list above.\n- A stock can have more than one tag, but choose one Primary Setup and optionally 1-3 Secondary Setups; every setup name must exactly match an approved Setup value.\n- For bearish setups, treat them as sell/trim/avoid fresh buying/exit weak holdings — not short-selling.\n- For Premarket trend and Last 5 candles trend, return the integer only; do not include words, symbols, explanations, or ranges.\n- For Confidence Score, copy the numeric Confidence value from the approved Technical Setups list for the same Primary Setup. Return only the number, without /10, %, avg text, or LLM counts.\n- Always mention the exact trigger level and invalidation level wherever possible.\n- Do not give generic advice. Make the tagging specific to the latest chart structure.\n\nReturn ONLY this markdown table and no extra prose:\n| ${TECHNICAL_SCAN_TABLE_COLUMNS.join(" | ")} |\n| ${TECHNICAL_SCAN_TABLE_COLUMNS.map(() => "---").join(" | ")} |\n| EXCHANGE | SYMBOL | Exact approved primary setup name | Optional exact approved setup names | Bullish/Bearish/Neutral | -3 to 3 integer only | -3 to 3 integer only | approved confidence number only | exact price/level | exact price/level |`;
 }
 
 function isUsableModelOutputStatus(status?: string | null) {
@@ -3939,11 +3958,12 @@ export function ConsensusBreakupButton({
   action,
 }: {
   stock: StockConsensus;
-  action: ActionCategory;
+  action: ActionCategory | null;
 }) {
   const [open, setOpen] = useState(false);
   const reviewDialog = useReviewDialog<HTMLDivElement>(open, () => setOpen(false));
   const { dragHandleProps, draggableStyle } = useDraggablePopup();
+  if (action === null) return <span>Action unavailable</span>;
   const consensusText = `${stock.actionCounts[action]}/${stock.totalSuggestions}`;
 
   return (
@@ -6738,7 +6758,7 @@ function buildActionablesCalculationRows(
               ) : null}
             </div>
           );
-          sortValues[header] = ACTION_CATEGORY_LABEL[source.detail.calculatedAction];
+          sortValues[header] = source.detail.calculatedAction ? ACTION_CATEGORY_LABEL[source.detail.calculatedAction] : "Action unavailable";
           return;
         }
         if (header === ACTION_HEADER) {
@@ -7723,7 +7743,7 @@ export type DashboardActionRow = {
   id: string;
   market: SwingTradeMarket;
   stock: StockConsensus;
-  formulaAction: ActionCategory;
+  formulaAction: ActionCategory | null;
   formulaScore: number | null;
   formulaEstimate: ActionEstimate;
   detail: ScoreMatrixDetail;
@@ -7896,7 +7916,7 @@ export function buildFinalActionableHistoryItems(
       covered_at: row.coveredAt,
       action,
       score: row.formulaScore,
-      consensus_numerator: row.stock.actionCounts[action],
+      consensus_numerator: action === null ? 0 : row.stock.actionCounts[action],
       consensus_denominator: row.stock.totalSuggestions,
       historical_current_units: estimate.currentUnits,
       historical_current_value: estimate.currentInvestmentAmount,
@@ -7943,12 +7963,12 @@ function getMarketActionUnits(
 
 function buildFormulaActionEstimate(
   stock: StockConsensus,
-  action: ActionCategory,
+  action: ActionCategory | null,
   unitsChange: number | null,
   market: SwingTradeMarket,
 ): ActionEstimate {
   const { currentUnits, currentInvestmentAmount } = getStockPositionContext(stock);
-  const units = getMarketActionUnits(unitsChange, action, market);
+  const units = action === null ? null : getMarketActionUnits(unitsChange, action, market);
   const price = parseNumericCell(stock.representative["Price Per Unit"]);
   let amount: number | null = null;
 
