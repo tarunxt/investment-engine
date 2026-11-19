@@ -6,6 +6,8 @@ from decimal import Decimal, InvalidOperation
 import hashlib
 import json
 
+from app.domains.jobs.rebalance_actions import normalize_action
+
 from .schemas import Formula, SCORE_FIELDS, WEIGHT_KEYS, SCHEMA_VERSION
 
 ORDER = ("Sell All", "Trim", "Add more", "Buy New", "Hold")
@@ -24,11 +26,6 @@ def number(value):
         return result if result.is_finite() else None
     except (InvalidOperation, ValueError):
         return None
-
-
-def normalize_action(value):
-    text = str(value or "").strip().lower()
-    return {"sell all": "Sell All", "sell": "Sell All", "trim": "Trim", "hold": "Hold", "add more": "Add more", "add": "Add more", "buy new": "Buy New", "buy": "Buy New"}.get(text)
 
 
 def finding(code, detail, severity="warning"):

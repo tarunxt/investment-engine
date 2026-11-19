@@ -5,6 +5,7 @@ import re
 from decimal import Decimal, InvalidOperation, localcontext
 from typing import Any, Mapping, Sequence
 
+from ..rebalance_actions import PROVIDER_ACTIONS
 from .document import MISSING
 from .schemas import Column, Finding, METADATA_KEYS, NUMERIC_KEYS, Provenance, SCORE_KEYS
 
@@ -210,12 +211,12 @@ def validate_row(
 
 def _validate_action(row: Mapping[str, Any], holding: Mapping[str, Any] | None, error: Any, non_buy_candidates: frozenset[tuple[str, str]] = frozenset()) -> None:
     action = row.get("action")
-    allowed = {"Buy", "Add", "Buy/Add", "Add more", "Buy New", "Sell All", "Trim", "Hold"}
     if unknown(action):
         return
-    if not isinstance(action, str) or action not in allowed:
+    if not isinstance(action, str) or action not in PROVIDER_ACTIONS:
         error("invalid_action", "Action must be an explicit supported decision label.", "action")
         return
+    action = PROVIDER_ACTIONS[action]
     non_buy = holding is None and action == "Hold" and identity(row) in non_buy_candidates and all(number(row.get(key)) == 0 for key in ("current_units", "units_change", "final_units", "units_to_buy", "total_buy_amount"))
     if holding is None and action != "Buy New" and not non_buy:
         error("holding_not_in_snapshot", "Existing-position decision has no exact exchange/symbol match in the snapshot.", "current_units")
@@ -227,7 +228,7 @@ def _validate_action(row: Mapping[str, Any], holding: Mapping[str, Any] | None, 
     current, delta, final, buy = (numbers[key] for key in numbers)
     if final != _sum(current, delta):
         error("unit_arithmetic", "Final Units must equal Current Units + Units Change.", "final_units")
-    if action in {"Buy", "Add", "Buy/Add", "Add more", "Buy New"}:
+    if action in {"Add more", "Buy New"}:
         if delta <= 0 or buy != delta:
             error("action_units", "Buy/Add requires positive Units Change equal to Units to Buy.", "units_change")
         if action == "Buy New" and current != 0:

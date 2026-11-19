@@ -63,6 +63,21 @@ function snapshot(units = 6) {
   return { holdings: [{ tradingsymbol: 'TESTINDIA', exchange: 'NSE', quantity: units, market_value: units * 100 }] };
 }
 
+test('a Buy/Add vote and a Hold vote both reach the live position score', () => {
+  const run = runWithRows([
+    modelRow(10, { [actionHeader]: 'Buy/Add', 'Current Units': '36', 'Final Units': '46' }),
+    modelRow(0, { [actionHeader]: 'Hold', 'Current Units': '36', 'Final Units': '36' }),
+  ]);
+  run.run_jobs[1].job.status = 'partial';
+  const [stock] = helpers.buildConsensusRows([run], 'india', snapshot(36));
+  assert.equal(stock.actionCounts['Add more'], 1);
+  assert.equal(stock.actionCounts.Hold, 1);
+  assert.equal(stock.actionCounts['Buy New'], 0);
+  assert.equal(stock.totalSuggestions, 2);
+  const [dashboard] = helpers.buildDashboardActionRows([stock], 'india', {});
+  assert.equal(dashboard.detail.meanScore, 0.5);
+});
+
 test('current holdings, consolidated arithmetic, formula, and action estimate share one position context', () => {
   const run = runWithRows([modelRow(6), modelRow(5)]);
   const [stock] = helpers.buildConsensusRows([run, run], 'india', snapshot());

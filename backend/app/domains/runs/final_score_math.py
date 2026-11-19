@@ -9,6 +9,8 @@ import re
 from decimal import Decimal, ROUND_HALF_UP
 from collections import Counter
 
+from app.domains.jobs.rebalance_actions import normalize_action
+
 DIRECTIONAL_SIZING = "directional-v2"
 BUY_PRICE_POLICY = "positive-provider-price-v1"
 ORIGINAL_SIZING = "absolute-mean-v1"
@@ -51,16 +53,6 @@ def mean(values):
     if result is not None and not math.isfinite(result):
         raise ArithmeticError("Source mean exceeds finite arithmetic")
     return result
-
-
-def normalize_action(value):
-    label = re.sub(r"[\s_-]+", " ", str(value or "").lower()).strip()
-    return {
-        "sell": "Sell All", "sell all": "Sell All", "exit": "Sell All",
-        "trim": "Trim", "reduce": "Trim", "hold": "Hold",
-        "buy new": "Buy New", "new buy": "Buy New", "new": "Buy New",
-        "add": "Add more", "add more": "Add more", "buy more": "Add more",
-    }.get(label)
 
 
 def signed_units(row, action):

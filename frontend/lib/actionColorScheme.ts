@@ -6,7 +6,7 @@ export function parseActionLabel(value: string): StandardActionCategory | null {
     case 'trim': case 'reduce': return 'Trim';
     case 'hold': return 'Hold';
     case 'new': case 'buy new': case 'new buy': return 'Buy New';
-    case 'add': case 'add more': case 'buy more': return 'Add more';
+    case 'buy': case 'buy/add': case 'add': case 'add more': case 'buy more': return 'Add more';
     default: return null;
   }
 }
