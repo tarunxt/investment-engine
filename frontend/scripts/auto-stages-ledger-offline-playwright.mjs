@@ -19,9 +19,12 @@ try {
  import React,{useState} from 'react';
  import {createRoot} from 'react-dom/client';
  import {WorkflowStageLedger,WorkflowStageLedgerViews} from ${JSON.stringify(path.join(frontend,'components/shared/WorkflowStageLedger.tsx'))};
+ import {ZerodhaRunGate} from ${JSON.stringify(path.join(frontend,'components/shared/ZerodhaRunGate.tsx'))};
  import {WorkflowStageTile,STAGE_ORDER} from ${JSON.stringify(path.join(frontend,'components/shared/WorkflowStageTile.tsx'))};
  window.actions=[];
  const now=Date.parse('2026-11-01T03:00:00Z');
+ const getStatus=async()=>({connected:Boolean(window.brokerConnected)});
+ const connect=async()=>{window.actions.push('connect');if(window.rejectLogin)throw new Error('Broker sign-in cancelled');window.brokerConnected=true;};
  function Fixture(){
  const [market,setMarket]=useState('India'),[view,setView]=useState('ledger'),[state,setState]=useState(new URLSearchParams(location.search).get('fixture')||'loaded'),[checks,setChecks]=useState({});
  const call=(name)=>()=>window.actions.push(name);
@@ -49,7 +52,7 @@ try {
  return <main className="mx-auto max-w-[1380px] p-4 text-slate-700"><h1 className="mb-3 text-xl font-bold text-slate-950">Automated rebalance · offline fixture</h1>
  <WorkflowStageLedgerViews market={market==='India'?'zerodha':'indmoneyUs'} view={view} onChange={(m,v)=>{setMarket(m==='zerodha'?'India':'US');setView(v)}}/>
  <label className="mb-3 block text-xs">Fixture state <select value={state} onChange={e=>setState(e.target.value)}>{['loaded','loading','empty','failed','stale','zero','selection','derived','recovered'].map(s=><option key={s}>{s}</option>)}</select></label>
- <article className="rounded-2xl border border-indigo-200 bg-indigo-50/50 p-4"><div className="flex justify-between gap-3"><div><h2 className="text-xl font-bold text-slate-950">Run {market==='India'?'Zerodha':'Indmoney'} Auto-Rebalance</h2><p className="mt-2 text-sm">Last run: {state==='empty'?'n/a':'30 Oct 19:43'}</p></div><section aria-label="Run controls"><h3 className="text-sm font-semibold">Run controls</h3><button className="mt-2 rounded-lg bg-indigo-700 px-4 py-2 text-white" onClick={call('run')}>Run</button></section></div>
+ <article className="rounded-2xl border border-indigo-200 bg-indigo-50/50 p-4"><div className="flex justify-between gap-3"><div><h2 className="text-xl font-bold text-slate-950">Run {market==='India'?'Zerodha':'Indmoney'} Auto-Rebalance</h2><p className="mt-2 text-sm">Last run: {state==='empty'?'n/a':'30 Oct 19:43'}</p></div><section aria-label="Run controls"><h3 className="text-sm font-semibold">Run controls</h3><ZerodhaRunGate getStatus={getStatus} connect={connect} disabled={false}><button className="mt-2 rounded-lg bg-indigo-700 px-4 py-2 text-white" onClick={call('run')}>Run</button></ZerodhaRunGate></section></div>
  <div data-palette-tiles hidden={!new URLSearchParams(location.search).has('palette')}>{stages}</div>
  <WorkflowStageLedger board={new URLSearchParams(location.search).has("board")} enabled view={view} market={market==='India'?'zerodha':'indmoneyUs'} historyHref="#history" onStockFlowClick={call('flow')}>{stages}</WorkflowStageLedger>
  <footer className="mt-3 rounded-xl border border-emerald-100 bg-emerald-50 p-3 text-sm">Cumulative LLM time: 00:08:39 · Total cost incurred in last Auto-rebalance: n/a</footer></article><p id="history">Offline fixture history destination</p></main>;
@@ -72,14 +75,35 @@ try {
  await page.goto(origin+'?board=1');
  const board=page.getByLabel('Rebalance workflow');
  await board.waitFor();
+ const connectButton=page.getByRole('button',{name:'Connect Broker',exact:true});
+ await connectButton.waitFor();
+ assert.equal(await page.getByRole('button',{name:'Run',exact:true}).count(),0);
+ await page.evaluate(()=>{window.rejectLogin=true;});
+ await connectButton.click();
+ await page.getByRole('alert').filter({hasText:'Broker sign-in cancelled'}).waitFor();
+ await page.evaluate(()=>{window.rejectLogin=false;});
+ await connectButton.click();
+ await page.getByRole('status').filter({hasText:'Congratulations'}).waitFor();
+ await page.getByRole('button',{name:'Run',exact:true}).waitFor();
+ assert.deepEqual(await page.evaluate(()=>window.actions),['connect','connect']);
  assert.equal(await board.locator('section').count(),4);
- assert.equal(await board.getByRole('button',{name:'Sync Now',exact:true}).count(),1);
- assert.equal(await board.getByRole('button',{name:'Place Order',exact:true}).count(),1);
+ assert.equal(await board.getByRole('button',{name:/ actions$/}).count(),8);
+ assert.equal(await page.getByRole('menuitem').count(),0);
+ await board.getByRole('button',{name:'Swing Scan actions',exact:true}).focus();
+ await page.keyboard.press('Enter');
+ assert.deepEqual(await page.getByRole('menuitem').allTextContents(),['Inputs','Models','Prompt','Saved output','Duration','Stock Flow','History','Open stage']);
+ await page.keyboard.press('Escape');
+ assert.equal(await board.getByRole('button',{name:'Swing Scan actions'}).evaluate(el=>el===document.activeElement),true);
+ await board.getByRole('button',{name:'Sync Portfolio actions'}).click();
+ await page.getByRole('menuitem',{name:'Sync Now',exact:true}).click();
+ assert.equal(await page.evaluate(()=>window.actions.at(-1)),'sync');
  assert.equal(await board.getByText('Query Screener',{exact:true}).count(),0);
- await board.getByRole('button',{name:'Place Order',exact:true}).click();
+ await board.getByRole('button',{name:'Actionables actions'}).click();
+ await page.getByRole('menuitem',{name:'Place Order',exact:true}).click();
  assert.equal(await page.evaluate(()=>window.actions.at(-1)),'order:India');
  await page.getByRole('button',{name:'US stage ledger',exact:true}).click();
- await board.getByRole('button',{name:'Place Order',exact:true}).click();
+ await board.getByRole('button',{name:'Actionables actions'}).click();
+ await page.getByRole('menuitem',{name:'Final Order',exact:true}).click();
  assert.equal(await page.evaluate(()=>window.actions.at(-1)),'order:US');
  await page.goto(origin);await page.getByRole('table').waitFor();
  assert.equal(await page.locator('tbody tr').count(),6);

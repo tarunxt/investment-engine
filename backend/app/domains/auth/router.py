@@ -35,6 +35,7 @@ from app.domains.auth.websocket_tickets import (
     WEBSOCKET_TICKET_TTL_SECONDS,
     issue_websocket_ticket,
 )
+from app.domains.auth.workflow_models import StageModelSelection, read_stage_models, save_stage_models
 from app.domains.auth.tasks import send_reset_password_email_task
 from app.infrastructure.database.session import get_async_db
 from app.shared.exceptions import NotFoundException, ValidationException
@@ -283,6 +284,24 @@ async def update_password(
     await db.commit()
 
     return {"message": "Password updated successfully"}
+
+
+@router.get("/profile/workflow-models", response_model=dict[str, list[str]])
+async def get_workflow_models(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db),
+):
+    return await read_stage_models(db, current_user.id)
+
+
+@router.put("/profile/workflow-models", response_model=StageModelSelection)
+async def update_workflow_models(
+    selection: StageModelSelection,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db),
+):
+    await save_stage_models(db, current_user.id, selection)
+    return selection
 
 
 @router.get("/profile", response_model=ProfilePreferencesResponse)

@@ -404,6 +404,7 @@ export const URLs = {
     me: () => `${resolveApiBaseUrl()}/auth/me`,
     updatePassword: () => `${resolveApiBaseUrl()}/auth/password`,
     getProfile: () => `${resolveApiBaseUrl()}/auth/profile`,
+    workflowModels: () => `${resolveApiBaseUrl()}/auth/profile/workflow-models`,
     updateProfile: () => `${resolveApiBaseUrl()}/auth/profile`,
     forgotPassword: () => `${resolveApiBaseUrl()}/auth/forgot-password`,
     resetPassword: () => `${resolveApiBaseUrl()}/auth/reset-password`,

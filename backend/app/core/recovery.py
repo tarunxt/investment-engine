@@ -175,6 +175,9 @@ def recovery_http_allowed(method, path):
         ))
     ):
         return True
+    # Account-owned model selections only; this endpoint cannot execute a run.
+    if method == "PUT" and path == "/auth/profile/workflow-models":
+        return True
     if method == "POST" and path in {"/zerodha/callback", "/zerodha/portfolio/sync"}:
         return True
     if method in {"GET", "HEAD"}:

@@ -3,6 +3,7 @@
 import { useId, useState, type ComponentProps, type ReactElement } from "react";
 import type { RankedListing } from "@/lib/workflowScorecardRanking";
 import { StageDurationBreakdownDialog } from "@/app/console/dashboard/_components/StageDurationBreakdownDialog";
+import { WorkflowTileMenu, type TileAction } from "./WorkflowTileMenu";
 import { StageErrorDetails } from "./StageErrorDetails";
 import { getStageLedgerTone, getIdleStageRows, getStageTileLabel, STAGE_METADATA, type WorkflowStageTile } from "./WorkflowStageTile";
 
@@ -64,16 +65,20 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
   const openDuration = (item: Stage) => {
     setDurationStage(item);
   };
-  const evidenceControls = (selected: Stage) => <div className="mt-3 flex flex-wrap gap-1">
-        {selected.onInputClick ? <button type="button" className={control} onClick={selected.onInputClick}>Inputs</button> : null}
-        {selected.onInfoClick ? <button type="button" className={control} onClick={selected.onInfoClick}>Models</button> : null}
-        {selected.onPromptClick ? <button type="button" className={control} onClick={selected.onPromptClick}>Prompt</button> : null}
-        {selected.onOutputClick ? <button type="button" className={control} onClick={selected.onOutputClick}>Saved output</button> : null}
-        {getIdleStageRows(selected.stage, selected.info, selected.now).some(row => row.label === "Duration") ? <button type="button" className={control} aria-haspopup="dialog" onClick={() => openDuration(selected)}>Duration</button> : null}
-        {selected.onCalculationsClick ? <button type="button" className={control} onClick={selected.onCalculationsClick}>Calculation</button> : null}
-        <button type="button" className={control} onClick={onStockFlowClick}>Stock Flow</button>
-        <a className={control} href={historyHref}>History</a>
-        {!selected.selectable && selected.onClick ? <button type="button" className={control} onClick={selected.onClick}>Open stage</button> : null}
+  const evidenceActions = (item: Stage): TileAction[] => {
+    const controls: [string, (() => void) | undefined][] = [
+      ["Inputs", item.onInputClick], ["Models", item.onInfoClick], ["Prompt", item.onPromptClick],
+      ["Saved output", item.onOutputClick],
+      ["Duration", getIdleStageRows(item.stage, item.info, item.now).some(row => row.label === "Duration") ? () => openDuration(item) : undefined],
+      ["Calculation", item.onCalculationsClick], ["Stock Flow", onStockFlowClick],
+    ];
+    const actions: TileAction[] = controls.flatMap(([label, onSelect]) => onSelect ? [{ label, onSelect }] : []);
+    actions.push({ label: "History", href: historyHref });
+    if (!item.selectable && item.onClick) actions.push({ label: "Open stage", onSelect: item.onClick });
+    return actions;
+  };
+  const tileHeader = (title: string, actions: TileAction[]) => <div className="flex items-start justify-between gap-2">
+    <h4 className="font-semibold">{title}</h4><WorkflowTileMenu title={title} actions={actions} />
   </div>;
   if (board && view === "ledger") {
     const lanes = [
@@ -91,9 +96,12 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
           const rows = getIdleStageRows(item.stage, item.info, item.now);
           const ranking = item.info.frozenFinal?.actionable_ranking as { rows?: RankedListing[] } | undefined;
           const upcoming = active && (item.info.state === "idle" || item.info.state === "queued");
+          const actions = evidenceActions(item);
+          if (item.onSyncNowClick) actions.push({ label: "Sync Now", onSelect: item.onSyncNowClick });
+          if (item.onPlaceOrderClick) actions.push({ label: item.placeOrderLabel ?? "Place Order", onSelect: item.onPlaceOrderClick });
           return <div key={key} className="mb-3">
             <article className={`rounded-lg border border-slate-200 p-3 ${getStageLedgerTone(item.info)}`}>
-              <h4 className="font-semibold">{getStageTileLabel(item.stage)}</h4>
+              {tileHeader(getStageTileLabel(item.stage), actions)}
               <p className="text-sm capitalize">{item.info.state} {item.info.runStatus}</p>
               {item.selectable && <label className="text-xs"><input type="checkbox" checked={Boolean(item.selected)} onChange={item.onClick} /> Select for next run</label>}
               {!upcoming && <><p className="text-xs">{evidenceLabel(item)}</p>
@@ -113,17 +121,13 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
                     <td>{row.stock_threat?.toFixed(1) ?? "—"}</td><td>{row.score?.toFixed(2) ?? "—"}</td></tr>)}</tbody></table>
               </details>}
               {item.info.portfolioThreat && <p className="mt-2 text-sm">Portfolio Threat · {item.info.portfolioThreat}</p>}
-              {evidenceControls(item)}
-              {item.onSyncNowClick && <button type="button" className={control} onClick={item.onSyncNowClick}>Sync Now</button>}
             </article>
             {item.stage === "swing" && <div className="mt-2 rounded-lg border p-3 text-sm">
-              <h4 className="font-semibold">Merge contenders</h4>
+              {tileHeader("Merge contenders", [{ label: "Stock Flow", onSelect: onStockFlowClick }, { label: "History", href: historyHref }])}
               <p>{item.info.recommendedStocks != null ? item.info.recommendedStocks + " unique listings" : "Awaiting scan evidence"}</p></div>}
             {item.stage === "threats" && <div className="mt-2 rounded-lg border p-3 text-sm">
-              <h4 className="font-semibold">Pairwise scorecard</h4><p>{item.info.pairCoverage ?? (item.info.state === "running" ? "Assessing stock pairs" : "Comparison count unavailable in this stage summary")}</p>
-              {item.onOutputClick && <button type="button" className={control} onClick={item.onOutputClick}>Saved output</button>}
+              {tileHeader("Pairwise scorecard", [{ label: "History", href: historyHref }, ...(item.onOutputClick ? [{ label: "Saved output", onSelect: item.onOutputClick }] : [])])}<p>{item.info.pairCoverage ?? (item.info.state === "running" ? "Assessing stock pairs" : "Comparison count unavailable in this stage summary")}</p>
             </div>}
-            {item.onPlaceOrderClick && <button type="button" className="mt-2 w-full rounded-lg bg-indigo-700 p-2 text-white" onClick={item.onPlaceOrderClick}>Place Order</button>}
           </div>;
         })}
       </section>)}
@@ -184,7 +188,9 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
           selected.info.jobId ? `Job #${selected.info.jobId}` : null,
         ].filter((value): value is string => Boolean(value))).map((reference, index) => <li key={index}>{reference}</li>)}
       </ul>
-      {evidenceControls(selected)}
+      <div className="mt-3 flex flex-wrap gap-1">{evidenceActions(selected).map(action => "href" in action
+        ? <a key={action.label} className={control} href={action.href}>{action.label}</a>
+        : <button key={action.label} type="button" className={control} onClick={action.onSelect}>{action.label}</button>)}</div>
     </section> : null}
     <section aria-label="Sync and order controls" className="rounded-xl border border-slate-300 bg-slate-50 p-3">
       <h3 className="font-semibold text-slate-900">Run and order controls</h3>
