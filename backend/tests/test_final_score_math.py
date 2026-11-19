@@ -145,3 +145,11 @@ def test_deferred_action_and_numeric_zero():
         assert result["estimate"]["units"] is None
         assert result["estimate"]["amount"] is None
     assert calculate_listing([source_row(**{"Current Units": 0})], formula(), market="india")["action"] == "Buy New"
+
+
+def test_whole_action_labels_and_ambiguous_prose():
+    from app.domains.runs.final_score_math import normalize_action
+    assert normalize_action("  BUY_NEW ") == "Buy New"
+    assert normalize_action("reduce") == "Trim"
+    for text in ("Do not sell all", "Hold, do not add", "additional information", "hold2"):
+        assert normalize_action(text) is None

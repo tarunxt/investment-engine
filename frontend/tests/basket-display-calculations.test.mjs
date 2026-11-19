@@ -848,3 +848,10 @@ test('India issuer policy sizes dual listings once and floors the post-rounding 
   const result = math.allocateIndiaEquities(twoHeld, math.defaultDisplayParameters(), 10000).venues;
   assert.ok(result.get('BSE:TWIN').shares <= 34 && result.get('NSE:TWIN').shares <= 5);
 });
+
+test('a positive quote rounding to zero paise cannot produce actionable shares', () => {
+  const listing = {key:'NSE:TEST', isin:'IN0000000000', price:0.004, holding:0, score:2};
+  const target = math.allocateIndiaEquities([listing], math.defaultDisplayParameters(), 10000).venues.get(listing.key);
+  assert.equal(target.shares, null);
+  assert.match(target.reason, /prices/);
+});

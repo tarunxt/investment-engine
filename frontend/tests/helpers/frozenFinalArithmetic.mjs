@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 process.on('uncaughtException', error => { console.error(error.message); process.exit(1); });
 const root = new URL('../../', import.meta.url);
 const files = [
+  new URL('lib/actionColorScheme.ts', root),
   new URL('lib/workflowScorecardRanking.ts', root),
   new URL('lib/usSecurityIdentity.ts', root),
   new URL('lib/technicalSetups.ts', root),
@@ -12,7 +13,7 @@ const files = [
   new URL('app/console/_components/FinalActionablesConsole.tsx', root),
 ];
 const functions = new Set([
-  'weightedSigned', 'buildScoreMatrixDetail', 'buildDetailedRationaleScoreRows', 'getTechnicalScanScoreMultiplier',
+  'parseActionLabel', 'weightedSigned', 'buildScoreMatrixDetail', 'buildDetailedRationaleScoreRows', 'getTechnicalScanScoreMultiplier',
   'getTechnicalScanConfidence', 'formatTechnicalScanConfidenceValue', 'getFallbackTechnicalConfidence',
   'normalizeEmptyTechnicalValue', 'normalizeScanCell', 'stripInlineCitations', 'stripMarkdownLinks',
   'resolveApprovedTechnicalSetup', 'getApprovedSetupByName', 'normalizeSetupLookupKey',

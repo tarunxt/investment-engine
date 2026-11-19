@@ -6,6 +6,8 @@ from typing import Any, cast
 
 import json5
 
+from app.domains.runs.final_score_math import normalize_action as _normalize_action_value
+
 logger = logging.getLogger(__name__)
 
 KEY_MAP = {
@@ -406,24 +408,6 @@ def _parse_headerless_canonical_items(tokens: list[str]) -> list[dict[str, str]]
             return items
 
     return []
-
-
-def _normalize_action_value(value: Any) -> str | None:
-    text = str(value or "").strip()
-    normalized = re.sub(r"[^a-z]+", " ", text.lower()).strip()
-    if not normalized:
-        return None
-    if "sell all" in normalized or normalized == "sell":
-        return "Sell All"
-    if "trim" in normalized or "reduce" in normalized:
-        return "Trim"
-    if "buy new" in normalized or "new buy" in normalized:
-        return "Buy New"
-    if "add" in normalized or "buy more" in normalized:
-        return "Add more"
-    if "hold" in normalized:
-        return "Hold"
-    return None
 
 
 def _normalize_rebalance_numeric_fields(item: dict[str, Any]) -> None:

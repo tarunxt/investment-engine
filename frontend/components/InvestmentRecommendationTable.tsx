@@ -1,5 +1,6 @@
 'use client';
 
+import { parseActionLabel } from '@/lib/actionColorScheme';
 import { useMemo } from 'react';
 import MarkdownRenderer from '@/components/shared/MarkdownRenderer';
 import { TradingViewSymbolLink } from '@/components/shared/TradingViewSymbolLink';
@@ -17,14 +18,7 @@ interface JsonRecommendationPayload {
 
 
 function normalizeActionCell(value: string): StandardActionCategory | null {
-  const normalized = value.toLowerCase().replace(/[^a-z]+/g, ' ').trim();
-  if (!normalized) return null;
-  if (normalized.includes('sell all') || normalized === 'sell') return 'Sell All';
-  if (normalized.includes('trim')) return 'Trim';
-  if (normalized.includes('hold')) return 'Hold';
-  if (normalized.includes('buy new')) return 'Buy New';
-  if (normalized.includes('add more') || normalized === 'add') return 'Add more';
-  return null;
+  return parseActionLabel(value);
 }
 
 interface Props {
@@ -438,15 +432,7 @@ function parseNumericText(value: unknown): number | null {
 }
 
 function normalizeRebalanceAction(value: unknown): string | null {
-  const text = formatCellValue(value);
-  const normalized = text.toLowerCase().replace(/[^a-z]+/g, ' ').trim();
-  if (!normalized) return null;
-  if (normalized.includes('sell all') || normalized === 'sell') return 'Sell All';
-  if (normalized.includes('trim') || normalized.includes('reduce')) return 'Trim';
-  if (normalized.includes('buy new') || normalized.includes('new buy')) return 'Buy New';
-  if (normalized.includes('add') || normalized.includes('buy more')) return 'Add more';
-  if (normalized.includes('hold')) return 'Hold';
-  return null;
+  return parseActionLabel(formatCellValue(value));
 }
 
 function formatNormalizedNumber(value: number): string {

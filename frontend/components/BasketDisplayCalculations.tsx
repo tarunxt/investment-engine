@@ -14,7 +14,7 @@ function historyCoverage(rows: readonly { source_run_ids?: unknown; covered_at: 
   const format = new Intl.DateTimeFormat("en-CA", { timeZone: timezone });
   const dates = new Set(rows.map(row => format.format(new Date(row.covered_at))));
   const coverage = current === 1 && rows.length === 1 ? "Current run only" : `${current} current + ${rows.length - current} prior`;
-  return `${coverage} · ${rows.length} run(s) · ${dates.size} distinct date(s)`;
+  return `${coverage} · ${rows.length} run(s) · ${dates.size} distinct date(s) · equal weight per eligible run`;
 }
 
 type Stock = { savedComparison?: {score: number; divisor?: number; currentDivisor: number}; modelUnits?: number | null; isin?: string | null; verifiedUsIdentity?: {securityId:string;exchangeAliases:readonly string[]}; identityIssue?: string | null; investedValue?: number | null; vendorReady?: boolean; vendorLtp?: number | null; vendorAsOf?: string; vendorSource?: string; holdingQuantity?: number | null; holdingAsOf?: string; holdingSource?: string; upstoxLtp?: number | null; upstoxAsOf?: string; upstoxSource?: string; currentValue?: number | null; symbol: string; exchange: string; score: number | null; action?: string | null; ltp: number | null; limitPrice?: number | null; ltpAsOf?: string; ltpSource?: string; quoteLoading?: boolean; scoreSources?: CurrentScoreCalculation['sources'] };

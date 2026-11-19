@@ -1,4 +1,5 @@
 "use client";
+import { parseActionLabel } from '@/lib/actionColorScheme';
 import type { VerifiedUsListing } from "@/lib/usSecurityIdentity";
 
 import { captureWorkflowOwner, requireWorkflowOwner, onWorkflowOwnerInvalidated } from "@/lib/workflowOwnerLifetime";
@@ -174,13 +175,7 @@ type StageJobOutput = {
 };
 
 function normalizeStageAction(value: string) {
-  const normalized = value.trim().toLowerCase();
-  if (normalized.includes("sell all")) return "Sell All";
-  if (normalized.includes("trim")) return "Trim";
-  if (normalized.includes("add more") || normalized === "add") return "Add more";
-  if (normalized.includes("buy new") || normalized === "new") return "Buy New";
-  if (normalized.includes("hold")) return "Hold";
-  return value.trim() || "Not covered";
+  return parseActionLabel(value) ?? "Not covered";
 }
 
 function buildStageJobOutputs(stocks: StockConsensus[], runs: RunResponse[]) {

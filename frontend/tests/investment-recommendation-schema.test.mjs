@@ -1,3 +1,4 @@
+import * as actionColors from '../lib/actionColorScheme.ts';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -11,7 +12,7 @@ const source = readFileSync(new URL('../components/InvestmentRecommendationTable
 const dependencies = {
   '@/components/shared/MarkdownRenderer': { default: ({ content }) => createElement('pre', null, content) },
   '@/components/shared/TradingViewSymbolLink': { TradingViewSymbolLink: ({ children }) => createElement('span', null, children) },
-  '@/lib/actionColorScheme': { getStandardActionTextClass: () => '' },
+  '@/lib/actionColorScheme': actionColors,
   '@/lib/utils': { cn: (...parts) => parts.filter(Boolean).join(' ') },
 };
 const compiled = ts.transpileModule(`${source}\nexport { SWING_HEADER_ORDER };`, {

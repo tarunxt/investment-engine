@@ -50,17 +50,13 @@ def mean(values):
 
 
 def normalize_action(value):
-    value = re.sub(r"[\s_-]+", " ", str(value or "").lower()).strip()
-    for matches, action in (
-        ("sell all" in value or value == "sell", "Sell All"),
-        ("trim" in value or "reduce" in value, "Trim"),
-        ("buy new" in value or "new buy" in value, "Buy New"),
-        ("add" in value or "buy more" in value, "Add more"),
-        ("hold" in value, "Hold"),
-    ):
-        if matches:
-            return action
-    return None
+    label = re.sub(r"[\s_-]+", " ", str(value or "").lower()).strip()
+    return {
+        "sell": "Sell All", "sell all": "Sell All", "exit": "Sell All",
+        "trim": "Trim", "reduce": "Trim", "hold": "Hold",
+        "buy new": "Buy New", "new buy": "Buy New", "new": "Buy New",
+        "add": "Add more", "add more": "Add more", "buy more": "Add more",
+    }.get(label)
 
 
 def signed_units(row, action):

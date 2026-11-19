@@ -1,4 +1,5 @@
 "use client";
+import { parseActionLabel } from '@/lib/actionColorScheme';
 import { readScorecardManifest, weightedSigned, type SupplementalInputs } from "@/lib/workflowScorecardRanking";
 import { groupUsIdentityRows, usIdentityHolding, type VerifiedUsListing, type UsIdentity } from "@/lib/usSecurityIdentity";
 import { useReviewDialog } from "@/hooks/useReviewDialog";
@@ -1233,18 +1234,7 @@ function getInputStatusBadgeClass(status?: string | null) {
 }
 
 function normalizeAction(value: string): ActionCategory | null {
-  const action = value
-    .toLowerCase()
-    .replace(/[\s_-]+/g, " ")
-    .trim();
-  if (!action) return null;
-  if (action.includes("sell all") || action === "sell") return "Sell All";
-  if (action.includes("trim") || action.includes("reduce")) return "Trim";
-  if (action.includes("buy new") || action.includes("new buy"))
-    return "Buy New";
-  if (action.includes("add") || action.includes("buy more")) return "Add more";
-  if (action.includes("hold")) return "Hold";
-  return null;
+  return parseActionLabel(value);
 }
 
 function parseNumericCell(value?: string | number | null) {
@@ -1844,6 +1834,7 @@ export function ScoreMatrixButton({
         {savedScore && displayScore != null && (Math.abs(savedScore.score - Math.max(-3, Math.min(3, displayScore))) > 1e-8 || (savedScore.divisor != null && savedScore.divisor !== configuredDetail.detailedRationaleDenominator)) && <span className="block text-amber-800">Saved revision {((savedScore.score + 3) * 100 / 6).toFixed(2)} / 100 · divisor {savedScore.divisor ?? "unrecorded"}</span>}
         {savedScore?.jobId != null && <span className="block">Saved pairwise {savedScore.pairwise ?? "unavailable"} · {savedScore.comparisons ?? "unknown"} comparisons · job #{savedScore.jobId}</span>}
         {cards}/3 scorecards used
+        {base != null && <span className="block">Base:pairwise:safety 98:{pair == null ? 0 : 1}:{threat == null ? 0 : 1} · blend divisor {98 + Number(pair != null) + Number(threat != null)}</span>}
         {base == null && <span className="block">Base unavailable</span>}
         {pair == null && <span className="block">Pairwise unavailable</span>}
         {threat == null && <span className="block">Stock Threat unavailable{savedScore?.threatReason && ` · ${savedScore.threatReason}`}</span>}

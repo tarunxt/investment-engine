@@ -12,6 +12,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session, selectinload
 
+from app.domains.runs.final_score_math import normalize_action
 from app.domains.runs.models import (
     AutoRebalanceWorkflow,
     FinalActionableHistory,
@@ -117,23 +118,6 @@ def row_value(row: dict[str, str], *aliases: str) -> str:
         if value.strip() and any(normalize_header(alias) in key for alias in aliases):
             return value.strip()
     return ""
-
-
-def normalize_action(value: str | None) -> str | None:
-    normalized = re.sub(r"[\s_-]+", " ", (value or "").lower()).strip()
-    if not normalized:
-        return None
-    if "sell all" in normalized or normalized == "sell" or "exit" in normalized:
-        return "Sell All"
-    if "trim" in normalized or "reduce" in normalized:
-        return "Trim"
-    if "buy new" in normalized or "new buy" in normalized:
-        return "Buy New"
-    if "add" in normalized or "buy more" in normalized:
-        return "Add more"
-    if "hold" in normalized:
-        return "Hold"
-    return None
 
 
 def parse_number(value: str | None) -> float | None:

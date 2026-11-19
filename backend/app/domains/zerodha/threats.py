@@ -485,7 +485,10 @@ def extract_threat_prompt_metadata(prompt: str) -> ThreatPromptMetadata:
     captured_at = None
     snapshot_match = re.search(r"\[THREAT_SNAPSHOT_DATE=([0-9]{4}-[0-9]{2}-[0-9]{2})\]", prompt or "")
     if snapshot_match:
-        snapshot_date = date.fromisoformat(snapshot_match.group(1))
+        try:
+            snapshot_date = date.fromisoformat(snapshot_match.group(1))
+        except ValueError:
+            snapshot_date = None
 
     captured_match = re.search(r"\[THREAT_CAPTURED_AT=([^\]]+)\]", prompt or "")
     if captured_match:
@@ -538,10 +541,12 @@ def parse_zerodha_threat_report(markdown: str | None, prompt: str = "", *, legac
     raw_evidence = evidence["rows"]
     listings = {(r.get("Exchange", "").strip().upper(), r.get("Symbol", "").strip().upper()) for r in raw_evidence}
     universe = assessment_list(manifest, listings) if manifest else {key for key in listings if all(key)}
-    if legacy_evidence:
+    strict = "[THREAT_EVIDENCE_V2]" in prompt.splitlines()
+    if legacy_evidence and not strict:
         cards = stock_scorecards(raw_evidence)
     else:
-        accepted, dispositions = audited_evidence(raw_evidence, universe)
+        accepted, dispositions = audited_evidence(raw_evidence, universe, strict=strict,
+            snapshot_date=extract_threat_prompt_metadata(prompt).snapshot_date if strict else None)
         cards = stock_scorecards(accepted)
         evidence = {"columns": [*evidence["columns"], "Category ID", "Disposition"], "rows": dispositions}
     cards = {listing: card for listing, card in cards.items() if listing in universe}

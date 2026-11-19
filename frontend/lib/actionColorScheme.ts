@@ -1,5 +1,16 @@
 export type StandardActionCategory = 'Sell All' | 'Trim' | 'Hold' | 'Buy New' | 'Add more';
 
+export function parseActionLabel(value: string): StandardActionCategory | null {
+  switch (value.toLowerCase().replace(/[\s_-]+/g, ' ').trim()) {
+    case 'sell': case 'sell all': case 'exit': return 'Sell All';
+    case 'trim': case 'reduce': return 'Trim';
+    case 'hold': return 'Hold';
+    case 'new': case 'buy new': case 'new buy': return 'Buy New';
+    case 'add': case 'add more': case 'buy more': return 'Add more';
+    default: return null;
+  }
+}
+
 export const STANDARD_ACTION_ORDER: StandardActionCategory[] = [
   'Sell All',
   'Trim',
