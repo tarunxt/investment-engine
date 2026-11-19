@@ -1784,7 +1784,7 @@ export function ScoreMatrixButton({
   className?: string;
   workflowScale?: boolean;
   originalDenominator?: number;
-  savedScore?: {score: number; divisor?: number};
+  savedScore?: {score: number; divisor?: number; jobId?: number; comparisons?: number | null; pairwise?: number | null};
 }) {
   const configuredDetail = applyScoreMatrixFormulaConfig(detail, formulaConfig);
   const validationSummary = getScoreMatrixValidationSummary(configuredDetail);
@@ -1836,6 +1836,7 @@ export function ScoreMatrixButton({
       )}
       {workflowScale && <small className="block text-left font-normal text-slate-600">
         {savedScore && displayScore != null && (Math.abs(savedScore.score - Math.max(-3, Math.min(3, displayScore))) > 1e-8 || (savedScore.divisor != null && savedScore.divisor !== configuredDetail.detailedRationaleDenominator)) && <span className="block text-amber-800">Saved revision {((savedScore.score + 3) * 100 / 6).toFixed(2)} / 100 · divisor {savedScore.divisor ?? "unrecorded"}</span>}
+        {savedScore?.jobId != null && <span className="block">Saved pairwise {savedScore.pairwise ?? "unavailable"} · {savedScore.comparisons ?? "unknown"} comparisons · job #{savedScore.jobId}</span>}
         {cards}/3 scorecards used
         {base == null && <span className="block">Base unavailable</span>}
         {pair == null && <span className="block">Pairwise unavailable</span>}

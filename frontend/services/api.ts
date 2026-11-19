@@ -1108,7 +1108,7 @@ class apiServiceClass implements IApiService {
 
   getIndiaScoreVerification(sequence: number) {
     return this.get<
-      | { verified: true; record: Record<string, unknown>; replayed: boolean }
+      | { verified: true; record: Record<string, unknown>; replayed: boolean; evidence: Record<string, { job_id: number; comparisons: number | null; pairwise: number | null; stock_threat: number | null }> }
       | { verified: false; reason: string }
     >(URLs.runs.autoRebalanceHistoryDetail("india", sequence) + "/score-verification");
   }

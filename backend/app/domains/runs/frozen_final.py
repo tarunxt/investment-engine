@@ -12,7 +12,7 @@ from .run_identity import analysis_run_identity
 from app.domains.jobs.models import Job
 
 
-async def validate_frozen_final(db, payload, *, user_id, portfolio, sequence, allow_legacy=False, rebuild=False):
+async def validate_frozen_final(db, payload, *, user_id, portfolio, sequence, allow_legacy=False, rebuild=False, scorecard_evidence=None):
     if not isinstance(payload, dict) or payload.get('schema') not in {'workflow-final-v1', 'workflow-final-v2'}:
         raise HTTPException(422, 'Unsupported frozen final schema')
     if (payload.get('broker', portfolio) != portfolio
@@ -114,7 +114,7 @@ async def validate_frozen_final(db, payload, *, user_id, portfolio, sequence, al
                 if not rebuild and payload.get("scorecard_job_id") != source_id:
                     raise HTTPException(409, "Final scorecard job differs from the Technical source")
                 payload["scorecard_job_id"] = source_id
-                scorecards = await verified_scorecards(db, source_id, user_id, portfolio, sequence, legacy_evidence=payload.get("formula_version") == "score-matrix-v1")
+                scorecards = await verified_scorecards(db, source_id, user_id, portfolio, sequence, legacy_evidence=payload.get("formula_version") == "score-matrix-v1", evidence=scorecard_evidence)
                 observations = manifest.get("rows")
                 if not isinstance(observations, list) or len(observations) > 500:
                     raise HTTPException(422, "Invalid scorecard observations")
@@ -160,7 +160,7 @@ async def validate_frozen_final(db, payload, *, user_id, portfolio, sequence, al
             payload["actionable_ranking"] = {"version": "weighted-98-1-1-v1", "rows": ranking}
 
 
-async def verified_scorecards(db, job_id, user_id, portfolio, sequence, *, legacy_evidence=False):
+async def verified_scorecards(db, job_id, user_id, portfolio, sequence, *, legacy_evidence=False, evidence=None):
     from app.domains.zerodha.threats import parse_zerodha_threat_report
 
     tables = {}
@@ -194,4 +194,13 @@ async def verified_scorecards(db, job_id, user_id, portfolio, sequence, *, legac
     threats = unique_scores(tables.get("stock_threat_scores", []),
                             lambda row: row["Exchange"] + ":" + row["Stock Symbol"], "Stock Threat /100")
     pairs = unique_scores(tables.get("pairwise_scores", []), lambda row: row["Listing"], "Pairwise /100")
+    if evidence is not None:
+        comparisons = {}
+        for row in tables.get("pairwise_scores", []):
+            listing = row["Listing"]
+            count = str(row.get("Valid comparisons", "")).strip()
+            comparisons[listing] = int(count) if listing not in comparisons and count.isdecimal() else None
+        for listing in pairs.keys() | threats.keys():
+            evidence[listing] = {"job_id": job_id, "comparisons": comparisons.get(listing),
+                                 "pairwise": pairs.get(listing), "stock_threat": threats.get(listing)}
     return {key: (pairs.get(key), threats.get(key)) for key in pairs.keys() | threats.keys()}

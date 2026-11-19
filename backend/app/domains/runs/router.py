@@ -895,13 +895,14 @@ async def verify_saved_india_score(sequence: int, db: AsyncSession = Depends(get
     if record.get("formula_version") != "score-matrix-v2":
         return {"verified": False, "reason": "Original formula requires a saved-input v2 replay"}
     candidate = deepcopy(record)
+    evidence = {}
     try:
-        await validate_frozen_final(db, candidate, user_id=current_user.id, portfolio="india", sequence=sequence)
+        await validate_frozen_final(db, candidate, user_id=current_user.id, portfolio="india", sequence=sequence, scorecard_evidence=evidence)
     except HTTPException as error:
         if error.status_code not in (409, 422):
             raise
         return {"verified": False, "reason": str(error.detail)}
-    return {"verified": True, "record": candidate, "replayed": bool(corrected)}
+    return {"verified": True, "record": candidate, "replayed": bool(corrected), "evidence": evidence}
 
 
 @router.post("/auto-rebalance-history/india/{sequence}/replay-score-v2")

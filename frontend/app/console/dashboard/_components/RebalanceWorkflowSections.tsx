@@ -877,7 +877,7 @@ type BasketScoreRevision = {
   capturedAt: string | null;
   replayed: boolean;
   originals: Map<string, number>;
-  saved: Map<string, {score: number; divisor?: number}>;
+  saved: Map<string, {score: number; divisor?: number; jobId?: number; comparisons?: number | null; pairwise?: number | null}>;
 };
 
 function sameFrozenScore(saved: unknown, current: number | null) {
@@ -5011,10 +5011,11 @@ export function RebalanceWorkflowSections({
               originals.set(stockIdentity(saved.symbol, saved.exchange), denominator);
             }
           }
-          const saved = new Map<string, {score: number; divisor?: number}>();
+          const saved = new Map<string, {score: number; divisor?: number; jobId?: number; comparisons?: number | null; pairwise?: number | null}>();
           for (const row of Array.isArray(frozen?.rows) ? frozen.rows : []) {
             if (typeof row?.effectiveScore === "number" && Number.isFinite(row.effectiveScore)) {
-              saved.set(stockIdentity(row.symbol, row.exchange), {score: row.effectiveScore, divisor: row.formula_inputs?.detailedRationaleDenominator});
+              const evidence = verification.verified ? verification.evidence[row.exchange + ":" + row.symbol] : undefined;
+              saved.set(stockIdentity(row.symbol, row.exchange), {score: row.effectiveScore, divisor: row.formula_inputs?.detailedRationaleDenominator, jobId: evidence?.job_id, comparisons: evidence?.comparisons, pairwise: evidence?.pairwise});
             }
           }
           setScoreRevision({
