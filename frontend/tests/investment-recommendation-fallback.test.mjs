@@ -1,3 +1,4 @@
+import * as actionColors from '../lib/actionColorScheme.ts';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -22,7 +23,7 @@ function loadParser() {
     '@/components/shared/TradingViewSymbolLink': {
       TradingViewSymbolLink: ({ children }) => createElement('span', null, children),
     },
-    '@/lib/actionColorScheme': { getStandardActionTextClass: () => '' },
+    '@/lib/actionColorScheme': actionColors,
     '@/lib/utils': { cn: (...parts) => parts.filter(Boolean).join(' ') },
   };
   const compiled = ts.transpileModule(source, {
