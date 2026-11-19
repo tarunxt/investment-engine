@@ -258,6 +258,7 @@ async function executeWorkflow({ stages = ['sync', 'swing', 'threats', 'rebalanc
   const targets = [{ provider: 'openai', model: 'same-model' }, { provider: 'openai', model: 'same-model' }];
   const noop = () => {};
   const apiService = {
+    indmoneyVerifiedListings: async () => ({listings:[]}),
     getProviders: async () => [],
     indmoneyUsPortfolioOverview: async () => ({ latest: snapshot }),
     indmoneyUsRunThreats: async () => { created.push({ stage: 'threats', targets: [targets[0]] }); return { job_id: 99, snapshot_id: snapshot?.id }; },
@@ -274,6 +275,7 @@ async function executeWorkflow({ stages = ['sync', 'swing', 'threats', 'rebalanc
     queueAutoRebalanceCompletionEmail: async () => {},
   };
   const bindings = {
+    parseApiTimestamp: value => value ? new Date(value) : null, captureUsValuation: async () => ({schema:"us-valuation-v1"}),
     requireWorkflowOwner: () => ({ id: 7 }), actionablesActivityKey: () => "test", announceActionablesActivity: () => () => {},
     readLatestIndmoneySnapshot: () => apiService.indmoneyUsPortfolioOverview(),
     recommendationAuditEnabled: false,
@@ -307,7 +309,7 @@ async function executeWorkflow({ stages = ['sync', 'swing', 'threats', 'rebalanc
     fetchAllFullRuns: async () => [generatedRebalance],
     buildConsensusRows: (runs) => { consensusInputs.push(runs); return runs.map((r) => ({ id: r.id, jobs: r.run_jobs.map((link) => link.job.response) })); },
     buildTechnicalScanMap: () => ({}),
-    buildDashboardActionRows: (rows) => rows.map(row => ({ stock: { exchange: 'NASDAQ', symbol: 'TEST', totalSuggestions: 1 }, formulaAction: 'Hold', formulaScore: 0, formulaEstimate: {}, detail: {} })),
+    buildDashboardActionRows: (rows) => rows.map(row => ({ stock: { rows: [{meta:{runId:row.id}}], exchange: 'NASDAQ', symbol: 'TEST', totalSuggestions: 1 }, formulaAction: 'Hold', formulaScore: 0, formulaEstimate: {}, detail: {} })),
     buildTechnicalScanPrompt: (rows) => JSON.stringify(rows), getStageTileLabel: (stage) => stage,
     window: { alert: message => alerts.push(message), setTimeout: noop, dispatchEvent: noop }, CustomEvent: class {},
     WORKFLOW_COMPLETION_RESET_DELAY_MS: 0, normalizeError: (error) => error.message,

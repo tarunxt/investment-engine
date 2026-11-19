@@ -3268,10 +3268,10 @@ function ScopedZerodhaBasketPreviewDialog({
                 data-testid="basket-score-scan-completed-at"
               >
                 Last score scan: {formatCompactStageTime(scoreScanCompletedAt)}
-                {isZerodhaPreview && <span className="ml-2">
+                {<span className="ml-2">
                   {scoreRevision ? `Run #${scoreRevision.sequence} · ${scoreRevision.replayed ? "Saved replay" : "Original record"} · ${scoreRevision.version ?? "revision unavailable"}` : "Saved revision unavailable"}
                   {detailsData.portfolioSnapshot && ` · Holdings ${formatCompactStageTime(detailsData.portfolioSnapshot.captured_at)}`}
-                  {calculationStocks.length > 0 && ` · Upstox quote times: ${[...new Set(calculationStocks.map(stock => stock.upstoxAsOf ? formatCompactStageTime(stock.upstoxAsOf) : "unavailable"))].join(", ")}`}
+                  {isZerodhaPreview && calculationStocks.length > 0 && ` · Upstox quote times: ${[...new Set(calculationStocks.map(stock => stock.upstoxAsOf ? formatCompactStageTime(stock.upstoxAsOf) : "unavailable"))].join(", ")}`}
                   {scoreRevision?.capturedAt && ` · ${formatCompactStageTime(scoreRevision.capturedAt)}`}
                 </span>}
               </p>
@@ -3363,7 +3363,7 @@ function ScopedZerodhaBasketPreviewDialog({
                 {displayCalculations.error ? <p role="alert" className="mb-3 text-red-700">{displayCalculations.error} <button type="button" onClick={displayCalculations.retry} className="underline">Retry historical scores</button></p> : null}
               </div>
               <div className="w-fit min-w-full overflow-clip rounded-2xl border border-slate-200">
-                  <BasketColumnTable hidden={hiddenColumns} order={columnPreferences?.order} names={isZerodhaPreview && displayCalculations.parameters ? { "Historical Weighted Score": `${displayCalculations.parameters.days}-day mean of run scores (−3 to +3)`, ...columnNames } : columnNames} onOpen={setColumnMenu} onRequestRename={setRenameColumn}>
+                  <BasketColumnTable hidden={hiddenColumns} order={columnPreferences?.order} names={displayCalculations.parameters ? { "Historical Weighted Score": `${displayCalculations.parameters.days}-day mean of run scores (−3 to +3)`, ...columnNames } : columnNames} onOpen={setColumnMenu} onRequestRename={setRenameColumn}>
                   <table className="min-w-[92rem] w-full text-sm">
                     <thead className="sticky top-0 z-10 bg-slate-50">
                       <tr className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
@@ -3452,7 +3452,7 @@ function ScopedZerodhaBasketPreviewDialog({
                                 </td>
                                 <td className="whitespace-nowrap px-4 py-3">
                                   <ConsensusBreakupButton stock={order.stock} action={getZerodhaBasketActionForPercent(order)} />
-                                  {isZerodhaPreview && <details className="text-xs text-slate-600"><summary>Rationale coverage {indiaSource(order)?.modelPrices.filter(m => m.fields === 6).length ?? 0}/{order.stock.rows?.length ?? 0} jobs</summary>{indiaSource(order)?.modelPrices.map(m => <div key={m.job}>#{m.job} {m.provider} · {m.fields}/6 scored · model ₹{m.price ?? "unavailable"} · job {m.time}{m.excluded.length ? ` · excluded: ${m.excluded.join(", ")}` : ""}</div>)}<div>Upstox ₹{order.price ?? "unavailable"} · last trade {order.draftContext?.asOf ?? "unavailable"}</div>{divergent(order) && <button type="button" className="text-blue-700 underline" disabled={priceReviews.has(priceReviewKey(order))} onClick={() => setPriceReviews(previous => new Set([...previous, priceReviewKey(order)]))}>{priceReviews.has(priceReviewKey(order)) ? "Price difference reviewed" : "Acknowledge this price difference"}</button>}</details>}
+                                  {<details className="text-xs text-slate-600"><summary>Rationale coverage {indiaSource(order)?.modelPrices.filter(m => m.fields === 6).length ?? 0}/{order.stock.rows?.length ?? 0} jobs</summary>{indiaSource(order)?.modelPrices.map(m => <div key={m.job}>#{m.job} {m.provider} · {m.fields}/6 scored · model {formatBasketDisplayCurrency(m.price, basketCurrency)} · job {m.time}{m.excluded.length ? ` · excluded: ${m.excluded.join(", ")}` : ""}</div>)}{isZerodhaPreview && <div>Upstox ₹{order.price ?? "unavailable"} · last trade {order.draftContext?.asOf ?? "unavailable"}</div>}{isZerodhaPreview && divergent(order) && <button type="button" className="text-blue-700 underline" disabled={priceReviews.has(priceReviewKey(order))} onClick={() => setPriceReviews(previous => new Set([...previous, priceReviewKey(order)]))}>{priceReviews.has(priceReviewKey(order)) ? "Price difference reviewed" : "Acknowledge this price difference"}</button>}</details>}
                                 </td>
                                 <td className="whitespace-nowrap px-4 py-3 text-slate-700">{isZerodhaPreview ? order.draftContext?.originalAction ?? getZerodhaBasketActionForPercent(order) : getZerodhaBasketActionForPercent(order)}</td>
                                 <td className="px-4 py-3">
@@ -5145,10 +5145,12 @@ export function RebalanceWorkflowSections({
     }
   }, [apiService, scoreMatrixFormulaConfig, zerodhaBasketBuyThreshold, verifyBasketRevision]);
 
+  const [usScanAt, setUsScanAt] = useState<string | null>(null);
   const [usRevision, setUsRevision] = useState<BasketScoreRevision | null>(null);
   const [usFormula, setUsFormula] = useState<ScoreMatrixFormulaConfig | null>(null);
   const openIndmoneyBasketPreview = useCallback(async (requested?: {sequence:number; formula:ScoreMatrixFormulaConfig}) => {
     setUsRevision(null);
+    setUsScanAt(null);
     setUsFormula(requested?.formula ?? null);
     const generation = ++indmoneyPreparation.current;
     setIndmoneyAllocationUniverse([]);
@@ -5176,6 +5178,7 @@ export function RebalanceWorkflowSections({
         stockFlowSource.verifiedUsListings ?? [],
       );
       const technicalScans = buildTechnicalScanMap(runs);
+      setUsScanAt(Object.values(technicalScans).map(scan => scan.createdAt).filter((value): value is string => Boolean(value)).sort((a,b) => parseTimestampMs(b) - parseTimestampMs(a))[0] ?? null);
       let actionRows = buildDashboardActionRows(stocks, "us", technicalScans, requested?.formula ?? scoreMatrixFormulaConfig);
       const ids = new Set(actionRows.map(row => row.detail?.technicalScanSourceRunId));
       const technical = ids.size === 1 ? runs.find(run => ids.has(run.id)) : null;
@@ -8484,11 +8487,12 @@ ${zerodhaExecutionMode === "direct_market"
         submission={null}
         detailsData={indmoneyBasketDetailsData}
         historicalRows={indmoneyBasketHistoricalRows}
+        scoreScanCompletedAt={usScanAt}
         scoreRevision={usRevision}
         compareCurrentSettings={usRevision?.formula && canonicalBasketInputs(usFormula) !== canonicalBasketInputs(scoreMatrixFormulaConfig) ? () => void openIndmoneyBasketPreview({sequence:usRevision.sequence,formula:scoreMatrixFormulaConfig}) : undefined}
         openSavedBasket={usRevision?.formula && canonicalBasketInputs(usFormula) !== canonicalBasketInputs(usRevision.formula) ? () => void openIndmoneyBasketPreview({sequence:usRevision.sequence,formula:usRevision.formula!}) : undefined}
         formulaConfig={usFormula ?? scoreMatrixFormulaConfig}
-        onFormulaConfigChange={setScoreMatrixFormulaConfig}
+        onFormulaConfigChange={update => {const next = update(usFormula ?? scoreMatrixFormulaConfig); setScoreMatrixFormulaConfig(() => next); setUsFormula(next);}}
         buyThreshold={indmoneyBasketBuyThreshold}
         buyThresholdDraft={indmoneyBasketBuyThresholdDraft}
         onBuyThresholdDraftChange={updateIndmoneyBasketBuyThresholdDraft}
