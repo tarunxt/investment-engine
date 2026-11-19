@@ -1,5 +1,7 @@
 "use client";
 import { useReviewDialog } from "@/hooks/useReviewDialog";
+import { ZerodhaRunGate } from "@/components/shared/ZerodhaRunGate";
+import { defaultStageModelKeys, getCompatibleTargets, isModelStage, previousBrowserSelection, resolveStageModelKeys, type ModelStage } from "@/lib/workflowStageModels";
 import { acquireZerodhaLogin } from "@/lib/zerodhaLoginArbitration";
 import { captureWorkflowOwner, isCurrentWorkflowOwner, onWorkflowOwnerInvalidated, requireWorkflowOwner, type WorkflowOwner } from "@/lib/workflowOwnerLifetime";
 import { workflowOwnedApi } from "@/lib/workflowOwnedApi";
@@ -289,12 +291,6 @@ type SavedModelMix = {
 };
 
 const MODEL_MIX_STORAGE_KEY = "investment-engine:model-mixes:v1";
-const AUTO_REBALANCE_MIX_NAME = "Auto Rebalance Model Mix";
-const AUTO_REBALANCE_MIX_ALIASES = [
-  AUTO_REBALANCE_MIX_NAME,
-  "Auto rebalance Models Mix",
-];
-const GPT_4O_MINI_MODEL = "gpt-4o-mini";
 const POLL_INTERVAL_MS = 3000;
 const MAX_ZERODHA_SYNC_POLLS = 30;
 const ZERODHA_AUTH_STATUS_POLL_MS = 500;
@@ -302,7 +298,6 @@ const ZERODHA_AUTH_CLOSE_GRACE_MS = 15_000;
 const ZERODHA_AUTH_TIMEOUT_MS = 5 * 60 * 1000;
 const ZERODHA_SYNC_AUTH_RETRY_DELAY_MS = 1_000;
 const WORKFLOW_STORAGE_KEY = "investment-engine:rebalance-workflow-state:v1";
-const STAGE_LLM_SELECTION_STORAGE_KEY = "investment-engine:dashboard-stage-llms:v1";
 const WORKFLOW_COMPLETION_RESET_DELAY_MS = 10000;
 
 class RecordedWorkflowStageFailure extends Error {
@@ -704,56 +699,6 @@ function readSavedModelMixes(): SavedModelMix[] {
   } catch {
     return [];
   }
-}
-
-function getRunTargetsFromStoredMix(providers: ProviderInfo[]) {
-  let parsed: SavedModelMix[] = [];
-  try {
-    const raw = window.localStorage.getItem(MODEL_MIX_STORAGE_KEY);
-    parsed = raw ? JSON.parse(raw) : [];
-  } catch {
-    parsed = [];
-  }
-
-  const compatible = new Set(
-    providers.flatMap((provider) =>
-      provider.models
-        .filter(
-          (model) =>
-            provider.model_compatibility?.[model]?.compatible !== false,
-        )
-        .map((model) => `${provider.name}::${model}`),
-    ),
-  );
-
-  const aliasNames = new Set(
-    AUTO_REBALANCE_MIX_ALIASES.map((name) => name.toLowerCase()),
-  );
-  const autoMix = parsed.find((mix) =>
-    aliasNames.has(mix?.name?.toLowerCase?.() ?? ""),
-  );
-  const sourceTargets = autoMix?.targets?.length ? autoMix.targets : [];
-
-  return uniqueTargetKeys(sourceTargets)
-    .filter((target) => compatible.has(target))
-    .map((target) => {
-      const [provider, model] = target.split("::");
-      return { provider, model };
-    });
-}
-
-function getGpt4oMiniTarget(
-  providers: ProviderInfo[],
-): ProviderModelTarget | null {
-  const provider = providers.find(
-    (item) =>
-      item.configured &&
-      item.models.includes(GPT_4O_MINI_MODEL) &&
-      item.model_compatibility?.[GPT_4O_MINI_MODEL]?.compatible !== false,
-  );
-  return provider
-    ? { provider: provider.name, model: GPT_4O_MINI_MODEL }
-    : null;
 }
 
 async function waitForRunCompletion(
@@ -1578,23 +1523,6 @@ function targetKey(target: ProviderModelTarget) {
   return `${target.provider}::${target.model}`;
 }
 
-function parseTargetKey(key: string): ProviderModelTarget | null {
-  const [provider, model] = key.split("::");
-  return provider && model ? { provider, model } : null;
-}
-
-function uniqueTargetKeys(keys: string[]) {
-  const unique: string[] = [];
-  const seen = new Set<string>();
-  keys.forEach((key) => {
-    const normalized = key.trim().toLowerCase();
-    if (!normalized || seen.has(normalized)) return;
-    seen.add(normalized);
-    unique.push(key);
-  });
-  return unique;
-}
-
 function getSelectionMultipliers(keys: string[]) {
   return keys.reduce<Record<string, number>>((counts, key) => {
     counts[key] = (counts[key] ?? 0) + 1;
@@ -1606,70 +1534,6 @@ function expandSelectionKeys(selectedKeys: Set<string>, multipliers: Record<stri
   return Array.from(selectedKeys).flatMap((key) =>
     Array.from({ length: Math.max(1, multipliers[key] ?? 1) }, () => key),
   );
-}
-
-function getCompatibleTargets(providers: ProviderInfo[]) {
-  return providers.flatMap((provider) =>
-    provider.models
-      .filter(
-        (model) =>
-          provider.configured &&
-          provider.model_compatibility?.[model]?.compatible !== false,
-      )
-      .map((model) => ({ provider: provider.name, model })),
-  );
-}
-
-function readStageLlmSelection(stage: WorkflowStageKey) {
-  try {
-    const raw = window.localStorage.getItem(STAGE_LLM_SELECTION_STORAGE_KEY);
-    const parsed = raw ? JSON.parse(raw) : {};
-    return Array.isArray(parsed?.[stage]) ? (parsed[stage] as string[]) : [];
-  } catch {
-    return [];
-  }
-}
-
-function writeStageLlmSelection(stage: WorkflowStageKey, keys: string[]) {
-  try {
-    const raw = window.localStorage.getItem(STAGE_LLM_SELECTION_STORAGE_KEY);
-    const parsed = raw ? JSON.parse(raw) : {};
-    window.localStorage.setItem(
-      STAGE_LLM_SELECTION_STORAGE_KEY,
-      JSON.stringify({ ...parsed, [stage]: keys }),
-    );
-  } catch {
-    // Local storage is a convenience only; workflow defaults still apply.
-  }
-}
-
-function getDefaultStageTargets(
-  stage: WorkflowStageKey,
-  providers: ProviderInfo[],
-) {
-  if (stage === "swing" || stage === "rebalance") {
-    return getRunTargetsFromStoredMix(providers);
-  }
-
-  const gpt4oMiniTarget = getGpt4oMiniTarget(providers);
-  return gpt4oMiniTarget ? [gpt4oMiniTarget] : [];
-}
-
-function getSavedStageTargets(
-  stage: WorkflowStageKey,
-  providers: ProviderInfo[],
-) {
-  const compatibleKeys = new Set(
-    getCompatibleTargets(providers).map(targetKey),
-  );
-  const savedTargets = readStageLlmSelection(stage)
-    .filter((key) => compatibleKeys.has(key))
-    .map(parseTargetKey)
-    .filter((target): target is ProviderModelTarget => Boolean(target));
-
-  return savedTargets.length > 0
-    ? savedTargets
-    : getDefaultStageTargets(stage, providers);
 }
 
 function getAutoRebalancePortfolioKey(portfolio: WorkflowPortfolio): AutoRebalanceRunMetadata["auto_rebalance_portfolio"] {
@@ -4161,8 +4025,11 @@ function StageLlmSelectorDialog({
   historicalEstimatedCostInrByTarget = {},
   loading = false,
   error = null,
-  onRetry,
+  onRetry, saving = false, saveError, onImportPrevious,
 }: {
+  saving?: boolean;
+  saveError?: string | null;
+  onImportPrevious?: () => void;
   open: boolean;
   stage: WorkflowStageKey | null;
   portfolio: WorkflowPortfolio | null;
@@ -4442,7 +4309,7 @@ function StageLlmSelectorDialog({
           ) : null}
           {error ? (
             <div className="mb-4 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
-              <p className="font-semibold">Provider models could not be loaded.</p>
+              <p className="font-semibold">Model settings could not be loaded.</p>
               <p className="mt-1">{error}</p>
               {onRetry ? (
                 <Button
@@ -4462,42 +4329,49 @@ function StageLlmSelectorDialog({
               Loading provider models…
             </div>
           ) : null}
-          <LlmModelSelectionPanel
-            organized={organizedPicker}
-            loading={organizedPicker && loading}
-            providers={providers}
-            selectedKeys={selectedKeys}
-            selectedMultipliers={singleSelect ? undefined : selectedMultipliers}
-            onMultiplierChange={singleSelect ? undefined : onMultiplierChange}
-            selectionMode={singleSelect ? "single" : "multiple"}
-            emptyMessage={organizedPicker ? "No provider models are available. Retry when provider access is restored." : "Loading provider models..."}
-            showBulkActions={!singleSelect}
-            modelMixControls={modelMixControls}
-            getEstimatedCostInr={getEstimatedCostInr}
-            onToggle={onToggle}
-            onSelectAll={singleSelect ? undefined : onSelectAll}
-            onClear={onClear}
-            costSummaryLabel="Estimated selected run"
-            onToggleProvider={(providerName, models) => {
-              const providerModelKeys = models.map(
-                (model) => `${providerName}::${model}`,
-              );
-              const allSelected =
-                providerModelKeys.length > 0 &&
-                providerModelKeys.every((key) => selectedKeys.has(key));
-              providerModelKeys.forEach((key) => {
-                if (allSelected === selectedKeys.has(key)) {
-                  onToggle(key);
+          {saveError && <p role="alert" className="mb-3 text-sm text-red-800">{saveError}</p>}
+          {saving && <p role="status" className="mb-2 text-sm">Saving model selection…</p>}
+          <fieldset disabled={loading || saving || Boolean(error)} className="min-w-0">
+            {onImportPrevious && <button type="button" onClick={onImportPrevious} className="mb-3 text-sm text-indigo-700 underline">Use this browser’s previous selection</button>}
+            <LlmModelSelectionPanel
+              organized={organizedPicker}
+              loading={organizedPicker && loading}
+              providers={providers}
+              selectedKeys={selectedKeys}
+              selectedMultipliers={singleSelect ? undefined : selectedMultipliers}
+              onMultiplierChange={singleSelect ? undefined : onMultiplierChange}
+              selectionMode={singleSelect ? "single" : "multiple"}
+              emptyMessage={organizedPicker ? "No provider models are available. Retry when provider access is restored." : "Loading provider models..."}
+              showBulkActions={!singleSelect}
+              modelMixControls={modelMixControls}
+              getEstimatedCostInr={getEstimatedCostInr}
+              onToggle={onToggle}
+              onSelectAll={singleSelect ? undefined : onSelectAll}
+              onClear={onClear}
+              costSummaryLabel="Estimated selected run"
+              onToggleProvider={(providerName, models) => {
+                const providerModelKeys = models.map(
+                  (model) => `${providerName}::${model}`,
+                );
+                const allSelected =
+                  providerModelKeys.length > 0 &&
+                  providerModelKeys.every((key) => selectedKeys.has(key));
+                const next = new Set(selectedKeys);
+                for (const key of providerModelKeys) {
+                  if (allSelected) next.delete(key);
+                  else next.add(key);
                 }
-              });
-            }}
-          />
+                onReplaceSelection(next);
+              }}
+            />
+          </fieldset>
         </div>
 
         <div className={cn("flex items-center justify-between gap-3 border-t border-slate-200 px-6 py-4", organizedPicker && "shrink-0 flex-wrap px-4 py-3 sm:px-6")}>
           {organizedPicker ? <span className="text-sm font-semibold text-slate-700">{selectedKeys.size} selected</span> : null}
           <button
             type="button"
+            disabled={loading || saving || Boolean(error)}
             onClick={onResetDefaults}
             className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
           >
@@ -4707,9 +4581,7 @@ export function RebalanceWorkflowSections({
   >([]);
   const [inputCandidatesLoading, setInputCandidatesLoading] = useState(false);
   const [inputCandidatesError, setInputCandidatesError] = useState<string | null>(null);
-  const [llmDialogStage, setLlmDialogStage] = useState<WorkflowStageKey | null>(
-    null,
-  );
+  const [llmDialogStage, setLlmDialogStage] = useState<ModelStage | null>(null);
   const [llmDialogPortfolio, setLlmDialogPortfolio] = useState<WorkflowPortfolio | null>(
     null,
   );
@@ -4724,6 +4596,14 @@ export function RebalanceWorkflowSections({
     useState<HistoricalLlmCostMapInr>({});
   const [llmDialogLoading, setLlmDialogLoading] = useState(false);
   const [llmDialogError, setLlmDialogError] = useState<string | null>(null);
+  const [savingModels, setSavingModels] = useState(false);
+  const [modelSaveError, setModelSaveError] = useState<string | null>(null);
+  const [legacyKeys, setLegacyKeys] = useState<string[] | null>(null);
+  const pendingModelSave = useRef<Promise<void> | null>(null);
+  const loadModelPreferences = useCallback(async () => {
+    await pendingModelSave.current;
+    return apiService.getWorkflowModels();
+  }, [apiService]);
   const llmDialogRequestRef = useRef(0);
   const [costHistoryPortfolio, setCostHistoryPortfolio] = useState<WorkflowPortfolio | null>(null);
   const [stockFlowPortfolio, setStockFlowPortfolio] =
@@ -6498,7 +6378,7 @@ ${zerodhaExecutionMode === "direct_market"
   );
 
   const showStageLlmInfo = useCallback(async (portfolio: WorkflowPortfolio, stage: WorkflowStageKey) => {
-    if (stage === "sync" || stage === "actionables") return;
+    if (!isModelStage(stage)) return;
     const requestId = ++llmDialogRequestRef.current;
     const market = portfolio === "zerodha" ? "india" : "us";
     const prompt = buildSwingTradePrompt(
@@ -6506,6 +6386,8 @@ ${zerodhaExecutionMode === "direct_market"
       getSwingTradeDefaultInvestmentAmount(market),
     );
 
+    setLegacyKeys(null);
+    setModelSaveError(null);
     setLlmDialogStage(stage);
     setLlmDialogPortfolio(portfolio);
     setLlmDialogProviders([]);
@@ -6536,9 +6418,14 @@ ${zerodhaExecutionMode === "direct_market"
       }
       if (!providers) throw lastProviderError ?? new Error("Provider models are unavailable.");
 
+      const saved = await loadModelPreferences();
       if (requestId !== llmDialogRequestRef.current) return;
-      const targets = getSavedStageTargets(stage, providers);
-      const targetKeys = targets.map(targetKey);
+      const targetKeys = resolveStageModelKeys(stage, saved);
+      const previous = saved[stage] === undefined ? previousBrowserSelection(stage) : null;
+      const compatible = new Set(getCompatibleTargets(providers).map(targetKey));
+      if (previous && previous.every(key => compatible.has(key)) && JSON.stringify(previous) !== JSON.stringify(targetKeys)) {
+        setLegacyKeys(previous);
+      }
       setLlmDialogProviders(providers);
       setLlmDialogSelectedKeys(new Set(targetKeys));
       setLlmDialogMultipliers(getSelectionMultipliers(targetKeys));
@@ -6561,7 +6448,7 @@ ${zerodhaExecutionMode === "direct_market"
         setLlmDialogLoading(false);
       }
     }
-  }, [apiService, usdInrRate]);
+  }, [apiService, loadModelPreferences, usdInrRate]);
 
   const showStageOutput = useCallback(
     async (portfolio: WorkflowPortfolio, stage: WorkflowStageKey, requestedRunId?: number) => {
@@ -6687,78 +6574,52 @@ ${zerodhaExecutionMode === "direct_market"
     };
   }, [showStageOutput]);
 
-  const persistLlmDialogSelection = useCallback(
-    (nextKeys: Set<string>) => {
-      if (!llmDialogStage) return;
-      const expandedKeys = expandSelectionKeys(nextKeys, llmDialogMultipliers);
-      writeStageLlmSelection(llmDialogStage, expandedKeys);
-      setLlmDialogSelectedKeys(nextKeys);
-      setLlmDialogMultipliers(getSelectionMultipliers(expandedKeys));
-    },
-    [llmDialogMultipliers, llmDialogStage],
-  );
+  function saveModelKeys(keys: string[]) {
+    if (!llmDialogStage || llmDialogLoading || llmDialogError || pendingModelSave.current) return;
+    if (keys.length > 8) {
+      setModelSaveError("A stage can run up to eight model calls, including repeats. Reduce the selection and try again.");
+      return;
+    }
+    const requestId = llmDialogRequestRef.current;
+    const stage = llmDialogStage;
+    setModelSaveError(null);
+    setSavingModels(true);
+    const write = apiService.saveWorkflowModels(stage, keys);
+    pendingModelSave.current = write;
+    void write.then(() => {
+      if (requestId !== llmDialogRequestRef.current) return;
+      setLlmDialogSelectedKeys(new Set(keys));
+      setLlmDialogMultipliers(getSelectionMultipliers(keys));
+      setLegacyKeys(null);
+    }).catch(error => {
+      if (isCurrentWorkflowOwner(runtimeOwner)) setModelSaveError(`Could not save ${getStageTileLabel(stage)} models. ${normalizeError(error)}`);
+    }).finally(() => {
+      pendingModelSave.current = null;
+      setSavingModels(false);
+    });
+  }
 
-  const toggleLlmTarget = useCallback(
-    (key: string) => {
-      if (!llmDialogStage) return;
-      const singleSelect =
-        llmDialogStage === "threats" || llmDialogStage === "technical";
-      const next = singleSelect
-        ? new Set([key])
-        : new Set(llmDialogSelectedKeys);
-      if (!singleSelect) {
-        if (next.has(key)) next.delete(key);
-        else next.add(key);
-      }
-      persistLlmDialogSelection(next);
-    },
-    [llmDialogSelectedKeys, llmDialogStage, persistLlmDialogSelection],
-  );
+  function persistLlmDialogSelection(keys: Set<string>) {
+    saveModelKeys(expandSelectionKeys(keys, llmDialogMultipliers));
+  }
 
-  const selectAllLlmTargets = useCallback(() => {
-    if (!llmDialogStage) return;
-    const keys = getCompatibleTargets(llmDialogProviders).map(targetKey);
-    writeStageLlmSelection(llmDialogStage, keys);
-    setLlmDialogSelectedKeys(new Set(keys));
-    setLlmDialogMultipliers(getSelectionMultipliers(keys));
-  }, [llmDialogProviders, llmDialogStage]);
+  function toggleLlmTarget(key: string) {
+    if (llmDialogStage === "threats" || llmDialogStage === "technical") {
+      saveModelKeys([key]);
+      return;
+    }
+    const next = new Set(llmDialogSelectedKeys);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    persistLlmDialogSelection(next);
+  }
 
-  const clearLlmTargets = useCallback(() => {
-    if (!llmDialogStage) return;
-    writeStageLlmSelection(llmDialogStage, []);
-    setLlmDialogSelectedKeys(new Set());
-    setLlmDialogMultipliers({});
-  }, [llmDialogStage]);
-
-  const resetDefaultLlmTargets = useCallback(() => {
-    if (!llmDialogStage) return;
-    const keys = getDefaultStageTargets(llmDialogStage, llmDialogProviders).map(targetKey);
-    writeStageLlmSelection(llmDialogStage, keys);
-    setLlmDialogSelectedKeys(new Set(keys));
-    setLlmDialogMultipliers(getSelectionMultipliers(keys));
-  }, [llmDialogProviders, llmDialogStage]);
-
-  const changeLlmMultiplier = useCallback(
-    (key: string, nextValue: number) => {
-      if (!llmDialogStage) return;
-      const nextSelectedKeys = new Set(llmDialogSelectedKeys);
-      const nextMultipliers = { ...llmDialogMultipliers };
-      if (nextValue <= 0) {
-        nextSelectedKeys.delete(key);
-        delete nextMultipliers[key];
-      } else {
-        nextSelectedKeys.add(key);
-        nextMultipliers[key] = Math.floor(nextValue);
-      }
-      writeStageLlmSelection(
-        llmDialogStage,
-        expandSelectionKeys(nextSelectedKeys, nextMultipliers),
-      );
-      setLlmDialogSelectedKeys(nextSelectedKeys);
-      setLlmDialogMultipliers(nextMultipliers);
-    },
-    [llmDialogMultipliers, llmDialogSelectedKeys, llmDialogStage],
-  );
+  function changeLlmMultiplier(key: string, count: number) {
+    const next = new Set(llmDialogSelectedKeys);
+    if (count > 0) next.add(key);
+    else next.delete(key);
+    saveModelKeys(expandSelectionKeys(next, { ...llmDialogMultipliers, [key]: count }));
+  }
 
   const navigateForStage = useCallback(
     (
@@ -6845,7 +6706,7 @@ ${zerodhaExecutionMode === "direct_market"
 
       if (!popup) {
         throw new Error(
-          "Zerodha login popup was blocked. Allow popups and click Sync Now or Refresh Board again.",
+          "Zerodha login popup was blocked. Allow popups for CredX and try again.",
         );
       }
 
@@ -6977,12 +6838,16 @@ ${zerodhaExecutionMode === "direct_market"
         { label: "LLM configuration", run: async () => {
           const modelStages = (["threats", "swing", "rebalance", "technical"] as const).filter(shouldRunCurrentStage);
           if (!modelStages.length) return;
-          const providers = await apiService.getProviders({ prompt: buildSwingTradePrompt(market, getSwingTradeDefaultInvestmentAmount(market)) });
+          const [providers, saved] = await Promise.all([
+            apiService.getProviders({ prompt: buildSwingTradePrompt(market, getSwingTradeDefaultInvestmentAmount(market)) }),
+            loadModelPreferences(),
+          ]);
           const issues: string[] = [];
-          const compatible = new Set(getCompatibleTargets(providers).map(targetKey));
+          const compatible = new Map(getCompatibleTargets(providers).map(target => [targetKey(target), target]));
           for (const stage of modelStages) {
-            targets[stage] = getSavedStageTargets(stage, providers);
-            const unavailable = readStageLlmSelection(stage).filter(key => !compatible.has(key));
+            const keys = resolveStageModelKeys(stage, saved);
+            targets[stage] = keys.flatMap(key => compatible.get(key) ?? []);
+            const unavailable = [...new Set(keys.filter(key => !compatible.has(key)))];
             if (unavailable.length) issues.push(`${stage} has unavailable selected models (${unavailable.join(", ")}). Open its LLM selector and update the selection.`);
             if (!targets[stage]?.length) issues.push(`${stage} has no compatible model. Open its LLM selector and choose a configured model.`);
           }
@@ -7783,7 +7648,7 @@ ${zerodhaExecutionMode === "direct_market"
         }
       }
     },
-    [runtimeOwner, apiService, scoreMatrixFormulaConfig,
+    [runtimeOwner, apiService, loadModelPreferences, scoreMatrixFormulaConfig,
       analysisOnlyRuns,
       buildZerodhaPopupFeatures,
       completeSkippedStage,
@@ -7921,6 +7786,12 @@ ${zerodhaExecutionMode === "direct_market"
     [indMoneySyncOnly, runWorkflow, syncPortfolioNow],
   );
 
+  const getBrokerStatus = useCallback(() => apiService.zerodhaStatus(), [apiService]);
+  const connectBroker = useCallback(() => {
+    const popup = window.open("about:blank", "zerodha-workflow-connect", buildZerodhaPopupFeatures());
+    return ensureZerodhaConnectedForSync(popup);
+  }, [buildZerodhaPopupFeatures, ensureZerodhaConnectedForSync]);
+
   const lastRunByPortfolio = useMemo(() => {
     const result: Record<WorkflowPortfolio, string | null> = {
       zerodha: null,
@@ -7981,6 +7852,27 @@ ${zerodhaExecutionMode === "direct_market"
     );
     const showQuotaLlmSwitchWarning = shouldShowQuotaLlmSwitchWarning(
       states[section.portfolio],
+    );
+
+    const runButton = (
+      <Button
+        type="button"
+        disabled={isBusy}
+        onClick={() => {
+          if (isBusy) return;
+          if (section.portfolio === "indmoneyUs") {
+            setDialogError(null);
+            setIndMoneySyncOnly(false);
+            setDialogOpen(true);
+            return;
+          }
+          void runWorkflow("zerodha");
+        }}
+        className="h-11 w-full justify-center gap-3 rounded-full bg-slate-950 px-7 text-xs font-extrabold uppercase tracking-[0.18em] text-white shadow-lg shadow-slate-950/15 hover:bg-slate-900 disabled:opacity-50 xl:w-auto"
+      >
+        <Play className="size-4" />
+        {preflightPortfolio === section.portfolio ? "Checking…" : section.buttonLabel.toUpperCase()}
+      </Button>
     );
 
     return (
@@ -8096,26 +7988,9 @@ ${zerodhaExecutionMode === "direct_market"
                     Kill
                   </Button>
                 </>
-              ) : (
-                <Button
-                  type="button"
-                  disabled={isBusy}
-                  onClick={() => {
-                    if (isBusy) return;
-                    if (section.portfolio === "indmoneyUs") {
-                      setDialogError(null);
-                      setIndMoneySyncOnly(false);
-                      setDialogOpen(true);
-                      return;
-                    }
-                    void runWorkflow("zerodha");
-                  }}
-                  className="h-11 w-full justify-center gap-3 rounded-full bg-slate-950 px-7 text-xs font-extrabold uppercase tracking-[0.18em] text-white shadow-lg shadow-slate-950/15 hover:bg-slate-900 disabled:opacity-50 xl:w-auto"
-                >
-                  <Play className="size-4" />
-                  {preflightPortfolio === section.portfolio ? "Checking…" : section.buttonLabel.toUpperCase()}
-                </Button>
-              )}
+              ) : section.portfolio === "zerodha" ? (
+                <ZerodhaRunGate getStatus={getBrokerStatus} connect={connectBroker} disabled={isBusy}>{runButton}</ZerodhaRunGate>
+              ) : runButton}
             </div>
             {!surface && <AnalysisOnlyRunControl checked={analysisOnlyRuns[section.portfolio]} disabled={isBusy}
               onChange={checked => setAnalysisOnlyRuns(current => ({ ...current, [section.portfolio]: checked }))} />}
@@ -8337,6 +8212,7 @@ ${zerodhaExecutionMode === "direct_market"
         {(!stageLedger || (surface?.market ?? ledgerMarket) === "zerodha") && renderSectionCard(zerodhaSection)}
         {(!stageLedger || (surface?.market ?? ledgerMarket) === "indmoneyUs") && renderSectionCard(indmoneySection)}
       </section>
+      {!llmDialogStage && modelSaveError && <p role="alert" className="text-sm text-red-800">{modelSaveError}</p>}
       {workflowHistoryError ? <div role="alert" className="mb-4 rounded border border-amber-500 p-3">{workflowHistoryError}</div> : null}
 
       <RebalanceStockFlowDialog
@@ -8387,9 +8263,12 @@ ${zerodhaExecutionMode === "direct_market"
           }
         }}
         onToggle={toggleLlmTarget}
-        onSelectAll={selectAllLlmTargets}
-        onClear={clearLlmTargets}
-        onResetDefaults={resetDefaultLlmTargets}
+        saving={savingModels}
+        saveError={modelSaveError}
+        onImportPrevious={legacyKeys ? () => saveModelKeys(legacyKeys) : undefined}
+        onSelectAll={() => saveModelKeys(getCompatibleTargets(llmDialogProviders).map(targetKey))}
+        onClear={() => saveModelKeys([])}
+        onResetDefaults={() => llmDialogStage && saveModelKeys(defaultStageModelKeys(llmDialogStage))}
         onReplaceSelection={persistLlmDialogSelection}
         selectedMultipliers={llmDialogMultipliers}
         onMultiplierChange={changeLlmMultiplier}

@@ -900,6 +900,14 @@ class apiServiceClass implements IApiService {
   /**
    * Get user profile
    */
+  getWorkflowModels() {
+    return this.get<import("@/lib/workflowStageModels").StageModelPreferences>(URLs.auth.workflowModels(), { cache: "no-store" });
+  }
+
+  saveWorkflowModels(stage: import("@/lib/workflowStageModels").ModelStage, keys: string[]) {
+    return this.put<void>(URLs.auth.workflowModels(), { stage, keys });
+  }
+
   getProfile(): Promise<import("@/types/api").ProfilePreferencesResponse> {
     return this.get<import("@/types/api").ProfilePreferencesResponse>(URLs.auth.getProfile());
   }
