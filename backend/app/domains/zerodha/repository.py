@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+import json
 from datetime import date, datetime, timezone
-from hashlib import sha256
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert
@@ -15,40 +15,67 @@ from app.domains.zerodha.models import ZerodhaCredential, ZerodhaPortfolioSnapsh
 from app.shared.portfolio_summary import build_persisted_portfolio_summary
 
 
-def _app_binding(user_id: int) -> str:
+# Fernet ciphertext is URL-safe base64 and cannot contain a colon. Default-app
+# rows keep their original wire format for existing readers and rollbacks.
+_PERSONAL_SESSION = "personal-v1:"
+
+
+def _encrypt_session(user_id: int, token: str) -> str:
     app = settings.zerodha_personal_apps.get(user_id)
-    identity = f"personal:{app.api_key}:{app.client_id}" if app else f"default:{settings.zerodha_api_key}"
-    return sha256(identity.encode()).hexdigest()
+    if app is None:
+        return encrypt_token(token)
+    payload = json.dumps([user_id, app.api_key, app.client_id, token])
+    return _PERSONAL_SESSION + encrypt_token(payload)
 
 
-def _matches_app(cred: ZerodhaCredential | None, user_id: int) -> bool:
+def _personal_token(user_id: int, ciphertext: str) -> str | None:
+    app = settings.zerodha_personal_apps.get(user_id)
+    if app is None or not ciphertext.startswith(_PERSONAL_SESSION):
+        return None
+    owner, api_key, client_id, token = json.loads(decrypt_token(ciphertext[len(_PERSONAL_SESSION):]))
+    if (owner, api_key, client_id) == (user_id, app.api_key, app.client_id):
+        return token
+    return None
+
+
+def token_for_credential(cred: ZerodhaCredential) -> str | None:
+    if cred.access_token.startswith(_PERSONAL_SESSION) or cred.user_id in settings.zerodha_personal_apps:
+        return _personal_token(cred.user_id, cred.access_token)
+    return decrypt_token(cred.access_token)
+
+
+def _matches_app(cred: ZerodhaCredential | None) -> bool:
     if cred is None:
         return False
-    if cred.app_binding is None:
-        # Sessions written before owner-specific apps could only use the default app.
-        return user_id not in settings.zerodha_personal_apps
-    return cred.app_binding == _app_binding(user_id)
+    if cred.access_token.startswith(_PERSONAL_SESSION) or cred.user_id in settings.zerodha_personal_apps:
+        return _personal_token(cred.user_id, cred.access_token) is not None
+    return True
 
 
 class ZerodhaCredentialRepository:
     def __init__(self, db: AsyncSession) -> None:
         self._db = db
 
-    async def get_by_user(self, user_id: int) -> ZerodhaCredential | None:
+    async def _get_stored(self, user_id: int) -> ZerodhaCredential | None:
         result = await self._db.execute(
             select(ZerodhaCredential).where(ZerodhaCredential.user_id == user_id)
         )
         cred = result.scalar_one_or_none()
-        return cred if _matches_app(cred, user_id) else None
+        return cred
+
+    async def get_by_user(self, user_id: int) -> ZerodhaCredential | None:
+        cred = await self._get_stored(user_id)
+        return cred if _matches_app(cred) else None
 
     async def get_plaintext_token(self, user_id: int) -> str | None:
         """Return the decrypted access token and stamp last_used_at."""
-        cred = await self.get_by_user(user_id)
-        if not cred:
+        cred = await self._get_stored(user_id)
+        token = token_for_credential(cred) if cred else None
+        if not token:
             return None
         cred.last_used_at = datetime.now(tz=timezone.utc)
         await self._db.flush()
-        return decrypt_token(cred.access_token)
+        return token
 
     async def upsert(
         self,
@@ -60,8 +87,7 @@ class ZerodhaCredentialRepository:
         # PostgreSQL upsert also covers two first-time callbacks arriving together.
         values = dict(
             user_id=user_id,
-            access_token=encrypt_token(access_token),
-            app_binding=_app_binding(user_id),
+            access_token=_encrypt_session(user_id, access_token),
             login_time=login_time,
             expires_at=expires_at,
         )
@@ -84,19 +110,24 @@ class SyncZerodhaCredentialRepository:
     def __init__(self, db: Session) -> None:
         self._db = db
 
-    def get_by_user(self, user_id: int) -> ZerodhaCredential | None:
+    def _get_stored(self, user_id: int) -> ZerodhaCredential | None:
         cred = self._db.execute(
             select(ZerodhaCredential).where(ZerodhaCredential.user_id == user_id)
         ).scalar_one_or_none()
-        return cred if _matches_app(cred, user_id) else None
+        return cred
+
+    def get_by_user(self, user_id: int) -> ZerodhaCredential | None:
+        cred = self._get_stored(user_id)
+        return cred if _matches_app(cred) else None
 
     def get_plaintext_token(self, user_id: int) -> str | None:
-        cred = self.get_by_user(user_id)
-        if not cred:
+        cred = self._get_stored(user_id)
+        token = token_for_credential(cred) if cred else None
+        if not token:
             return None
         cred.last_used_at = datetime.now(tz=timezone.utc)
         self._db.flush()
-        return decrypt_token(cred.access_token)
+        return token
 
     def list_active_user_ids(self, now: datetime) -> list[int]:
         rows = self._db.execute(

@@ -2,14 +2,15 @@
 
 Usage: sudo /srv/investor/backend/.venv/bin/python /srv/investor/backend/scripts/configure-kite-personal-app.py
 The server-only ZERODHA_PERSONAL_APPS JSON object maps numeric CredX user IDs to
-client_id, api_key and api_secret. Restart the API and active portfolio workers
-after updating their environment.
+client_id, api_key and api_secret. The command reloads active broker services
+with the new configuration after saving it.
 """
 import fcntl
 import getpass
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -73,7 +74,16 @@ def main() -> None:
             os.replace(target, ENV_FILE)
     finally:
         os.close(lock)
-    print("Saved the Kite app for this CredX account. Restart the backend and active portfolio workers to apply.")
+    units = ("investor-backend", "investor-recovery-analysis", "investor-celery-worker",
+             "investor-celery-beat-worker")
+    active = [unit for unit in units if subprocess.run(
+        ["systemctl", "is-active", "--quiet", unit], check=False,
+    ).returncode == 0]
+    if not active:
+        raise SystemExit("Kite app saved. Restart the active CredX API and portfolio workers to apply it.")
+    print("Kite app saved. Reloading " + ", ".join(active) + ".", flush=True)
+    subprocess.run(["systemctl", "try-restart", *active], check=True)
+    print("Start a fresh Connect Kite login from the enrolled CredX account.")
 
 
 if __name__ == "__main__":

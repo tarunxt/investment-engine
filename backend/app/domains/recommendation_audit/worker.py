@@ -95,13 +95,12 @@ def collect_external(session, record, fence, current, claims, settings):
             limitations.append("Kite incremental tariff/entitlement not configured; no request made")
         else:
             try:
-                from app.domains.zerodha.repository import SyncZerodhaCredentialRepository
+                from app.domains.zerodha.repository import SyncZerodhaCredentialRepository, token_for_credential
                 from app.domains.zerodha.service import ZerodhaService, service_for_user
-                from app.domains.zerodha.crypto import decrypt_token
                 credential = SyncZerodhaCredentialRepository(session).get_by_user(record.user_id)
                 kite = service_for_user(record.user_id, ZerodhaService())
                 if not credential or aware(credential.expires_at) <= utcnow() or not kite.api_key: raise ValueError("Existing Kite authorization unavailable or expired; no refresh is performed")
-                source = kite_read(current.payload, api_key=kite.api_key, access_token=decrypt_token(credential.access_token), transport=transport_for("kite", Decimal(str(settings.recommendation_audit_kite_incremental_cost_usd))))
+                source = kite_read(current.payload, api_key=kite.api_key, access_token=token_for_credential(credential), transport=transport_for("kite", Decimal(str(settings.recommendation_audit_kite_incremental_cost_usd))))
                 sources.append(source)
                 observations.extend(candle_observations(claims, source["candles"], decision_at=current.payload["decision_at"], source_id=source["source_id"], source_url=source["source_url"], content_hash=source["content_hash"], observed_at=aware(source["observed_at"])))
                 limitations.extend(source["limitations"])

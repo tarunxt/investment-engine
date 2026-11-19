@@ -120,18 +120,6 @@ def verify_forward_baseline(before: dict, after: dict) -> None:
             require(policy[0] in row and row.pop(policy[0]) is None, "Forward policy changed legacy row defaults")
             rows.append(json.dumps(row, sort_keys=True, default=str))
         workflow["rows"] = sorted(rows)
-    if "zerodha_credentials" in before:
-        credentials = observed["zerodha_credentials"]
-        column = ("app_binding", "VARCHAR(64)", True, None)
-        require(column in credentials["columns"], "Missing nullable Kite app binding")
-        credentials["columns"].remove(column)
-        rows = []
-        for raw in credentials["rows"]:
-            row = json.loads(raw)
-            require("app_binding" in row and row.pop("app_binding") is None,
-                    "Forward migration rebound an existing Kite session")
-            rows.append(json.dumps(row, sort_keys=True, default=str))
-        credentials["rows"] = sorted(rows)
     outbox = observed.get("outbox")
     prior_outbox = before.get("outbox")
     if outbox is not None and prior_outbox is not None:
