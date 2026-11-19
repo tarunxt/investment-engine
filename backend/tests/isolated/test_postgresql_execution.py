@@ -192,9 +192,12 @@ class ExecutionHarness:
         celery.conf.task_eager_propagates = True
         lifecycle = []
         sessions = self.sessions
+        # Only the PostgreSQL concurrency suite needs an accelerated heartbeat.
+        # SQLite lacks SELECT FOR UPDATE; its wiring smoke uses the worker default.
+        heartbeat_options = {"interval": 0.01} if self.engine.dialect.name == "postgresql" else {}
         class ObservedOwnership(claim.ExecutionOwnership):
             def __init__(self, *args, **kwargs):
-                super().__init__(*args, **kwargs, interval=0.01)
+                super().__init__(*args, **kwargs, **heartbeat_options)
                 lifecycle.append(self)
         provider = SimpleNamespace(generate=generate)
         factory = SimpleNamespace(create=lambda name: provider)
