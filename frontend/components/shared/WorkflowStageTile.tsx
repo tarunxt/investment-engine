@@ -295,6 +295,7 @@ export function getStageOutcome(info: StageInfo) {
   if (info.state === "failed" || ["failed", "verification failed", "error", "canceled", "cancelled", "interrupted", "killed", "start failed", "auth expired"].includes(status)) return "failed";
   if (status === "completion unconfirmed" && info.error?.startsWith("Final calculation could not be verified:")) return "failed";
   if (status === "completion unconfirmed") return "unconfirmed";
+  if (status === "stale") return "stale";
   if (hasStagePartialOutput(info)) return "partial";
   if (info.evidence?.kind === "derived") return "derived";
   if (status.startsWith("using ") || status === "skipped") return "skipped";
@@ -307,7 +308,7 @@ export function getStageOutcome(info: StageInfo) {
 
 export function getStageLedgerTone(info: StageInfo) {
   const outcome = getStageOutcome(info);
-  if (outcome === "partial" || outcome === "unconfirmed") return "bg-amber-50";
+  if (outcome === "partial" || outcome === "unconfirmed" || outcome === "stale") return "bg-amber-50";
   if (outcome === "derived" || outcome === "paused" || outcome === "skipped") return getStageBackgroundClass("idle");
   return getStageBackgroundClass(outcome);
 }
@@ -315,7 +316,7 @@ export function getStageLedgerTone(info: StageInfo) {
 export function StageStatusIcon({ info }: { info: StageInfo }) {
   const outcome = getStageOutcome(info);
   const symbols = {
-    completed: "✅", failed: "❌", partial: "⚠️", unconfirmed: "⚠️", queued: "⏳",
+    completed: "✅", failed: "❌", partial: "⚠️", stale: "⚠️", unconfirmed: "⚠️", queued: "⏳",
     running: "🔄", derived: "ℹ️", skipped: "⏭️", paused: "⏸️", idle: "○",
   };
   const description = info.runStatus || outcome;
