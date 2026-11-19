@@ -1773,15 +1773,21 @@ export function ScoreMatrixButton({
   onOpenDetail,
   className,
   workflowScale = false,
+  originalDenominator,
 }: {
   detail: ScoreMatrixDetail;
   formulaConfig?: ScoreMatrixFormulaConfig;
   onOpenDetail: (detail: ScoreMatrixDetail) => void;
   className?: string;
   workflowScale?: boolean;
+  originalDenominator?: number;
 }) {
   const configuredDetail = applyScoreMatrixFormulaConfig(detail, formulaConfig);
   const validationSummary = getScoreMatrixValidationSummary(configuredDetail);
+  const base = configuredDetail.detailedRationaleFinalScore ?? configuredDetail.meanScore;
+  const pair = configuredDetail.supplementalInputs?.pairwise;
+  const threat = configuredDetail.supplementalInputs?.stock_threat;
+  const cards = base == null ? 0 : 1 + Number(pair != null) + Number(threat != null);
   const displayScore = workflowScale || configuredDetail.supplementalInputs ? configuredDetail.calculatedScore : validationSummary.displayScore;
   const warningTitle = validationSummary.finalScoreOutOfRange
     ? validationSummary.finalScoreMessage
@@ -1824,6 +1830,13 @@ export function ScoreMatrixButton({
       ) : (
         <ScoreSymbol score={configuredDetail.calculatedScore} formulaConfig={formulaConfig} />
       )}
+      {workflowScale && <small className="block text-left font-normal text-slate-600">
+        {cards}/3 scorecards used
+        {base == null && <span className="block">Base unavailable</span>}
+        {pair == null && <span className="block">Pairwise unavailable</span>}
+        {threat == null && <span className="block">Stock Threat unavailable</span>}
+        <span className="block">Base denominator {originalDenominator != null && originalDenominator !== configuredDetail.detailedRationaleDenominator ? `${originalDenominator} → ` : ""}{configuredDetail.detailedRationaleDenominator}</span>
+      </small>}
     </button>
   );
 }
