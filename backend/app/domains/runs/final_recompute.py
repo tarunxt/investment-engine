@@ -4,7 +4,7 @@ import re
 from datetime import timezone
 from collections import defaultdict
 
-from .final_score_math import ACTIONS, DIRECTIONAL_SIZING, RATIONALE_HEADERS, calculate_listing
+from .final_score_math import ACTIONS, BUY_PRICE_POLICY, DIRECTIONAL_SIZING, RATIONALE_HEADERS, calculate_listing
 from .final_source_rows import UnverifiableFinal, rebalance_rows, technical_rows, technical_direction
 
 
@@ -24,7 +24,7 @@ def equivalent(actual, expected):
     return type(actual) is type(expected) and actual == expected
 
 
-def source_calculations(payload, *, sources, jobs_by_run, market, scorecards=None, sizing_policy=DIRECTIONAL_SIZING, positions=None):
+def source_calculations(payload, *, sources, jobs_by_run, market, scorecards=None, sizing_policy=DIRECTIONAL_SIZING, positions=None, us_context=None):
     formula = payload.get("formula")
     required = {"detailedRationaleMultipliers", "detailedRationaleDenominator", "actionScores", "technicalScanMultipliers", "scoreSymbolThresholds"}
     if not isinstance(formula, dict) or set(formula) != required:
@@ -45,14 +45,32 @@ def source_calculations(payload, *, sources, jobs_by_run, market, scorecards=Non
     grouped_jobs = defaultdict(list)
     output_jobs = set()
     rebalance_ids = payload["rebalance_run_ids"]
+    from .final_us_positions import holding, resolve_listing
+    registry, snapshot = us_context or ([], None)
+    identities = {}
+    def listing_key(row):
+        key = row["Exchange Symbol"], row["Stock Symbol"]
+        if us_context is None:
+            return key
+        key, identity, safe = resolve_listing(key, registry)
+        identities[key] = identity, safe
+        return key
+
     for run_id in rebalance_ids:
         for job in jobs_by_run.get(run_id, []):
             rows = rebalance_rows(job)
             if rows:
                 output_jobs.add((run_id, job.id))
+            per_job = {}
             for row in rows:
-                grouped[(row["Exchange Symbol"], row["Stock Symbol"])].append(row)
-                grouped_jobs[(row["Exchange Symbol"], row["Stock Symbol"])].append((run_id, job))
+                key = listing_key(row)
+                if key in per_job:
+                    if any(row.get(k) != per_job[key].get(k) for k in row if k not in {"Stock Name", "Exchange Symbol", "Stock Symbol"}):
+                        raise UnverifiableFinal("Conflicting US listing aliases within the same job")
+                    continue
+                grouped[key].append(row)
+                grouped_jobs[key].append((run_id, job))
+                per_job[key] = row
     technical_id = payload["technical_run_id"]
     technical_source = next(source for source in sources if source.id == technical_id)
     selected = {}
@@ -64,7 +82,7 @@ def source_calculations(payload, *, sources, jobs_by_run, market, scorecards=Non
             when = getattr(job, "updated_at", None) or getattr(job, "created_at", None)
             observations.append((when.replace(tzinfo=timezone.utc).timestamp() if when and when.tzinfo is None else when.timestamp() if when else 0, job.id, row))
     for when, job_id, row in sorted(observations, key=lambda item: (item[0], item[1])):
-        key = (row["Exchange Symbol"], row["Stock Symbol"])
+        key = listing_key(row)
         prior = selected.get(key)
         if prior is not None and prior[0] == when and prior[2] != row:
             raise UnverifiableFinal("Equal-time conflicting Technical rows require exact source selection")
@@ -102,10 +120,22 @@ def source_calculations(payload, *, sources, jobs_by_run, market, scorecards=Non
                 else:
                     source = "price-unavailable"
             position = (units, price)
+        us_position = holding(snapshot, key, identities[key][1]) if us_context else None
+        buy_quote = None
+        if payload.get("buy_price_policy") == BUY_PRICE_POLICY:
+            candidates = sorted((run_id, job.id, candidate_price) for row, (run_id, job) in zip(rows, grouped_jobs[key])
+                                if (candidate_price := numeric(row.get("Price Per Unit"), strict=True)) is not None and candidate_price > 0)
+            run_id, job_id, quote = candidates[0] if candidates else (None, None, None)
+            buy_quote = {"run_id": run_id, "job_id": job_id, "price": quote}
         calculation = calculate_listing(rows, formula, technical, direction=direction,
-                                        market=market, position=position, sizing_policy=sizing_policy, unresolved_holding=market == "us",
+                                        market=market, position=position, buy_quote=buy_quote, us_position=us_position, sizing_policy=sizing_policy, unresolved_holding=market == "us",
                                         legacy="[SCORING_POLICY_V3]" not in technical_source.prompt,
                                         supplemental=(scorecards or {}).get(":".join(key)))
+        if us_position is not None:
+            calculation["position_valuation"] = {"snapshot_id": snapshot.id, "source": us_position[2],
+                                                 "units": us_position[0], "value_usd": us_position[1]}
+        if buy_quote is not None:
+            calculation["buy_quote"] = buy_quote
         if position is not None:
             calculation["position_valuation"] = {"snapshot_at": captured, "source": source,
                                                  "price": price, "provider_job_id": source_job}
@@ -120,7 +150,7 @@ def source_calculations(payload, *, sources, jobs_by_run, market, scorecards=Non
         calculation["technical_job_id"] = match[1] if match else None
         if market == "us":
             venue = {"AMEX": "NYSEAMERICAN", "ARCA": "NYSEARCA"}.get(key[0], key[0])
-            stock_key = f"unresolved:{venue}:{key[1]}:?"
+            stock_key = identities[key][0] if us_context else f"unresolved:{venue}:{key[1]}:?"
         else:
             stock_key = f"{key[0]}:{key[1]}" if sum(other[1] == key[1] for other in grouped) > 1 else key[1]
         # The UI selects newest provider creation time for this lineage field.

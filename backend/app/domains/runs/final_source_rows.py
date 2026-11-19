@@ -153,7 +153,7 @@ def technical_rows(job):
     result = []
     for cells in table.rows:
         row = dict(zip(table.headers, cells))
-        if (row["Exchange Symbol"] not in {"NSE", "BSE", "NASDAQ", "NYSE", "NYSEARCA", "AMEX", "ARCA"}
+        if (row["Exchange Symbol"] not in {"NSE", "BSE", "NASDAQ", "NYSE", "NYSEARCA", "NYSEAMERICAN", "US", "AMEX", "ARCA"}
                 or not re.fullmatch(r"[A-Z0-9&_.-]+", row["Stock Symbol"])
                 or re.search(r"\.(NS|BO|NSE|BSE)$", row["Stock Symbol"])):
             raise UnverifiableFinal("Technical source requires exact listing identities")

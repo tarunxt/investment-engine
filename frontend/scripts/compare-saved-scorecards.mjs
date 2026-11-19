@@ -1,10 +1,10 @@
 // Node 22.18+ · compare-saved-scorecards.mjs workflow.json [prior-workflow.json ...]
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import { allocateIndiaEquities } from '../lib/basketDisplayCalculations.ts';
+import { allocateDisplayScores, allocateIndiaEquities, indmoneyActionSizing } from '../lib/basketDisplayCalculations.ts';
 
 const paths = process.argv.slice(2);
-if (!paths.length) throw new Error('Supply a saved India workflow and optional saved prior workflows.');
+if (!paths.length) throw new Error('Supply a saved workflow and optional saved prior workflows.');
 const records = await Promise.all(paths.map(async path => JSON.parse(await readFile(path, 'utf8'))));
 const baselineWeights = [98,1,1];
 
@@ -36,8 +36,8 @@ function digest(card) {
 }
 const close = (a,b) => a === b || Number.isFinite(a) && Number.isFinite(b) && Math.abs(a-b) < 1e-8;
 function index(record) {
-  if (record.schema !== 'workflow-final-v2' || record.formula_version !== 'score-matrix-v2' || record.broker !== 'india' ||
-      record.actionable_ranking?.version !== 'weighted-98-1-1-v1') throw new Error('Expected a saved India score-matrix-v2 workflow.');
+  if (record.schema !== 'workflow-final-v2' || record.formula_version !== 'score-matrix-v2' || !['india','indmoney_us'].includes(record.broker) ||
+      record.actionable_ranking?.version !== 'weighted-98-1-1-v1') throw new Error('Expected a saved score-matrix-v2 workflow.');
   const cards = new Map(record.actionable_ranking.rows.map(r => [r.listing,r]));
   const rows = new Map();
   for (const r of record.rows) {
@@ -53,9 +53,11 @@ function index(record) {
 }
 const [current,...archives] = records.map(index);
 const {record,rows} = current;
-const v = ['india-valuation-v1','india-valuation-v2'].includes(record.valuation?.schema) ? record.valuation : null;
+const us = record.broker === 'indmoney_us';
+if (archives.some(a => a.record.broker !== record.broker)) throw new Error('Prior workflow broker differs');
+const v = (us ? ['us-valuation-v1'] : ['india-valuation-v1','india-valuation-v2']).includes(record.valuation?.schema) ? record.valuation : null;
 const listings = new Map(v?.listings.map(row=>[row.key,row]));
-if (v && (v.sequence !== record.workflow_sequence || v.asOf !== record.captured_at ||
+if (v && (v.sequence !== record.workflow_sequence || (us ? v.capturedAt : v.asOf) !== record.captured_at ||
     listings.size !== v.listings.length || listings.size !== rows.size ||
     !v.parameters.valid || !Number.isFinite(Date.parse(v.holdingsAsOf)) ||
     Date.parse(v.asOf)-Date.parse(v.windowStart) !== v.parameters.days*86400000)) throw new Error('Mismatched saved valuation');
@@ -68,7 +70,8 @@ for (const [key,row] of rows) {
   const seen = new Set();
   for (const obs of listing.prior) {
     const lookup = JSON.stringify([key,obs.run_id]);
-    if (obs.exchange+':'+obs.symbol !== key || seen.has(obs.run_id) || !Number.isFinite(obs.score) ||
+    const alias = us && listing.eligible && obs.exchange === 'US' && obs.symbol === listing.listing?.symbol;
+    if ((!alias && obs.exchange+':'+obs.symbol !== key) || seen.has(obs.run_id) || !Number.isFinite(obs.score) ||
         !(Date.parse(obs.covered_at)>Date.parse(v.windowStart) && Date.parse(obs.covered_at)<=Date.parse(v.asOf)))
       throw new Error('Invalid saved observation for '+key);
     seen.add(obs.run_id);
@@ -103,7 +106,13 @@ function scenario(weights, mode) {
   });
   let allocation=null;
   let listingResults=null;
-  if (v) {
+  if (us && v) {
+    const {weights} = allocateDisplayScores(means.filter(row => row.eligible),v.parameters);
+    listingResults = means.map(row => {
+      const weight = row.eligible && row.score != null ? weights.get(row.key) ?? 0 : null;
+      return {listing:row.key, weight, ...indmoneyActionSizing(weight,v.assets,row.holding?.investedValue ?? null,row.quote?.price ?? null)};
+    });
+  } else if (v) {
     const completeRanks=means.every(r=>r.score!=null && /^[A-Z]{2}[A-Z0-9]{9}[0-9]$/.test(r.isin));
     const priced=means.map(r=>({...r, price:r.price>0 && r.priceSource?.startsWith('Upstox ') &&
       Number.isFinite(Date.parse(r.priceAsOf)) ? r.price : null}));
@@ -129,14 +138,20 @@ function actionBand(score) {
 }
 const baseline=scenario(baselineWeights,'current-run-only');
 const original=new Map(baseline.allocation?.map(r=>[r.listing,r]));
-if (v?.schema === 'india-valuation-v2' || baseline.allocation) {
+if (v?.schema === 'india-valuation-v2' || v?.schema === 'us-valuation-v1' || baseline.allocation) {
   const targets=new Map(baseline.listingResults.map(r=>[r.listing,r]));
   if (v.baseline.length!==targets.size || new Set(v.baseline.map(r=>r.listing)).size!==targets.size ||
-      v.baseline.some(r=>!targets.has(r.listing)||['shares','units','targetRupees','tradeRupees'].some(k=>targets.get(r.listing)[k]!==r[k])))
+      v.baseline.some(r=>!targets.has(r.listing)||(us ? ['weight','targetAmount','targetStocks','amount','stocks','price'] : ['shares','units','targetRupees','tradeRupees']).some(k=>targets.get(r.listing)[k]!==r[k])))
     throw new Error('Captured targets or amounts differ from offline replay');
 }
 for (const mode of ['current-run-only','full-window']) for (const weights of [baselineWeights,[90,5,5],[80,10,10]]) {
   const result=scenario(weights,mode), trades=result.allocation;
+  if (us) {
+    const targets = new Map(baseline.listingResults?.map(r => [r.listing,r.targetAmount]));
+    console.log(JSON.stringify({...result, sequence:record.workflow_sequence, currency:"USD", valuationAsOf:v?.asOf ?? null,
+      allocation:result.listingResults?.map(r => ({...r, targetChangeUsd:r.targetAmount == null || targets.get(r.listing) == null ? null : r.targetAmount - targets.get(r.listing)})) ?? null}));
+    continue;
+  }
   console.log(JSON.stringify({...result,sequence:record.workflow_sequence,valuationAsOf:v?.asOf??null,
     coverage:v && v.historyAvailable !== false ? {eligiblePrior:totalPrior,comparablePrior} : null,
     thresholdCrossings:result.rankings.flatMap(({key,signed}) => {

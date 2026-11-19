@@ -91,7 +91,7 @@ async def validate_frozen_final(db, payload, *, user_id, portfolio, sequence, al
     if not legacy:
         # Reconstruct source membership independently; never use client detail
         # as arithmetic evidence. Existing provenance/hash gates above still run.
-        from .final_recompute import source_calculations, verify_recomputed_rows
+        from .final_recompute import equivalent, source_calculations, verify_recomputed_rows
         from .final_source_rows import UnverifiableFinal
         links = list((await db.execute(select(RunJob).where(RunJob.run_id.in_(ids)).order_by(RunJob.id))).scalars())
         known_jobs = {job.id: job for job in jobs}
@@ -137,16 +137,38 @@ async def validate_frozen_final(db, payload, *, user_id, portfolio, sequence, al
             if not stored_record and not rebuild and market == "india" and manifest_line and payload.get("formula_version") == "score-matrix-v2":
                 payload.setdefault("position_policy", POSITION_POLICY)
             use_positions = payload.get("position_policy") == POSITION_POLICY
-            if "position_policy" in payload and (not use_positions or market != "india" or not manifest_line):
+            from .final_us_positions import US_POSITION_POLICY, load_us_snapshot
+            us_positions = payload.get("position_policy") == US_POSITION_POLICY and market == "us"
+            us_context = None
+            if us_positions:
+                from app.domains.indmoney_us.alpaca_quotes import read_verified_listings
+                prefix = "[VERIFIED_US_LISTINGS_V1]"
+                lines = [line[len(prefix):] for line in technical.prompt.splitlines() if line.startswith(prefix)]
+                if len(lines) != 1 or not manifest_line:
+                    raise UnverifiableFinal("Missing US registry or Stage 3 snapshot evidence")
+                registry = json.loads(lines[0])
+                if not isinstance(registry, list) or len(registry) > 1000:
+                    raise UnverifiableFinal("Invalid US listing registry")
+                if not stored_record and not rebuild and registry != read_verified_listings(user_id)["listings"]:
+                    raise UnverifiableFinal("US listing registry differs from verified owner metadata")
+                if rebuild and registry != payload.get("us_verified_listings", read_verified_listings(user_id)["listings"]):
+                    raise UnverifiableFinal("US listing registry differs from captured evidence")
+                payload["us_verified_listings"] = registry
+                prompt = await db.scalar(select(Job.prompt).where(Job.id == source_id, Job.user_id == user_id))
+                us_context = registry, await load_us_snapshot(db, user_id, prompt or "")
+            if "position_policy" in payload and not us_positions and (not use_positions or market != "india" or not manifest_line):
                 raise UnverifiableFinal("Unsupported holding valuation policy or missing Stage 3 source")
             positions = None
             if use_positions:
                 prompt = await db.scalar(select(Job.prompt).where(Job.id == source_id, Job.user_id == user_id))
                 positions = captured_positions(prompt or "")
+            from .final_score_math import BUY_PRICE_POLICY
+            if "buy_price_policy" in payload and payload["buy_price_policy"] != BUY_PRICE_POLICY:
+                raise UnverifiableFinal("Unsupported buy quote policy")
             policy = payload.get("sizing_policy", DIRECTIONAL_SIZING)
             if policy != DIRECTIONAL_SIZING and not (stored_record and policy == ORIGINAL_SIZING):
                 raise UnverifiableFinal("Unsupported final sizing policy")
-            context = dict(sources=sources, jobs_by_run=jobs_by_run, market=market, scorecards=scorecards, positions=positions)
+            context = dict(sources=sources, jobs_by_run=jobs_by_run, market=market, scorecards=scorecards, positions=positions, us_context=us_context)
             calculations = source_calculations(payload, **context, sizing_policy=policy)
             if rebuild:
                 from .final_reconciliation import materialize_rows
@@ -174,7 +196,12 @@ async def validate_frozen_final(db, payload, *, user_id, portfolio, sequence, al
             payload["sizing_policy"] = policy
             if payload.get("formula_version") == "score-matrix-v2":
                 for row in payload["rows"]:
-                    if use_positions:
+                    if "buy_price_policy" in payload:
+                        quote = calculations[(row["exchange"], row["symbol"])]["buy_quote"]
+                        if stored_record and not equivalent(row.get("buy_quote"), quote):
+                            raise UnverifiableFinal("Saved buy quote differs from provider evidence")
+                        row["buy_quote"] = quote
+                    if use_positions or us_positions:
                         provenance = calculations[(row["exchange"], row["symbol"])]["position_valuation"]
                         if stored_record and row.get("position_valuation") != provenance:
                             raise UnverifiableFinal("Saved holding valuation provenance differs from Stage 3")

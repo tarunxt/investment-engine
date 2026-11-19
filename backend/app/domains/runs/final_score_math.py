@@ -10,6 +10,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from collections import Counter
 
 DIRECTIONAL_SIZING = "directional-v2"
+BUY_PRICE_POLICY = "positive-provider-price-v1"
 ORIGINAL_SIZING = "absolute-mean-v1"
 
 ACTIONS = ("Sell All", "Trim", "Add more", "Buy New", "Hold")
@@ -107,7 +108,7 @@ def weighted_score(rows, override=None):
     return score, denominator
 
 
-def calculate_listing(rows, formula, technical=None, *, direction=None, market, unresolved_holding=False, supplemental=None, legacy=False, sizing_policy=DIRECTIONAL_SIZING, position=None):
+def calculate_listing(rows, formula, technical=None, *, direction=None, market, unresolved_holding=False, supplemental=None, legacy=False, sizing_policy=DIRECTIONAL_SIZING, position=None, buy_quote=None, us_position=None):
     """Rows are source cells; technical is the selected source Technical row."""
     actions = [normalize_action(row.get(ACTION_HEADER)) for row in rows]
     mean_action = mean([ACTION_VALUES.get(action) for action in actions])
@@ -168,6 +169,8 @@ def calculate_listing(rows, formula, technical=None, *, direction=None, market, 
     if position is not None:
         current, position_price = position
         value = 0 if current == 0 else None if position_price is None else round(current * position_price, 2)
+    if us_position is not None:
+        current, value, _ = us_position
     changes = [signed_units(row, action) for row, action in zip(rows, actions)]
     mean_change = mean(changes)
     bullish = mean([change for change in changes if change is not None and change > 0])
@@ -218,7 +221,10 @@ def calculate_listing(rows, formula, technical=None, *, direction=None, market, 
     amount = None
     price = numeric(rows[0].get("Price Per Unit"))
     if units is not None:
-        if position is not None and action in {"Sell All", "Trim"} and value is None:
+        if buy_quote is not None and action in {"Buy New", "Add more"}:
+            price = buy_quote["price"]
+            amount = 0 if units == 0 else None if price is None else units * price
+        elif (position is not None or us_position is not None) and action in {"Sell All", "Trim"} and value is None:
             amount = None
         elif action == "Sell All" and value is not None:
             amount = value

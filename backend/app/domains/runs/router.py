@@ -1,5 +1,6 @@
 import redis.asyncio as aioredis
 from redis.exceptions import WatchError
+from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -774,7 +775,7 @@ async def update_auto_rebalance_stage(
         stage=stage, run_id=effective_run_id, job_id=effective_job_id,
         expected_status=status if stage in LLM_STAGES and status in {"completed", "partial"} else None,
     )
-    if {"corrected_final_v2", "previous_sizing_replay", "previous_valuation_replay"} & body.summary.keys():
+    if {"corrected_final_v2", "previous_sizing_replay", "previous_valuation_replay", "previous_price_replay"} & body.summary.keys():
         raise HTTPException(422, detail="Corrected calculations are generated from saved sources")
     if "frozen_final" in body.summary:
         if stage != "actionables":
@@ -786,7 +787,9 @@ async def update_auto_rebalance_stage(
         if isinstance(capture, dict) and capture.get("formula_version") == "score-matrix-v2":
             technical_stage = next((item for item in workflow.stages if item.stage == "technical"), None)
             receipt = (technical_stage.summary_json or {}).get("final_inputs") if technical_stage else None
-            keys = ("formula_version", "formula", "rebalance_run_ids", "response_hashes")
+            keys = ("formula_version", "formula", "rebalance_run_ids", "response_hashes", "buy_price_policy")
+            if portfolio == "indmoney_us":
+                keys += ("position_policy",)
             if (not isinstance(receipt, dict) or technical_stage.run_id != capture.get("technical_run_id")
                     or any(capture.get(key) != receipt.get(key) for key in keys)):
                 raise HTTPException(409, detail="Final inputs differ from the saved Technical stage receipt")
@@ -875,14 +878,14 @@ async def update_auto_rebalance_stage(
     return response
 
 
-@router.get("/auto-rebalance-history/india/{sequence}/score-verification")
+@router.get("/auto-rebalance-history/{portfolio}/{sequence}/score-verification")
 async def verify_saved_india_score(sequence: int, db: AsyncSession = Depends(get_async_db),
-                                   current_user: User = Depends(get_current_user)):
+                                   current_user: User = Depends(get_current_user), portfolio: Literal["india", "indmoney_us"] = "india"):
     from .frozen_final import validate_frozen_final
 
     workflow = (await db.execute(select(AutoRebalanceWorkflow).where(
         AutoRebalanceWorkflow.user_id == current_user.id,
-        AutoRebalanceWorkflow.portfolio == "india",
+        AutoRebalanceWorkflow.portfolio == portfolio,
         AutoRebalanceWorkflow.sequence == sequence,
     ).options(selectinload(AutoRebalanceWorkflow.stages)))).scalar_one_or_none()
     if workflow is None:
@@ -900,7 +903,7 @@ async def verify_saved_india_score(sequence: int, db: AsyncSession = Depends(get
     candidate = deepcopy(record)
     evidence = {}
     try:
-        await validate_frozen_final(db, candidate, user_id=current_user.id, portfolio="india", sequence=sequence, scorecard_evidence=evidence, stored_record=True)
+        await validate_frozen_final(db, candidate, user_id=current_user.id, portfolio=portfolio, sequence=sequence, scorecard_evidence=evidence, stored_record=True)
     except HTTPException as error:
         if error.status_code not in (409, 422):
             raise
@@ -908,12 +911,12 @@ async def verify_saved_india_score(sequence: int, db: AsyncSession = Depends(get
     return {"verified": True, "record": candidate, "replayed": bool(corrected), "evidence": evidence}
 
 
-@router.post("/auto-rebalance-history/india/{sequence}/replay-score-v2")
+@router.post("/auto-rebalance-history/{portfolio}/{sequence}/replay-score-v2")
 async def replay_india_score(sequence: int, db: AsyncSession = Depends(get_async_db),
-                            current_user: User = Depends(get_current_user)):
+                            current_user: User = Depends(get_current_user), portfolio: Literal["india", "indmoney_us"] = "india"):
     from .final_reconciliation import recover_final
     workflow = (await db.execute(select(AutoRebalanceWorkflow).where(
-        AutoRebalanceWorkflow.user_id == current_user.id, AutoRebalanceWorkflow.portfolio == "india",
+        AutoRebalanceWorkflow.user_id == current_user.id, AutoRebalanceWorkflow.portfolio == portfolio,
         AutoRebalanceWorkflow.sequence == sequence,
     ).options(selectinload(AutoRebalanceWorkflow.stages)).with_for_update())).scalar_one_or_none()
     if workflow is None:
@@ -924,6 +927,8 @@ async def replay_india_score(sequence: int, db: AsyncSession = Depends(get_async
     previous = summary.get("corrected_final_v2")
     if previous != replay:
         archive_key = "previous_valuation_replay" if previous and previous.get("sizing_policy") == "directional-v2" else "previous_sizing_replay"
+        if previous and previous.get("position_policy"):
+            archive_key = "previous_price_replay"
         archive = {archive_key: previous} if previous is not None else {}
         final.summary_json = {**summary, **archive, "corrected_final_v2": replay}
         await db.commit()
