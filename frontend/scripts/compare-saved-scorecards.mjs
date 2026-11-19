@@ -1,4 +1,5 @@
 // Node 22.18+ · compare-saved-scorecards.mjs workflow.json [prior-workflow.json ...]
+import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { allocateIndiaEquities } from '../lib/basketDisplayCalculations.ts';
 
@@ -21,6 +22,18 @@ function weighted(card, weights) {
   return total / denominator;
 }
 
+function digest(card) {
+  const hash = createHash('sha256').update('india-score-components-v1');
+  for (const key of ['base','pair','threat']) {
+    const value = card[key];
+    if (value === null) { hash.update('0'); continue; }
+    if (!Number.isFinite(value)) return null;
+    const bytes = Buffer.alloc(8);
+    bytes.writeDoubleBE(value);
+    hash.update('1').update(bytes);
+  }
+  return hash.digest('hex');
+}
 const close = (a,b) => a === b || Number.isFinite(a) && Number.isFinite(b) && Math.abs(a-b) < 1e-8;
 function index(record) {
   if (record.schema !== 'workflow-final-v2' || record.formula_version !== 'score-matrix-v2' || record.broker !== 'india' ||
@@ -40,7 +53,7 @@ function index(record) {
 }
 const [current,...archives] = records.map(index);
 const {record,rows} = current;
-const v = record.valuation?.schema === 'india-valuation-v1' ? record.valuation : null;
+const v = ['india-valuation-v1','india-valuation-v2'].includes(record.valuation?.schema) ? record.valuation : null;
 const listings = new Map(v?.listings.map(row=>[row.key,row]));
 if (v && (v.sequence !== record.workflow_sequence || v.asOf !== record.captured_at ||
     listings.size !== v.listings.length || listings.size !== rows.size ||
@@ -59,11 +72,11 @@ for (const [key,row] of rows) {
         !(Date.parse(obs.covered_at)>Date.parse(v.windowStart) && Date.parse(obs.covered_at)<=Date.parse(v.asOf)))
       throw new Error('Invalid saved observation for '+key);
     seen.add(obs.run_id);
-    const matching = archives.filter(({record:r,rows:rs}) => r.workflow_sequence === obs.workflow_sequence &&
+    const matching = !obs.component_sha256 ? [] : archives.filter(({record:r,rows:rs}) => r.workflow_sequence === obs.workflow_sequence &&
       (r.rebalance_run_ids?.includes(obs.run_id) || r.technical_run_id === obs.run_id) && rs.has(key) &&
-      rs.get(key).action === obs.action && close(rs.get(key).score,obs.score));
+      digest(rs.get(key).components) === obs.component_sha256 && rs.get(key).action === obs.action && close(rs.get(key).score,obs.score));
     totalPrior++;
-    if (obs.components && close(weighted(obs.components,baselineWeights),obs.score)) {
+    if (obs.components && (!obs.component_sha256 || digest(obs.components) === obs.component_sha256) && close(weighted(obs.components,baselineWeights),obs.score)) {
       priorCards.set(lookup,obs.components);
       comparablePrior++;
     } else if (matching.length === 1 && !obs.components) {
@@ -77,9 +90,9 @@ function scenario(weights, mode) {
     .sort((a,b)=>(b.signed??-Infinity)-(a.signed??-Infinity)||a.key.localeCompare(b.key));
   const means = rankings.map(({key,signed})=>{
     const listing=listings.get(key);
-    if (!listing) return {key,score:null};
+    if (!listing || v.historyAvailable === false) return {...listing,key,score:null};
     const values=listing.prior.map(obs=>{
-      if (mode === 'current-run-only') return obs.score;
+      if (mode === 'current-run-only' || weights === baselineWeights) return obs.score;
       const card=priorCards.get(JSON.stringify([key,obs.run_id]));
       return card ? weighted(card,weights) : null;
     });
@@ -89,31 +102,37 @@ function scenario(weights, mode) {
     return {...listing,key,score};
   });
   let allocation=null;
-  if (v && Number.isFinite(v.assets) && v.assets>0 && means.every(r=>r.score!=null && r.price>0 && r.priceSource?.startsWith('Upstox ') &&
-      Number.isFinite(Date.parse(r.priceAsOf)) && Number.isSafeInteger(r.holding) && r.holding>=0 && r.isin)) {
-    const {venues}=allocateIndiaEquities(means,v.parameters,v.assets);
-    allocation=means.map(r=>{
-      const shares=venues.get(r.key)?.shares;
-      if (!Number.isSafeInteger(shares)) throw new Error('Invalid target for '+r.key);
-      const units=shares-r.holding;
-      return {listing:r.key,shares,units,targetRupees:shares*r.price,tradeRupees:units*r.price};
+  let listingResults=null;
+  if (v) {
+    const completeRanks=means.every(r=>r.score!=null && /^[A-Z]{2}[A-Z0-9]{9}[0-9]$/.test(r.isin));
+    const priced=means.map(r=>({...r, price:r.price>0 && r.priceSource?.startsWith('Upstox ') &&
+      Number.isFinite(Date.parse(r.priceAsOf)) ? r.price : null}));
+    const {venues}=allocateIndiaEquities(priced,v.parameters,v.assets);
+    listingResults=priced.map(r=>{
+      const venue=venues.get(r.key);
+      const shares=completeRanks && Number.isSafeInteger(venue?.shares) ? venue.shares : null;
+      const units=shares!=null && Number.isSafeInteger(r.holding) && r.holding>=0 ? shares-r.holding : null;
+      return {listing:r.key,shares,units,targetRupees:shares!=null && r.price!=null ? shares*r.price : null,
+        tradeRupees:units!=null && r.price!=null ? units*r.price : null};
     });
+    if (listingResults.every(r=>r.tradeRupees!=null && r.targetRupees!=null)) allocation=listingResults;
   }
   const historicalMeans=means.map(({key,score})=>({key,score})).sort((a,b)=>
     (b.score??-Infinity)-(a.score??-Infinity)||a.key.localeCompare(b.key));
-  return {mode,weights,rankings,historicalMeans,allocation};
+  return {mode,weights,rankings,historicalMeans,listingResults,allocation};
 }
 const baseline=scenario(baselineWeights,'current-run-only');
 const original=new Map(baseline.allocation?.map(r=>[r.listing,r]));
-if (baseline.allocation) {
-  if (v.baseline.length!==original.size || new Set(v.baseline.map(r=>r.listing)).size!==original.size ||
-      v.baseline.some(r=>!original.has(r.listing)||['shares','units','targetRupees','tradeRupees'].some(k=>original.get(r.listing)[k]!==r[k])))
+if (v?.schema === 'india-valuation-v2' || baseline.allocation) {
+  const targets=new Map(baseline.listingResults.map(r=>[r.listing,r]));
+  if (v.baseline.length!==targets.size || new Set(v.baseline.map(r=>r.listing)).size!==targets.size ||
+      v.baseline.some(r=>!targets.has(r.listing)||['shares','units','targetRupees','tradeRupees'].some(k=>targets.get(r.listing)[k]!==r[k])))
     throw new Error('Captured targets or amounts differ from offline replay');
 }
 for (const mode of ['current-run-only','full-window']) for (const weights of [baselineWeights,[90,5,5],[80,10,10]]) {
   const result=scenario(weights,mode), trades=result.allocation;
   console.log(JSON.stringify({...result,sequence:record.workflow_sequence,valuationAsOf:v?.asOf??null,
-    coverage:v ? {eligiblePrior:totalPrior,comparablePrior} : null,
+    coverage:v && v.historyAvailable !== false ? {eligiblePrior:totalPrior,comparablePrior} : null,
     changedRanks:result.rankings.filter((r,i)=>r.key!==baseline.rankings[i].key).length,
     changedWindowRanks:result.historicalMeans.every(r=>r.score!=null) && baseline.historicalMeans.every(r=>r.score!=null)
       ? result.historicalMeans.filter((r,i)=>r.key!==baseline.historicalMeans[i].key).length : null,

@@ -1784,7 +1784,7 @@ export function ScoreMatrixButton({
   className?: string;
   workflowScale?: boolean;
   originalDenominator?: number;
-  savedScore?: {score: number; divisor?: number; jobId?: number; comparisons?: number | null; pairwise?: number | null};
+  savedScore?: {threatReason?: string | null; score: number; divisor?: number; jobId?: number; comparisons?: number | null; pairwise?: number | null};
 }) {
   const configuredDetail = applyScoreMatrixFormulaConfig(detail, formulaConfig);
   const validationSummary = getScoreMatrixValidationSummary(configuredDetail);
@@ -1840,7 +1840,7 @@ export function ScoreMatrixButton({
         {cards}/3 scorecards used
         {base == null && <span className="block">Base unavailable</span>}
         {pair == null && <span className="block">Pairwise unavailable</span>}
-        {threat == null && <span className="block">Stock Threat unavailable</span>}
+        {threat == null && <span className="block">Stock Threat unavailable{savedScore?.threatReason && ` · ${savedScore.threatReason}`}</span>}
         <span className="block">Base denominator {originalDenominator != null && originalDenominator !== configuredDetail.detailedRationaleDenominator ? `${originalDenominator} → ` : ""}{configuredDetail.detailedRationaleDenominator}</span>
       </small>}
     </button>

@@ -1,6 +1,6 @@
 import type { ZerodhaThreatReport } from "@/types/api";
 
-export type RankedListing = { listing: string; score: number | null; pairwise: number | null; stock_threat: number | null; comparisons?: number | null };
+export type RankedListing = { listing: string; score: number | null; pairwise: number | null; stock_threat: number | null; comparisons?: number | null; threat_reason?: string | null };
 
 export function workflowRanking(rows: { exchange: string; symbol: string; effectiveScore: number | null }[], report?: ZerodhaThreatReport | null): RankedListing[] {
   const tables = report?.tables ?? [];
@@ -23,11 +23,14 @@ export function workflowRanking(rows: { exchange: string; symbol: string; effect
     const listing = row.exchange + ":" + row.symbol;
     const pairRow = pairwise.get(listing);
     const pair = observation(pairRow?.["Pairwise /100"]);
-    const threat = observation(threats.get(listing)?.["Stock Threat /100"]);
+    const threatRow = threats.get(listing);
+    const threat = observation(threatRow?.["Stock Threat /100"]);
+    const threat_reason = threat != null ? null : !report ? "No scorecard manifest" :
+      threatRow === undefined ? "Missing stock threat row" : threatRow === null ? "Duplicate stock threat rows" : "Invalid stock threat score";
     const count = pairRow?.["Valid comparisons"]?.trim();
     const comparisons = count && /^\d+$/.test(count) ? Number(count) : null;
     const signed = weightedSigned(row.effectiveScore, {pairwise: pair, stock_threat: threat});
-    return { listing, score: signed === null ? null : (signed + 3) * 100 / 6, pairwise: pair, stock_threat: threat, comparisons };
+    return { listing, threat_reason, score: signed === null ? null : (signed + 3) * 100 / 6, pairwise: pair, stock_threat: threat, comparisons };
 
   }).sort((a, b) => (b.score ?? -1) - (a.score ?? -1) || a.listing.localeCompare(b.listing));
 }

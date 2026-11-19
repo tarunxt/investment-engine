@@ -1,6 +1,8 @@
 """Read saved score observations only. No materialization or scoring provider calls."""
 from datetime import datetime, timedelta, timezone
+import hashlib
 import math
+import struct
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from sqlalchemy import and_, select
 from app.domains.runs.models import FinalActionableHistory, Run
@@ -40,6 +42,16 @@ def saved_components(detail):
     return {'base': base, 'pair': pair, 'threat': threat}
 
 
+def component_digest(components):
+    if components is None:
+        return None
+    digest = hashlib.sha256(b'india-score-components-v1')
+    for key in ('base', 'pair', 'threat'):
+        value = components[key]
+        digest.update(b'0' if value is None else b'1' + struct.pack('>d', value))
+    return digest.hexdigest()
+
+
 def score_history_view(session, *, user_id, market, symbols, days, as_of, timezone_name):
     if as_of.tzinfo is None: raise ValueError('An offset-aware as-of timestamp is required')
     if days < 1 or days > 3650: raise ValueError('Choose between 1 and 3650 past days')
@@ -57,7 +69,8 @@ def score_history_view(session, *, user_id, market, symbols, days, as_of, timezo
         score = history.score
         completed = run is not None and status_value(run.status) == 'completed' and identity.market == market
         valid = isinstance(score, (int, float)) and not isinstance(score, bool) and math.isfinite(score)
-        observations.append({'components': saved_components(history.formula_inputs_json), 'workflow_sequence': getattr(run, 'auto_rebalance_sequence', None), 'id': history.id, 'run_id': history.rebalance_run_id, 'symbol': history.stock_symbol, 'exchange': saved_venue(history), 'covered_at': history.covered_at.replace(tzinfo=timezone.utc).isoformat() if history.covered_at.tzinfo is None else history.covered_at.isoformat(), 'score': score if valid else None, 'action': history.action, 'formula_version': history.formula_version, 'completed': completed, 'eligible': run is not None and status_value(run.status) in {'completed', 'partial'} and identity.market == market, 'run_status': status_value(run.status) if run else None, 'coverage_status': history.coverage_status})
+        components = saved_components(history.formula_inputs_json)
+        observations.append({'components': components, 'component_sha256': component_digest(components), 'workflow_sequence': getattr(run, 'auto_rebalance_sequence', None), 'id': history.id, 'run_id': history.rebalance_run_id, 'symbol': history.stock_symbol, 'exchange': saved_venue(history), 'covered_at': history.covered_at.replace(tzinfo=timezone.utc).isoformat() if history.covered_at.tzinfo is None else history.covered_at.isoformat(), 'score': score if valid else None, 'action': history.action, 'formula_version': history.formula_version, 'completed': completed, 'eligible': run is not None and status_value(run.status) in {'completed', 'partial'} and identity.market == market, 'run_status': status_value(run.status) if run else None, 'coverage_status': history.coverage_status})
     # An immutable completed decision is also a recorded score. Never choose a
     # latest revision: disagreeing complete captures for one run remain ambiguous.
     represented = {(row['symbol'], row['exchange'], row['run_id']) for row in observations}

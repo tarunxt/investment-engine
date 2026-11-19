@@ -882,7 +882,7 @@ type BasketScoreRevision = {
   capturedAt: string | null;
   replayed: boolean;
   originals: Map<string, number>;
-  saved: Map<string, {score: number; divisor?: number; jobId?: number; comparisons?: number | null; pairwise?: number | null}>;
+  saved: Map<string, {score: number; divisor?: number; jobId?: number; threatReason?: string | null; comparisons?: number | null; pairwise?: number | null}>;
 };
 
 function sameFrozenScore(saved: unknown, current: number | null) {
@@ -5028,11 +5028,13 @@ export function RebalanceWorkflowSections({
               originals.set(stockIdentity(saved.symbol, saved.exchange), denominator);
             }
           }
-          const saved = new Map<string, {score: number; divisor?: number; jobId?: number; comparisons?: number | null; pairwise?: number | null}>();
+          const ranking = frozen?.actionable_ranking as {rows?: {listing:string;threat_reason?:string | null}[]} | undefined;
+          const reasons = new Map(ranking?.rows?.map(item=>[item.listing,item.threat_reason]));
+          const saved = new Map<string, {score: number; divisor?: number; jobId?: number; threatReason?: string | null; comparisons?: number | null; pairwise?: number | null}>();
           for (const row of Array.isArray(frozen?.rows) ? frozen.rows : []) {
             if (typeof row?.effectiveScore === "number" && Number.isFinite(row.effectiveScore)) {
               const evidence = verification.verified ? verification.evidence[row.exchange + ":" + row.symbol] : undefined;
-              saved.set(stockIdentity(row.symbol, row.exchange), {score: row.effectiveScore, divisor: row.formula_inputs?.detailedRationaleDenominator, jobId: evidence?.job_id, comparisons: evidence?.comparisons, pairwise: evidence?.pairwise});
+              saved.set(stockIdentity(row.symbol, row.exchange), {score: row.effectiveScore, divisor: row.formula_inputs?.detailedRationaleDenominator, jobId: evidence?.job_id, comparisons: evidence?.comparisons, pairwise: evidence?.pairwise, threatReason: verification.verified ? evidence?.threat_reason ?? reasons.get(row.exchange + ":" + row.symbol) : null});
             }
           }
           const storedFormula = verification.verified && frozen?.formula && typeof frozen.formula === "object"

@@ -33,3 +33,10 @@ test('duplicates and malformed observations cannot replace unique evidence', () 
   assert.equal(readScorecardManifest(manifest([row])).get(listing).comparisons, null);
   assert.equal(readScorecardManifest(manifest([{...row, comparisons: 2}])).get(listing).comparisons, 2);
 });
+
+test('missing, duplicate and invalid stock threat evidence stay distinct', () => {
+  assert.equal(ranking([], []).threat_reason, 'Missing stock threat row');
+  assert.equal(ranking([], [threatRow('7'),threatRow('7')]).threat_reason, 'Duplicate stock threat rows');
+  assert.equal(ranking([], [threatRow('')]).threat_reason, 'Invalid stock threat score');
+  assert.equal(ranking([], [threatRow('0')]).threat_reason, null);
+});
