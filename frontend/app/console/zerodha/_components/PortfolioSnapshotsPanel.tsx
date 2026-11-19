@@ -50,14 +50,6 @@ function formatSnapshotDate(value: string) {
   });
 }
 
-function formatCapturedAt(value: string) {
-  return formatPortfolioTimestamp(value);
-}
-
-function formatSnapshotTime(value: string) {
-  return formatPortfolioTimestamp(value, true);
-}
-
 function formatShortSnapshotDate(value: string) {
   return new Date(`${value}T00:00:00+05:30`).toLocaleDateString("en-IN", {
     timeZone: "Asia/Kolkata",
@@ -334,18 +326,11 @@ function SnapshotHistoryChart({
           <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">
             Daily History
           </span>
-          <p className="mt-1 text-sm text-gray-500">
-            Settled holdings value trend (excludes T1) across saved portfolio snapshots.
-          </p>
         </div>
         {selectedPoint && (
           <div className="text-sm sm:text-right">
             <p className="font-semibold text-gray-950">
               {formatCurrency(selectedPoint.value)}
-            </p>
-            <p className="text-xs text-gray-500">
-              {formatSnapshotDate(selectedPoint.snapshot_date)} · Captured{" "}
-              {formatSnapshotTime(selectedPoint.captured_at)}
             </p>
           </div>
         )}
@@ -616,12 +601,6 @@ export function PortfolioSnapshotsPanel({
               <p className="mt-2 text-lg font-semibold text-gray-950">
                 {formatSnapshotDate(selectedSnapshot.snapshot_date)}
               </p>
-            </div>
-            <div className="text-sm text-gray-500">
-              <p role="status">Captured <time dateTime={selectedSnapshot.captured_at}>{formatCapturedAt(selectedSnapshot.captured_at)}</time></p>
-              <p>Save time unavailable in this view</p>
-              <p>Price as-of unavailable in this view</p>
-              <p className="capitalize">Source: {selectedSnapshot.source}</p>
             </div>
           </div>
 

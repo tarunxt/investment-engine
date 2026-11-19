@@ -184,7 +184,7 @@ try {
    context.fillRect(0,0,1,1);
    return Array.from(context.getImageData(0,0,1,1).data).join(',');
  };
- const stateClasses={completed:'bg-emerald-50',running:'bg-yellow-50',queued:'bg-sky-50',idle:'bg-slate-100',failed:'bg-red-50'};
+ const stateClasses={completed:'bg-emerald-50',running:'bg-yellow-50',queued:'bg-sky-50',idle:'bg-slate-100',failed:'bg-red-100'};
  for(const dark of [false,true])for(const market of ['India','US']){
    const colours=[];
    for(const [state,background] of Object.entries(stateClasses)){

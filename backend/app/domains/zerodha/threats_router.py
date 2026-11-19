@@ -43,6 +43,7 @@ from app.domains.zerodha.threats_schemas import (
     ZerodhaThreatAnalysisResponse,
     ZerodhaThreatHistoryResponse,
     ZerodhaThreatLatestResponse,
+    ZerodhaThreatRunRequest,
     ZerodhaThreatRunResponse,
 )
 from app.infrastructure.database.session import get_async_db
@@ -112,14 +113,21 @@ async def get_threat_analysis(
 
 @router.post("/run", response_model=ZerodhaThreatRunResponse)
 async def run_threat_analysis(
-    body: PortfolioEventRunRequest | None = None,
+    body: ZerodhaThreatRunRequest | None = None,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
     provider, model = await _resolve_threat_target(body, db)
 
     snapshot_repo = ZerodhaPortfolioSnapshotRepository(db)
-    latest_snapshot = await snapshot_repo.get_latest_by_user(current_user.id)
+    if body and body.expected_snapshot_captured_at is not None:
+        latest_snapshot = await snapshot_repo.get_by_user_and_capture(
+            current_user.id, body.expected_snapshot_captured_at,
+        )
+        if latest_snapshot is None:
+            raise HTTPException(409, detail="The selected portfolio capture is no longer available. Sync the portfolio and restart Threats.")
+    else:
+        latest_snapshot = await snapshot_repo.get_latest_by_user(current_user.id)
     if not latest_snapshot:
         raise HTTPException(
             400,

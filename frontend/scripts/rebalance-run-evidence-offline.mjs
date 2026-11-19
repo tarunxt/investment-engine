@@ -18,14 +18,14 @@ try {
   browser=await chromium.launch({executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE||'/usr/bin/chromium',headless:true,args:['--no-sandbox']});
   const page=await browser.newPage();
   await page.route('**/*',route=>route.abort());
-  const old={state:'idle',completedAt:'2026-11-14T08:00:00Z',error:'Previous failure',recommendedStocks:99,portfolioStockCount:99,evidence:{kind:'saved',references:['Previous run #123']}};
+  const old={state:'idle',runStatus:'failed',completedAt:'2026-11-14T08:00:00Z',error:'Previous failure',recommendedStocks:99,portfolioStockCount:99,evidence:{kind:'saved',references:['Previous run #123']}};
   const states={sync:{state:'completed',portfolioStockCount:7,completedAt:'2026-11-15T08:01:00Z'},threats:{...old,state:'queued'},swing:{...old},rebalance:{...old},technical:{...old},actionables:{...old}};
-  const blankUpcoming=async()=>{for(const row of await page.locator('tbody tr').all()){const state=await row.locator('th').innerText();if(/idle|queued/.test(state))for(const cell of await row.locator('td').all())assert.equal((await cell.innerText()).trim(),'');}};
+  const blankUpcoming=async()=>{for(const row of await page.locator('tbody tr').all()){const state=await row.getByRole('img').first().getAttribute('aria-label');if(/idle|queued/.test(state))for(const cell of await row.locator('td').all())assert.equal((await cell.innerText()).trim(),'');}};
   await page.setContent(render(true,states));await blankUpcoming();
   assert.equal((await page.locator('body').innerText()).includes('Previous failure'),false);
   states.swing={state:'failed',lastRunId:301,error:'Current synthetic failure',startedAt:'2026-11-15T08:02:00Z',endedAt:'2026-11-15T08:03:00Z'};
   await page.setContent(render(true,states));await blankUpcoming();assert.match(await page.locator('body').innerText(),/Stage execution failed/);
-  await page.setContent(render(false,{swing:old}));assert.match(await page.locator('body').innerText(),/Historical saved evidence/);assert.match(await page.locator('body').innerText(),/Stage execution failed/);
+  await page.setContent(render(false,{swing:old}));assert.doesNotMatch(await page.locator('body').innerText(),/Historical saved evidence/);assert.equal(await page.getByRole('img',{name:'failed',exact:true}).count(),1);assert.match(await page.locator('body').innerText(),/Stage execution failed/);
   for(const width of [390,1180]){await page.setViewportSize({width,height:900});await page.setContent(render(true,states));await blankUpcoming();}
   console.log('PASS actual ledger browser rendering: blank upcoming cells including shared Threats count, current failure, historical idle evidence, mobile/desktop; zero API calls');
 } finally {await browser?.close();rmSync(temp,{recursive:true,force:true});}

@@ -657,6 +657,9 @@ function summarizeThreat(
   const expectedPairs = paired?.reduce((n, row) => n + Number(row.Expected), 0);
   return {
     evidenceCoverage,
+    pairStatus: expectedPairs && Number.isFinite(expectedPairs) && validPairs != null && Number.isFinite(validPairs)
+      ? validPairs === expectedPairs ? "completed" as const : "partial" as const
+      : undefined,
     pairCoverage: validPairs == null || expectedPairs == null ? undefined : `${validPairs / 2} / ${expectedPairs / 2} comparisons`,
     portfolioThreat: portfolioRisk ? `${portfolioRisk["Portfolio Threat /100"]} / 100 · ${portfolioRisk["Assessed value"]} of holdings value assessed${coverage}` : undefined,
     completedAt: analysis.updated_at ?? analysis.created_at,
@@ -762,17 +765,18 @@ async function waitForZerodhaPortfolioSync(
     stopped,
   );
 
-  for (let attempt = 0; attempt < MAX_ZERODHA_SYNC_POLLS; attempt += 1) {
+  for (let attempt = 0; attempt <= MAX_ZERODHA_SYNC_POLLS; attempt += 1) {
     if (stopped()) {
       throw new Error("Zerodha portfolio sync was cancelled by user.");
     }
     requireWorkflowOwner(owner);
     const latestCapturedAt = latestOverview.latest?.captured_at ?? null;
-    if (latestCapturedAt && latestCapturedAt !== (previousCapturedAt ?? null)) {
+    if (latestCapturedAt && Date.parse(latestCapturedAt) > (previousCapturedAt ? Date.parse(previousCapturedAt) : 0)) {
       requireWorkflowOwner(owner);
       return latestOverview;
     }
 
+    if (attempt === MAX_ZERODHA_SYNC_POLLS) break;
     await sleep(POLL_INTERVAL_MS);
     requireWorkflowOwner(owner);
     latestOverview = await retryWorkflowRead(
@@ -783,7 +787,7 @@ async function waitForZerodhaPortfolioSync(
   }
 
   requireWorkflowOwner(owner);
-  return latestOverview;
+  throw new Error("Portfolio sync timed out waiting for a new Zerodha snapshot. Check the sync status before retrying.");
 }
 
 async function waitForThreatCompletion(
@@ -7063,7 +7067,7 @@ ${zerodhaExecutionMode === "direct_market"
           markRunning(portfolio, "sync");
           if (portfolio === "zerodha") {
             const previousOverview = await apiService.zerodhaPortfolioOverview();
-            const synced = await queueZerodhaPortfolioSyncWithAuthRetry(runtimeOwner);
+            await queueZerodhaPortfolioSyncWithAuthRetry(runtimeOwner);
             const overview = await waitForZerodhaPortfolioSync(
               previousOverview.latest?.captured_at,
               () => cancelRequestedRef.current || !isCurrentWorkflowOwner(runtimeOwner),
@@ -7073,10 +7077,7 @@ ${zerodhaExecutionMode === "direct_market"
             await markCompleted(portfolio, "sync", {
               completedAt: overview.latest?.captured_at,
               portfolioStockCount: overview.latest?.holdings_count ?? null,
-              runStatus:
-                overview.latest?.captured_at !== previousOverview.latest?.captured_at
-                  ? "synced"
-                  : synced.status,
+              runStatus: "synced",
             });
           } else if (indmoneyPayload) {
             const snapshot =
@@ -7178,9 +7179,17 @@ ${zerodhaExecutionMode === "direct_market"
           try {
             markRunning(portfolio, "threats", { totalLlms: 1, completedLlms: 0 });
             const contenders = generatedSwingRun ? listingsFromSwingRun(generatedSwingRun) : [];
+            if (portfolio === "zerodha" && !workflowSnapshot) {
+              const overview = await retryWorkflowRead(
+                () => apiService.zerodhaPortfolioOverview(),
+                "portfolio snapshot", () => cancelRequestedRef.current || !isCurrentWorkflowOwner(runtimeOwner),
+              );
+              workflowSnapshot = overview.latest;
+              if (!workflowSnapshot) throw new Error("Sync the Zerodha portfolio before running Threats.");
+            }
             const queuedThreat =
               portfolio === "zerodha"
-                ? await apiService.zerodhaRunThreats({ ...threatTargets[0], ...runMetadata, contenders })
+                ? await apiService.zerodhaRunThreats({ ...threatTargets[0], ...runMetadata, contenders, expected_snapshot_captured_at: workflowSnapshot?.captured_at })
                 : await apiService.indmoneyUsRunThreats({ ...threatTargets[0], ...runMetadata, contenders, ...(workflowSnapshot && "id" in workflowSnapshot ? { expected_snapshot_id: workflowSnapshot.id } : {}) });
             if (portfolio === "indmoneyUs" && workflowSnapshot && "id" in workflowSnapshot && (!("snapshot_id" in queuedThreat) || queuedThreat.snapshot_id !== workflowSnapshot.id)) {
               throw new Error("Threats scan source does not match the reviewed portfolio snapshot.");
@@ -7684,7 +7693,7 @@ ${zerodhaExecutionMode === "direct_market"
         if (portfolio === "zerodha") {
           await ensureZerodhaConnectedForSync(zerodhaPopup);
           const previousOverview = await apiService.zerodhaPortfolioOverview();
-          const synced = await queueZerodhaPortfolioSyncWithAuthRetry(runtimeOwner);
+          await queueZerodhaPortfolioSyncWithAuthRetry(runtimeOwner);
           const overview = await waitForZerodhaPortfolioSync(
             previousOverview.latest?.captured_at,
             () => cancelRequestedRef.current || !isCurrentWorkflowOwner(runtimeOwner),
@@ -7693,10 +7702,7 @@ ${zerodhaExecutionMode === "direct_market"
           markCompleted(portfolio, "sync", {
             completedAt: overview.latest?.captured_at,
             portfolioStockCount: overview.latest?.holdings_count ?? null,
-            runStatus:
-              overview.latest?.captured_at !== previousOverview.latest?.captured_at
-                ? "synced"
-                : synced.status,
+            runStatus: "synced",
           });
         } else if (payload) {
           const snapshot =

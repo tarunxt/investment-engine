@@ -63,14 +63,11 @@ zerodhaOrders:()=>read('orders',{data:[]})
   assert.equal(await saved().getByRole('button',{name:'Sync Portfolio',exact:true}).isDisabled(),true);
   assert.ok((await saved().boundingBox()).y<757);
   assert.match(await page.locator('header').textContent(),/India.*Saved snapshot.*30 Oct 2026.*Not connected/);
-  assert.equal(await page.getByRole('navigation',{name:'Portfolio stages and markets'}).getByRole('link').count(),18);
+  assert.equal(await page.getByRole('navigation',{name:'Portfolio stages and markets'}).count(),0);
   assert.equal(await page.evaluate(()=>devicePixelRatio),1);
   assert.match(await saved().textContent(),/Source: offline_fixture.*Holdings: 0/);
-  const links=await page.getByRole('navigation').getByRole('link').evaluateAll(nodes=>nodes.map(n=>n.getAttribute('href')));
-  for(const market of ['zerodha','indmoney-us'])for(const stage of ['','/swing-trade','/threats','/events','/rebalance','/final-actionables'])assert.ok(links.includes('/console/'+market+stage));
-  assert.equal(await page.getByRole('link',{name:'India Portfolio',exact:true}).evaluate(e=>getComputedStyle(e).backgroundColor),'rgb(124, 58, 237)');
   await page.screenshot({path:path.join(evidence,'desktop-saved.png')});
-  await page.evaluate(()=>document.documentElement.classList.add('dark'));await page.waitForFunction(()=>getComputedStyle([...document.querySelectorAll('nav a')].find(e=>e.textContent==='Swing Trade')).backgroundColor==='rgb(46, 16, 101)');await page.screenshot({path:path.join(evidence,'desktop-dark.png')});await page.evaluate(()=>document.documentElement.classList.remove('dark'));
+  await page.evaluate(()=>document.documentElement.classList.add('dark'));await page.screenshot({path:path.join(evidence,'desktop-dark.png')});await page.evaluate(()=>document.documentElement.classList.remove('dark'));
   await guidance().click();await page.getByText('Kite Connect integration — save daywise portfolio history and manage orders').waitFor();
   await page.getByPlaceholder('Paste request_token here').waitFor();assert.equal(await page.getByRole('link',{name:'Open full-page login'}).getAttribute('href'),'/fixture-kite-login');
   await page.screenshot({path:path.join(evidence,'desktop-connection.png')});await guidance().click();

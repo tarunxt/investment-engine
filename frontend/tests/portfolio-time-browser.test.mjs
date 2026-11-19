@@ -29,7 +29,7 @@ before(async () => {
     mode: 'development', devtool: false, context: frontend, entry: join(temp, 'entry.tsx'),
     output: { path: temp, filename: 'bundle.js' },
     resolve: { extensions: ['.tsx', '.ts', '.jsx', '.js'], modules: [join(frontend, 'node_modules'), 'node_modules'], alias: { 'next/link$': join(temp, 'link.jsx'), '@': frontend } },
-    module: { rules: [{ test: /\.(tsx?|jsx)$/, exclude: /node_modules/, use: join(temp, 'ts-loader.cjs') }] },
+    module: { rules: [{ test: /\.css$/, type: 'asset/source' }, { test: /\.(tsx?|jsx)$/, exclude: /node_modules/, use: join(temp, 'ts-loader.cjs') }] },
     plugins: [new webpack.DefinePlugin({ 'process.env': JSON.stringify({ NODE_ENV: 'development' }) })],
     optimization: { minimize: false },
   });
@@ -55,10 +55,10 @@ test('actual India and US labels in isolated states and widths',async()=>{
  const text=await page.locator('main').innerText();
  writeFileSync(join(evidence,`${market}-${state}-${width}.json`),JSON.stringify({timestamp:new Date().toISOString(),width,deviceScaleFactor:1,text},null,2));
  if(process.env.TIME_AFTER !== '0' && ['success','partial','stale'].includes(state)) {
- assert.ok(await page.getByRole('status').count()>0,'capture status is announced');
+ assert.equal(await page.locator('time[datetime]').filter({hasText:/8:19 pm/i}).count(),1,'one readable capture timestamp');
  assert.match(text,/20 Oct 2026/);
  if(market==='us') assert.match(await page.getByText('Wallet',{exact:true}).locator('../..').innerText(),/—/);
- assert.match(text,/Captured/); assert.match(text,/8:19 pm IST/i); assert.match(text,/Price as-of unavailable in this view/); assert.match(text,/Save time unavailable in this view/);
+ assert.match(text,market==='india'?/20 Oct 2026, 8:19 pm/i:/8:19 pm IST/i); assert.doesNotMatch(text,/Price as-of unavailable in this view|Save time unavailable in this view/);
  assert.match(text,market==='india'?/Available Margin/i:/Wallet/i);
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,'no page overflow');
  await page.keyboard.press('Tab');assert.equal(await page.evaluate(()=>document.activeElement!==document.body),true,'keyboard target');

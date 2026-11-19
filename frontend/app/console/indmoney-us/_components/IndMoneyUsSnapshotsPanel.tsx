@@ -1,6 +1,5 @@
 'use client';
 
-import { formatPortfolioTimestamp } from "@/lib/portfolioTimestamp";
 import {
   Activity,
   AlertTriangle,
@@ -58,14 +57,6 @@ function formatSnapshotDate(value: string) {
   return new Date(`${value}T00:00:00`).toLocaleDateString('en-IN', {
     dateStyle: 'medium',
   });
-}
-
-function formatCapturedAt(value: string) {
-  return formatPortfolioTimestamp(value);
-}
-
-function formatSnapshotTime(value: string) {
-  return formatPortfolioTimestamp(value, true);
 }
 
 function formatShortSnapshotDate(value: string) {
@@ -320,14 +311,10 @@ function SnapshotHistoryChart({
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">Historical trend</span>
-          <p className="mt-1 text-sm text-gray-500">Current value trend across saved INDmoney snapshots.</p>
         </div>
         {selectedPoint ? (
           <div className="text-sm sm:text-right">
             <p className="font-semibold text-gray-950">{formatCurrency(selectedPoint.value)}</p>
-            <p className="text-xs text-gray-500">
-              {formatSnapshotDate(selectedPoint.snapshot_date)} · Captured {formatSnapshotTime(selectedPoint.captured_at)}
-            </p>
           </div>
         ) : null}
       </div>
@@ -747,12 +734,6 @@ export function IndMoneyUsSnapshotsPanel({
                 <p className="mt-2 text-lg font-semibold text-gray-950">
                   {formatSnapshotDate(selectedSnapshot.snapshot_date)}
                 </p>
-              </div>
-              <div className="text-sm text-gray-500">
-                <p role="status">Captured <time dateTime={selectedSnapshot.captured_at}>{formatCapturedAt(selectedSnapshot.captured_at)}</time></p>
-                <p>Save time unavailable in this view</p>
-                <p>Price as-of unavailable in this view</p>
-                <p className="capitalize">Source: {selectedSnapshot.source.replace('_', ' ')}</p>
               </div>
             </div>
 

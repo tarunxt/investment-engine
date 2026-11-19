@@ -230,7 +230,7 @@ export interface IApiService {
     zerodhaThreatsLatest(): Promise<ZerodhaThreatLatestResponse>;
     zerodhaThreatsHistory(params?: { limit?: number }): Promise<ZerodhaThreatHistoryResponse>;
     zerodhaThreatJob(jobId: number): Promise<ZerodhaThreatAnalysis>;
-    zerodhaRunThreats(data?: PortfolioEventRunRequest): Promise<ZerodhaThreatRunResponse>;
+    zerodhaRunThreats(data?: PortfolioEventRunRequest & { expected_snapshot_captured_at?: string }): Promise<ZerodhaThreatRunResponse>;
 
     // INDmoney US endpoints
     indmoneyUsPortfolioOverview(): Promise<IndMoneyUsPortfolioOverviewResponse>;
