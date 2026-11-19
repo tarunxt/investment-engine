@@ -104,6 +104,7 @@ async def validate_frozen_final(db, payload, *, user_id, portfolio, sequence, al
                 jobs_by_run[link.run_id].append(known_jobs[link.job_id])
         try:
             manifest_line = next((line for line in technical.prompt.splitlines() if line.startswith("[WORKFLOW_SCORECARDS_V1]")), None)
+            diagnostics = {} if scorecard_evidence is None else scorecard_evidence
             scorecards = {}
             if manifest_line:
                 try:
@@ -114,7 +115,7 @@ async def validate_frozen_final(db, payload, *, user_id, portfolio, sequence, al
                 if not rebuild and payload.get("scorecard_job_id") != source_id:
                     raise HTTPException(409, "Final scorecard job differs from the Technical source")
                 payload["scorecard_job_id"] = source_id
-                scorecards = await verified_scorecards(db, source_id, user_id, portfolio, sequence, legacy_evidence=payload.get("formula_version") == "score-matrix-v1", evidence=scorecard_evidence)
+                scorecards = await verified_scorecards(db, source_id, user_id, portfolio, sequence, legacy_evidence=payload.get("formula_version") == "score-matrix-v1", evidence=diagnostics)
                 observations = manifest.get("rows")
                 if not isinstance(observations, list) or len(observations) > 500:
                     raise HTTPException(422, "Invalid scorecard observations")
@@ -154,7 +155,9 @@ async def validate_frozen_final(db, payload, *, user_id, portfolio, sequence, al
                 listing = row["exchange"] + ":" + row["symbol"]
                 pair, threat = scorecards.get(listing, (None, None))
                 effective = row["effectiveScore"]
-                ranking.append({"listing": listing, "stock_threat": threat, "pairwise": pair,
+                detail = diagnostics.get(listing, {})
+                reason = detail.get("threat_reason") if detail else ("Missing stock threat row" if manifest_line else "No scorecard manifest")
+                ranking.append({"threat_reason": reason, "listing": listing, "stock_threat": threat, "pairwise": pair,
                                 "score": None if effective is None else (effective + 3) * 100 / 6})
             ranking.sort(key=lambda r: (r["score"] is None, -(r["score"] or 0), r["listing"]))
             payload["actionable_ranking"] = {"version": "weighted-98-1-1-v1", "rows": ranking}
@@ -191,7 +194,11 @@ async def verified_scorecards(db, job_id, user_id, portfolio, sequence, *, legac
             scores[listing] = number if number is not None and math.isfinite(number) and 0 <= number <= 100 else None
         return scores
 
-    threats = unique_scores(tables.get("stock_threat_scores", []),
+    threat_rows = tables.get("stock_threat_scores", [])
+    counts = defaultdict(int)
+    for row in threat_rows:
+        counts[row["Exchange"] + ":" + row["Stock Symbol"]] += 1
+    threats = unique_scores(threat_rows,
                             lambda row: row["Exchange"] + ":" + row["Stock Symbol"], "Stock Threat /100")
     pairs = unique_scores(tables.get("pairwise_scores", []), lambda row: row["Listing"], "Pairwise /100")
     if evidence is not None:
@@ -201,6 +208,8 @@ async def verified_scorecards(db, job_id, user_id, portfolio, sequence, *, legac
             count = str(row.get("Valid comparisons", "")).strip()
             comparisons[listing] = int(count) if listing not in comparisons and count.isdecimal() else None
         for listing in pairs.keys() | threats.keys():
-            evidence[listing] = {"job_id": job_id, "comparisons": comparisons.get(listing),
+            count = counts[listing]
+            reason = ("Duplicate stock threat rows" if count > 1 else "Invalid stock threat score" if count and threats.get(listing) is None else None if count else "Missing stock threat row")
+            evidence[listing] = {"threat_reason": reason, "job_id": job_id, "comparisons": comparisons.get(listing),
                                  "pairwise": pairs.get(listing), "stock_threat": threats.get(listing)}
     return {key: (pairs.get(key), threats.get(key)) for key in pairs.keys() | threats.keys()}
