@@ -183,6 +183,10 @@ def recovery_http_allowed(method, path):
             "/jobs", "/prompts", "/providers", "/api-usage",
         ))
     if method == "POST":
+        # Recompute from the authenticated owner's saved sources and append only
+        # the versioned result. This handler never submits jobs, orders or mail.
+        if re.fullmatch(r"/runs/auto-rebalance-history/india/[1-9][0-9]*/replay-score-v2", path):
+            return True
         if stored_audit_recovery_enabled() and (
             path in {"/runs/recommendation-audit/materialize", "/runs/recommendation-audit/calculations", "/runs/recommendation-audit/verifications"}
             or re.fullmatch(r"/runs/recommendation-audit/verifications/[0-9a-fA-F-]{36}/cancel", path)
