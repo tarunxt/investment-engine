@@ -144,6 +144,7 @@ function harness({ analysisOnly = false, formulaScore = 0, intercept, read, emai
     buildOutputSourceJobs: async () => [], getPreviousMarketClose: () => new Date(),
     buildRebalanceInputBundle: () => "snapshot", ensureRebalanceFlowMarker: p => p,
     buildRebalancePrompt: () => "rebalance", getRebalanceDefaultExportSheetName: () => "sheet",
+    captureUsValuation: async () => ({schema:"us-valuation-v1"}),
     captureIndiaValuation: async () => { throw new Error("Valuation inputs unavailable in audit persistence fixture"); },
     parseApiTimestamp: value => value ? new Date(value) : null,
     scoreMatrixFormulaConfig: {}, auditResponseHashes: async () => ({}),

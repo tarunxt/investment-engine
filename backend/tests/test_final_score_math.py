@@ -112,8 +112,9 @@ def test_component_arithmetic_parity():
         scan = fixture["technical"]
         technical = {key: scan[field] for key, field in (("Confidence Score", "confidenceScore"),
                     ("Premarket trend", "premarketTrend"), ("Last 5 candles trend", "last5CandlesTrend"))} if scan else None
+        prices = [float(row["Price Per Unit"]) for row in fixture["rows"] if str(row.get("Price Per Unit", "")).replace(".", "", 1).isdigit() and float(row["Price Per Unit"]) > 0]
         expected = calculate_listing(fixture["rows"], fixture["formula"], technical,
-                                     direction="bullish" if scan else None, market=fixture["market"])
+                                     direction="bullish" if scan else None, market=fixture["market"], buy_quote={"price":next(iter(prices), None)})
         detail = output["detail"]
         assert equivalent(detail["calculatedScore"], expected["raw_score"]), fixture
         assert equivalent(output["estimate"], expected["estimate"]), fixture
@@ -185,3 +186,23 @@ Portfolio holdings table:
     assert after["estimate"] == dict(currentUnits=19, currentInvestmentAmount=8274.5, units=9, amount=3919.5)
     with pytest.raises(UnverifiableFinal):
         captured_positions(prompt.replace("count: 1", "count: 2"))
+
+
+@pytest.mark.parametrize("market,expected_units", [("india", 2), ("us", 2.5)])
+def test_buy_quote_provenance_and_unavailable_amount(market, expected_units):
+    rows = [source_row(**{ACTION_HEADER: "Buy New", "Current Units": "0", "Units Change": "2.5", "Units to Buy": "2.5", "Price Per Unit": "0"})]
+    for price, amount in [(12.5, expected_units * 12.5), (None, None)]:
+        result = calculate_listing(rows, formula(), market=market, buy_quote={"price":price})
+        assert result["estimate"]["units"] == expected_units
+        assert result["estimate"]["amount"] == amount
+
+
+def test_us_snapshot_identity_and_fractional_position():
+    from types import SimpleNamespace
+    from app.domains.runs.final_us_positions import holding, resolve_listing
+    listings = [{"symbol":"ACME", "instrument":"NASDAQ:ACME", "security_id":"a", "listing_mic":"XNAS", "share_class":"A"}]
+    key, identity, safe = resolve_listing(("US", "ACME"), listings)
+    assert key == ("NASDAQ","ACME") and identity == 'us:["a","XNAS","A"]' and safe
+    snap = SimpleNamespace(parse_status="parsed", holdings_count=1, reported_holdings_count=1, holdings=[{"symbol":"ACME","quantity":0.1278,"current_value":23.45}])
+    assert holding(snap, key, safe) == (0.1278,23.45,"matched")
+    assert holding(snap, key, False) == (None,None,"unresolved")

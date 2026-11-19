@@ -7924,7 +7924,7 @@ export function buildFinalActionableHistoryItems(
       action_units: estimate.units,
       amount: estimate.amount,
       technical_scan_run_id: row.detail.technicalScanSourceRunId,
-      formula_version: row.market === "india" ? "score-matrix-v2" : "score-matrix-v1",
+      formula_version: "score-matrix-v2",
       formula_inputs_json: row.detail as unknown as Record<string, unknown>,
       source_run_ids_json: sourceRunIds,
       snapshot_json: {
@@ -7974,7 +7974,14 @@ function buildFormulaActionEstimate(
   let amount: number | null = null;
 
   if (units !== null) {
-    if (stock.positionContext?.source === "portfolio-snapshot" && currentInvestmentAmount === null && (action === "Trim" || action === "Sell All")) {
+    if (action === "Buy New" || action === "Add more") {
+      const quotes = (stock.consensusRows ?? stock.rows ?? [])
+        .map(row => ({ ...row.meta, price: parseStrictNumericCell(row.cells["Price Per Unit"]) }))
+        .filter(row => row.price !== null && row.price > 0)
+        .sort((a, b) => a.runId - b.runId || a.jobId - b.jobId || a.price! - b.price!);
+      const buyPrice = quotes[0]?.price;
+      amount = units === 0 ? 0 : buyPrice == null ? null : units * buyPrice;
+    } else if (stock.positionContext?.source === "portfolio-snapshot" && currentInvestmentAmount === null && (action === "Trim" || action === "Sell All")) {
       amount = null;
     } else if (action === "Sell All" && currentInvestmentAmount !== null) {
       amount = currentInvestmentAmount;
@@ -7987,13 +7994,7 @@ function buildFormulaActionEstimate(
       amount = Math.abs(units / currentUnits) * currentInvestmentAmount;
     } else if (price !== null) {
       amount = Math.abs(units * price);
-    } else if (
-      action === "Add more" &&
-      currentUnits !== null &&
-      currentUnits > 0 &&
-      currentInvestmentAmount !== null
-    ) {
-      amount = Math.abs(units / currentUnits) * currentInvestmentAmount;
+
     } else {
       amount = getActionAmount(stock.representative, units, action);
     }

@@ -305,8 +305,8 @@ export function AutoRebalanceHistoryDetailClient({
       const detail = await apiService.getAutoRebalanceHistoryDetail(apiPortfolio(portfolio), sequence);
       setRun(detail);
       setVerificationMessage(null);
-      if (detail.portfolio === "india" && detail.stages.some(stage => stage.stage === "actionables")) {
-        const receipt = await apiService.getIndiaScoreVerification(sequence);
+      if (detail.stages.some(stage => stage.stage === "actionables")) {
+        const receipt = await apiService.getScoreVerification(apiPortfolio(portfolio), sequence);
         setVerificationMessage(receipt.verified ? "Saved score verified against source runs and formula." : "Score verification pending. " + receipt.reason);
       }
     } catch (reason) {
@@ -335,7 +335,7 @@ export function AutoRebalanceHistoryDetailClient({
   const finalSummary = run?.stages.find(stage => stage.stage === "actionables")?.summary;
   const replay = finalSummary?.corrected_final_v2;
   const currentSizing = typeof replay === "object" && replay !== null && "sizing_policy" in replay && replay.sizing_policy === "directional-v2";
-  const snapshotValuation = typeof replay === "object" && replay !== null && ("position_policy" in replay && replay.position_policy === "zerodha-settled-snapshot-v1" || !("scorecard_job_id" in replay));
+  const snapshotValuation = typeof replay === "object" && replay !== null && (run?.portfolio === "indmoney_us" || "position_policy" in replay && replay.position_policy === "zerodha-settled-snapshot-v1" || !("scorecard_job_id" in replay));
   const jobs = useMemo(() => run ? [...run.standalone_jobs, ...run.runs.flatMap((item) => item.jobs)] : [], [run]);
 
   return (
@@ -352,12 +352,13 @@ export function AutoRebalanceHistoryDetailClient({
         <Button disabled={reconciling || loading} onClick={() => void reconcile()}>{reconciling ? "Reconciling…" : "Reconcile this run"}</Button>}
       {run ? <>
         <div className={`rounded-2xl border p-5 ${stageCardTone(run.status)}`}><div className="flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-2 text-slate-900">{run.status === "failed" ? <XCircle className="size-5 text-rose-600" /> : <Clock3 className="size-5 text-slate-600" />}<span className="font-semibold">{run.status === "failed" ? "Run stopped" : "Run summary"}</span></div><span className="text-xs text-slate-600">Saved status <StatusBadge status={run.status} workflow /></span></div><div className="mt-4 grid gap-3 text-sm sm:grid-cols-4"><span>Started: {formatTime(run.created_at)}</span><span>Finished: {formatTime(run.completed_at)}</span><span>Last recorded stage: {run.current_stage ? STAGE_LABELS[run.current_stage] : "—"}</span><span>Total LLM cost: {formatCost(run.total_estimated_cost)}</span></div>{run.error_message ? <div className="mt-4 rounded-lg border border-rose-200 bg-white/70 p-3 text-sm text-rose-800">{run.error_message}</div> : null}</div>
-        {run.portfolio === "india" && run.stages.some(s => s.stage === "actionables") && <div>
+        {run.stages.some(s => s.stage === "actionables") && <div>
           {verificationMessage && <p role="status">{verificationMessage}</p>}
           {replay != null && <details><summary>Saved replay · score matrix v2</summary><pre className="max-h-96 overflow-auto whitespace-pre-wrap text-xs">{JSON.stringify(replay, null, 2)}</pre></details>}
+          {finalSummary?.previous_price_replay != null && <details><summary>Previous buy valuation</summary><pre>{JSON.stringify(finalSummary.previous_price_replay, null, 2)}</pre></details>}
           {finalSummary?.previous_sizing_replay != null && <details><summary>Previous sizing revision</summary><pre className="max-h-96 overflow-auto whitespace-pre-wrap text-xs">{JSON.stringify(finalSummary.previous_sizing_replay, null, 2)}</pre></details>}
           {finalSummary?.previous_valuation_replay != null && <details><summary>Previous holding valuation</summary><pre className="max-h-96 overflow-auto whitespace-pre-wrap text-xs">{JSON.stringify(finalSummary.previous_valuation_replay, null, 2)}</pre></details>}
-          {(!currentSizing || !snapshotValuation) && <Button disabled={reconciling || loading} onClick={() => void reconcile(true)}>{currentSizing ? "Create snapshot valuation revision" : replay ? "Create directional sizing revision" : "Replay saved inputs under score matrix v2"}</Button>}
+          {(!currentSizing || !snapshotValuation || !(typeof replay === "object" && replay && "buy_price_policy" in replay)) && <Button disabled={reconciling || loading} onClick={() => void reconcile(true)}>{currentSizing ? "Update saved valuation revision" : replay ? "Create directional sizing revision" : "Replay saved inputs under score matrix v2"}</Button>}
         </div>}
         {run.stages.filter(stage => stage.stage === "actionables" && stage.summary.frozen_final).map(stage => (
           <details key="frozen-final" className="rounded-xl border bg-white p-4">

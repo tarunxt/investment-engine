@@ -12,6 +12,7 @@ import { AnalysisOnlyRunControl } from "@/components/shared/AnalysisOnlyRunContr
 import { WorkflowStageLedger, WorkflowStageLedgerViews, type WorkflowLedgerView } from "@/components/shared/WorkflowStageLedger";
 import { WorkflowRunBoundary } from "@/app/console/automated-rebalance/_components/WorkflowRunBoundary";
 
+import { captureUsValuation } from "@/lib/captureUsValuation";
 import { captureIndiaValuation } from "@/lib/captureIndiaValuation";
 import { workflowRanking } from "@/lib/workflowScorecardRanking";
 import { type WorkflowStageKey, type StageState, type StageErrorDetail, type StageInfo, STAGE_ORDER, STAGE_METADATA, getStageTileLabel, parseTimestampMs, formatDuration, formatInrCost, WorkflowStageTile } from "@/components/shared/WorkflowStageTile";
@@ -3267,10 +3268,10 @@ function ScopedZerodhaBasketPreviewDialog({
                 data-testid="basket-score-scan-completed-at"
               >
                 Last score scan: {formatCompactStageTime(scoreScanCompletedAt)}
-                {isZerodhaPreview && <span className="ml-2">
+                {<span className="ml-2">
                   {scoreRevision ? `Run #${scoreRevision.sequence} · ${scoreRevision.replayed ? "Saved replay" : "Original record"} · ${scoreRevision.version ?? "revision unavailable"}` : "Saved revision unavailable"}
                   {detailsData.portfolioSnapshot && ` · Holdings ${formatCompactStageTime(detailsData.portfolioSnapshot.captured_at)}`}
-                  {calculationStocks.length > 0 && ` · Upstox quote times: ${[...new Set(calculationStocks.map(stock => stock.upstoxAsOf ? formatCompactStageTime(stock.upstoxAsOf) : "unavailable"))].join(", ")}`}
+                  {isZerodhaPreview && calculationStocks.length > 0 && ` · Upstox quote times: ${[...new Set(calculationStocks.map(stock => stock.upstoxAsOf ? formatCompactStageTime(stock.upstoxAsOf) : "unavailable"))].join(", ")}`}
                   {scoreRevision?.capturedAt && ` · ${formatCompactStageTime(scoreRevision.capturedAt)}`}
                 </span>}
               </p>
@@ -3362,7 +3363,7 @@ function ScopedZerodhaBasketPreviewDialog({
                 {displayCalculations.error ? <p role="alert" className="mb-3 text-red-700">{displayCalculations.error} <button type="button" onClick={displayCalculations.retry} className="underline">Retry historical scores</button></p> : null}
               </div>
               <div className="w-fit min-w-full overflow-clip rounded-2xl border border-slate-200">
-                  <BasketColumnTable hidden={hiddenColumns} order={columnPreferences?.order} names={isZerodhaPreview && displayCalculations.parameters ? { "Historical Weighted Score": `${displayCalculations.parameters.days}-day mean of run scores (−3 to +3)`, ...columnNames } : columnNames} onOpen={setColumnMenu} onRequestRename={setRenameColumn}>
+                  <BasketColumnTable hidden={hiddenColumns} order={columnPreferences?.order} names={displayCalculations.parameters ? { "Historical Weighted Score": `${displayCalculations.parameters.days}-day mean of run scores (−3 to +3)`, ...columnNames } : columnNames} onOpen={setColumnMenu} onRequestRename={setRenameColumn}>
                   <table className="min-w-[92rem] w-full text-sm">
                     <thead className="sticky top-0 z-10 bg-slate-50">
                       <tr className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
@@ -3447,11 +3448,11 @@ function ScopedZerodhaBasketPreviewDialog({
                                   </div>
                                 </td>
                                 <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-800">
-                                  <ScoreMatrixButton workflowScale={isZerodhaPreview} detail={order.detail} savedScore={scoreRevision?.saved.get(stockIdentity(order.symbol, order.exchange))} originalDenominator={scoreRevision?.originals.get(stockIdentity(order.symbol, order.exchange))} formulaConfig={formulaConfig} onOpenDetail={setSelectedMatrixDetail} />
+                                  <ScoreMatrixButton workflowScale detail={order.detail} savedScore={scoreRevision?.saved.get(stockIdentity(order.symbol, order.exchange))} originalDenominator={scoreRevision?.originals.get(stockIdentity(order.symbol, order.exchange))} formulaConfig={formulaConfig} onOpenDetail={setSelectedMatrixDetail} />
                                 </td>
                                 <td className="whitespace-nowrap px-4 py-3">
                                   <ConsensusBreakupButton stock={order.stock} action={getZerodhaBasketActionForPercent(order)} />
-                                  {isZerodhaPreview && <details className="text-xs text-slate-600"><summary>Rationale coverage {indiaSource(order)?.modelPrices.filter(m => m.fields === 6).length ?? 0}/{order.stock.rows?.length ?? 0} jobs</summary>{indiaSource(order)?.modelPrices.map(m => <div key={m.job}>#{m.job} {m.provider} · {m.fields}/6 scored · model ₹{m.price ?? "unavailable"} · job {m.time}{m.excluded.length ? ` · excluded: ${m.excluded.join(", ")}` : ""}</div>)}<div>Upstox ₹{order.price ?? "unavailable"} · last trade {order.draftContext?.asOf ?? "unavailable"}</div>{divergent(order) && <button type="button" className="text-blue-700 underline" disabled={priceReviews.has(priceReviewKey(order))} onClick={() => setPriceReviews(previous => new Set([...previous, priceReviewKey(order)]))}>{priceReviews.has(priceReviewKey(order)) ? "Price difference reviewed" : "Acknowledge this price difference"}</button>}</details>}
+                                  {<details className="text-xs text-slate-600"><summary>Rationale coverage {indiaSource(order)?.modelPrices.filter(m => m.fields === 6).length ?? 0}/{order.stock.rows?.length ?? 0} jobs</summary>{indiaSource(order)?.modelPrices.map(m => <div key={m.job}>#{m.job} {m.provider} · {m.fields}/6 scored · model {formatBasketDisplayCurrency(m.price, basketCurrency)} · job {m.time}{m.excluded.length ? ` · excluded: ${m.excluded.join(", ")}` : ""}</div>)}{isZerodhaPreview && <div>Upstox ₹{order.price ?? "unavailable"} · last trade {order.draftContext?.asOf ?? "unavailable"}</div>}{isZerodhaPreview && divergent(order) && <button type="button" className="text-blue-700 underline" disabled={priceReviews.has(priceReviewKey(order))} onClick={() => setPriceReviews(previous => new Set([...previous, priceReviewKey(order)]))}>{priceReviews.has(priceReviewKey(order)) ? "Price difference reviewed" : "Acknowledge this price difference"}</button>}</details>}
                                 </td>
                                 <td className="whitespace-nowrap px-4 py-3 text-slate-700">{isZerodhaPreview ? order.draftContext?.originalAction ?? getZerodhaBasketActionForPercent(order) : getZerodhaBasketActionForPercent(order)}</td>
                                 <td className="px-4 py-3">
@@ -3514,7 +3515,7 @@ function ScopedZerodhaBasketPreviewDialog({
                               return <tr key={`display-only:${row.id}`} data-display-only="true" className="bg-white transition">
                                 <td className="px-4 py-3"><input type="checkbox" disabled aria-label={`${row.stock.exchange} ${row.stock.symbol} display only; no executable order`} className="size-4 rounded border-slate-300" /></td>
                                 <td className="whitespace-nowrap px-4 py-3 font-bold text-slate-950"><div className="inline-flex items-center gap-1.5"><StockDetailsButton stock={row.stock} formulaConfig={formulaConfig} market={tradingViewMarket} technicalScan={null} detailsData={detailsData} historicalRows={historicalRows} /><span className="text-xs font-semibold text-slate-500">{row.stock.exchange}</span><TradingViewSymbolLink symbol={row.stock.symbol} market={tradingViewMarket} exchange={row.stock.exchange}>{row.stock.symbol}</TradingViewSymbolLink></div></td>
-                                <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-800"><ScoreMatrixButton workflowScale={isZerodhaPreview} savedScore={scoreRevision?.saved.get(stockIdentity(row.stock.symbol, row.stock.exchange))} originalDenominator={scoreRevision?.originals.get(stockIdentity(row.stock.symbol, row.stock.exchange))} detail={row.detail} formulaConfig={formulaConfig} onOpenDetail={setSelectedMatrixDetail} /></td>
+                                <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-800"><ScoreMatrixButton workflowScale savedScore={scoreRevision?.saved.get(stockIdentity(row.stock.symbol, row.stock.exchange))} originalDenominator={scoreRevision?.originals.get(stockIdentity(row.stock.symbol, row.stock.exchange))} detail={row.detail} formulaConfig={formulaConfig} onOpenDetail={setSelectedMatrixDetail} /></td>
                                 <td className="whitespace-nowrap px-4 py-3"><ConsensusBreakupButton stock={row.stock} action={row.formulaAction} /></td>
                                 <td className="whitespace-nowrap px-4 py-3 text-slate-700">{row.formulaAction ?? (row.formulaScore == null ? "Score unavailable" : "Holdings unavailable")}</td>
                                 <td className="px-4 py-3">{side ? <span className={cn("rounded-full px-3 py-1 text-xs font-bold", side === "BUY" ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700")}>{side}</span> : <span title="Hold has no order side">Not applicable</span>}</td>
@@ -4960,6 +4961,80 @@ export function RebalanceWorkflowSections({
 
   const zerodhaPreparation = useRef(0);
   const indmoneyPreparation = useRef(0);
+  const verifyBasketRevision = useCallback(async (market: "india" | "us", stocks: StockConsensus[], technicalScans: ReturnType<typeof buildTechnicalScanMap>, initialFormula: ScoreMatrixFormulaConfig, rebalance: RunResponse[], technical: RunResponse, sequence: number, requested?: {sequence:number; formula:ScoreMatrixFormulaConfig}) => {
+    const broker = market === "india" ? "india" : "indmoney_us";
+    let formula = initialFormula;
+    let actionRows = buildDashboardActionRows(stocks, market, technicalScans, formula);
+    const [history, hashes, verification] = await Promise.all([
+      apiService.getAutoRebalanceHistoryDetail(broker, sequence), auditResponseHashes([...rebalance, technical], technical), apiService.getScoreVerification(broker, sequence),
+    ]);
+
+    const stage = history.stages.find(s => s.stage === "actionables");
+    const corrected = stage?.summary?.corrected_final_v2;
+    const frozen = verification.verified ? verification.record : (corrected ?? stage?.summary?.frozen_final) as Record<string, unknown> | undefined;
+    const original = stage?.summary?.frozen_final as Record<string, unknown> | undefined;
+    const originals = new Map<string, number>();
+    for (const saved of Array.isArray(original?.rows) ? original.rows : []) {
+      const denominator = saved?.formula_inputs?.detailedRationaleDenominator;
+      if (typeof denominator === "number" && Number.isFinite(denominator)) {
+        originals.set(stockIdentity(saved.symbol, saved.exchange), denominator);
+      }
+    }
+    const ranking = frozen?.actionable_ranking as {rows?: {listing:string;threat_reason?:string | null}[]} | undefined;
+    const reasons = new Map(ranking?.rows?.map(item=>[item.listing,item.threat_reason]));
+    const saved = new Map<string, {score: number; divisor?: number; jobId?: number; threatReason?: string | null; comparisons?: number | null; pairwise?: number | null}>();
+    for (const row of Array.isArray(frozen?.rows) ? frozen.rows : []) {
+      if (typeof row?.effectiveScore === "number" && Number.isFinite(row.effectiveScore)) {
+        const evidence = verification.verified ? verification.evidence[row.exchange + ":" + row.symbol] : undefined;
+        saved.set(stockIdentity(row.symbol, row.exchange), {score: row.effectiveScore, divisor: row.formula_inputs?.detailedRationaleDenominator, jobId: evidence?.job_id, comparisons: evidence?.comparisons, pairwise: evidence?.pairwise, threatReason: verification.verified ? evidence?.threat_reason ?? reasons.get(row.exchange + ":" + row.symbol) : null});
+      }
+    }
+    const storedFormula = verification.verified && frozen?.formula && typeof frozen.formula === "object"
+      ? normalizeScoreMatrixFormulaConfig(frozen.formula as Partial<ScoreMatrixFormulaConfig>) : null;
+    const verifiedSettings = storedFormula && canonicalBasketInputs(storedFormula) === canonicalBasketInputs(frozen?.formula) ? storedFormula : null;
+    if (!requested && verifiedSettings) {
+      formula = verifiedSettings;
+
+      actionRows = buildDashboardActionRows(stocks, market, technicalScans, formula);
+    }
+    const divisors = new Set<string>();
+    const differences = actionRows.filter(row => {
+      const entry = saved.get(stockIdentity(row.stock.symbol, row.stock.exchange));
+      if (entry?.divisor != null && entry.divisor !== row.detail.detailedRationaleDenominator)
+        divisors.add(`${row.detail.detailedRationaleDenominator} → ${entry.divisor}`);
+      return !entry || !sameFrozenScore(entry.score, row.formulaScore) || entry.divisor !== row.detail.detailedRationaleDenominator;
+    }).map(row => stockIdentity(row.stock.symbol, row.stock.exchange));
+    const revision = {
+      formula: verifiedSettings,
+      divisors: [...divisors], differences,
+      sequence, version: typeof frozen?.formula_version === "string" ? frozen.formula_version : null,
+      capturedAt: typeof frozen?.captured_at === "string" ? frozen.captured_at : null,
+      replayed: Boolean(corrected), originals, saved,
+    };
+    const rows = Array.isArray(frozen?.rows) ? frozen.rows : [];
+    const listingKey = (exchange: string, symbol: string) => JSON.stringify([exchange, symbol]);
+    const savedByListing = new Map(rows.map(saved => [listingKey(saved.exchange, saved.symbol), saved]));
+    const problems = [
+      requested && sequence !== requested.sequence && "requested workflow sequence",
+      !verification.verified && verification.reason,
+      !(stage?.status === "completed" || corrected) && "Actionables completion or saved replay",
+      (frozen?.schema !== "workflow-final-v2" || frozen.formula_version !== "score-matrix-v2") && "formula version",
+      (frozen?.broker !== broker || frozen.workflow_sequence !== sequence) && "workflow identity",
+      frozen?.technical_run_id !== technical.id && "Technical source run",
+      canonicalBasketInputs(frozen?.rebalance_run_ids) !== canonicalBasketInputs(rebalance.map(r => r.id)) && "Rebalance source runs",
+      canonicalBasketInputs(frozen?.response_hashes) !== canonicalBasketInputs(hashes) && "source response revisions",
+      canonicalBasketInputs(frozen?.formula) !== canonicalBasketInputs(formula) && "formula settings",
+      (!rows.length || savedByListing.size !== rows.length || rows.length !== actionRows.length ||
+        new Set(actionRows.map(row => listingKey(row.stock.exchange, row.stock.symbol))).size !== actionRows.length) && "listing coverage",
+      ...actionRows.flatMap(row => {
+        const saved = savedByListing.get(listingKey(row.stock.exchange, row.stock.symbol));
+        return saved && saved.action === row.formulaAction && sameFrozenScore(saved.score, row.formulaScore)
+          ? [] : [row.stock.exchange + ":" + row.stock.symbol + " action or score"];
+      }),
+    ].filter(Boolean);
+    const issue = problems.length ? "Could not match " + problems.filter(problem => !String(problem).endsWith(" action or score")).concat(problems.some(problem => String(problem).endsWith(" action or score")) ? ["listing actions or scores"] : []).join(", ") + "." : null;
+    return {actionRows, formula, revision, issue};
+  }, [apiService]);
   const openZerodhaBasketPreview = useCallback(async (requested?: {sequence: number; formula: ScoreMatrixFormulaConfig}) => {
     let formula = requested?.formula ?? scoreMatrixFormulaConfig;
     setLocalBasketFormula(requested?.formula ?? null);
@@ -5026,74 +5101,12 @@ export function RebalanceWorkflowSections({
       if (technical?.auto_rebalance_sequence && !stockFlowResult.value.warning) {
         const sequence = technical.auto_rebalance_sequence;
         try {
-          const [history, hashes, verification] = await Promise.all([
-            apiService.getAutoRebalanceHistoryDetail("india", sequence), auditResponseHashes([...rebalance, technical], technical), apiService.getIndiaScoreVerification(sequence),
-          ]);
+          const verified = await verifyBasketRevision("india", stocks, technicalScans, formula, rebalance, technical, sequence, requested);
           if (generation !== zerodhaPreparation.current) return;
-          const stage = history.stages.find(s => s.stage === "actionables");
-          const corrected = stage?.summary?.corrected_final_v2;
-          const frozen = verification.verified ? verification.record : (corrected ?? stage?.summary?.frozen_final) as Record<string, unknown> | undefined;
-          const original = stage?.summary?.frozen_final as Record<string, unknown> | undefined;
-          const originals = new Map<string, number>();
-          for (const saved of Array.isArray(original?.rows) ? original.rows : []) {
-            const denominator = saved?.formula_inputs?.detailedRationaleDenominator;
-            if (typeof denominator === "number" && Number.isFinite(denominator)) {
-              originals.set(stockIdentity(saved.symbol, saved.exchange), denominator);
-            }
-          }
-          const ranking = frozen?.actionable_ranking as {rows?: {listing:string;threat_reason?:string | null}[]} | undefined;
-          const reasons = new Map(ranking?.rows?.map(item=>[item.listing,item.threat_reason]));
-          const saved = new Map<string, {score: number; divisor?: number; jobId?: number; threatReason?: string | null; comparisons?: number | null; pairwise?: number | null}>();
-          for (const row of Array.isArray(frozen?.rows) ? frozen.rows : []) {
-            if (typeof row?.effectiveScore === "number" && Number.isFinite(row.effectiveScore)) {
-              const evidence = verification.verified ? verification.evidence[row.exchange + ":" + row.symbol] : undefined;
-              saved.set(stockIdentity(row.symbol, row.exchange), {score: row.effectiveScore, divisor: row.formula_inputs?.detailedRationaleDenominator, jobId: evidence?.job_id, comparisons: evidence?.comparisons, pairwise: evidence?.pairwise, threatReason: verification.verified ? evidence?.threat_reason ?? reasons.get(row.exchange + ":" + row.symbol) : null});
-            }
-          }
-          const storedFormula = verification.verified && frozen?.formula && typeof frozen.formula === "object"
-            ? normalizeScoreMatrixFormulaConfig(frozen.formula as Partial<ScoreMatrixFormulaConfig>) : null;
-          const verifiedSettings = storedFormula && canonicalBasketInputs(storedFormula) === canonicalBasketInputs(frozen?.formula) ? storedFormula : null;
-          if (!requested && verifiedSettings) {
-            formula = verifiedSettings;
-            setLocalBasketFormula(formula);
-            actionRows = buildDashboardActionRows(stocks, "india", technicalScans, formula);
-          }
-          const divisors = new Set<string>();
-          const differences = actionRows.filter(row => {
-            const entry = saved.get(stockIdentity(row.stock.symbol, row.stock.exchange));
-            if (entry?.divisor != null && entry.divisor !== row.detail.detailedRationaleDenominator)
-              divisors.add(`${row.detail.detailedRationaleDenominator} → ${entry.divisor}`);
-            return !entry || !sameFrozenScore(entry.score, row.formulaScore) || entry.divisor !== row.detail.detailedRationaleDenominator;
-          }).map(row => stockIdentity(row.stock.symbol, row.stock.exchange));
-          setScoreRevision({
-            formula: verifiedSettings,
-            divisors: [...divisors], differences,
-            sequence, version: typeof frozen?.formula_version === "string" ? frozen.formula_version : null,
-            capturedAt: typeof frozen?.captured_at === "string" ? frozen.captured_at : null,
-            replayed: Boolean(corrected), originals, saved,
-          });
-          const rows = Array.isArray(frozen?.rows) ? frozen.rows : [];
-          const listingKey = (exchange: string, symbol: string) => JSON.stringify([exchange, symbol]);
-          const savedByListing = new Map(rows.map(saved => [listingKey(saved.exchange, saved.symbol), saved]));
-          const problems = [
-            requested && sequence !== requested.sequence && "requested workflow sequence",
-            !verification.verified && verification.reason,
-            !(stage?.status === "completed" || corrected) && "Actionables completion or saved replay",
-            (frozen?.schema !== "workflow-final-v2" || frozen.formula_version !== "score-matrix-v2") && "formula version",
-            (frozen?.broker !== "india" || frozen.workflow_sequence !== sequence) && "workflow identity",
-            frozen?.technical_run_id !== technical.id && "Technical source run",
-            canonicalBasketInputs(frozen?.rebalance_run_ids) !== canonicalBasketInputs(rebalance.map(r => r.id)) && "Rebalance source runs",
-            canonicalBasketInputs(frozen?.response_hashes) !== canonicalBasketInputs(hashes) && "source response revisions",
-            canonicalBasketInputs(frozen?.formula) !== canonicalBasketInputs(formula) && "formula settings",
-            (!rows.length || savedByListing.size !== rows.length || rows.length !== actionRows.length ||
-              new Set(actionRows.map(row => listingKey(row.stock.exchange, row.stock.symbol))).size !== actionRows.length) && "listing coverage",
-            ...actionRows.flatMap(row => {
-              const saved = savedByListing.get(listingKey(row.stock.exchange, row.stock.symbol));
-              return saved && saved.action === row.formulaAction && sameFrozenScore(saved.score, row.formulaScore)
-                ? [] : [row.stock.exchange + ":" + row.stock.symbol + " action or score"];
-            }),
-          ].filter(Boolean);
-          if (problems.length) setVerificationIssue("Could not match " + problems.filter(problem => !String(problem).endsWith(" action or score")).concat(problems.some(problem => String(problem).endsWith(" action or score")) ? ["listing actions or scores"] : []).join(", ") + ".");
+          ({actionRows, formula} = verified);
+          setLocalBasketFormula(formula);
+          setScoreRevision(verified.revision);
+          if (verified.issue) setVerificationIssue(verified.issue);
           else setVerifiedBasketFormula(canonicalBasketInputs(formula));
         } catch {
           if (generation === zerodhaPreparation.current) setVerificationIssue("Could not read the saved revision or verify its source responses.");
@@ -5130,9 +5143,15 @@ export function RebalanceWorkflowSections({
     } finally {
       if (generation === zerodhaPreparation.current) setZerodhaBasketLoading(false);
     }
-  }, [apiService, scoreMatrixFormulaConfig, zerodhaBasketBuyThreshold]);
+  }, [apiService, scoreMatrixFormulaConfig, zerodhaBasketBuyThreshold, verifyBasketRevision]);
 
-  const openIndmoneyBasketPreview = useCallback(async () => {
+  const [usScanAt, setUsScanAt] = useState<string | null>(null);
+  const [usRevision, setUsRevision] = useState<BasketScoreRevision | null>(null);
+  const [usFormula, setUsFormula] = useState<ScoreMatrixFormulaConfig | null>(null);
+  const openIndmoneyBasketPreview = useCallback(async (requested?: {sequence:number; formula:ScoreMatrixFormulaConfig}) => {
+    setUsRevision(null);
+    setUsScanAt(null);
+    setUsFormula(requested?.formula ?? null);
     const generation = ++indmoneyPreparation.current;
     setIndmoneyAllocationUniverse([]);
     setIndmoneyBasketOrders([]);
@@ -5159,7 +5178,21 @@ export function RebalanceWorkflowSections({
         stockFlowSource.verifiedUsListings ?? [],
       );
       const technicalScans = buildTechnicalScanMap(runs);
-      const actionRows = buildDashboardActionRows(stocks, "us", technicalScans, scoreMatrixFormulaConfig);
+      setUsScanAt(Object.values(technicalScans).map(scan => scan.createdAt).filter((value): value is string => Boolean(value)).sort((a,b) => parseTimestampMs(b) - parseTimestampMs(a))[0] ?? null);
+      let actionRows = buildDashboardActionRows(stocks, "us", technicalScans, requested?.formula ?? scoreMatrixFormulaConfig);
+      const ids = new Set(actionRows.map(row => row.detail?.technicalScanSourceRunId));
+      const technical = ids.size === 1 ? runs.find(run => ids.has(run.id)) : null;
+      if (technical?.auto_rebalance_sequence && !stockFlowSource.warning) {
+        const verified = await verifyBasketRevision("us", stocks, technicalScans, requested?.formula ?? scoreMatrixFormulaConfig,
+          getLatestMatchingRebalanceRuns(runs, "us"), technical, technical.auto_rebalance_sequence, requested);
+        if (generation !== indmoneyPreparation.current) return;
+        actionRows = verified.actionRows;
+        setUsRevision(verified.revision);
+        setUsFormula(verified.formula);
+        if (verified.issue) setIndmoneyBasketError(verified.issue);
+      } else {
+        setIndmoneyBasketError("A unique saved Technical source is required to verify this preview.");
+      }
       const orders = buildZerodhaBasketPreviewOrders(actionRows, technicalScans, null, { allowFractionalSellUnits: true })
         .map((order) => ({
           ...order,
@@ -5190,7 +5223,7 @@ export function RebalanceWorkflowSections({
     } finally {
       if (generation === indmoneyPreparation.current) setIndmoneyBasketLoading(false);
     }
-  }, [apiService, indmoneyBasketBuyThreshold, scoreMatrixFormulaConfig]);
+  }, [apiService, indmoneyBasketBuyThreshold, scoreMatrixFormulaConfig, verifyBasketRevision]);
 
   const updateZerodhaBasketBuyThresholdDraft = useCallback((value: string) => {
     setZerodhaBasketBuyThresholdDraft(value);
@@ -7148,6 +7181,7 @@ ${zerodhaExecutionMode === "direct_market"
       let generatedSwingRun: RunResponse | null = null;
       let generatedRebalanceRun: RunResponse | null = null;
       let generatedTechnicalRun: RunResponse | null = null;
+      let usRegistry: Awaited<ReturnType<typeof apiService.indmoneyVerifiedListings>>["listings"] = [];
       let finalRebalanceInputs: RunResponse[] = [];
       let workflowSnapshot: ZerodhaPortfolioSnapshotDetail | IndMoneyUsPortfolioSnapshotDetail | null = null;
 
@@ -7449,7 +7483,8 @@ ${zerodhaExecutionMode === "direct_market"
             ...selectStageRunInputs(allRuns, selectedTechnicalInputs, { market, stage: "rebalance" }),
           ], { market, stage: "rebalance" });
           finalRebalanceInputs = rebalanceInputs;
-          const consensus = buildConsensusRows(rebalanceInputs, market);
+          if (market === "us" && generatedThreatInput) usRegistry = (await apiService.indmoneyVerifiedListings()).listings;
+          const consensus = buildConsensusRows(rebalanceInputs, market, null, rebalanceInputs, usRegistry);
           if (consensus.length === 0)
             throw new Error(
               "No fresh rebalance consensus rows were available for technical scan. Consensus rows are the normalized stock/action rows parsed from completed Rebalance LLM outputs. Run Rebalance in this workflow or explicitly select completed Rebalance outputs in Select Inputs.",
@@ -7464,7 +7499,7 @@ ${zerodhaExecutionMode === "direct_market"
           }) : "";
           const technicalRun = await apiService.createRun(
             buildRunPayload({
-              prompt: buildTechnicalScanPrompt(consensus, market) + priceEvidence + scorecardManifest + `\n[TECHNICAL_REBALANCE_SOURCES_V1]${JSON.stringify({ run_ids: rebalanceInputs.map(run => run.id), job_ids: rebalanceInputs.flatMap(run => run.run_jobs.map(link => link.job_id)) })}[/TECHNICAL_REBALANCE_SOURCES_V1]`,
+              prompt: buildTechnicalScanPrompt(consensus, market) + priceEvidence + scorecardManifest + (market === "us" && generatedThreatInput ? "\n[VERIFIED_US_LISTINGS_V1]" + JSON.stringify(usRegistry) : "") + `\n[TECHNICAL_REBALANCE_SOURCES_V1]${JSON.stringify({ run_ids: rebalanceInputs.map(run => run.id), job_ids: rebalanceInputs.flatMap(run => run.run_jobs.map(link => link.job_id)) })}[/TECHNICAL_REBALANCE_SOURCES_V1]`,
               targets: [technicalTargets[0]],
               runMetadata,
               scanLabel: "Technical Scan",
@@ -7480,7 +7515,7 @@ ${zerodhaExecutionMode === "direct_market"
           await markCompleted(portfolio, "technical", {
             ...summarizeRun(completedTechnicalRun),
             ...getRunProgress(completedTechnicalRun),
-            finalInputs: { formula_version: market === "india" ? "score-matrix-v2" : "score-matrix-v1", formula: scoreMatrixFormulaConfig, rebalance_run_ids: rebalanceInputs.map(run => run.id),
+            finalInputs: { ...(market === "us" && generatedThreatInput ? {position_policy:"indmoney-verified-snapshot-v1"} : {}), formula_version: "score-matrix-v2", buy_price_policy: "positive-provider-price-v1", formula: scoreMatrixFormulaConfig, rebalance_run_ids: rebalanceInputs.map(run => run.id),
               response_hashes: await auditResponseHashes([...rebalanceInputs, completedTechnicalRun], completedTechnicalRun) },
             lastRunId: completedTechnicalRun.id,
             recommendedStocks: countUniqueStocksFromRun(completedTechnicalRun),
@@ -7512,16 +7547,16 @@ ${zerodhaExecutionMode === "direct_market"
           if (!workflowSnapshot) {
             throw new Error("Final capture requires the workflow portfolio snapshot to resolve holdings context.");
           }
-          const finalConsensus = buildConsensusRows(finalRebalanceInputs, market, workflowSnapshot);
+          const finalConsensus = buildConsensusRows(finalRebalanceInputs, market, workflowSnapshot, finalRebalanceInputs, usRegistry);
           const actionablesCompletedAt = new Date().toISOString();
           const finalRows = buildDashboardActionRows(finalConsensus, market,
             buildTechnicalScanMap([generatedTechnicalRun]), scoreMatrixFormulaConfig)
             .map(row => ({ ...row, coveredAt: actionablesCompletedAt, runId: finalRebalanceInputs[0].id }));
           const frozenFinal = {
-            schema: "workflow-final-v2", formula_version: market === "india" ? "score-matrix-v2" : "score-matrix-v1",
+            schema: "workflow-final-v2", formula_version: "score-matrix-v2", buy_price_policy: "positive-provider-price-v1",
             scorePolicy: "score-matrix-raw-effective-v2",
             broker: runMetadata.auto_rebalance_portfolio, workflow_sequence: runMetadata.auto_rebalance_sequence,
-            ...(market === "india" && generatedThreatInput?.analysis.job_id ? {position_policy:"zerodha-settled-snapshot-v1"} : {}),
+            ...(generatedThreatInput?.analysis.job_id ? {position_policy:market === "india" ? "zerodha-settled-snapshot-v1" : "indmoney-verified-snapshot-v1"} : {}),
             scorecard_job_id: generatedThreatInput?.analysis.job_id ?? null,
             captured_at: actionablesCompletedAt, formula: scoreMatrixFormulaConfig,
             rebalance_run_id: finalRebalanceInputs[0].id, rebalance_run_ids: finalRebalanceInputs.map(run => run.id), technical_run_id: generatedTechnicalRun.id,
@@ -7542,16 +7577,19 @@ ${zerodhaExecutionMode === "direct_market"
               return {...item, score: row?.effectiveScore == null ? null : (row.effectiveScore + 3) * 100 / 6};
             }).sort((a, b) => (b.score ?? -1) - (a.score ?? -1) || (a.listing < b.listing ? -1 : a.listing > b.listing ? 1 : 0))};
           const sourceRuns = [...finalRebalanceInputs, generatedTechnicalRun];
-          const valuation = market === "india" ? await captureIndiaValuation(runMetadata.auto_rebalance_sequence, actionablesCompletedAt,
-            workflowSnapshot as ZerodhaPortfolioSnapshotDetail, finalRows.map(row => {
+          const valuationInputs = finalRows.map(row => {
               const ids = new Set([...row.stock.rows.map(source => source.meta.runId), row.detail.technicalScanSourceRunId]);
               const sources = [...ids].map(id => {
                 const run = sourceRuns.find(source => source.id === id);
                 return {runId:id ?? 0, createdAt:parseApiTimestamp(run?.created_at)?.toISOString() ?? "", completed:run?.status === "completed",
-                  status:run?.status, market:run ? "india" as const : null};
+                  status:run?.status, market:run ? market : null};
               });
-              return {symbol:row.stock.symbol, exchange:row.stock.exchange, score:row.formulaScore, action:row.formulaAction, sources};
-            })).catch(error => ({schema:"india-valuation-unavailable-v1", reason:normalizeError(error)})) : undefined;
+              return {identity:row.stock.usIdentity, issue:row.stock.identityIssue, symbol:row.stock.symbol, exchange:row.stock.exchange, score:row.formulaScore, action:row.formulaAction, sources};
+            });
+          const valuation = await (market === "india"
+            ? captureIndiaValuation(runMetadata.auto_rebalance_sequence, actionablesCompletedAt, workflowSnapshot as ZerodhaPortfolioSnapshotDetail, valuationInputs)
+            : captureUsValuation(runMetadata.auto_rebalance_sequence, actionablesCompletedAt, workflowSnapshot as IndMoneyUsPortfolioSnapshotDetail, valuationInputs))
+            .catch(error => ({schema:market === "india" ? "india-valuation-unavailable-v1" : "us-valuation-unavailable-v1", reason:normalizeError(error)}));
           const savedFinal = await markCompleted(portfolio, "actionables", {
             completedAt: actionablesCompletedAt, runStatus: "saved calculation",
             rebalanceInputs: finalRebalanceInputs.length, recommendedStocks: finalRows.length, frozenFinal: {...frozenFinal, actionable_ranking, ...(valuation ? {valuation} : {})},
@@ -8449,8 +8487,12 @@ ${zerodhaExecutionMode === "direct_market"
         submission={null}
         detailsData={indmoneyBasketDetailsData}
         historicalRows={indmoneyBasketHistoricalRows}
-        formulaConfig={scoreMatrixFormulaConfig}
-        onFormulaConfigChange={setScoreMatrixFormulaConfig}
+        scoreScanCompletedAt={usScanAt}
+        scoreRevision={usRevision}
+        compareCurrentSettings={usRevision?.formula && canonicalBasketInputs(usFormula) !== canonicalBasketInputs(scoreMatrixFormulaConfig) ? () => void openIndmoneyBasketPreview({sequence:usRevision.sequence,formula:scoreMatrixFormulaConfig}) : undefined}
+        openSavedBasket={usRevision?.formula && canonicalBasketInputs(usFormula) !== canonicalBasketInputs(usRevision.formula) ? () => void openIndmoneyBasketPreview({sequence:usRevision.sequence,formula:usRevision.formula!}) : undefined}
+        formulaConfig={usFormula ?? scoreMatrixFormulaConfig}
+        onFormulaConfigChange={update => {const next = update(usFormula ?? scoreMatrixFormulaConfig); setScoreMatrixFormulaConfig(() => next); setUsFormula(next);}}
         buyThreshold={indmoneyBasketBuyThreshold}
         buyThresholdDraft={indmoneyBasketBuyThresholdDraft}
         onBuyThresholdDraftChange={updateIndmoneyBasketBuyThresholdDraft}
