@@ -58,3 +58,21 @@ def test_weighted_final_matches_renderer_in_both_markets():
         assert isclose(signed, calculated["effective_score"])
         assert isclose((signed + 3) * 100 / 6, 50.32)
         assert rendered["detail"]["calculatedAction"] == calculated["action"]
+
+
+def test_strict_evidence_uses_frozen_publication_cutoff_and_complete_adverse_inputs():
+    from datetime import date
+    from app.domains.runs.threat_evidence import audited_evidence
+
+    listing = ("NSE", "TEST")
+    common = {"Exchange": "NSE", "Symbol": "TEST", "Likelihood": "4", "Impact": "3",
+              "Confidence": "high", "Source": "https://example.org/filing/1", "As of": "2026-11-19",
+              "Trigger": "Hearing scheduled for next month", "Downside": "5–10%", "Rationale": "Fixture"}
+    rows = [dict(common, Category=str(i), Scenario=f"case-{i}") for i in range(1, 4)]
+    accepted, _ = audited_evidence(rows, {listing}, strict=True, snapshot_date=date(2026, 11, 19))
+    assert stock_scorecards(accepted)[listing]["score"] == 48
+    for edit in ({"As of": "2099-01-01"}, {"Trigger": ""}, {"Downside": "Unknown"}):
+        accepted, dispositions = audited_evidence([{**row, **edit} for row in rows], {listing},
+                                                  strict=True, snapshot_date=date(2026, 11, 19))
+        assert not accepted and all(row["Disposition"].startswith("Excluded:") for row in dispositions)
+    assert not audited_evidence(rows, {listing}, strict=True)[0]

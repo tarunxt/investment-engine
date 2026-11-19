@@ -12,7 +12,9 @@ COLUMNS = ["Exchange", "Symbol", "Category", "Scenario", "Trigger", "Likelihood"
 
 
 def scorecard_instruction(domestic):
-    return f"""Preserve the descriptive report and append one final section, ## {EVIDENCE_TITLE}.
+    return f"""[THREAT_EVIDENCE_V2]
+Use As of for the source publication date, on or before the frozen snapshot date. Put a future event date in Trigger.
+Preserve the descriptive report and append one final section, ## {EVIDENCE_TITLE}.
 Use this exact markdown table header: {' | '.join(COLUMNS)}.
 Assess each listing across all eight categories over the next 90 days:
 1 geopolitics/trade; 2 global economy; 3 {domestic} economy and monetary conditions;
@@ -60,7 +62,7 @@ def category_id(value):
     raise ValueError("Unrecognised or contradictory category")
 
 
-def audited_evidence(rows, universe=None):
+def audited_evidence(rows, universe=None, *, strict=False, snapshot_date=None):
     accepted, records, appearances, definitions = [], [], defaultdict(list), defaultdict(set)
     for row in rows:
         record = {**row, "Disposition": "Accepted"}
@@ -75,9 +77,11 @@ def audited_evidence(rows, universe=None):
             if url.scheme not in ("https", "http") or not url.hostname or not url.path.strip("/"):
                 raise ValueError("Specific evidence URL missing")
             try:
-                date.fromisoformat(row.get("As of", ""))
+                published = date.fromisoformat(row.get("As of", ""))
             except ValueError:
                 raise ValueError("Evidence date missing or invalid") from None
+            if strict and (snapshot_date is None or published > snapshot_date):
+                raise ValueError("Missing snapshot date or evidence published after snapshot")
             scenario = row.get("Scenario", "").strip().lower()
             if not scenario or scenario == "unknown" or not row.get("Rationale", "").strip():
                 raise ValueError("Scenario or rationale unavailable")
@@ -89,6 +93,9 @@ def audited_evidence(rows, universe=None):
             else:
                 if row.get("Impact", "").lower() == "unknown":
                     raise ValueError("Impact unassessed")
+                if strict and any(row.get(field, "").strip().casefold() in {"", "-", "—", "n/a", "unknown", "unavailable"}
+                                  for field in ("Trigger", "Downside")):
+                    raise ValueError("Adverse event requires trigger and downside evidence")
                 likelihood = int(row.get("Likelihood", ""))
                 event_score(likelihood, int(row.get("Impact", "")))
                 definitions[scenario].add((category, likelihood))

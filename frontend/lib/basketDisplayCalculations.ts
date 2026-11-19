@@ -277,9 +277,10 @@ export function allocateIndiaEquities(listings: IndiaAllocationListing[], parame
       (right.holding ?? 0) - (left.holding ?? 0) || left.key.localeCompare(right.key));
     const weight = allocation.weights.get(issuer) ?? 0;
     const eligible = score != null && parameters.valid;
-    const priced = assets != null && Number.isFinite(assets) && assets > 0 && members.every(row =>
+    const pricesPaise = members.map(row => Math.round((row.price ?? 0) * 100));
+    const priced = assets != null && Number.isFinite(assets) && assets > 0 && members.every((row, i) =>
       row.holding != null && Number.isSafeInteger(row.holding) && row.holding >= 0 &&
-      (row.price != null && Number.isFinite(row.price) && row.price > 0 || row.holding === 0 && weight === 0));
+      (Number.isSafeInteger(pricesPaise[i]) && pricesPaise[i] > 0 || row.holding === 0 && weight === 0));
     const reason = !eligible ? "Issuer score or parameters unavailable" : score <= 0 ? "Nonpositive issuer score" :
       !allocation.weights.has(issuer) ? "Outside positive-score rank cutoff" :
       weight === parameters.normalised / 100 ? "Issuer weight cap applied" : "Proportional issuer allocation";
@@ -289,18 +290,19 @@ export function allocateIndiaEquities(listings: IndiaAllocationListing[], parame
     if (budget != null) {
       let remaining = budget;
       members.forEach((row, i) => {
-        const held = row.holding! * Math.round((row.price ?? 0) * 100);
+        const held = row.holding! * pricesPaise[i];
         amounts[i] = Math.min(remaining, held);
         remaining -= amounts[i];
       });
       amounts[0] += remaining;
     }
     members.forEach((row, i) => {
-      const shares = eligible && weight === 0 ? 0 : budget == null || !row.price ? null :
-        Math.floor(amounts[i] / Math.round(row.price * 100));
+      const candidateShares = eligible && weight === 0 ? 0 : budget == null || !row.price ? null :
+        Math.floor(amounts[i] / pricesPaise[i]);
+      const shares = candidateShares != null && Number.isSafeInteger(candidateShares) && candidateShares >= 0 ? candidateShares : null;
       const venueWeight = members.length === 1 ? weight : budget && assets ? amounts[i] / (assets * 100) : 0;
       venues.set(row.key, {issuer, issuerScore: score, issuerWeight: weight, weight: venueWeight, shares,
-        price: row.price, reason: !priced && weight > 0 ? "Verified prices and quantities required at each venue" : reason});
+        price: row.price, reason: weight > 0 && shares === null ? "Verified prices and quantities required at each venue" : reason});
     });
   }
   return {venues, denominator: allocation.denominator};

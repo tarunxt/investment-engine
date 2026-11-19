@@ -40,3 +40,12 @@ test('missing, duplicate and invalid stock threat evidence stay distinct', () =>
   assert.equal(ranking([], [threatRow('')]).threat_reason, 'Invalid stock threat score');
   assert.equal(ranking([], [threatRow('0')]).threat_reason, null);
 });
+
+test('action labels allow complete aliases and reject prose', async () => {
+  const {parseActionLabel} = await import('../lib/actionColorScheme.ts');
+  assert.equal(parseActionLabel(' BUY_NEW '), 'Buy New');
+  assert.equal(parseActionLabel('reduce'), 'Trim');
+  for (const text of ['Do not sell all', 'Hold, do not add', 'additional information', 'hold2']) {
+    assert.equal(parseActionLabel(text), null);
+  }
+});
