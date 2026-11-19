@@ -356,6 +356,8 @@ def test_worker_ready_hooks_do_not_dispatch_or_touch_legacy_state(recovery):
     ("POST", "/indmoney-us/events/run", True), ("POST", "/indmoney-us/threats/run", True),
     ("GET", "/polymarket/state", False), ("GET", "/polymarket-direct/state", False),
     ("GET", "/zerodha/status", True), ("GET", "/zerodha/login-url", True),
+    ("GET", "/zerodha/connection", True), ("DELETE", "/zerodha/disconnect", True),
+    ("POST", "/zerodha/connection", False), ("DELETE", "/zerodha/orders", False),
     ("GET", "/zerodha/portfolio", True), ("GET", "/zerodha/portfolio/2026-10-07", True),
     ("POST", "/zerodha/callback", True), ("POST", "/zerodha/portfolio/sync", True),
     ("POST", "/zerodha/threats/run", True), ("POST", "/zerodha/events/run", True),

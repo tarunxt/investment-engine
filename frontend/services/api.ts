@@ -125,6 +125,8 @@ import {
   ZerodhaEventsHistoryResponse,
   ZerodhaEventsLatestResponse,
   ZerodhaEventsRunResponse,
+  KiteBrokerConnection,
+  KiteConnectionChange,
   ZerodhaLoginUrlResponse,
   ZerodhaPortfolioOverviewResponse,
   ZerodhaPortfolioSnapshotDetail,
@@ -1317,8 +1319,12 @@ class apiServiceClass implements IApiService {
     });
   }
 
-  zerodhaCallback(request_token: string): Promise<ZerodhaStatusResponse> {
-    return this.post<ZerodhaStatusResponse>(URLs.zerodha.callback(), { request_token });
+  zerodhaCallback(request_token: string, change?: KiteConnectionChange): Promise<ZerodhaStatusResponse> {
+    return this.post<ZerodhaStatusResponse>(URLs.zerodha.callback(), { request_token, ...change });
+  }
+
+  zerodhaConnection(): Promise<KiteBrokerConnection> {
+    return this.get<KiteBrokerConnection>(URLs.zerodha.connection());
   }
 
   zerodhaStatus(): Promise<ZerodhaStatusResponse> {
@@ -1378,8 +1384,9 @@ class apiServiceClass implements IApiService {
     return this.post<ZerodhaSequencedProtectedMarketResponse>(URLs.zerodha.placeProtectedMarketOrdersSequenced(), data, { timeoutMs: 190_000 });
   }
 
-  zerodhaDisconnect(): Promise<{ message: string }> {
-    return this.delete<{ message: string }>(URLs.zerodha.disconnect());
+  zerodhaDisconnect(revision?: string): Promise<{ message: string }> {
+    const url = URLs.zerodha.disconnect();
+    return this.delete<{ message: string }>(revision ? `${url}?expected_revision=${encodeURIComponent(revision)}` : url);
   }
 
   zerodhaEventsLatest(): Promise<ZerodhaEventsLatestResponse> {

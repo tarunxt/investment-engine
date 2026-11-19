@@ -83,6 +83,8 @@ import {
     BullpenRunAuditSectionResponse,
     TradingBotsSummaryResponse,
     TradingBotsOverviewResponse,
+    KiteBrokerConnection,
+    KiteConnectionChange,
     ZerodhaLoginUrlResponse,
     ZerodhaOrder,
     ZerodhaPrepareBasketRequest,
@@ -208,7 +210,8 @@ export interface IApiService {
 
     // Zerodha endpoints
     zerodhaLoginUrl(): Promise<ZerodhaLoginUrlResponse>;
-    zerodhaCallback(request_token: string): Promise<ZerodhaStatusResponse>;
+    zerodhaCallback(request_token: string, change?: KiteConnectionChange): Promise<ZerodhaStatusResponse>;
+    zerodhaConnection(): Promise<KiteBrokerConnection>;
     zerodhaStatus(): Promise<ZerodhaStatusResponse>;
     zerodhaDisplayQuotes(instruments: string[]): Promise<ZerodhaDisplayQuoteResponse>;
     zerodhaPortfolioOverview(): Promise<ZerodhaPortfolioOverviewResponse>;
@@ -219,7 +222,7 @@ export interface IApiService {
     zerodhaPlaceOrder(data: ZerodhaPlaceOrderRequest): Promise<ZerodhaPlaceOrderResponse>;
     zerodhaPlaceProtectedMarketOrders(data: ZerodhaProtectedMarketRequest): Promise<ZerodhaProtectedMarketResponse>;
     zerodhaPlaceProtectedMarketOrdersSequenced(data: ZerodhaSequencedProtectedMarketRequest): Promise<ZerodhaSequencedProtectedMarketResponse>;
-    zerodhaDisconnect(): Promise<{ message: string }>;
+    zerodhaDisconnect(revision?: string): Promise<{ message: string }>;
     zerodhaEventsLatest(): Promise<ZerodhaEventsLatestResponse>;
     zerodhaEventsHistory(params?: { limit?: number }): Promise<ZerodhaEventsHistoryResponse>;
     zerodhaEventJob(jobId: number): Promise<ZerodhaEventsAnalysis>;

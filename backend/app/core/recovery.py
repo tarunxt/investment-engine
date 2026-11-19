@@ -169,11 +169,13 @@ def recovery_http_allowed(method, path):
         if method in {"GET", "HEAD"} and path == "/zerodha/orders":
             return True
     if method in {"GET", "HEAD"} and (
-        path in {"/zerodha/status", "/zerodha/login-url", "/zerodha/portfolio"}
+        path in {"/zerodha/status", "/zerodha/connection", "/zerodha/login-url", "/zerodha/portfolio"}
         or any(path == prefix or path.startswith(prefix + "/") for prefix in (
             "/zerodha/portfolio", "/zerodha/events", "/zerodha/threats",
         ))
     ):
+        return True
+    if method == "DELETE" and path == "/zerodha/disconnect":
         return True
     # Account-owned model selections only; this endpoint cannot execute a run.
     if method == "PUT" and path == "/auth/profile/workflow-models":

@@ -4,7 +4,7 @@ import asyncio
 import logging
 from datetime import date, datetime, time, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.recovery import manual_zerodha_order_scope
@@ -14,6 +14,9 @@ from app.domains.zerodha.audit import ZerodhaAuditRepository
 from app.domains.zerodha.basket import (
     is_kite_quote_permission_error_message,
     prepare_basket_order_from_request,
+)
+from app.domains.zerodha.connections import (
+    PROFILE_EVENT, broker_profile, check_revision, lock_connection, read_connection, readable_token, save_profile,
 )
 from app.domains.zerodha.models import ZerodhaPortfolioSnapshot
 from app.domains.zerodha.order_validation import (
@@ -26,6 +29,7 @@ from app.domains.zerodha.repository import (
     ZerodhaPortfolioSnapshotRepository,
 )
 from app.domains.zerodha.schemas import (
+    KiteBrokerConnection,
     ZerodhaCallbackRequest,
     ZerodhaLoginUrlResponse,
     ZerodhaPrepareBasketRequest,
@@ -263,6 +267,16 @@ def _snapshot_detail(
     )
 
 
+@router.get("/connection", response_model=KiteBrokerConnection)
+async def get_connection(
+    response: Response,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    response.headers["Cache-Control"] = "private, no-store"
+    return await read_connection(db, current_user.id, service_for_user(current_user.id, _svc))
+
+
 @router.get("/login-url", response_model=ZerodhaLoginUrlResponse)
 async def get_login_url(current_user: User = Depends(get_current_user)):
     svc = service_for_user(current_user.id, _svc)
@@ -288,6 +302,9 @@ async def callback(
     ip = _client_ip(request)
     audit = ZerodhaAuditRepository(db)
 
+    repo = ZerodhaCredentialRepository(db)
+    if body.expected_revision:
+        check_revision(current_user.id, await repo.get_stored(current_user.id), body.expected_revision)
     try:
         data = await svc.exchange_token(body.request_token)
     except KiteError as exc:
@@ -308,12 +325,23 @@ async def callback(
     expires_at = ZerodhaService.token_expires_at(login_time)
     access_token: str = data.get("access_token", "")
 
-    repo = ZerodhaCredentialRepository(db)
-    await repo.upsert(current_user.id, access_token, login_time, expires_at)
+    profile = broker_profile(data)
+    if body.target_client_id and (not profile or profile.client_id != body.target_client_id):
+        raise HTTPException(400, "Kite returned a different client ID. Sign in with the account you selected.")
+
+    previous = await lock_connection(db, current_user.id)
+    check_revision(current_user.id, previous, body.expected_revision)
+    old_token = readable_token(previous) if body.expected_revision else None
+    credential = await repo.upsert(current_user.id, access_token, login_time, expires_at)
+    if profile:
+        await save_profile(db, current_user.id, credential, profile, login_time)
     await audit.log(
         current_user.id, "token_exchange", ip, {"expires_at": expires_at.isoformat()}
     )
     await db.commit()
+
+    if body.expected_revision and old_token and old_token != access_token:
+        await svc.invalidate_token(old_token)
 
     try:
         task = sync_portfolio_snapshot_task.delay(current_user.id, "login")  # type: ignore[attr-defined]
@@ -1009,6 +1037,7 @@ async def place_order(
 @router.delete("/disconnect")
 async def disconnect(
     request: Request,
+    expected_revision: str | None = None,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -1017,14 +1046,17 @@ async def disconnect(
     repo = ZerodhaCredentialRepository(db)
     audit = ZerodhaAuditRepository(db)
 
-    token = await repo.get_plaintext_token(current_user.id)
+    cred = await lock_connection(db, current_user.id)
+    check_revision(current_user.id, cred, expected_revision)
+    token = readable_token(cred)
     if token:
         await audit.log(current_user.id, "token_used", ip, {"operation": "disconnect"})
-        await svc.invalidate_token(token)
     # Remove a locally stored session even if its issuing app was reassigned.
     await repo.delete_by_user(current_user.id)
     await audit.log(current_user.id, "disconnect", ip)
     await db.commit()
+    if token:
+        await svc.invalidate_token(token)
     logger.info("Zerodha disconnected for user %s", current_user.id)
     return {"message": "Disconnected from Zerodha"}
 
@@ -1043,7 +1075,7 @@ async def get_audit_logs(
                 "id": e.id,
                 "action": e.action,
                 "ip_address": e.ip_address,
-                "details": e.details,
+                "details": None if e.action == PROFILE_EVENT else e.details,
                 "created_at": e.created_at.isoformat(),
             }
             for e in logs

@@ -14,6 +14,29 @@ class ZerodhaLoginUrlResponse(BaseModel):
 
 class ZerodhaCallbackRequest(BaseModel):
     request_token: str
+    expected_revision: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    target_client_id: str | None = Field(default=None, pattern=r"^[A-Z0-9]{1,32}$")
+
+
+class KiteBrokerProfile(BaseModel):
+    client_id: str
+    name: str | None = None
+    email: str | None = None
+    masked_pan: str | None = None
+    exchanges: list[str] = Field(default_factory=list)
+    products: list[str] = Field(default_factory=list)
+
+
+class KiteBrokerConnection(BaseModel):
+    revision: str
+    linked: bool
+    session_active: bool = False
+    assigned_client_id: str | None = None
+    connection_record_created_at: datetime | None = None
+    first_added_at: datetime | None = None
+    login_time: datetime | None = None
+    expires_at: datetime | None = None
+    profile: KiteBrokerProfile | None = None
 
 
 class ZerodhaStatusResponse(BaseModel):

@@ -462,6 +462,7 @@ export const URLs = {
     loginUrl: () => `${resolveApiBaseUrl()}/zerodha/login-url`,
     callback: () => `${resolveApiBaseUrl()}/zerodha/callback`,
     status: () => `${resolveApiBaseUrl()}/zerodha/status`,
+    connection: () => `${resolveApiBaseUrl()}/zerodha/connection`,
     portfolio: () => `${resolveApiBaseUrl()}/zerodha/portfolio`,
     portfolioSync: () => `${resolveApiBaseUrl()}/zerodha/portfolio/sync`,
     portfolioSnapshot: (snapshotDate: string) => `${resolveApiBaseUrl()}/zerodha/portfolio/${snapshotDate}`,
@@ -684,6 +685,7 @@ export const URLs = {
       costDrivers: () => "/console/profile/cost-drivers",
       security: () => "/console/profile/security",
       activity: () => "/console/profile/activity",
+      connectedBrokers: () => "/console/profile/connected-brokers",
     },
 
     admin: {
