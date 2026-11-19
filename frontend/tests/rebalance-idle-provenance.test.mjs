@@ -159,3 +159,13 @@ test('restoring an older active cache keeps exact polling identity and real term
   assert.deepEqual(restored.technical,{state:'queued'});
   assert.deepEqual(restored.rebalance,{state:'idle'});
 });
+
+test('older stage summaries recover coverage only from the exact saved source', () => {
+  const observed = {completedAt: oldTime, jobId: 31, lastRunId: 20, evidenceCoverage: '0/120 rows accepted', distinctModels: 1};
+  const same = mergeStageEvidence(observed, {completedAt: newTime, jobId: 31, lastRunId: 20}, true);
+  assert.equal(same.evidenceCoverage, observed.evidenceCoverage);
+  assert.equal(same.distinctModels, 1);
+  const other = mergeStageEvidence(observed, {completedAt: newTime, jobId: 32, lastRunId: 21}, true);
+  assert.equal(other.evidenceCoverage, undefined);
+  assert.equal(other.distinctModels, undefined);
+});
