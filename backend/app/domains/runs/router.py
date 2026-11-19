@@ -885,11 +885,13 @@ async def verify_saved_india_score(sequence: int, db: AsyncSession = Depends(get
     if workflow is None:
         raise HTTPException(404, "Workflow not found")
     stage = next((item for item in workflow.stages if item.stage == "actionables"), None)
-    summary = stage.summary_json or {} if stage is not None else {}
+    summary = (stage.summary_json or {}) if stage is not None else {}
     corrected = summary.get("corrected_final_v2")
     record = corrected or summary.get("frozen_final")
     if not record or (not corrected and stage.status != "completed"):
         return {"verified": False, "reason": "No completed original calculation or saved replay"}
+    if not isinstance(record, dict):
+        return {"verified": False, "reason": "Saved score revision has an invalid format"}
     if record.get("formula_version") != "score-matrix-v2":
         return {"verified": False, "reason": "Original formula requires a saved-input v2 replay"}
     candidate = deepcopy(record)
