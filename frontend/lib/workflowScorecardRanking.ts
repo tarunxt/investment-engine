@@ -26,7 +26,7 @@ export function workflowRanking(rows: { exchange: string; symbol: string; effect
     const threatRow = threats.get(listing);
     const threat = observation(threatRow?.["Stock Threat /100"]);
     const threat_reason = threat != null ? null : !report ? "No scorecard manifest" :
-      threatRow === undefined ? "Missing stock threat row" : threatRow === null ? "Duplicate stock threat rows" : "Invalid stock threat score";
+      threatRow === undefined ? "Missing stock threat row" : threatRow === null ? "Duplicate stock threat rows" : threatRow["Assessment reason"] || "Invalid stock threat score";
     const count = pairRow?.["Valid comparisons"]?.trim();
     const comparisons = count && /^\d+$/.test(count) ? Number(count) : null;
     const signed = weightedSigned(row.effectiveScore, {pairwise: pair, stock_threat: threat});

@@ -36,11 +36,11 @@ def test_raw_arithmetic_is_preserved_and_effective_is_separate():
     config["detailedRationaleDenominator"] = 30
     rows = [{**source_row(), **{header: "3" for header in RATIONALE_HEADERS.values()}}]
     technical = {"Confidence Score": "10", "Premarket trend": "0", "Last 5 candles trend": "3"}
-    actual = calculate_listing(rows, config, technical, direction="bullish", market="india")
+    actual = calculate_listing(rows, config, technical, direction="bullish", market="india", legacy=True)
     # 13*3 rationale + 10 confidence + 5*3 trend + 4*2.5 action = 74.
     assert actual["raw_score"] == 74 / 30
     config["detailedRationaleDenominator"] = 24
-    actual = calculate_listing(rows, config, technical, direction="bullish", market="india")
+    actual = calculate_listing(rows, config, technical, direction="bullish", market="india", legacy=True)
     assert actual["raw_score"] == 74 / 24
     assert actual["effective_score"] == 3
     assert actual["action"] == "Add more"
@@ -118,8 +118,30 @@ def test_negative_raw_score_is_preserved_and_effective_is_bounded():
     config['detailedRationaleDenominator'] = 24
     rows = [{**source_row(), ACTION_HEADER: 'Sell All', **{header:'-3' for header in RATIONALE_HEADERS.values()}}]
     scan = {'Confidence Score':'10', 'Premarket trend':'0', 'Last 5 candles trend':'-3'}
-    result = calculate_listing(rows, config, scan, direction='bearish', market='india')
+    result = calculate_listing(rows, config, scan, direction='bearish', market='india', legacy=True)
     assert result['raw_score'] == -74 / 24
     assert result['effective_score'] == -3
     assert result['action'] == 'Sell All'
     assert result['estimate'] == {'currentUnits':10, 'currentInvestmentAmount':1000, 'units':10, 'amount':1000}
+
+@pytest.mark.parametrize("scan_value,rebalance_value,expected", [
+    ("", "", None), (None, 0, 0), ("8", "80", 8), ("", "80", 8), ("80", "", None),
+])
+def test_informational_confidence(scan_value, rebalance_value, expected):
+    config = formula()
+    row = source_row(**{"Confidence Score (0-100)": rebalance_value})
+    result = calculate_listing([row], config, {"Confidence Score": scan_value}, direction="bullish", market="india")
+    term = next(row for row in result["weighted_rows"] if row["id"] == "technical-scan-confidence")
+    assert (term["score"], term["multiplier"], term["denominatorWeight"]) == (expected, 0, 0)
+    assert result["raw_score"] == calculate_listing([row], config, market="india")["raw_score"]
+
+
+def test_deferred_action_and_numeric_zero():
+    from app.domains.runs.final_score_math import numeric
+    assert [numeric(value) for value in (0, 0.0, "0", "", None, True)] == [0, 0, 0, None, None, None]
+    for rows in ([{}], [source_row(**{"Current Units": ""})]):
+        result = calculate_listing(rows, formula(), market="india")
+        assert result["action"] is None
+        assert result["estimate"]["units"] is None
+        assert result["estimate"]["amount"] is None
+    assert calculate_listing([source_row(**{"Current Units": 0})], formula(), market="india")["action"] == "Buy New"

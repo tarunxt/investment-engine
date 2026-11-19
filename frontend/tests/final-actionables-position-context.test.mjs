@@ -97,7 +97,7 @@ test('current holdings, consolidated arithmetic, formula, and action estimate sh
   assert.deepEqual(stock.rows.map((row) => row.cells['Final Units']), ['6', '5']);
 });
 
-test('fallback captured context, authoritative zero holdings, and US fractional sizing are consistent', () => {
+test('verified zero holdings allow a buy while unknown US holdings defer action', () => {
   const run = runWithRows([modelRow(6), modelRow(5)]);
   const [fallback] = helpers.buildConsensusRows([run], 'india');
   assert.equal(helpers.buildScoreMatrixDetail(fallback).calculatedAction, 'Buy New');
@@ -109,7 +109,10 @@ test('fallback captured context, authoritative zero holdings, and US fractional 
   const usRun = runWithRows([modelRow(6), modelRow(5)], 'us');
   const usSnapshot = { holdings: [{ symbol: 'TESTINDIA', company_name: 'Synthetic', quantity: 6, current_value: 600 }] };
   const [usStock] = helpers.buildConsensusRows([usRun], 'us', usSnapshot);
-  assert.equal(helpers.buildDashboardActionRows([usStock], 'us', {})[0].formulaEstimate.units, 5.5);
+  const deferred = helpers.buildDashboardActionRows([usStock], 'us', {})[0];
+  assert.ok(deferred.formulaScore > 0);
+  assert.equal(deferred.formulaAction, null);
+  assert.equal(deferred.formulaEstimate.units, null);
 });
 
 test('sell, trim and hold summaries clear stale buy quantities and use current holdings for formula sizing', () => {

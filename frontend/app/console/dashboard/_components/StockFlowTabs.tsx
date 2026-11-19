@@ -88,8 +88,8 @@ function compareFinalActionables(
   left: ReturnType<typeof buildDashboardActionRows>[number],
   right: ReturnType<typeof buildDashboardActionRows>[number],
 ) {
-  const leftIndex = BASKET_ACTION_ORDER.indexOf(left.formulaAction);
-  const rightIndex = BASKET_ACTION_ORDER.indexOf(right.formulaAction);
+  const leftIndex = BASKET_ACTION_ORDER.indexOf(left.formulaAction ?? "");
+  const rightIndex = BASKET_ACTION_ORDER.indexOf(right.formulaAction ?? "");
   const actionComparison = (leftIndex === -1 ? Number.MAX_SAFE_INTEGER : leftIndex)
     - (rightIndex === -1 ? Number.MAX_SAFE_INTEGER : rightIndex);
   if (actionComparison !== 0) return actionComparison;
@@ -612,7 +612,7 @@ function RebalanceStockFlowSubwidget({
               >
                 <p className="px-4 py-2 text-xs text-slate-600">{flow.actionables.length} formula decisions · {flow.uncovered.length} retained without an executable action.</p>
                 {flow.actionables.length ? flow.actionables.map((row) => (
-                  <StockRow key={row.id} name={`${row.stock.exchange}:${row.stock.symbol}`} action={row.formulaAction} score={row.formulaScore} consensus={consensusLabel(row.stock)} detailed highlighted={isAboveBuyThreshold(row, buyThreshold)} details={[`Exchange: ${row.stock.exchange || "—"}`, `Suggestions: ${row.stock.totalSuggestions}`, `Source: ${flow.rebalanceRun && isAnalysisRunForStage(flow.rebalanceRun, "rebalance", flow.portfolio.market) ? "Latest rebalance scan" : "Rebalance scan"}`]} />
+                  <StockRow key={row.id} name={`${row.stock.exchange}:${row.stock.symbol}`} action={row.formulaAction ?? (row.formulaScore == null ? "Score unavailable" : "Holdings unavailable")} score={row.formulaScore} consensus={consensusLabel(row.stock)} detailed highlighted={isAboveBuyThreshold(row, buyThreshold)} details={[`Exchange: ${row.stock.exchange || "—"}`, `Suggestions: ${row.stock.totalSuggestions}`, `Source: ${flow.rebalanceRun && isAnalysisRunForStage(flow.rebalanceRun, "rebalance", flow.portfolio.market) ? "Latest rebalance scan" : "Rebalance scan"}`]} />
                 )) : <EmptyStage />}
                 {flow.uncovered.map(row => <StockRow key={row.key} name={row.key} action={row.disposition} score={null} detailed details={[row.explanation, ...Object.values(row.reasons)]} />)}
               </Stage>
@@ -663,7 +663,7 @@ function RebalanceStockFlowSubwidget({
                         <td className="px-4 py-3 text-sm font-semibold text-slate-950">{row.stock.exchange}:{row.stock.symbol}</td>
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-2">
-                            <ActionBadge action={row.formulaAction} />
+                            {row.formulaAction ? <ActionBadge action={row.formulaAction} /> : row.formulaScore == null ? "Score unavailable" : "Holdings unavailable"}
                             {isAboveBuyThreshold(row, buyThreshold) ? (
                               <span className="whitespace-nowrap rounded-full bg-emerald-600 px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-white">Above threshold</span>
                             ) : null}

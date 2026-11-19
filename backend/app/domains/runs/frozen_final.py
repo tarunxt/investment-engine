@@ -196,8 +196,11 @@ async def verified_scorecards(db, job_id, user_id, portfolio, sequence, *, legac
 
     threat_rows = tables.get("stock_threat_scores", [])
     counts = defaultdict(int)
+    assessment_reasons = {}
     for row in threat_rows:
-        counts[row["Exchange"] + ":" + row["Stock Symbol"]] += 1
+        listing = row["Exchange"] + ":" + row["Stock Symbol"]
+        counts[listing] += 1
+        assessment_reasons[listing] = row.get("Assessment reason")
     threats = unique_scores(threat_rows,
                             lambda row: row["Exchange"] + ":" + row["Stock Symbol"], "Stock Threat /100")
     pairs = unique_scores(tables.get("pairwise_scores", []), lambda row: row["Listing"], "Pairwise /100")
@@ -209,7 +212,7 @@ async def verified_scorecards(db, job_id, user_id, portfolio, sequence, *, legac
             comparisons[listing] = int(count) if listing not in comparisons and count.isdecimal() else None
         for listing in pairs.keys() | threats.keys():
             count = counts[listing]
-            reason = ("Duplicate stock threat rows" if count > 1 else "Invalid stock threat score" if count and threats.get(listing) is None else None if count else "Missing stock threat row")
+            reason = ("Duplicate stock threat rows" if count > 1 else (assessment_reasons.get(listing) or "Invalid stock threat score") if count and threats.get(listing) is None else None if count else "Missing stock threat row")
             evidence[listing] = {"threat_reason": reason, "job_id": job_id, "comparisons": comparisons.get(listing),
                                  "pairwise": pairs.get(listing), "stock_threat": threats.get(listing)}
     return {key: (pairs.get(key), threats.get(key)) for key in pairs.keys() | threats.keys()}

@@ -555,14 +555,16 @@ def parse_zerodha_threat_report(markdown: str | None, prompt: str = "", *, legac
                           ", ".join(f"{key} ({value:.2f} points)" for key, value in portfolio["contributors"])]
                 tables.insert(0, {"key": "portfolio_threat_score", "title": "Portfolio Threat",
                                   "columns": columns, "rows": [dict(zip(columns, values))]})
-        columns = ["Exchange", "Stock Symbol", "Stock Threat /100", "Coverage", "Extreme impact"]
+        columns = ["Exchange", "Stock Symbol", "Stock Threat /100", "Coverage", "Extreme impact", "Assessment reason"]
         scores = []
         for exchange, symbol in sorted(universe):
             card = cards.get((exchange, symbol), {"score": None, "provisional": True, "evidence": []})
             value = card["score"]
+            assessed = sum(category["score"] is not None for category in card.get("categories", {}).values())
+            reason = f"{assessed} of 3 required threat categories scored" if value is None else ""
             scores.append(dict(zip(columns, [exchange, symbol, "Unknown" if value is None else f"{value:.2f}",
                 ("Unassessed" if value is None and not legacy_evidence else "Provisional") if card["provisional"] else "Complete",
-                "20%+ conditional downside" if any(r.get("Impact") == "5" for r in card["evidence"]) else "—"])))
+                "20%+ conditional downside" if any(r.get("Impact") == "5" for r in card["evidence"]) else "—", reason])))
         tables.append({"key": "stock_threat_scores", "title": "Stock Threat", "columns": columns, "rows": scores})
         category_columns = ["Exchange", "Stock Symbol", "Category", "Threat /100", "Leading event", "Runner-up"]
         category_names = ["Geopolitics and trade", "Global financial conditions", "Domestic economy",

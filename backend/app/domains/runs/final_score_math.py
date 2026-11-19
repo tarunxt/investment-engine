@@ -23,7 +23,9 @@ ACTION_HEADER = "Action (Buy/Add/Sell All/Trim/Hold/Buy New)"
 
 
 def numeric(value, *, strict=False):
-    text = str(value or "").replace(",", "").strip()
+    if value is None or isinstance(value, bool):
+        return None
+    text = str(value).replace(",", "").strip()
     match = re.fullmatch(r"-?\d+(?:\.\d+)?", text) if strict else re.search(r"-?\d+(?:\.\d+)?", text)
     if not match:
         return None
@@ -106,7 +108,7 @@ def weighted_score(rows, override=None):
     return score, denominator
 
 
-def calculate_listing(rows, formula, technical=None, *, direction=None, market, unresolved_holding=False, supplemental=None):
+def calculate_listing(rows, formula, technical=None, *, direction=None, market, unresolved_holding=False, supplemental=None, legacy=False):
     """Rows are source cells; technical is the selected source Technical row."""
     actions = [normalize_action(row.get(ACTION_HEADER)) for row in rows]
     mean_action = mean([ACTION_VALUES.get(action) for action in actions])
@@ -119,7 +121,7 @@ def calculate_listing(rows, formula, technical=None, *, direction=None, market, 
         score = mean([value for value in values if value is not None and -3 <= value <= 3])
         weighted.append({"id": key, "score": score, "multiplier": weights[key]})
     confidence = numeric(technical.get("Confidence Score")) if technical else None
-    if technical and str(technical.get("Confidence Score", "")).strip().lower() in {"", "—", "-", "n/a", "na", "none", "null"}:
+    if legacy and technical and str(technical.get("Confidence Score", "")).strip().lower() in {"", "—", "-", "n/a", "na", "none", "null"}:
         # summarizeNumeric uses Number after stripping non-numeric characters,
         # then rounds the displayed mean before its numeric fallback is read.
         fallback_values = []
@@ -135,9 +137,17 @@ def calculate_listing(rows, formula, technical=None, *, direction=None, market, 
                 fallback_values.append(value)
         fallback_mean = mean(fallback_values)
         confidence = float(Decimal.from_float(fallback_mean).to_integral_value(rounding=ROUND_HALF_UP)) if fallback_mean is not None else None
-    # The UI's existing confidence term uses the direction multiplier directly;
+    if technical and not legacy:
+        confidence = numeric(technical.get("Confidence Score"), strict=True)
+        if str(technical.get("Confidence Score") or "").strip().lower() in {"", "—", "-", "n/a", "na", "none", "null"} and confidence is None:
+            values = [numeric(row.get("Confidence Score (0-100)"), strict=True) for row in rows]
+            percent = mean([v for v in values if v is not None and 0 <= v <= 100])
+            confidence = None if percent is None else percent / 10
+        if confidence is not None and not 0 <= confidence <= 10:
+            confidence = None
+    # The legacy UI's confidence term uses the direction multiplier directly;
     # the configurable detailed confidence multiplier is not applied by that UI.
-    multiplier = formula["technicalScanMultipliers"][direction] if technical and confidence is not None and direction in {"bullish", "bearish"} else 0
+    multiplier = formula["technicalScanMultipliers"][direction] if legacy and technical and confidence is not None and direction in {"bullish", "bearish"} else 0
     weighted.append({"id": "technical-scan-confidence", "score": confidence if technical else None,
                      "multiplier": multiplier, "denominatorWeight": 2 if multiplier else 0,
                      "outOfBoundsDenominatorWeight": 3 if multiplier else 0, "min": 0, "max": 10})
@@ -162,7 +172,10 @@ def calculate_listing(rows, formula, technical=None, *, direction=None, market, 
     bearish = mean([abs(change) for change in changes if change is not None and change < 0])
     bounded = effective if effective is not None else 0
     action = ("Add more" if (current or 0) > 0 else "Buy New") if bounded >= 1 else "Hold" if bounded >= -1 else "Trim" if bounded >= -2 else "Sell All"
-    if action in {"Sell All", "Trim"} and current == 0:
+    if not legacy and (effective is None or effective >= 1 and current is None):
+        action = None
+        units_change = None
+    elif action in {"Sell All", "Trim"} and current == 0:
         units_change = 0
     elif action == "Sell All":
         units_change = -abs(current) if (current or 0) > 0 else -abs(bearish) if bearish is not None else -abs(mean_change) if mean_change is not None else None
@@ -212,7 +225,7 @@ def calculate_listing(rows, formula, technical=None, *, direction=None, market, 
     return {"raw_score": raw, "effective_score": effective, "action": action,
             "estimate": {"currentUnits": current, "currentInvestmentAmount": value, "units": units, "amount": amount},
             "entries": [{"action": action, "actionScore": ACTION_VALUES.get(action), "unitsChange": change} for action, change in zip(actions, changes)],
-            "inputs": {"calculationPolicy": "missing-score-exclusion-v2", "currentUnits": current, "modeAction": mode, "meanScore": mean_action,
+            "inputs": {"calculationPolicy": "missing-score-exclusion-v2" if legacy else "informational-confidence-v3", "currentUnits": current, "modeAction": mode, "meanScore": mean_action,
                        "meanUnitsChange": mean_change, "meanModeAction": mode, "meanModeUnitsChange": mean_change,
                        "calculatedAction": action, "calculatedUnitsChange": units_change,
                        "detailedRationaleFinalScore": rationale, "detailedRationaleDenominator": denominator},

@@ -40,11 +40,11 @@ def test_technical_adapter_preserves_catalog_score_and_source_hash():
     assert row["confidence"] == "8.2" and row["source_hash"]
 
 
-def test_equity_fallback_is_not_silently_converted_to_technical_scale():
+def test_legacy_equity_fallback_retains_its_original_scale():
     formula = json.loads(json.dumps(Formula().model_dump(),default=float))
     source = {"Confidence Score (0-100)":"80"}
     technical = {"Confidence Score":"—"}
-    output = calculate_listing([source],formula,technical,direction="bullish",market="india")
+    output = calculate_listing([source],formula,technical,direction="bullish",market="india",legacy=True)
     row = next(r for r in output["weighted_rows"] if r["id"] == "technical-scan-confidence")
     assert row["score"] == 80  # Existing compatibility arithmetic, not 8 or .8.
     assert row["max"] == 10    # Unsupported cross-scale equivalence remains visible.

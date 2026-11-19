@@ -89,6 +89,7 @@ def source_calculations(payload, *, sources, jobs_by_run, market, scorecards=Non
         # unknown, even if model rows contain a suggested current quantity.
         calculation = calculate_listing(rows, formula, technical, direction=direction,
                                         market=market, unresolved_holding=market == "us",
+                                        legacy="[SCORING_POLICY_V3]" not in technical_source.prompt,
                                         supplemental=(scorecards or {}).get(":".join(key)))
         calculation["valid_suggestions"] = len(output_jobs)
         calculation["source_coverage"] = [{

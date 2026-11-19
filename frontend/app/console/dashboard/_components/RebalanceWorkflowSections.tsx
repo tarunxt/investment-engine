@@ -1487,7 +1487,7 @@ function buildZerodhaBasketPreviewOrders(
     // Keep explicit zero-position non-buy decisions visible in allocationUniverse,
     // without converting them into executable orders through a later formula.
     .filter(row => !isExplicitNonBuyDecision(row.stock))
-    .filter((row) => ZERODHA_BASKET_ACTIONS.has(row.formulaAction))
+    .filter((row): row is DashboardActionRow & {formulaAction: ActionCategory} => row.formulaAction !== null && ZERODHA_BASKET_ACTIONS.has(row.formulaAction))
     .filter((row) => {
       if (row.formulaAction !== "Sell All" && row.formulaAction !== "Trim") return true;
       const symbol = normalizeZerodhaBasketSymbol(row.stock.symbol);
@@ -2958,6 +2958,7 @@ function ScopedZerodhaBasketPreviewDialog({
   loadingLabel = "Preparing Zerodha basket…",
   scoreRevision,
   openSavedBasket,
+  compareCurrentSettings,
   scoreScanCompletedAt: scoreScanCompletedAtOverride = null,
   primaryButtonLabel,
   basketInfoText = "All rows are visible and selectable. Selection does not assert execution validity. Review the basket here, use protected MARKET for all selected stocks by default whenever direct Kite Connect access is enabled during regular market hours. Market drafts require enabled direct broker access; no silent LIMIT fallback is used.",
@@ -3004,6 +3005,7 @@ function ScopedZerodhaBasketPreviewDialog({
   tradingViewAriaLabel?: string;
   loadingLabel?: string;
   openSavedBasket?: () => void;
+  compareCurrentSettings?: () => void;
   scoreRevision?: BasketScoreRevision | null;
   scoreScanCompletedAt?: string | null;
   primaryButtonLabel?: string;
@@ -3075,7 +3077,8 @@ function ScopedZerodhaBasketPreviewDialog({
       const sameMarket = run && ["rebalance", "technical", "swing", "threats"].some(stage => isAnalysisRunForStage(run, stage as "rebalance" | "technical" | "swing" | "threats", tradingViewMarket));
       return { runId, createdAt: parseApiTimestamp(run?.created_at)?.toISOString() ?? "", completed: run?.status === "completed", status: run?.status, market: sameMarket ? tradingViewMarket : null };
     });
-    return { modelUnits: currentDetail.meanUnitsChange, isin: hasOutsideHolding ? null : issuer, modelPrices, verifiedUsIdentity: row.stock.usIdentity?.listing ? {securityId:row.stock.usIdentity.listing.security_id,exchangeAliases:row.stock.usIdentity.holdingSafe ? ["US"] : []} : undefined, identityIssue: row.stock.identityIssue, vendorReady: (quoteRead.vendorQuotes ?? []).find(quote => quote.instrument === stockIdentity(row.stock.symbol, row.stock.exchange))?.eligible_for_readiness === true, investedValue: usHolding?.investedValue ?? null, vendorLtp: vendor?.price ?? null, vendorSource: vendor?.source, vendorAsOf: vendor?.asOf, currentValue: tradingViewMarket === "us" ? usHolding?.currentValue ?? null : currentWeights.valid ? currentWeights.values.get(stockIdentity(row.stock.symbol, row.stock.exchange)) ?? 0 : null, holdingQuantity: tradingViewMarket === "us" ? usHolding?.quantity ?? null : holding?.quantity ?? null, holdingAsOf: holding?.asOf, holdingSource: holding?.source, upstoxLtp: upstox?.price ?? null, upstoxAsOf: upstox?.asOf, upstoxSource: upstox?.source, symbol: row.stock.symbol, exchange: row.stock.exchange, score: currentOrder ? currentDetail.calculatedScore : row.formulaScore, action: currentOrder ? getZerodhaBasketActionForPercent(currentOrder) : row.formulaAction, scoreSources, ...displayQuote(row.stock.symbol, row.stock.exchange) };
+    const saved = openSavedBasket ? scoreRevision?.saved.get(stockIdentity(row.stock.symbol, row.stock.exchange)) : undefined;
+    return { savedComparison: saved && {score: saved.score, divisor: saved.divisor, currentDivisor: currentDetail.detailedRationaleDenominator}, modelUnits: currentDetail.meanUnitsChange, isin: hasOutsideHolding ? null : issuer, modelPrices, verifiedUsIdentity: row.stock.usIdentity?.listing ? {securityId:row.stock.usIdentity.listing.security_id,exchangeAliases:row.stock.usIdentity.holdingSafe ? ["US"] : []} : undefined, identityIssue: row.stock.identityIssue, vendorReady: (quoteRead.vendorQuotes ?? []).find(quote => quote.instrument === stockIdentity(row.stock.symbol, row.stock.exchange))?.eligible_for_readiness === true, investedValue: usHolding?.investedValue ?? null, vendorLtp: vendor?.price ?? null, vendorSource: vendor?.source, vendorAsOf: vendor?.asOf, currentValue: tradingViewMarket === "us" ? usHolding?.currentValue ?? null : currentWeights.valid ? currentWeights.values.get(stockIdentity(row.stock.symbol, row.stock.exchange)) ?? 0 : null, holdingQuantity: tradingViewMarket === "us" ? usHolding?.quantity ?? null : holding?.quantity ?? null, holdingAsOf: holding?.asOf, holdingSource: holding?.source, upstoxLtp: upstox?.price ?? null, upstoxAsOf: upstox?.asOf, upstoxSource: upstox?.source, symbol: row.stock.symbol, exchange: row.stock.exchange, score: currentOrder ? currentDetail.calculatedScore : row.formulaScore, action: currentOrder ? getZerodhaBasketActionForPercent(currentOrder) : row.formulaAction, scoreSources, ...displayQuote(row.stock.symbol, row.stock.exchange) };
   };
   const calculationStocks = allocationUniverse.map(displayStock);
   const displayCalculations = useBasketDisplayCalculations(open, tradingViewMarket, calculationStocks, portfolioAssets.totalAssets, detailsData.portfolioSnapshot?.captured_at ?? null, basketBrokerLabel, { portfolioValue: portfolioAssets.portfolioValue, availableMargin: portfolioAssets.availableMargin }, tradingViewMarket === "india" ? "issuer-v2" : "listing-v1");
@@ -3098,7 +3101,7 @@ function ScopedZerodhaBasketPreviewDialog({
       percent: direction === 'SELL' && holding?.quantity ? (units ?? 0) / holding.quantity * 100 : 100,
       orderKind: 'Market', wholeShareReview: tradingViewMarket === 'india' ? existing?.wholeShareReview : undefined, stock: existing?.stock ?? row!.stock, detail: existing?.detail ?? row!.detail,
       technicalScan: existing?.technicalScan ?? null,
-      draftContext: { action, originalAction: existing ? existing.detail.calculatedAction : row!.formulaAction, suggestedUnits: suggested, source: tradingViewMarket === "india" ? upstox?.source : displayQuote(stock.symbol, stock.exchange).ltpSource, asOf: tradingViewMarket === "india" ? upstox?.asOf : displayQuote(stock.symbol, stock.exchange).ltpAsOf },
+      draftContext: { action, originalAction: (existing ? existing.detail.calculatedAction : row!.formulaAction) ?? undefined, suggestedUnits: suggested, source: tradingViewMarket === "india" ? upstox?.source : displayQuote(stock.symbol, stock.exchange).ltpSource, asOf: tradingViewMarket === "india" ? upstox?.asOf : displayQuote(stock.symbol, stock.exchange).ltpAsOf },
     };
   };
   const basketRows = [
@@ -3276,6 +3279,7 @@ function ScopedZerodhaBasketPreviewDialog({
           </div>
         </div>
 
+        {compareCurrentSettings && <button type="button" className="mx-5 mt-2 self-start underline" onClick={compareCurrentSettings}>Compare with current settings</button>}
         {orderSubmissionBlockedReason ? (
           <div role="alert" className="mx-5 mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
             {scoreRevision?.divisors.length ? <p className="font-semibold">Rationale divisor (basket → saved): {scoreRevision.divisors.join(", ")}</p> : null}
@@ -3349,7 +3353,7 @@ function ScopedZerodhaBasketPreviewDialog({
                 {displayCalculations.error ? <p role="alert" className="mb-3 text-red-700">{displayCalculations.error} <button type="button" onClick={displayCalculations.retry} className="underline">Retry historical scores</button></p> : null}
               </div>
               <div className="w-fit min-w-full overflow-clip rounded-2xl border border-slate-200">
-                  <BasketColumnTable hidden={hiddenColumns} order={columnPreferences?.order} names={isZerodhaPreview && displayCalculations.parameters ? { "Historical Weighted Score": `${displayCalculations.parameters.days}-day mean score (−3 to +3)`, ...columnNames } : columnNames} onOpen={setColumnMenu} onRequestRename={setRenameColumn}>
+                  <BasketColumnTable hidden={hiddenColumns} order={columnPreferences?.order} names={isZerodhaPreview && displayCalculations.parameters ? { "Historical Weighted Score": `${displayCalculations.parameters.days}-day mean of run scores (−3 to +3)`, ...columnNames } : columnNames} onOpen={setColumnMenu} onRequestRename={setRenameColumn}>
                   <table className="min-w-[92rem] w-full text-sm">
                     <thead className="sticky top-0 z-10 bg-slate-50">
                       <tr className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
@@ -3497,13 +3501,13 @@ function ScopedZerodhaBasketPreviewDialog({
                             })}
                             {group.displayRows.map(row => {
                               const quote = displayQuote(row.stock.symbol, row.stock.exchange);
-                              const side = row.formulaAction === "Hold" ? null : row.formulaAction === "Sell All" || row.formulaAction === "Trim" ? "SELL" : "BUY";
+                              const side = row.formulaAction == null || row.formulaAction === "Hold" ? null : row.formulaAction === "Sell All" || row.formulaAction === "Trim" ? "SELL" : "BUY";
                               return <tr key={`display-only:${row.id}`} data-display-only="true" className="bg-white transition">
                                 <td className="px-4 py-3"><input type="checkbox" disabled aria-label={`${row.stock.exchange} ${row.stock.symbol} display only; no executable order`} className="size-4 rounded border-slate-300" /></td>
                                 <td className="whitespace-nowrap px-4 py-3 font-bold text-slate-950"><div className="inline-flex items-center gap-1.5"><StockDetailsButton stock={row.stock} formulaConfig={formulaConfig} market={tradingViewMarket} technicalScan={null} detailsData={detailsData} historicalRows={historicalRows} /><span className="text-xs font-semibold text-slate-500">{row.stock.exchange}</span><TradingViewSymbolLink symbol={row.stock.symbol} market={tradingViewMarket} exchange={row.stock.exchange}>{row.stock.symbol}</TradingViewSymbolLink></div></td>
                                 <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-800"><ScoreMatrixButton workflowScale={isZerodhaPreview} savedScore={scoreRevision?.saved.get(stockIdentity(row.stock.symbol, row.stock.exchange))} originalDenominator={scoreRevision?.originals.get(stockIdentity(row.stock.symbol, row.stock.exchange))} detail={row.detail} formulaConfig={formulaConfig} onOpenDetail={setSelectedMatrixDetail} /></td>
                                 <td className="whitespace-nowrap px-4 py-3"><ConsensusBreakupButton stock={row.stock} action={row.formulaAction} /></td>
-                                <td className="whitespace-nowrap px-4 py-3 text-slate-700">{row.formulaAction}</td>
+                                <td className="whitespace-nowrap px-4 py-3 text-slate-700">{row.formulaAction ?? (row.formulaScore == null ? "Score unavailable" : "Holdings unavailable")}</td>
                                 <td className="px-4 py-3">{side ? <span className={cn("rounded-full px-3 py-1 text-xs font-bold", side === "BUY" ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700")}>{side}</span> : <span title="Hold has no order side">Not applicable</span>}</td>
                                 {displayCalculations.cells(displayStock(row))}
                                 <td className="px-4 py-3 text-slate-500">{isZerodhaPreview ? displayCalculations.units?.(displayStock(row), "Units action") : "Not applicable"}</td><td className="px-4 py-3 text-slate-500">Not applicable</td>
@@ -4948,7 +4952,7 @@ export function RebalanceWorkflowSections({
   const zerodhaPreparation = useRef(0);
   const indmoneyPreparation = useRef(0);
   const openZerodhaBasketPreview = useCallback(async (requested?: {sequence: number; formula: ScoreMatrixFormulaConfig}) => {
-    const formula = requested?.formula ?? scoreMatrixFormulaConfig;
+    let formula = requested?.formula ?? scoreMatrixFormulaConfig;
     setLocalBasketFormula(requested?.formula ?? null);
     const generation = ++zerodhaPreparation.current;
     setVerifiedBasketFormula(null);
@@ -5006,7 +5010,7 @@ export function RebalanceWorkflowSections({
           .filter((value): value is string => Boolean(value))
           .sort((left, right) => parseTimestampMs(right) - parseTimestampMs(left))[0] ?? null,
       );
-      const actionRows = buildDashboardActionRows(stocks, "india", technicalScans, formula);
+      let actionRows = buildDashboardActionRows(stocks, "india", technicalScans, formula);
       const rebalance = getLatestMatchingRebalanceRuns(runs, "india");
       const technicalIds = [...new Set(actionRows.map(row => row.detail?.technicalScanSourceRunId))];
       const technical = technicalIds.length === 1 ? runs.find(run => run.id === technicalIds[0]) : null;
@@ -5039,6 +5043,12 @@ export function RebalanceWorkflowSections({
           }
           const storedFormula = verification.verified && frozen?.formula && typeof frozen.formula === "object"
             ? normalizeScoreMatrixFormulaConfig(frozen.formula as Partial<ScoreMatrixFormulaConfig>) : null;
+          const verifiedSettings = storedFormula && canonicalBasketInputs(storedFormula) === canonicalBasketInputs(frozen?.formula) ? storedFormula : null;
+          if (!requested && verifiedSettings) {
+            formula = verifiedSettings;
+            setLocalBasketFormula(formula);
+            actionRows = buildDashboardActionRows(stocks, "india", technicalScans, formula);
+          }
           const divisors = new Set<string>();
           const differences = actionRows.filter(row => {
             const entry = saved.get(stockIdentity(row.stock.symbol, row.stock.exchange));
@@ -5047,7 +5057,7 @@ export function RebalanceWorkflowSections({
             return !entry || !sameFrozenScore(entry.score, row.formulaScore) || entry.divisor !== row.detail.detailedRationaleDenominator;
           }).map(row => stockIdentity(row.stock.symbol, row.stock.exchange));
           setScoreRevision({
-            formula: storedFormula && canonicalBasketInputs(storedFormula) === canonicalBasketInputs(frozen?.formula) ? storedFormula : null,
+            formula: verifiedSettings,
             divisors: [...divisors], differences,
             sequence, version: typeof frozen?.formula_version === "string" ? frozen.formula_version : null,
             capturedAt: typeof frozen?.captured_at === "string" ? frozen.captured_at : null,
@@ -8386,6 +8396,8 @@ ${zerodhaExecutionMode === "direct_market"
         ltpRefreshing={zerodhaBasketLtpRefreshing}
         ltpRefreshedAt={zerodhaBasketLtpRefreshedAt}
         scoreRevision={scoreRevision}
+        compareCurrentSettings={scoreRevision?.formula && canonicalBasketInputs(scoreRevision.formula) === canonicalBasketInputs(basketFormula) && canonicalBasketInputs(basketFormula) !== canonicalBasketInputs(scoreMatrixFormulaConfig)
+          ? () => void openZerodhaBasketPreview({sequence: scoreRevision.sequence, formula: scoreMatrixFormulaConfig}) : undefined}
         openSavedBasket={scoreRevision?.formula && canonicalBasketInputs(scoreRevision.formula) !== canonicalBasketInputs(basketFormula)
           ? () => void openZerodhaBasketPreview({sequence: scoreRevision.sequence, formula: scoreRevision.formula!}) : undefined}
         scoreScanCompletedAt={zerodhaBasketScoreScanCompletedAt}
