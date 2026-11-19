@@ -63,14 +63,17 @@ for (const [key,row] of rows) {
       (r.rebalance_run_ids?.includes(obs.run_id) || r.technical_run_id === obs.run_id) && rs.has(key) &&
       rs.get(key).action === obs.action && close(rs.get(key).score,obs.score));
     totalPrior++;
-    if (matching.length === 1) {
+    if (obs.components && close(weighted(obs.components,baselineWeights),obs.score)) {
+      priorCards.set(lookup,obs.components);
+      comparablePrior++;
+    } else if (matching.length === 1 && !obs.components) {
       priorCards.set(lookup,matching[0].rows.get(key).components);
       comparablePrior++;
     }
   }
 }
 function scenario(weights, mode) {
-  const rankings = [...rows].map(([key,row])=>({key,signed:weighted(row.components,weights)}))
+  const rankings = [...rows].map(([key,row])=>({key,signed:weights===baselineWeights ? row.score : weighted(row.components,weights)}))
     .sort((a,b)=>(b.signed??-Infinity)-(a.signed??-Infinity)||a.key.localeCompare(b.key));
   const means = rankings.map(({key,signed})=>{
     const listing=listings.get(key);
@@ -96,7 +99,9 @@ function scenario(weights, mode) {
       return {listing:r.key,shares,units,targetRupees:shares*r.price,tradeRupees:units*r.price};
     });
   }
-  return {mode,weights,rankings,historicalMeans:means.map(({key,score})=>({key,score})),allocation};
+  const historicalMeans=means.map(({key,score})=>({key,score})).sort((a,b)=>
+    (b.score??-Infinity)-(a.score??-Infinity)||a.key.localeCompare(b.key));
+  return {mode,weights,rankings,historicalMeans,allocation};
 }
 const baseline=scenario(baselineWeights,'current-run-only');
 const original=new Map(baseline.allocation?.map(r=>[r.listing,r]));
@@ -110,6 +115,8 @@ for (const mode of ['current-run-only','full-window']) for (const weights of [ba
   console.log(JSON.stringify({...result,sequence:record.workflow_sequence,valuationAsOf:v?.asOf??null,
     coverage:v ? {eligiblePrior:totalPrior,comparablePrior} : null,
     changedRanks:result.rankings.filter((r,i)=>r.key!==baseline.rankings[i].key).length,
+    changedWindowRanks:result.historicalMeans.every(r=>r.score!=null) && baseline.historicalMeans.every(r=>r.score!=null)
+      ? result.historicalMeans.filter((r,i)=>r.key!==baseline.historicalMeans[i].key).length : null,
     entries:trades?.filter(r=>r.shares>0 && original.get(r.listing).shares===0).map(r=>r.listing)??null,
     exits:trades?.filter(r=>!r.shares && original.get(r.listing).shares>0).map(r=>r.listing)??null,
     allocation:trades?.map(r=>({...r,targetChangeRupees:r.targetRupees-original.get(r.listing).targetRupees}))??null,

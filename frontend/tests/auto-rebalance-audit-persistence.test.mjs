@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import "../scripts/compare-saved-scorecards.test.mjs";
 import ts from "typescript";
 import { createElement } from "react";
 import * as jsxRuntime from "react/jsx-runtime";
@@ -143,8 +144,10 @@ function harness({ analysisOnly = false, formulaScore = 0, intercept, read, emai
     buildOutputSourceJobs: async () => [], getPreviousMarketClose: () => new Date(),
     buildRebalanceInputBundle: () => "snapshot", ensureRebalanceFlowMarker: p => p,
     buildRebalancePrompt: () => "rebalance", getRebalanceDefaultExportSheetName: () => "sheet",
+    captureIndiaValuation: async () => { throw new Error("Valuation inputs unavailable in audit persistence fixture"); },
+    parseApiTimestamp: value => value ? new Date(value) : null,
     scoreMatrixFormulaConfig: {}, auditResponseHashes: async () => ({}),
-    buildConsensusRows: (...args) => { consensusCalls.push(args); return [{ key: "NSE:TEST", exchange: "NSE", symbol: "TEST" }]; },
+    buildConsensusRows: (...args) => { consensusCalls.push(args); return [{ key: "NSE:TEST", exchange: "NSE", symbol: "TEST", rows: [] }]; },
     buildTechnicalScanMap: () => ({}), resolveTechnicalPriceEvidence: quoteRead ? priceExports.resolveTechnicalPriceEvidence : async () => "", buildTechnicalScanPrompt: () => "technical",
     buildDashboardActionRows: rows => rows.map(stock => ({ stock, formulaAction: "Hold", formulaScore, formulaEstimate: {}, detail: {} })),
     getSelectedThreatJobIds: () => [], deduplicateThreatStageInputs: (input) => input,
