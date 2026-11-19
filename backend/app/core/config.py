@@ -2,13 +2,21 @@ import os
 from datetime import datetime, timezone
 from typing import Optional
 
-from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, PositiveInt, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.core.jwt_configuration import signing_key
 
 _TRUE_ENV_VALUES = {"1", "true", "t", "yes", "y", "on", "debug", "development", "dev"}
 _FALSE_ENV_VALUES = {"0", "false", "f", "no", "n", "off", "release", "prod", "production"}
+
+
+class KitePersonalApp(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True, hide_input_in_errors=True)
+
+    client_id: str = Field(pattern=r"^[A-Z0-9]+$", min_length=1, max_length=32)
+    api_key: str = Field(pattern=r"^[A-Za-z0-9]+$", min_length=1, max_length=128)
+    api_secret: SecretStr = Field(min_length=1, repr=False)
 
 
 class Settings(BaseSettings):
@@ -63,6 +71,9 @@ class Settings(BaseSettings):
     # Zerodha Kite Connect
     zerodha_api_key: Optional[str] = None
     zerodha_api_secret: Optional[str] = None
+    zerodha_personal_apps: dict[PositiveInt, KitePersonalApp] = Field(
+        default_factory=dict, repr=False, exclude=True,
+    )
     zerodha_token_encryption_key: Optional[str] = None  # Fernet key for access_token at-rest encryption
     zerodha_enable_direct_market_orders: bool = False  # Enable only when the server egress IP is Kite-whitelisted
 

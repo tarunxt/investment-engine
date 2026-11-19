@@ -11,7 +11,7 @@ from collections.abc import Mapping, Sequence
 
 import httpx
 
-from app.core.config import settings
+from app.core.config import KitePersonalApp, settings
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
@@ -27,9 +27,22 @@ class ZerodhaService:
     KITE_BASE = "https://api.kite.trade"
     LOGIN_BASE = "https://kite.zerodha.com/connect/login"
 
+    def __init__(self, personal_app: KitePersonalApp | None = None) -> None:
+        self._personal_app = personal_app
+
+    @property
+    def api_key(self) -> str | None:
+        return self._personal_app.api_key if self._personal_app else settings.zerodha_api_key
+
+    @property
+    def _api_secret(self) -> str | None:
+        if self._personal_app:
+            return self._personal_app.api_secret.get_secret_value()
+        return settings.zerodha_api_secret
+
     @property
     def is_configured(self) -> bool:
-        return bool(settings.zerodha_api_key and settings.zerodha_api_secret)
+        return bool(self.api_key and self._api_secret)
 
     @property
     def direct_market_orders_enabled(self) -> bool:
@@ -50,16 +63,16 @@ class ZerodhaService:
         return None
 
     def get_login_url(self) -> str:
-        return f"{self.LOGIN_BASE}?v=3&api_key={settings.zerodha_api_key}"
+        return f"{self.LOGIN_BASE}?v=3&api_key={self.api_key}"
 
     def _checksum(self, request_token: str) -> str:
-        raw = f"{settings.zerodha_api_key}{request_token}{settings.zerodha_api_secret}"
+        raw = f"{self.api_key}{request_token}{self._api_secret}"
         return hashlib.sha256(raw.encode()).hexdigest()
 
     def _auth_headers(self, access_token: str) -> dict[str, str]:
         return {
             "X-Kite-Version": "3",
-            "Authorization": f"token {settings.zerodha_api_key}:{access_token}",
+            "Authorization": f"token {self.api_key}:{access_token}",
         }
 
     def _raise_for_kite(self, resp: httpx.Response) -> None:
@@ -141,7 +154,7 @@ class ZerodhaService:
             "POST",
             "/session/token",
             data={
-                "api_key": settings.zerodha_api_key,
+                "api_key": self.api_key,
                 "request_token": request_token,
                 "checksum": checksum,
             },
@@ -150,7 +163,13 @@ class ZerodhaService:
                 "Content-Type": "application/x-www-form-urlencoded",
             },
         )
-        return data or {}
+        if not isinstance(data, dict) or not data.get("access_token"):
+            raise KiteError("Kite returned an incomplete login. Please reconnect.")
+        if self._personal_app and data.get("user_id") != self._personal_app.client_id:
+            raise KiteError("Please sign in with the Kite client ID assigned to this CredX account.")
+        if data.get("api_key") and data["api_key"] != self.api_key:
+            raise KiteError("The Kite app changed during login. Please reconnect.")
+        return data
 
     async def get_orders(self, access_token: str) -> list:
         data = await self._request_async("GET", "/orders", access_token=access_token)
@@ -246,3 +265,8 @@ class ZerodhaService:
         if expiry_ist <= login_ist:
             expiry_ist += timedelta(days=1)
         return expiry_ist.astimezone(timezone.utc)
+
+
+def service_for_user(user_id: int, default: ZerodhaService) -> ZerodhaService:
+    personal_app = settings.zerodha_personal_apps.get(user_id)
+    return ZerodhaService(personal_app) if personal_app else default

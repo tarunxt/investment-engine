@@ -1,15 +1,33 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
+from hashlib import sha256
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.domains.zerodha.crypto import decrypt_token, encrypt_token
 from app.domains.zerodha.models import ZerodhaCredential, ZerodhaPortfolioSnapshot
 from app.shared.portfolio_summary import build_persisted_portfolio_summary
+
+
+def _app_binding(user_id: int) -> str:
+    app = settings.zerodha_personal_apps.get(user_id)
+    identity = f"personal:{app.api_key}:{app.client_id}" if app else f"default:{settings.zerodha_api_key}"
+    return sha256(identity.encode()).hexdigest()
+
+
+def _matches_app(cred: ZerodhaCredential | None, user_id: int) -> bool:
+    if cred is None:
+        return False
+    if cred.app_binding is None:
+        # Sessions written before owner-specific apps could only use the default app.
+        return user_id not in settings.zerodha_personal_apps
+    return cred.app_binding == _app_binding(user_id)
 
 
 class ZerodhaCredentialRepository:
@@ -20,7 +38,8 @@ class ZerodhaCredentialRepository:
         result = await self._db.execute(
             select(ZerodhaCredential).where(ZerodhaCredential.user_id == user_id)
         )
-        return result.scalar_one_or_none()
+        cred = result.scalar_one_or_none()
+        return cred if _matches_app(cred, user_id) else None
 
     async def get_plaintext_token(self, user_id: int) -> str | None:
         """Return the decrypted access token and stamp last_used_at."""
@@ -38,22 +57,22 @@ class ZerodhaCredentialRepository:
         login_time: datetime,
         expires_at: datetime,
     ) -> ZerodhaCredential:
-        encrypted = encrypt_token(access_token)
-        cred = await self.get_by_user(user_id)
-        if cred:
-            cred.access_token = encrypted
-            cred.login_time = login_time
-            cred.expires_at = expires_at
-        else:
-            cred = ZerodhaCredential(
-                user_id=user_id,
-                access_token=encrypted,
-                login_time=login_time,
-                expires_at=expires_at,
-            )
-            self._db.add(cred)
-        await self._db.flush()
-        return cred
+        # PostgreSQL upsert also covers two first-time callbacks arriving together.
+        values = dict(
+            user_id=user_id,
+            access_token=encrypt_token(access_token),
+            app_binding=_app_binding(user_id),
+            login_time=login_time,
+            expires_at=expires_at,
+        )
+        insert_stmt = insert(ZerodhaCredential).values(**values)
+        updates = {k: getattr(insert_stmt.excluded, k) for k in values if k != "user_id"}
+        updates["updated_at"] = func.now()
+        stmt = insert_stmt.on_conflict_do_update(
+            index_elements=[ZerodhaCredential.user_id],
+            set_=updates,
+        ).returning(ZerodhaCredential)
+        return (await self._db.scalars(stmt, execution_options={"populate_existing": True})).one()
 
     async def delete_by_user(self, user_id: int) -> None:
         await self._db.execute(
@@ -66,9 +85,10 @@ class SyncZerodhaCredentialRepository:
         self._db = db
 
     def get_by_user(self, user_id: int) -> ZerodhaCredential | None:
-        return self._db.execute(
+        cred = self._db.execute(
             select(ZerodhaCredential).where(ZerodhaCredential.user_id == user_id)
         ).scalar_one_or_none()
+        return cred if _matches_app(cred, user_id) else None
 
     def get_plaintext_token(self, user_id: int) -> str | None:
         cred = self.get_by_user(user_id)

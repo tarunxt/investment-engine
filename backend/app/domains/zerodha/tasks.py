@@ -11,7 +11,7 @@ from app.domains.zerodha.repository import (
     SyncZerodhaCredentialRepository,
     SyncZerodhaPortfolioSnapshotRepository,
 )
-from app.domains.zerodha.service import KiteError, ZerodhaService
+from app.domains.zerodha.service import KiteError, ZerodhaService, service_for_user
 from app.infrastructure.database.sync_session import SyncSessionLocal
 from app.infrastructure.messaging.celery_app import celery
 
@@ -84,9 +84,10 @@ def sync_portfolio_snapshot_task(self, user_id: int, source: str = "manual"):
             return {"status": "skipped", "reason": "missing_token"}
 
         try:
-            holdings = _svc.get_holdings_sync(token)
-            positions = _svc.get_positions_sync(token)
-            margins = _svc.get_margins_sync(token)
+            svc = service_for_user(user_id, _svc)
+            holdings = svc.get_holdings_sync(token)
+            positions = svc.get_positions_sync(token)
+            margins = svc.get_margins_sync(token)
             snapshot_data = build_portfolio_snapshot(
                 holdings,
                 positions,

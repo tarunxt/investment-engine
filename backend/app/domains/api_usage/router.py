@@ -10,6 +10,7 @@ from sqlalchemy.orm import load_only
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domains.zerodha.service import ZerodhaService, service_for_user
 from app.domains.auth.dependencies import get_current_user
 from app.domains.auth.models import User
 from app.domains.google_sheets.service import GoogleSheetsService
@@ -374,7 +375,7 @@ async def api_usage_summary(
             ApiUsageItem(
                 name="Zerodha API",
                 category="Broker",
-                configured=bool(settings.zerodha_api_key and settings.zerodha_api_secret),
+                configured=service_for_user(current_user.id, ZerodhaService()).is_configured,
                 daily_requests=0,
                 daily_tokens_in=0,
                 daily_tokens_out=0,

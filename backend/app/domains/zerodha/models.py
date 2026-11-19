@@ -19,6 +19,7 @@ class ZerodhaCredential(Base, TimestampMixin):
         nullable=False,
     )
     access_token: Mapped[str] = mapped_column(Text, nullable=False)  # stored encrypted
+    app_binding: Mapped[str | None] = mapped_column(String(64), nullable=True)
     login_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
