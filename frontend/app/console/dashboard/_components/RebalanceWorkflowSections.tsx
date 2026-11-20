@@ -3230,10 +3230,10 @@ function ScopedZerodhaBasketPreviewDialog({
                 {quoteRead.loading ? <p role="status" className="mb-3 text-slate-600">Loading display prices…</p> : quoteRead.error ? <p role="alert" className="mb-3 text-amber-800">{quoteRead.upstoxEnabled ? "Price sources unavailable. " : `Display prices unavailable: ${quoteRead.error}. `}<button type="button" className="underline" onClick={quoteRead.retry}>Retry quotes</button></p> : null}
                 {displayCalculations.error ? <p role="alert" className="mb-3 text-red-700">{displayCalculations.error} <button type="button" onClick={displayCalculations.retry} className="underline">Retry historical scores</button></p> : null}
               </div>
-              <div className="w-fit min-w-full overflow-clip rounded-2xl border border-slate-200">
+              <div role="region" aria-label="Basket orders, scroll to inspect" tabIndex={0} className="basket-preview-scroll mb-5 max-h-[min(52vh,38rem)] min-h-0 w-fit min-w-full overflow-auto overscroll-contain rounded-2xl border border-slate-200 focus-visible:outline-2 focus-visible:outline-blue-700">
                   <BasketColumnTable hidden={hiddenColumns} order={columnPreferences?.order} names={displayCalculations.parameters ? { "Historical Weighted Score": `${displayCalculations.parameters.days}-day mean of run scores (−3 to +3)`, ...columnNames } : columnNames} onOpen={setColumnMenu} onRequestRename={setRenameColumn}>
-                  <table className="min-w-[92rem] w-full text-sm">
-                    <thead className="sticky top-0 z-10 bg-slate-50">
+                  <table className="min-w-[92rem] w-full border-separate border-spacing-0 text-sm">
+                    <thead className="bg-slate-50">
                       <tr className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
                         <th className="px-4 py-3 font-semibold" data-column-label="Selection">
                           <input type="checkbox" checked={allSelected} onChange={() => onToggleAll(basketRows.map(row => row.id))} aria-label="Select or deselect all basket rows" className="size-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
