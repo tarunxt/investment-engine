@@ -36,7 +36,10 @@
 .notice { margin: 1.375rem 0 0; padding: 1.0625rem; border-radius: 0.8125rem; background: var(--metric-soft); color: var(--metric-accent); font-size: 0.8125rem; line-height: 1.6; }
 .warning { background: var(--metric-warning-bg); color: var(--metric-warning); }
 .footer { margin: 0 1.625rem; padding: 1.125rem 0; border-top: 1px solid var(--metric-line); display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-shrink: 0; }
-.footer > span { font-size: 0.6875rem; color: var(--metric-muted); }
+.footerMain { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.footerWithExtra { flex-direction: column; align-items: stretch; gap: 0.625rem; }
+.footerMain > span { font-size: 0.6875rem; color: var(--metric-muted); }
+.footerExtra { font-size: 0.8125rem; color: var(--metric-ink); }
 .button { display: inline-flex; gap: 0.5rem; align-items: center; justify-content: center; min-height: 2.75rem; padding: 0.625rem 1.125rem; border-radius: 1.5rem; background: var(--metric-soft); color: var(--metric-accent); font-size: 0.75rem; font-weight: 700; cursor: pointer; flex-shrink: 0; }
 .detailHeading { color: var(--metric-accent); background: var(--metric-soft); padding: 0.625rem 1rem; border-radius: 0.75rem; font-size: 0.75rem; font-weight: 700; margin-bottom: 1rem; }
 .details { font-size: 0.8125rem; line-height: 1.7; overflow-wrap: anywhere; }
@@ -52,7 +55,7 @@
 @media (max-width: 520px) {
   .overlay { padding: 0.75rem; } .secondary { padding-top: 2.25rem; }
   .header { padding: 1.25rem 1.125rem 1rem; gap: 0.5rem; } .body { padding: 0.25rem 1.125rem 1.25rem; }
-  .footer { margin: 0 1.125rem; gap: 0.5rem; } .footer > span { max-width: 8.75rem; }
+  .footer { margin: 0 1.125rem; gap: 0.5rem; } .footerMain { gap: 0.5rem; } .footerMain > span { max-width: 8.75rem; }
   .hero { padding: 1.25rem; } .metrics { grid-template-columns: 1fr; gap: 0.5rem; }
   .metrics > div { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 0.75rem 0.875rem; }
   .metrics dt { margin: 0; } .metrics dd { font-size: 0.9375rem; text-align: right; }
@@ -67,7 +70,7 @@
   .subtitle { font-size: max(0.8125rem, 11px); }
   .metrics dt { font-size: max(0.6875rem, 11px); }
   .notice { font-size: max(0.8125rem, 11px); }
-  .footer > span { font-size: max(0.6875rem, 11px); }
+  .footerMain > span { font-size: max(0.6875rem, 11px); }
   .button { font-size: max(0.75rem, 11px); }
   .detailHeading { font-size: max(0.75rem, 11px); }
   .details { font-size: max(0.8125rem, 11px); }

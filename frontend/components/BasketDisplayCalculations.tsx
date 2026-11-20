@@ -22,7 +22,7 @@ export function useBasketDisplayQuotes(open: boolean, market: "india" | "us", in
   const keys = [...new Set(instruments)].sort().join(",");
   const [attempt, setAttempt] = useState(0);
   const request = useMemo(() => ({ open, market, keys, scope, attempt }), [open, market, keys, scope, attempt]);
-  const [capabilities, setCapabilities] = useState<{ request: object | null; enabled: boolean }>({ request: null, enabled: false });
+  const [capabilities, setCapabilities] = useState<{ request: object | null; enabled: boolean | null }>({ request: null, enabled: null });
   const [state, setState] = useState<{ request: object | null; quotes: { instrument: string; isin?: string; price: number; as_of: string; source: string }[]; vendorQuotes?: UsVendorDisplayQuote[]; upstoxQuotes?: { instrument: string; isin?: string; price: number; as_of: string; source: string }[]; error?: string }>({ request: null, quotes: [] });
   useEffect(() => {
     if (!open || !keys) return;
@@ -117,7 +117,7 @@ export function useBasketDisplayQuotes(open: boolean, market: "india" | "us", in
     return () => { active = false; };
   }, [open, market, request]);
   const current = open && state.request === request;
-  return { retry: () => setAttempt(value => value + 1), quotes: current ? state.quotes : [], upstoxQuotes: current ? state.upstoxQuotes ?? [] : [], vendorQuotes: current ? state.vendorQuotes ?? [] : [], upstoxEnabled: open && capabilities.request === request && capabilities.enabled, error: current ? state.error : undefined, loading: Boolean(open && keys && !current) };
+  return { retry: () => setAttempt(value => value + 1), quotes: current ? state.quotes : [], upstoxQuotes: current ? state.upstoxQuotes ?? [] : [], vendorQuotes: current ? state.vendorQuotes ?? [] : [], upstoxEnabled: open && capabilities.request === request ? capabilities.enabled : null, error: current ? state.error : undefined, loading: Boolean(open && keys && !current) };
 }
 
 export function CalculationPopup({ title, children, onClose }: { title: string; children: ReactNode; onClose: () => void }) {
@@ -231,23 +231,6 @@ export function useBasketDisplayCalculations(open: boolean, market: "india" | "u
             <td>{saved?.divisor ?? "Unavailable"} → {saved?.currentDivisor ?? "Unavailable"}</td>
             <td>{savedTargets?.venues.get(row.key)?.shares ?? "Unavailable"} → {row.shown?.stocks ?? "Unavailable"}</td></tr>;
         })}</tbody></table></details>}
-    <p>Min Cash {parameters.cash}% is a minimum input, not an exact invested allocation. Weight cap {parameters.normalised}%; caps are not redistributed.</p>
-    <table className="w-full text-left"><caption className="text-left">Calculated allocation targets · {market === "india" ? "INR" : "USD"}</caption><tbody>
-      <tr><th scope="row">Aggregate target weight</th><td>{percentAggregate(aggregate.weight)}</td></tr>
-      <tr><th scope="row">Residual cash before rounding</th><td>{percentAggregate(aggregate.residualWeight)}</td></tr>
-      <tr><th scope="row">Rounded aggregate target amount</th><td>{formatBasketDisplayCurrency(aggregate.roundedAmount, market === "india" ? "INR" : "USD")}</td></tr>
-      <tr><th scope="row">Residual cash after rounding</th><td>{formatBasketDisplayCurrency(aggregate.roundedResidual, market === "india" ? "INR" : "USD")}</td></tr>
-    </tbody></table>
-    {aggregate.roundedAmount == null && data && !loading && !error && <details><summary>Inputs needed for rounded allocation totals</summary>
-      {totalAssets == null && <p>Portfolio assets unavailable.</p>}
-      {data.truncated && <p>Score history is incomplete.</p>}
-      {!parameters.valid && <p>Allocation settings are invalid.</p>}
-      <ul>{stocks.map(stock => {
-        const row = metrics(stock);
-        if (row.target != null && row.shown?.amount != null && Number.isFinite(row.shown.amount)) return null;
-        return <li key={row.key}>{row.key} · {row.mean?.score == null ? "Eligible score unavailable" : row.sourceStock.identityIssue || row.venue?.reason || (row.target == null ? "Target allocation unavailable" : "Sizing price unavailable")}</li>;
-      })}</ul></details>}
-    <p>Independent rounding can change aggregate exposure. These are calculated allocation targets, before holding overrides, edited drafts or orders. Missing or incomplete inputs remain unavailable.</p>
   </section>;
   const units = (stock: Stock, label = market === 'india' ? 'Action Zerodha Stocks' : 'Action Indmoney Stocks', draftUnits?: number | null) => {
     const suggested = metrics(stock).actionSizing.stocks;

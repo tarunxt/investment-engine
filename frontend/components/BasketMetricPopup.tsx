@@ -8,9 +8,9 @@ export type BasketMetricSummary = {
   metrics: { label: string; value: string }[];
   notice: string; warning?: boolean; status?: "loading" | "error";
 };
-function ModalLayer({ title, eyebrow, onClose, children, footer, tools, covered = false, details = false, wide = false }: {
+function ModalLayer({ title, eyebrow, onClose, children, footer, footerExtra, tools, covered = false, details = false, wide = false }: {
   title: string; eyebrow: string; onClose: () => void; children: ReactNode;
-  footer: ReactNode; tools?: ReactNode; covered?: boolean; details?: boolean; wide?: boolean;
+  footer: ReactNode; footerExtra?: ReactNode; tools?: ReactNode; covered?: boolean; details?: boolean; wide?: boolean;
 }) {
   const panel = useRef<HTMLElement>(null);
   useEffect(() => {
@@ -43,7 +43,10 @@ function ModalLayer({ title, eyebrow, onClose, children, footer, tools, covered 
           <div className={styles.actions}>{tools}<button type="button" className={styles.iconButton} aria-label={details ? "Close calculation details" : "Close metric summary"} onClick={onClose}><X size={19} aria-hidden="true" /></button></div>
         </header>
         <div className={styles.body}>{children}</div>
-        <footer className={styles.footer}><span>Display only · Orders unchanged</span>{footer}</footer>
+        <footer className={`${styles.footer} ${footerExtra ? styles.footerWithExtra : ""}`}>
+          <div className={styles.footerMain}><span>Display only · Orders unchanged</span>{footer}</div>
+          {footerExtra ? <div className={styles.footerExtra}>{footerExtra}</div> : null}
+        </footer>
       </section>
     </div>, document.body,
   );

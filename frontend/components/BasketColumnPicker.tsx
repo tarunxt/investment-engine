@@ -4,6 +4,8 @@ import { Menu } from "lucide-react";
 import { orderedBasketColumns, moveBasketColumn } from "@/lib/basketColumnPreferences";
 import { BasketModalLayer } from "./BasketMetricPopup";
 
+let displayInDepthDetails = false;
+
 type Element = ReactElement<{ children?: ReactNode; colSpan?: number; [key: string]: unknown }>;
 function flatten(nodes: ReactNode): ReactNode[] {
   return Children.toArray(nodes).flatMap(node => isValidElement(node) && node.type === Fragment ? flatten((node as Element).props.children) : [node]);
@@ -50,14 +52,14 @@ export function BasketColumnTable({ children, hidden, onOpen, order = [], names 
         : <td key="column-control" className="sticky right-0 bg-white px-3" aria-hidden="true" data-column-control />);
       return cloneElement(element, {}, columns);
     }
-    return cloneElement(element, {}, Children.map(element.props.children, visit));
+    return cloneElement(element, element.type === "table" ? { className: `${element.props.className ?? ""} basket-table-details` } as Record<string, unknown> : {}, Children.map(element.props.children, visit));
   }
   return visit(children);
 }
 
 export function BasketColumnPicker({ labels, hidden, onToggle, onClose, order = [], names = {}, onReorder, onRequestRename, covered = false }: { labels: string[]; hidden: string[]; onToggle: (label: string) => void; onClose: () => void; order?: string[]; names?: Record<string, string>; onReorder?: (order: string[]) => void; onRequestRename?: (id: string) => void; covered?: boolean }) {
   const ids = orderedBasketColumns(labels, order);
-  return <BasketModalLayer title="Basket columns" eyebrow="Place Order Basket" covered={covered} onClose={onClose} footer={<button type="button" className="rounded-full bg-emerald-50 px-5 py-3 font-semibold text-emerald-800" onClick={onClose}>Done</button>}>
+  return <BasketModalLayer title="Basket columns" eyebrow="Place Order Basket" covered={covered} onClose={onClose} footerExtra={<label className="flex items-center gap-2 text-sm"><input type="checkbox" defaultChecked={displayInDepthDetails} onChange={event => { displayInDepthDetails = event.target.checked; document.documentElement.dataset.basketTableDetails = event.target.checked ? "shown" : "hidden"; }} className="size-4" />Display indepth details in table</label>} footer={<button type="button" className="rounded-full bg-emerald-50 px-5 py-3 font-semibold text-emerald-800" onClick={onClose}>Done</button>}>
     <div className="space-y-2">{ids.map((id, index) => <div key={id} data-column-id={id} draggable={Boolean(onReorder)} tabIndex={0} className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2"
       onDragStart={event => { event.dataTransfer.setData('text/plain', id); event.dataTransfer.effectAllowed = 'move'; }} onDragOver={event => event.preventDefault()}
       onDrop={event => { event.preventDefault(); const moving = event.dataTransfer.getData('text/plain'); if (ids.includes(moving)) onReorder?.(moveBasketColumn(ids, moving, index)); }}

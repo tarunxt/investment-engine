@@ -500,3 +500,12 @@
 .dark th {
   border-color: var(--border);
 }
+html:not([data-basket-table-details="shown"]) .basket-table-details td[data-basket-column="Score"] small,
+html:not([data-basket-table-details="shown"]) .basket-table-details td[data-basket-column="Historical Weighted Score"] small,
+html:not([data-basket-table-details="shown"]) .basket-table-details td[data-basket-column="Action New"] small,
+html:not([data-basket-table-details="shown"]) .basket-table-details td[data-basket-column="Consensus"] details,
+html:not([data-basket-table-details="shown"]) .basket-table-details td[data-provider] time,
+html:not([data-basket-table-details="shown"]) .basket-table-details td[data-provider] .text-xs,
+html:not([data-basket-table-details="shown"]) .basket-table-details td[data-basket-column="Status"] span span {
+  display: none;
+}
