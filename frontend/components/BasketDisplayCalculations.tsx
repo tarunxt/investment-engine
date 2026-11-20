@@ -88,7 +88,7 @@ export function useBasketDisplayQuotes(open: boolean, market: "india" | "us", in
         } catch (error) {
           if (!active || controller.signal.aborted) return null;
           batchFailed = true;
-          warnings.push(`Quote batch unavailable for ${batch.length} listings: ${error instanceof Error ? error.message : 'request failed'}`);
+          warnings.push(error instanceof Error ? error.message : 'Quote request failed.');
         }
       }
       return { quotes, upstoxQuotes, vendorQuotes, batchFailed, ...(warnings.length ? { error: [...new Set(warnings)].join("; ") } : {}) };
