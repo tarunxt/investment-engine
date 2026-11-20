@@ -859,3 +859,31 @@ test('a positive quote rounding to zero paise cannot produce actionable shares',
   assert.equal(target.shares, null);
   assert.match(target.reason, /prices/);
 });
+
+test('basket width uses the release position when the final pointer move is coalesced', () => {
+  const { BasketResizeHandles } = load('../components/BasketResizeHandles.tsx', {
+    useEffect: () => {},
+    useRef: current => ({ current }),
+    useState: () => [{ current: 900, available: 1400 }, () => {}],
+  });
+  for (const side of ['left', 'right']) {
+    let width = 900;
+    const panel = {
+      getBoundingClientRect: () => ({ width }),
+      style: { setProperty: (_, value) => { width = parseFloat(value); } },
+    };
+    const handle = BasketResizeHandles({ panelRef: { current: panel } }).find(edge => edge.key === side);
+    const target = { dataset: { side }, setPointerCapture() {} };
+    const event = (type, clientX) => ({
+      type, clientX, currentTarget: target, isPrimary: true, button: 0, pointerId: 1, preventDefault() {},
+    });
+    const direction = side === 'left' ? 1 : -1;
+    handle.props.onPointerDown(event('pointerdown', 400));
+    handle.props.onPointerMove(event('pointermove', 400 + direction * 6));
+    assert.equal(width, 888);
+    handle.props.onPointerUp(event('pointerup', 400 + direction * 25));
+    assert.equal(width, 850);
+    handle.props.onLostPointerCapture(event('lostpointercapture', 0));
+    assert.equal(width, 850);
+  }
+});
