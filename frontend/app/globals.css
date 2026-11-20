@@ -509,3 +509,15 @@ html:not([data-basket-table-details="shown"]) .basket-table-details td[data-prov
 html:not([data-basket-table-details="shown"]) .basket-table-details td[data-basket-column="Status"] span span {
   display: none;
 }
+
+.basket-preview-scroll thead th {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background-color: rgb(248 250 252);
+}
+
+.basket-preview-scroll thead th[data-column-control] {
+  right: 0;
+  z-index: 30;
+}

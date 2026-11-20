@@ -117,7 +117,7 @@ export function useBasketDisplayQuotes(open: boolean, market: "india" | "us", in
     return () => { active = false; };
   }, [open, market, request]);
   const current = open && state.request === request;
-  return { retry: () => setAttempt(value => value + 1), quotes: current ? state.quotes : [], upstoxQuotes: current ? state.upstoxQuotes ?? [] : [], vendorQuotes: current ? state.vendorQuotes ?? [] : [], upstoxEnabled: open && capabilities.request === request ? capabilities.enabled : null, error: current ? state.error : undefined, loading: Boolean(open && keys && !current) };
+  return { retry: () => setAttempt(value => value + 1), quotes: current ? state.quotes : [], upstoxQuotes: current ? state.upstoxQuotes ?? [] : [], vendorQuotes: current ? state.vendorQuotes ?? [] : [], upstoxEnabled: open ? capabilities.request === request ? capabilities.enabled : false : null, error: current ? state.error : undefined, loading: Boolean(open && keys && !current) };
 }
 
 export function CalculationPopup({ title, children, onClose }: { title: string; children: ReactNode; onClose: () => void }) {
@@ -214,6 +214,12 @@ export function useBasketDisplayCalculations(open: boolean, market: "india" | "u
   }), parameters, totalAssets) : null;
   const displayScore = (score: number | null) => score == null ? "Unavailable" : ((Math.max(-3, Math.min(3, score)) + 3) * 100 / 6).toFixed(2);
   const disclosure = <section aria-label="Allocation disclosure" className="my-3 text-sm">
+    <table className="mb-3 w-full text-sm"><tbody>
+      <tr><th className="pr-4 text-left">Aggregate target weight</th><td>{percentAggregate(aggregate.weight)}</td></tr>
+      <tr><th className="pr-4 text-left">Residual cash before rounding</th><td>{percentAggregate(aggregate.residualWeight)}</td></tr>
+      <tr><th className="pr-4 text-left">Rounded aggregate target amount</th><td>{aggregate.roundedAmount === null ? "—" : formatBasketDisplayCurrency(aggregate.roundedAmount, market === "india" ? "INR" : "USD")}</td></tr>
+      <tr><th className="pr-4 text-left">Residual cash after rounding</th><td>{aggregate.roundedResidual === null ? "—" : formatBasketDisplayCurrency(aggregate.roundedResidual, market === "india" ? "INR" : "USD")}</td></tr>
+    </tbody></table>
     {unavailableScores.length > 0 && data ? <section aria-label="Unavailable score reasons" className="mb-3 rounded border border-amber-500 p-3 text-amber-900 dark:text-amber-200">
       <h3 className="font-semibold">{unavailableScores.length} stock(s) need eligible score evidence</h3>
       <p>Selected score window: ({data.window_start}, {data.as_of}] · {data.timezone}. Missing scores are not zero or a recommendation to sell.</p>

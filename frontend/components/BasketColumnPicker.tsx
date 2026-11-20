@@ -48,7 +48,7 @@ export function BasketColumnTable({ children, hidden, onOpen, order = [], names 
         return cloneElement(cell as Element, props);
       });
       columns.push(header
-        ? <th key="column-picker" className="sticky right-0 bg-slate-50 px-3 py-3" data-column-control><button type="button" aria-label="Choose basket columns" aria-haspopup="dialog" onClick={() => onOpen(labels)} className="rounded-lg p-2 text-slate-600 hover:bg-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-300"><Menu size={18} aria-hidden="true" /></button></th>
+        ? <th key="column-picker" className="sticky top-0 right-0 z-30 bg-slate-50 px-3 py-3" data-column-control><button type="button" aria-label="Choose basket columns" aria-haspopup="dialog" onClick={() => onOpen(labels)} className="rounded-lg p-2 text-slate-600 hover:bg-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-300"><Menu size={18} aria-hidden="true" /></button></th>
         : <td key="column-control" className="sticky right-0 bg-white px-3" aria-hidden="true" data-column-control />);
       return cloneElement(element, {}, columns);
     }
