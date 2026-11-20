@@ -478,7 +478,7 @@ jobs:
             id "$APP_USER" >/dev/null
 
             if [[ "$DEPLOY_SCOPE" != frontend-only ]]; then
-              sudo -n python3 - "$BACKEND_ENV_FILE" "$UPSTOX_LTP_ALLOWED_USERNAMES" <<'PY'
+              sudo -n python3 - "$BACKEND_ENV_FILE" "${UPSTOX_LTP_ALLOWED_USERNAMES:-tarunxtcrypto}" <<'PY'
             import os
             import re
             import stat
