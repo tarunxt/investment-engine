@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type RefObject } from "react";
 
-type Side = "left" | "right";
 type Drag = { pointerId: number; startX: number; startWidth: number };
 
 export function BasketResizeHandles({ panelRef }: { panelRef: RefObject<HTMLDivElement | null> }) {
@@ -33,10 +32,10 @@ export function BasketResizeHandles({ panelRef }: { panelRef: RefObject<HTMLDivE
     drag.current = { pointerId: event.pointerId, startX: event.clientX, startWidth: panel.getBoundingClientRect().width };
   }
 
-  function move(event: PointerEvent<HTMLDivElement>, side: Side) {
+  function move(event: PointerEvent<HTMLDivElement>) {
     const active = drag.current;
     if (!active || active.pointerId !== event.pointerId) return;
-    const outward = (event.clientX - active.startX) * (side === "right" ? 1 : -1);
+    const outward = (event.clientX - active.startX) * (event.currentTarget.dataset.side === "right" ? 1 : -1);
     // The grabbed edge follows the pointer and the opposite edge moves just as far.
     resize(active.startWidth + 2 * outward);
   }
@@ -50,10 +49,10 @@ export function BasketResizeHandles({ panelRef }: { panelRef: RefObject<HTMLDivE
     if (drag.current?.pointerId === event.pointerId) drag.current = null;
   }
 
-  function keyDown(event: KeyboardEvent<HTMLDivElement>, side: Side) {
+  function keyDown(event: KeyboardEvent<HTMLDivElement>) {
     const width = panelRef.current?.getBoundingClientRect().width;
     if (width === undefined) return;
-    const step = side === "right" ? 32 : -32;
+    const step = event.currentTarget.dataset.side === "right" ? 32 : -32;
     switch (event.key) {
       case "ArrowLeft": resize(width - step); break;
       case "ArrowRight": resize(width + step); break;
@@ -67,6 +66,7 @@ export function BasketResizeHandles({ panelRef }: { panelRef: RefObject<HTMLDivE
   return (["left", "right"] as const).map(side => (
     <div
       key={side}
+      data-side={side}
       role="separator"
       tabIndex={0}
       aria-label={`Resize basket from ${side} edge`}
@@ -77,11 +77,11 @@ export function BasketResizeHandles({ panelRef }: { panelRef: RefObject<HTMLDivE
       aria-valuetext={`${widths.current} pixels wide`}
       className={`absolute inset-y-3 z-30 w-[12px] touch-none cursor-ew-resize select-none rounded-full focus-visible:outline-2 focus-visible:outline-blue-600 ${side === "left" ? "-left-[8px]" : "-right-[8px]"}`}
       onPointerDown={start}
-      onPointerMove={event => move(event, side)}
+      onPointerMove={move}
       onPointerUp={finish}
       onPointerCancel={finish}
       onLostPointerCapture={finish}
-      onKeyDown={event => keyDown(event, side)}
+      onKeyDown={keyDown}
     />
   ));
 }
