@@ -84,9 +84,9 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
   if (board && view === "ledger") {
     const lanes = [
       { title: "Sync portfolio", keys: ["sync"] },
-      { title: "Discover contenders", keys: ["swing"] },
-      { title: "Score & check threats", keys: ["threats", "rebalance", "technical"] },
-      { title: "Build Actionables", keys: ["actionables"] },
+      { title: market === "zerodha" ? "Find New Promising Stocks" : "Discover contenders", keys: ["swing"] },
+      { title: market === "zerodha" ? "Scorecards" : "Score & check threats", keys: ["threats", "rebalance", "technical"] },
+      { title: market === "zerodha" ? "Final Actionables" : "Build Actionables", keys: ["actionables"] },
     ];
     return <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Rebalance workflow">
       {lanes.map((lane, index) => <section key={lane.title} className="min-w-0 rounded-xl border border-slate-200 bg-white p-3">
@@ -102,7 +102,7 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
           if (item.onSyncNowClick) actions.push({ label: "Sync Now", onSelect: item.onSyncNowClick });
           return <div key={key} className="mb-3">
             <article className={`rounded-lg border border-slate-200 p-3 ${getStageLedgerTone(item.info)}`}>
-              {tileHeader(getStageTileLabel(item.stage), actions, item.info)}
+              {tileHeader(market === "zerodha" && item.stage === "sync" ? "Sync Kite Portfolio" : getStageTileLabel(item.stage), actions, item.info)}
               {item.selectable && <label className="text-xs"><input type="checkbox" checked={Boolean(item.selected)} onChange={item.onClick} /> Select for next run</label>}
               {!upcoming && <>{label && <p className="text-xs">{label}</p>}
                 <dl className="mt-2 text-xs">{rows.map(row => <div key={row.label} className="flex justify-between gap-2">

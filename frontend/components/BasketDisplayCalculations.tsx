@@ -229,20 +229,23 @@ export function useBasketDisplayCalculations(open: boolean, market: "india" | "u
   const displayScore = (score: number | null) => score == null ? "Unavailable" : ((Math.max(-3, Math.min(3, score)) + 3) * 100 / 6).toFixed(2);
   const renderDisclosure = (netPurchases: number | null = 0) => {
     const columns = [
-      { label: "Current", investments: assetInputs?.portfolioValue, cash: assetInputs?.availableMargin },
-      { label: "Recommended", investments: aggregate.roundedAmount, cash: aggregate.roundedResidual },
-      { label: "Selected",
+      { label: "Current", tone: "bg-sky-100 text-sky-950", bar: "bg-sky-600", investments: assetInputs?.portfolioValue, cash: assetInputs?.availableMargin },
+      { label: "Recommended", tone: "bg-violet-100 text-violet-950", bar: "bg-violet-600", investments: aggregate.roundedAmount, cash: aggregate.roundedResidual },
+      { label: "Selected", tone: "bg-emerald-100 text-emerald-950", bar: "bg-emerald-600",
         investments: assetInputs?.portfolioValue != null && netPurchases != null ? assetInputs.portfolioValue + netPurchases : null,
         cash: assetInputs?.availableMargin != null && netPurchases != null ? assetInputs.availableMargin - netPurchases : null },
     ];
     return <section aria-label="Allocation disclosure" className="my-3 text-sm">
-      <div className="mb-3 overflow-x-auto">
+      <div className="mb-3 overflow-x-auto rounded-xl border border-slate-200">
         <table aria-label="Portfolio allocation" className="w-full border-collapse text-sm tabular-nums">
-          <thead><tr>{columns.map(column => <th key={column.label} scope="colgroup" colSpan={2} className="border p-2 text-center">{column.label}</th>)}</tr></thead>
+          <thead><tr>{columns.map(column => <th key={column.label} scope="colgroup" colSpan={2} className={`p-2 text-center font-bold ${column.tone}`}>{column.label}</th>)}</tr></thead>
           <tbody>{(["investments", "cash"] as const).map(key => <tr key={key}>
             {columns.flatMap(column => [
-              <td key={column.label + "-label"} className="border px-3 py-2">{key === "investments" ? "Investments" : "Cash"}</td>,
-              <td key={column.label} className="whitespace-nowrap border px-3 py-2 text-right">{balanceCell(column[key])}</td>
+              <td key={column.label + "-label"} className="border-t border-slate-200 px-3 py-2 text-slate-600">{key === "investments" ? "Investments" : "Cash"}</td>,
+              <td key={column.label} className="whitespace-nowrap border-t border-slate-200 px-3 py-2 text-right font-semibold">{balanceCell(column[key])}
+                {totalAssets != null && totalAssets > 0 && column[key] != null && column[key] >= 0 && column[key] <= totalAssets && <div aria-hidden="true" className="mt-1 h-1 overflow-hidden rounded-full bg-slate-100">
+                  <div className={`h-full rounded-full ${column.bar}`} style={{ width: `${100 * column[key] / totalAssets}%` }} />
+                </div>}</td>
             ])}
           </tr>)}</tbody>
         </table>
