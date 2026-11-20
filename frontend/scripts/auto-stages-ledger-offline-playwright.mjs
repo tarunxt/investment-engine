@@ -99,11 +99,15 @@ try {
  assert.equal(await page.evaluate(()=>window.actions.at(-1)),'sync');
  assert.equal(await board.getByText('Query Screener',{exact:true}).count(),0);
  await board.getByRole('button',{name:'Actionables actions'}).click();
- await page.getByRole('menuitem',{name:'Place Order',exact:true}).click();
+ assert.equal(await page.getByRole('menuitem',{name:'Place Order',exact:true}).count(),0);
+ await page.keyboard.press('Escape');
+ await board.getByRole('button',{name:'Place Order',exact:true}).click();
  assert.equal(await page.evaluate(()=>window.actions.at(-1)),'order:India');
  await page.getByRole('button',{name:'US stage ledger',exact:true}).click();
  await board.getByRole('button',{name:'Actionables actions'}).click();
- await page.getByRole('menuitem',{name:'Final Order',exact:true}).click();
+ assert.equal(await page.getByRole('menuitem',{name:'Final Order',exact:true}).count(),0);
+ await page.keyboard.press('Escape');
+ await board.getByRole('button',{name:'Final Order',exact:true}).click();
  assert.equal(await page.evaluate(()=>window.actions.at(-1)),'order:US');
  await page.goto(origin);await page.getByRole('table').waitFor();
  assert.equal(await page.locator('tbody tr').count(),6);
