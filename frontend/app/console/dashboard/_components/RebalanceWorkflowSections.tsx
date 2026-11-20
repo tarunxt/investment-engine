@@ -38,7 +38,7 @@ import { basketActionGroup, indmoneyHolding, actionQuantityMatchesDraft, kiteWei
 import { PortfolioParametersTile } from "@/components/PortfolioParametersTile";
 import { portfolioParameterAssets, portfolioParameterMargin } from "@/lib/portfolioParameters";
 import { collectPreflightErrors, type PreflightCheck } from "@/lib/rebalancePreflight";
-import { validateTechnicalInstruments, resolveTechnicalPriceEvidence } from "@/lib/technicalPriceEvidence";
+import { resolveTechnicalPriceEvidence } from "@/lib/technicalPriceEvidence";
 import { auditResponseHashes } from "@/services/recommendationAudit";
 import { WholeShareTrimChoice } from "@/components/WholeShareTrimChoice";
 import { BasketUnitsPopup } from "@/components/BasketUnitsPopup";
@@ -7308,9 +7308,6 @@ ${zerodhaExecutionMode === "direct_market"
             "rebalance",
             rebalanceRun.id,
           );
-          if (market === "india" && shouldRunCurrentStage("technical") && selectedInputs[portfolio].technical.has("technical:next")) {
-            validateTechnicalInstruments(buildConsensusRows([completedRebalanceRun], market).map(stock => `${stock.exchange}:${stock.symbol}`));
-          }
           generatedRebalanceRun = completedRebalanceRun;
           await markCompleted(portfolio, "rebalance", {
             ...summarizeRun(completedRebalanceRun),

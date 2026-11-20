@@ -2854,7 +2854,7 @@ function parseTechnicalScanResponse(
       if (!rowLine.includes("|")) break;
       const cells = splitMarkdownRow(rowLine);
       if (isMarkdownSeparator(cells) || cells.length < 3) continue;
-      const stockSymbol = normalizeScanCell(cells[symbolIndex] || "");
+      const stockSymbol = normalizeScanCell(cells[symbolIndex] || "").replace(/&amp;/g, "&");
       if (!stockSymbol || /^stock(?: symbol)?$/i.test(stockSymbol)) continue;
       const exchangeSymbol = exchangeIndex >= 0 ? normalizeScanCell(cells[exchangeIndex] || "") : "";
       const primarySetup = normalizeScanCell(cells[primaryIndex] || "");
