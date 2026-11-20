@@ -42,6 +42,13 @@ def status(job):
 OVERFLOW = "Unaligned source cells (not scored)"
 
 
+def ambiguous_entities(cell, header=None):
+    # The Markdown writer escapes an ampersand once, including in exact tickers.
+    if header == "Stock Symbol":
+        cell = cell.replace("&amp;", "&")
+    return re.findall(r"&(?:#\w+|[a-zA-Z]+);", cell)
+
+
 def rebalance_rows(job):
     if status(job) == "failed" and getattr(job, "response", None) and "invalid output contract" in str(getattr(job, "error_message", "")).lower():
         from types import SimpleNamespace
@@ -75,7 +82,8 @@ def rebalance_rows(job):
     # Inspect the original cells before the Markdown parser decodes entities.
     for index, line in enumerate(table.text.splitlines()):
         for col, cell in enumerate(line.strip().strip("|").split("|")):
-            entities = re.findall(r"&(?:#\w+|[a-zA-Z]+);", cell)
+            header = table.headers[col] if index >= 2 and col < len(table.headers) else None
+            entities = ambiguous_entities(cell, header)
             if index >= 2 and col == len(table.headers) - 1 and table.headers[col] == OVERFLOW:
                 # Isolated, never interpreted as formula inputs.
                 continue
@@ -150,8 +158,15 @@ def technical_rows(job):
     if len(tables) != 1 or findings or not required.issubset(tables[0].headers):
         raise UnverifiableFinal("Technical source requires an unambiguous canonical table")
     table = tables[0]
-    if len(set(table.headers)) != len(table.headers) or "\\|" in job.response or re.search(r"&(?:#\w+|[a-zA-Z]+);", job.response):
+    if len(set(table.headers)) != len(table.headers) or "\\|" in job.response:
         raise UnverifiableFinal("Technical source headers/cells are ambiguous")
+    if any(ambiguous_entities(block.text) for block in blocks if block.kind != "table"):
+        raise UnverifiableFinal("Technical source headers/cells are ambiguous")
+    for index, line in enumerate(table.text.splitlines()):
+        for col, cell in enumerate(line.strip().strip("|").split("|")):
+            header = table.headers[col] if index >= 2 and col < len(table.headers) else None
+            if ambiguous_entities(cell, header):
+                raise UnverifiableFinal("Technical source headers/cells are ambiguous")
     result = []
     for cells in table.rows:
         row = dict(zip(table.headers, cells))

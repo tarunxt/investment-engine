@@ -332,3 +332,21 @@ def test_no_chart_evidence_replays_without_inventing_a_setup(inputs, status, mar
     job.response = table(headers, [row])
     with pytest.raises(UnverifiableFinal, match="approved direction"):
         source_calculations(payload, **context)
+
+
+def test_encoded_ticker_matches_literal_ticker_across_final_sources(inputs):
+    payload, context = inputs
+    rebalance, technical = (context["jobs_by_run"][run][0] for run in (10, 20))
+    for job in (rebalance, technical):
+        job.response = job.response.replace("FIXTUREEQ", "A&B")
+    expected = source_calculations(payload, **context)
+    assert ("NSE", "A&B") in expected
+    for job in (rebalance, technical):
+        job.response = job.response.replace("A&B", "A&amp;B")
+        assert source_calculations(payload, **context) == expected
+        saved = job.response
+        for malformed in ("A&amp;amp;B", "A&#124;B"):
+            job.response = saved.replace("A&amp;B", malformed)
+            with pytest.raises(UnverifiableFinal):
+                source_calculations(payload, **context)
+        job.response = saved

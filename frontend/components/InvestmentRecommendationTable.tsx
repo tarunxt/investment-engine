@@ -614,7 +614,10 @@ export function normalizeMarkdownRecommendationTable(
       parsed.headers.forEach((header, index) => {
         source[header] = row[index] ?? '';
       });
-      return buildCanonicalRow(source, context, headers);
+      const cells = buildCanonicalRow(source, context, headers);
+      // The saved Markdown renderer encodes literal ampersands once.
+      cells['Stock Symbol'] = cells['Stock Symbol'].replace(/&amp;/g, '&');
+      return cells;
     })
     .filter((row) => !isLikelyInvalidRow(row));
 

@@ -85,3 +85,12 @@ test('the short Action alias still selects Rebalance', () => {
   assert.deepEqual(parsed.headers, parser.REBALANCE_HEADER_ORDER);
   assert.equal(parsed.rows[0]['Action (Buy/Add/Sell All/Trim/Hold/Buy New)'], 'Buy New');
 });
+
+test('saved Markdown ticker ampersands decode exactly once', () => {
+  for (const headers of [parser.SWING_HEADER_ORDER, parser.REBALANCE_HEADER_ORDER]) {
+    const rows = ['A&amp;B', 'A&B', 'A&amp;amp;B', 'A&#124;B'].map(symbol => fixture(headers, symbol));
+    const parsed = parser.parseInvestmentRecommendationContent(contentFor('markdown', headers, rows));
+    assert.deepEqual(parsed.rows.map(row => row['Stock Symbol']), ['A&B', 'A&B', 'A&amp;B', 'A&#124;B']);
+    assert.equal(parser.parseInvestmentRecommendationContent(contentFor('json', headers, [rows[0]])).rows[0]['Stock Symbol'], 'A&amp;B');
+  }
+});
