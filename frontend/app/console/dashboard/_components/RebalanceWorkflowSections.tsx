@@ -7420,11 +7420,15 @@ ${zerodhaExecutionMode === "direct_market"
           }
           const finalConsensus = buildConsensusRows(finalRebalanceInputs, market, workflowSnapshot, finalRebalanceInputs, usRegistry);
           const actionablesCompletedAt = new Date().toISOString();
+          const finalTechnical = buildTechnicalScanMap([generatedTechnicalRun]);
           const finalRows = buildDashboardActionRows(finalConsensus, market,
-            buildTechnicalScanMap([generatedTechnicalRun]), scoreMatrixFormulaConfig)
+            finalTechnical, scoreMatrixFormulaConfig)
             .map(row => ({ ...row, coveredAt: actionablesCompletedAt, runId: finalRebalanceInputs[0].id }));
           const frozenFinal = {
             schema: "workflow-final-v2", formula_version: "score-matrix-v2", buy_price_policy: "positive-provider-price-v1",
+            basket_order_count: buildZerodhaBasketPreviewOrders(finalRows, finalTechnical,
+              market === "india" ? workflowSnapshot as ZerodhaPortfolioSnapshotDetail : null,
+              {allowFractionalSellUnits: market === "us"}).length,
             scorePolicy: "score-matrix-raw-effective-v2",
             broker: runMetadata.auto_rebalance_portfolio, workflow_sequence: runMetadata.auto_rebalance_sequence,
             ...(generatedThreatInput?.analysis.job_id ? {position_policy:market === "india" ? "zerodha-settled-snapshot-v1" : "indmoney-verified-snapshot-v1"} : {}),
@@ -7837,6 +7841,13 @@ ${zerodhaExecutionMode === "direct_market"
     const displayedWorkflowSequence =
       activeAutoRebalanceMetadata[section.portfolio]?.auto_rebalance_sequence ??
       (savedWorkflowSequences.length ? Math.max(...savedWorkflowSequences) : null);
+    const finalStage = states[section.portfolio].actionables;
+    const basketRevision = section.portfolio === "zerodha" ? scoreRevision : usRevision;
+    const preparedOrders = section.portfolio === "zerodha" ? zerodhaBasketOrders : indmoneyBasketOrders;
+    const basketReady = displayedWorkflowSequence !== null && finalStage.state === "completed" && !finalStage.error &&
+      finalStage.frozenFinal?.workflow_sequence === displayedWorkflowSequence &&
+      (Number(finalStage.frozenFinal.basket_order_count) > 0 ||
+       (basketRevision?.sequence === displayedWorkflowSequence && preparedOrders.length > 0));
     const emailWarning = completionEmailWarnings[section.portfolio];
     const isSectionRunning = runningPortfolio === section.portfolio;
     const hasActiveStage = hasActiveWorkflowStage(section.portfolio, states);
@@ -7906,7 +7917,6 @@ ${zerodhaExecutionMode === "direct_market"
 
           </div>
           <div aria-label={stageLedger ? "Run controls" : undefined} className="flex w-full min-w-0 flex-col items-start gap-3 xl:w-auto xl:max-w-full xl:items-end">
-            {stageLedger ? <h3 className="text-sm font-semibold text-slate-900">Run controls</h3> : null}
             <div
               className={
                 showPauseKillControls
@@ -8023,7 +8033,7 @@ ${zerodhaExecutionMode === "direct_market"
           </div>
         )}
 
-        <WorkflowStageLedger active={runningPortfolio === section.portfolio} market={section.portfolio} board enabled={stageLedger} view={ledgerView} historyHref={URLs.routes.console.autoRebalanceRuns(section.portfolio)} onStockFlowClick={() => setStockFlowPortfolio(section.portfolio)}>
+        <WorkflowStageLedger basketReady={basketReady} active={runningPortfolio === section.portfolio} market={section.portfolio} board enabled={stageLedger} view={ledgerView} historyHref={URLs.routes.console.autoRebalanceRuns(section.portfolio)} onStockFlowClick={() => setStockFlowPortfolio(section.portfolio)}>
           {STAGE_ORDER.map((stage) => (
             <WorkflowStageTile
               key={stage}
@@ -8149,13 +8159,6 @@ ${zerodhaExecutionMode === "direct_market"
             <Loader2 className="size-4 shrink-0 animate-spin" />
             {audit.label}: run history confirmation pending. Completed outputs remain available.
           </p>
-        ) : audit?.status === "failed" ? (
-          <div role="alert" className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
-            <p className="font-semibold">{audit.label}: run history was not confirmed.</p>
-            <p className="mt-1">Completed outputs remain available. A completion email has not been queued. Do not rerun model work to repair history.</p>
-            {audit.message ? <p className="mt-1">{audit.message}</p> : null}
-            <Link href={URLs.routes.console.autoRebalanceRuns(section.portfolio)} className="mt-2 inline-block font-semibold underline">Check saved run history</Link>
-          </div>
         ) : null}
         {emailWarning ? <p role="alert" className="mt-2 text-sm text-amber-800">{emailWarning}</p> : null}
         <div className="mt-5 flex items-center justify-between gap-3 rounded-2xl border border-emerald-100 bg-emerald-50 px-5 py-4 text-base font-normal text-emerald-950">

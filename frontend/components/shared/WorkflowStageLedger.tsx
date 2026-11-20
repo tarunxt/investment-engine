@@ -40,9 +40,10 @@ export function WorkflowStageLedgerViews({ market, view, onChange, portfolioOnly
 const control = "inline-flex min-h-9 items-center rounded-lg border border-indigo-200 bg-white px-3 py-1.5 text-sm font-medium text-indigo-800 hover:bg-indigo-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600 focus-visible:ring-offset-2";
 
 /** Presentation adapter: the workflow continues to own every value and callback. */
-export function WorkflowStageLedger({ children, enabled, view = "ledger", historyHref, onStockFlowClick, market, active = false, board = false }: {
+export function WorkflowStageLedger({ children, enabled, view = "ledger", historyHref, onStockFlowClick, market, active = false, basketReady = false, board = false }: {
   children: ReactElement<Stage>[];
   enabled: boolean;
+  basketReady?: boolean;
   board?: boolean;
   active?: boolean;
   view?: WorkflowLedgerView;
@@ -84,7 +85,7 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
     const lanes = [
       { title: "Sync portfolio", keys: ["sync"] },
       { title: "Discover contenders", keys: ["swing"] },
-      { title: "Score & check threats", keys: ["rebalance", "technical", "threats"] },
+      { title: "Score & check threats", keys: ["threats", "rebalance", "technical"] },
       { title: "Build Actionables", keys: ["actionables"] },
     ];
     return <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Rebalance workflow">
@@ -99,7 +100,6 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
           const upcoming = active && (item.info.state === "idle" || item.info.state === "queued");
           const actions = evidenceActions(item);
           if (item.onSyncNowClick) actions.push({ label: "Sync Now", onSelect: item.onSyncNowClick });
-          if (item.onPlaceOrderClick) actions.push({ label: item.placeOrderLabel ?? "Place Order", onSelect: item.onPlaceOrderClick });
           return <div key={key} className="mb-3">
             <article className={`rounded-lg border border-slate-200 p-3 ${getStageLedgerTone(item.info)}`}>
               {tileHeader(getStageTileLabel(item.stage), actions, item.info)}
@@ -122,6 +122,10 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
               </details>}
               {item.info.portfolioThreat && <p className="mt-2 text-sm">Portfolio Threat · {item.info.portfolioThreat}</p>}
             </article>
+            {item.onPlaceOrderClick && <button type="button" onClick={item.onPlaceOrderClick}
+              className={`mt-2 min-h-9 rounded-lg px-3 text-sm font-semibold text-white ${basketReady && !active ? "bg-green-700 hover:bg-green-800" : "bg-blue-700 hover:bg-blue-800"}`}>
+              {item.placeOrderLabel ?? "Place Order"}
+            </button>}
             {item.stage === "swing" && <div className="mt-2 rounded-lg border p-3 text-sm">
               {tileHeader("Merge contenders", [{ label: "Stock Flow", onSelect: onStockFlowClick }, { label: "History", href: historyHref }], item.info.recommendedStocks != null ? item.info : { state: "idle" })}
               <p>{item.info.recommendedStocks != null ? item.info.recommendedStocks + " unique listings" : "Awaiting scan evidence"}</p></div>}

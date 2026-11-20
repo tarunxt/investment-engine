@@ -63,6 +63,7 @@ function BrokerSettings() {
     setError("");
     try {
       await apiService.zerodhaDisconnect(broker.revision);
+      window.dispatchEvent(new Event("broker-connection-changed"));
       setNotice("Zerodha was removed from your CredX account.");
       refresh();
     } catch (e) {

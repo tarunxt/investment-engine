@@ -9,9 +9,15 @@ import {
     HiOutlineX,
 } from 'react-icons/hi';
 import { URLs } from '@/lib/urls';
-import { BRAND_ACRONYM, getBrandExpansionLines } from '@/lib/brand';
+import { apiService } from '@/services/api';
+import { BRAND_ACRONYM } from '@/lib/brand';
 import { stripRedirectToFromCurrentUrl } from '@/lib/authRedirect';
 import { SidebarNavigation } from './SidebarNavigation';
+
+function emailName(email?: string | null) {
+    const first = email?.split('@')[0].split(/[._+0-9-]/)[0];
+    return first ? first.charAt(0).toUpperCase() + first.slice(1) : '';
+}
 
 export function ConsoleShell({
     children,
@@ -21,10 +27,28 @@ export function ConsoleShell({
     const consoleSidebarStyle = {
         '--console-sidebar-width': '22rem',
     } as CSSProperties;
-    const brandExpansionLines = getBrandExpansionLines();
     const { user, logout, loading, error } = useAuth();
     const router = useRouter();
     const pathname = usePathname();
+    const userId = user?.id;
+    const [identity, setIdentity] = useState<{userId: number; name: string} | null>(null);
+    useEffect(() => {
+        if (!userId) return;
+        let current = true;
+        const load = async () => {
+            try {
+                const broker = await apiService.zerodhaConnection();
+                const name = broker.linked ? broker.profile?.name?.trim().split(/\s+/)[0] || emailName(broker.profile?.email) : '';
+                if (current) setIdentity({userId, name});
+            } catch {
+                if (current) setIdentity(null);
+            }
+        };
+        void load();
+        window.addEventListener('broker-connection-changed', load);
+        return () => { current = false; window.removeEventListener('broker-connection-changed', load); };
+    }, [userId, pathname]);
+    const owner = (identity?.userId === userId && identity?.name) || user?.full_name?.trim().split(/\s+/)[0] || emailName(user?.email) || 'Tarun';
     const searchParams = useSearchParams();
     const searchParamString = searchParams.toString();
     const hasRedirectToParam = searchParams.has('redirectTo');
@@ -74,12 +98,10 @@ export function ConsoleShell({
                                 <span className="text-xs font-bold uppercase tracking-[0.28em] text-white">{BRAND_ACRONYM}</span>
                             </div>
                             <div className="space-y-1 leading-tight">
-                                <div className="text-sm font-semibold text-sidebar-foreground">{brandExpansionLines.primary}</div>
-                                {brandExpansionLines.secondary ? (
+                                <div className="text-sm font-semibold text-sidebar-foreground">{owner}'s</div>
                                     <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
-                                        {brandExpansionLines.secondary}
+                                        Investment Engine
                                     </div>
-                                ) : null}
                             </div>
                         </Link>
                         <button

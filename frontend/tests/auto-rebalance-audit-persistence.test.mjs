@@ -150,6 +150,7 @@ function harness({ analysisOnly = false, formulaScore = 0, intercept, read, emai
     scoreMatrixFormulaConfig: {}, auditResponseHashes: async () => ({}),
     buildConsensusRows: (...args) => { consensusCalls.push(args); return [{ key: "NSE:TEST", exchange: "NSE", symbol: "TEST", rows: [] }]; },
     buildTechnicalScanMap: () => ({}), resolveTechnicalPriceEvidence: quoteRead ? priceExports.resolveTechnicalPriceEvidence : async () => "", buildTechnicalScanPrompt: () => "technical",
+    buildZerodhaBasketPreviewOrders: () => [],
     buildDashboardActionRows: rows => rows.map(stock => ({ stock, formulaAction: "Hold", formulaScore, formulaEstimate: {}, detail: {} })),
     getSelectedThreatJobIds: () => [], deduplicateThreatStageInputs: (input) => input,
     buildRunPayload: (payload) => payload, summarizeRun: () => ({ runStatus: "completed" }), getRunProgress: () => ({ completedLlms: 1, totalLlms: 1 }), countUniqueStocksFromRun: () => 1, listingsFromSwingRun: () => ["NSE:TEST"], workflowRanking: () => [],
@@ -348,13 +349,14 @@ test("email failure is visible and does not turn completed model work into a fai
   assert.equal(h.modelCalls.length, 3);
 });
 
-test("actual workflow card renders pending and failed history independently of output controls", () => {
+test("workflow card retains pending status and omits the failed-history banner", () => {
   const source = compile(`${extract("  const renderSectionCard =", "  useEffect(() => {")}\nreturn renderSectionCard;`);
   const workflowStates = Object.fromEntries(stages.map((stage) => [stage, { state: "completed" }]));
   for (const status of ["pending", "failed"]) {
     const bindings = {
       exports: {}, technicalInputPlanIssue, selectedInputs: { zerodha: { technical: new Set(["technical:next"]) } },
       require: (name) => { assert.equal(name, "react/jsx-runtime"); return jsxRuntime; },
+      scoreRevision: null, zerodhaBasketOrders: [],
       auditStates: { zerodha: { key: "india:42", label: "India 42", status, message: "History not acknowledged" } },
       activeAutoRebalanceMetadata: {}, preflightPortfolio: null, preflightErrors: {}, completionEmailWarnings: {}, runningPortfolio: null, states: { zerodha: workflowStates },
       hasActiveWorkflowStage: () => false, getQueuedStages: () => new Set(),
@@ -372,16 +374,15 @@ test("actual workflow card renders pending and failed history independently of o
     };
     const card = new Function(...Object.keys(bindings), source)(...Object.values(bindings));
     const html = renderToStaticMarkup(card({ portfolio: "zerodha", title: "Run Zerodha Auto-Rebalance", buttonLabel: "Run" }));
-    assert.match(html, status === "pending" ? /role="status"/ : /role="alert"/);
-    assert.match(html, /Completed outputs remain available/);
+    if (status === "pending") assert.match(html, /Completed outputs remain available/);
     const specificBindings = { ...bindings, specificMode: { zerodha: true }, selectedStages: { zerodha: new Set(["technical"]) } };
     const specificCard = new Function(...Object.keys(specificBindings), source)(...Object.values(specificBindings));
     const specificHtml = renderToStaticMarkup(specificCard({ portfolio: "zerodha", title: "Run Zerodha Auto-Rebalance", buttonLabel: "Run" }));
     assert.match(specificHtml, /Choose saved Rebalance inputs/);
     assert.match(specificHtml, /Next means a new result from this invocation/);
     if (status === "failed") {
-      assert.match(html, /completion email has not been queued/);
-      assert.match(html, /Check saved run history/);
+      assert.doesNotMatch(html, /completion email has not been queued/);
+      assert.doesNotMatch(html, /Check saved run history/);
     }
     assert.match(html, /View output actionables/);
     assert.match(html, /View output swing/);
