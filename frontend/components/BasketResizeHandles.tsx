@@ -46,7 +46,10 @@ export function BasketResizeHandles({ panelRef }: { panelRef: RefObject<HTMLDivE
   }
 
   function finish(event: PointerEvent<HTMLDivElement>) {
-    if (drag.current?.pointerId === event.pointerId) drag.current = null;
+    if (drag.current?.pointerId !== event.pointerId) return;
+    // A browser can deliver the release before the last pointermove.
+    if (event.type === "pointerup") move(event);
+    drag.current = null;
   }
 
   function keyDown(event: KeyboardEvent<HTMLDivElement>) {
