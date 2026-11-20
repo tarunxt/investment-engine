@@ -429,10 +429,10 @@ async def portfolio_display_quotes(instruments: list[str] = Query(min_length=1, 
     if not token:
         raise HTTPException(401, "Not connected to Zerodha. Please login first.")
     try:
-        return await read_display_quotes(
-            svc, token, keys, user_id=current_user.id,
-            username=getattr(current_user, "username", None),
-        )
+        username = getattr(current_user, "username", None)
+        if username is None:
+            return await read_display_quotes(svc, token, keys, user_id=current_user.id)
+        return await read_display_quotes(svc, token, keys, user_id=current_user.id, username=username)
     except KiteError as exc:
         status_code, detail = quote_failure_detail(exc)
         logger.warning("Read-only portfolio quote rejected for user %s: %s", current_user.id, detail)
