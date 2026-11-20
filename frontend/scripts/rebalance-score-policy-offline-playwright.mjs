@@ -24,7 +24,7 @@ function Fixture(){
  const stock={symbol:'SYNTH',exchange,score,ltp:100,currentValue:0,investedValue:0,vendorLtp:100,vendorAsOf:'${asOf}',vendorSource:'US vendor synthetic fixture',scoreSources:mode==='legacy-only'?[]:[{runId:2,createdAt:mode==='stale'?'2026-10-20T12:00:00Z':'${asOf}',completed:!['partial','failed'].includes(mode),status:mode==='partial'?'partial':mode==='failed'?'failed':'completed',market}]};
  const c=useBasketDisplayCalculations(open,market,[stock],10000,'${asOf}',market==='us'?'Indmoney':'Zerodha');
  return <><nav>{['positive','negative','zero','missing','custom','partial','failed','stale','legacy-only','error','delayed'].map(m=><button key={m} onClick={()=>setMode(m)}>{m}</button>)}<button onClick={()=>setOpen(false)}>Close basket</button><button onClick={()=>setOpen(true)}>Reopen basket</button></nav>
- {open&&<table><thead><tr>{c.headers}</tr></thead><tbody><tr data-testid='score-row'>{c.cells(stock)}</tr></tbody></table>}{c.popup}
+ {open&&<table><thead><tr>{c.headers}</tr></thead><tbody><tr data-testid='score-row'>{c.cells(stock)}</tr></tbody></table>}{c.renderPopup()}
  <output data-testid='raw-arithmetic'>{String(score)}</output><output data-testid='state'>{c.error??(c.loading?'loading':'ready')}</output></>;
 }createRoot(document.getElementById('root')).render(<Fixture/>);`);
 await writeFile(path.join(temporary,'api.ts'),`export const apiService={getBasketScoreHistory:async p=>{const r=await fetch('/history?mode='+window.fixtureMode+'&days='+p.days+'&market='+p.market);if(!r.ok)throw new Error('Synthetic history unavailable');return r.json();}};`);
