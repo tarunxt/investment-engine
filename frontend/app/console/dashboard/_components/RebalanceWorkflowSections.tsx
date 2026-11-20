@@ -3013,6 +3013,8 @@ function ScopedZerodhaBasketPreviewDialog({
   const selectedSellAmount = selectedOrders
     .filter((order) => order.side === "SELL")
     .reduce((sum, order) => sum + (order.amount ?? 0), 0);
+  const netPurchases = selectedOrders.some(order => order.amount == null || !Number.isFinite(order.amount))
+    ? null : selectedBuyAmount - selectedSellAmount;
   const availableMarginToneClass = getZerodhaAvailableMarginToneClass(
     availableMargin,
     selectedBuyAmount,
@@ -3202,7 +3204,7 @@ function ScopedZerodhaBasketPreviewDialog({
                   </div>
                 ) : null}
 
-                {displayCalculations.controls}
+                {displayCalculations.renderDisclosure(netPurchases)}
 
                 {!isZerodhaPreview ? <p className="mb-5 text-sm font-semibold text-slate-700">IndMoney US basket review · USD</p> : null}
 
@@ -3455,7 +3457,7 @@ function ScopedZerodhaBasketPreviewDialog({
         />
       </div>
     </div>
-    {displayCalculations.popup}
+    {displayCalculations.renderPopup(netPurchases)}
     {unitsDetailOrder ? <BasketUnitsPopup row={unitsDetailOrder} broker={basketBrokerLabel} onClose={() => setUnitsDetailId(null)} /> : null}
     {renameColumn ? <BasketColumnRename key={renameColumn} id={renameColumn} name={columnNames[renameColumn] ?? renameColumn} onSave={name => columnPreferences?.rename?.(renameColumn, name)} onClose={() => setRenameColumn(null)} /> : null}
     {columnMenu ? <BasketColumnPicker covered={Boolean(renameColumn)} labels={columnMenu} hidden={hiddenColumns} order={columnPreferences?.order} names={columnNames} onReorder={columnPreferences?.reorder} onRequestRename={setRenameColumn} onToggle={label => columnPreferences ? columnPreferences.toggle(label) : setHiddenColumns(current => current.includes(label) ? current.filter(value => value !== label) : [...current, label])} onClose={() => setColumnMenu(null)} /> : null}
