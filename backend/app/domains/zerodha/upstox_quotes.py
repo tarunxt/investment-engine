@@ -29,10 +29,18 @@ def build_quote_request(client, instrument_keys, token):
     )
 
 
-def configured_for(user_id):
-    # No global credential may become an implicit shared market-data account.
-    return (str(user_id) == os.getenv("UPSTOX_LTP_OWNER_USER_ID", "")
-            and bool(os.getenv("UPSTOX_ANALYTICS_TOKEN", "")))
+def configured_for(user_id, username=None):
+    # Keep the shared read-only provider credential limited to explicitly
+    # approved Cred-X accounts. The primary owner ID remains backward compatible.
+    owner_id = os.getenv("UPSTOX_LTP_OWNER_USER_ID", "").strip()
+    allowed_usernames = {
+        value.strip().casefold()
+        for value in os.getenv("UPSTOX_LTP_ALLOWED_USERNAMES", "").split(",")
+        if value.strip()
+    }
+    username_allowed = isinstance(username, str) and username.strip().casefold() in allowed_usernames
+    return (bool(os.getenv("UPSTOX_ANALYTICS_TOKEN", ""))
+            and ((bool(owner_id) and str(user_id) == owner_id) or username_allowed))
 
 
 def instrument_map(rows):
@@ -111,11 +119,15 @@ def normalize_quotes(data, requested, now):
     return quotes
 
 
-async def read_upstox_quotes(user_id, instruments):
-    if not instruments or not configured_for(user_id):
+async def read_upstox_quotes(user_id, instruments, username=None):
+    if not instruments or not configured_for(user_id, username):
         return []
     from .upstox_quote_guard import guarded_quotes
-    return await guarded_quotes(user_id, instruments, lambda guard: _fetch_quotes(instruments, guard))
+    # All explicitly authorized Cred-X users share one Upstox token. Keep the
+    # quota and cooldown keyed to its canonical owner, not the caller, so adding
+    # an account cannot multiply the provider's rate budget.
+    quota_owner = os.getenv("UPSTOX_LTP_OWNER_USER_ID", "").strip() or str(user_id)
+    return await guarded_quotes(quota_owner, instruments, lambda guard: _fetch_quotes(instruments, guard))
 
 
 async def _fetch_quotes(instruments, guard):
