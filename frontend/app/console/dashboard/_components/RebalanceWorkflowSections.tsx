@@ -25,6 +25,7 @@ import { InputEvidenceRows, InputEvidenceSummary } from "./InputEvidenceRows";
 import { threatInputRationale } from "./threatInputRationale";
 import { PromptTemplateDialog } from "@/app/console/automated-rebalance/_components/PromptTemplateDialog";
 import { SavedOutputDialog } from "@/components/shared/SavedOutputDialog";
+import { BasketResizeHandles } from "@/components/BasketResizeHandles";
 import { ZerodhaBasketLoading } from "@/components/ZerodhaBasketLoading";
 import { basketAffordabilityIssue, basketResponseIssue, definitiveBasketRejection } from "@/lib/basketSubmissionSafety";
 import { useBasketSubmissionSafety } from "@/hooks/useBasketSubmissionSafety";
@@ -3122,7 +3123,9 @@ function ScopedZerodhaBasketPreviewDialog({
   return (
     <>
     <div inert={displayCalculations.popupOpen || unitsDetailOrder || columnMenu || renameColumn || marketNoticeOpen ? true : undefined} className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm" onClick={onClose}>
-      <div {...reviewDialog} role="dialog" aria-modal="true" aria-label={basketTitle} className="flex max-h-[90vh] w-full max-w-7xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
+      <div {...reviewDialog} role="dialog" aria-modal="true" aria-label={basketTitle} className="relative w-[var(--basket-width,80rem)] max-w-full min-w-[min(320px,100%)] rounded-3xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
+        <BasketResizeHandles panelRef={reviewDialog.ref} />
+        <div className="flex max-h-[90vh] flex-col overflow-hidden rounded-[inherit]">
         <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-5">
           <div>
             <div className="text-[11px] font-semibold uppercase tracking-[0.35em] text-slate-400">
@@ -3455,6 +3458,7 @@ function ScopedZerodhaBasketPreviewDialog({
           onFormulaConfigChange={onFormulaConfigChange}
           onClose={() => setSelectedMatrixDetail(null)}
         />
+        </div>
       </div>
     </div>
     {displayCalculations.renderPopup(netPurchases)}
