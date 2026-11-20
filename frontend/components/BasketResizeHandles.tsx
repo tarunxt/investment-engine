@@ -1,6 +1,6 @@
 "use client";
 
-import { useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type RefObject } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type RefObject } from "react";
 
 type Drag = { pointerId: number; startX: number; startWidth: number };
 
@@ -9,7 +9,8 @@ export function BasketResizeHandles({ panelRef, owner }: { owner?: number | null
   const [widths, setWidths] = useState({ current: 0, available: 0 });
 
   const preferenceKey = owner ? `basket-width:user:${owner}` : null;
-  useLayoutEffect(() => {
+  // The parent attaches its panel ref after child layout effects run.
+  useEffect(() => {
     const panel = panelRef.current;
     const backdrop = panel?.parentElement;
     if (!panel || !backdrop) return;
@@ -48,6 +49,7 @@ export function BasketResizeHandles({ panelRef, owner }: { owner?: number | null
   }
 
   function resize(width: number) {
+    if (widths.available <= 0) return;
     const clamped = Math.min(widths.available, Math.max(320, width));
     panelRef.current?.style.setProperty("--basket-width", clamped + "px");
   }

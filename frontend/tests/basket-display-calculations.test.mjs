@@ -862,7 +862,7 @@ test('a positive quote rounding to zero paise cannot produce actionable shares',
 
 test('basket width uses the release position when the final pointer move is coalesced', () => {
   const { BasketResizeHandles } = load('../components/BasketResizeHandles.tsx', {
-    useLayoutEffect: () => {},
+    useEffect: () => {},
     useRef: current => ({ current }),
     useState: () => [{ current: 900, available: 1400 }, () => {}],
   });
@@ -885,5 +885,35 @@ test('basket width uses the release position when the final pointer move is coal
     assert.equal(width, 850);
     handle.props.onLostPointerCapture(event('lostpointercapture', 0));
     assert.equal(width, 850);
+  }
+});
+
+test('basket width restores after the parent attaches its ref and stays scoped to the owner', () => {
+  const saved = new Map([['basket-width:user:42', '1000']]);
+  for (const owner of [42, 19]) {
+    const h = hooks();
+    const { BasketResizeHandles } = load('../components/BasketResizeHandles.tsx', {
+      ...h.bindings,
+      localStorage: { getItem: key => saved.get(key), setItem: (key, value) => saved.set(key, value) },
+      getComputedStyle: () => ({paddingLeft: '16px', paddingRight: '16px'}),
+      ResizeObserver: class { observe() {} disconnect() {} },
+    });
+    const panelRef = { current: null };
+    const render = () => { h.start(); return BasketResizeHandles({ panelRef, owner }); };
+    render();
+    let width = 900;
+    panelRef.current = {
+      parentElement: { clientWidth: 1440 },
+      getBoundingClientRect: () => ({ width }),
+      style: { setProperty: (_, value) => { width = parseFloat(value); }, getPropertyValue: () => width + 'px' },
+    };
+    h.flush();
+    const expected = owner === 42 ? 1000 : 900;
+    assert.equal(width, expected);
+    const right = render().find(edge => edge.key === 'right');
+    assert.equal(right.props['aria-valuemax'], 1408);
+    right.props.onKeyDown({ key: 'ArrowRight', currentTarget: { dataset: { side: 'right' } }, preventDefault() {} });
+    assert.equal(saved.get('basket-width:user:' + owner), String(expected + 32));
+    h.unmount();
   }
 });
