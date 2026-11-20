@@ -31,7 +31,12 @@ async def read_display_quotes(service, token, instruments, user_id=None, usernam
         quotes.append({"instrument": instrument, "price": price, "as_of": received, "source": "Zerodha broker /quote last_price · exact venue · server receipt time"})
     # Independently read the full batch for the provider comparison column.
     # Only absent Kite prices may use those values in the selected quote list.
-    upstox = await read_upstox_quotes(user_id, instruments, username=username) if user_id is not None else []
+    if user_id is None:
+        upstox = []
+    elif username is None:
+        upstox = await read_upstox_quotes(user_id, instruments)
+    else:
+        upstox = await read_upstox_quotes(user_id, instruments, username=username)
     fallback = [row for row in upstox if row["instrument"] in missing]
     quotes.extend(fallback)
     filled = {row["instrument"] for row in fallback}
