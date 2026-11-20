@@ -862,7 +862,7 @@ test('a positive quote rounding to zero paise cannot produce actionable shares',
 
 test('basket width uses the release position when the final pointer move is coalesced', () => {
   const { BasketResizeHandles } = load('../components/BasketResizeHandles.tsx', {
-    useEffect: () => {},
+    useLayoutEffect: () => {},
     useRef: current => ({ current }),
     useState: () => [{ current: 900, available: 1400 }, () => {}],
   });
@@ -870,7 +870,7 @@ test('basket width uses the release position when the final pointer move is coal
     let width = 900;
     const panel = {
       getBoundingClientRect: () => ({ width }),
-      style: { setProperty: (_, value) => { width = parseFloat(value); } },
+      style: { getPropertyValue: () => width + 'px', setProperty: (_, value) => { width = parseFloat(value); } },
     };
     const handle = BasketResizeHandles({ panelRef: { current: panel } }).find(edge => edge.key === side);
     const target = { dataset: { side }, setPointerCapture() {} };
