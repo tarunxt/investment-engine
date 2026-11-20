@@ -71,8 +71,7 @@ try{
  const page=await context.newPage(),errors=[];await page.clock.install();page.on('pageerror',e=>errors.push(e.message));
  await page.goto(origin);await page.getByLabel('AAA Historical Weighted Score calculation').filter({hasText:'3.0'}).waitFor();await page.getByLabel('AAA Action Zerodha Stocks calculation').filter({hasText:'+1'}).waitFor();
  const disclosure=page.getByRole('region',{name:'Allocation disclosure'});
- assert.match(await disclosure.textContent(),/Min Cash 5% is a minimum input/);
- assert.match(await disclosure.textContent(),/Weight cap 9.5%/);
+ assert.doesNotMatch(await disclosure.textContent(),/Min Cash 5% is a minimum input|Weight cap 9.5%|Independent rounding can change aggregate exposure|Inputs needed for rounded allocation totals/);
  assert.match(await disclosure.textContent(),/Rounded aggregate target amount/);
  const aggregateRows=await disclosure.locator('tr').allTextContents();
  assert.deepEqual(aggregateRows,['Aggregate target weight28.5%','Residual cash before rounding71.5%','Rounded aggregate target amount₹300.00','Residual cash after rounding₹700.00']);
