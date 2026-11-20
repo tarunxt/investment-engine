@@ -310,6 +310,7 @@ async function executeWorkflow({ stages = ['sync', 'swing', 'threats', 'rebalanc
     fetchAllFullRuns: async () => [generatedRebalance],
     buildConsensusRows: (runs) => { consensusInputs.push(runs); return runs.map((r) => ({ id: r.id, jobs: r.run_jobs.map((link) => link.job.response) })); },
     buildTechnicalScanMap: () => ({}),
+    buildZerodhaBasketPreviewOrders: () => [],
     buildDashboardActionRows: (rows) => rows.map(row => ({ stock: { rows: [{meta:{runId:row.id}}], exchange: 'NASDAQ', symbol: 'TEST', totalSuggestions: 1 }, formulaAction: 'Hold', formulaScore: 0, formulaEstimate: {}, detail: {} })),
     buildTechnicalScanPrompt: (rows) => JSON.stringify(rows), getStageTileLabel: (stage) => stage,
     window: { alert: message => alerts.push(message), setTimeout: noop, dispatchEvent: noop }, CustomEvent: class {},
