@@ -7897,7 +7897,7 @@ ${zerodhaExecutionMode === "direct_market"
         <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <h2 className="text-xl font-extrabold text-slate-950">
+              <h2 className="text-xl font-medium text-slate-950">
                 {section.title}
               </h2>
               <Link

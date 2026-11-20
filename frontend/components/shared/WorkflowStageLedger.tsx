@@ -123,7 +123,7 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
               {item.info.portfolioThreat && <p className="mt-2 text-sm">Portfolio Threat · {item.info.portfolioThreat}</p>}
             </article>
             {item.onPlaceOrderClick && <button type="button" onClick={item.onPlaceOrderClick}
-              className={`mt-2 min-h-9 rounded-lg px-3 text-sm font-semibold text-white ${basketReady && !active ? "bg-green-700 hover:bg-green-800" : "bg-blue-700 hover:bg-blue-800"}`}>
+              className={`mx-auto mt-3 block min-h-12 max-w-full rounded-lg px-8 text-base font-semibold text-white ${basketReady && !active ? "bg-green-700 hover:bg-green-800" : "bg-blue-700 hover:bg-blue-800"}`}>
               {item.placeOrderLabel ?? "Place Order"}
             </button>}
             {item.stage === "swing" && <div className="mt-2 rounded-lg border p-3 text-sm">
