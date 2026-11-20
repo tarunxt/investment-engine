@@ -46,9 +46,9 @@ export function PortfolioParametersTile(props: Props) {
   return <>
     {props.currency === "INR" ? <section className="min-w-0 rounded-2xl border border-violet-200 bg-violet-50 p-4">
       <button type="button" onClick={() => setOpen(true)} aria-haspopup="dialog" className="text-xs font-bold uppercase tracking-wide text-violet-800 underline">Portfolio Parameters</button>
-      <div className="grid gap-2 text-sm sm:grid-cols-2">
+      <div className="mt-2 grid gap-2 text-sm [&>div]:mt-0 [&_input]:py-1 [&_button]:leading-4 md:[&_label]:min-w-0 md:[&>div]:grid md:[&>div]:grid-cols-2 md:[&>div]:items-center md:[&>div]:gap-x-2">
         {stocksInput("basket-maximum-stocks")}
-        <div className="mt-5">{weightInput("max", "basket-parameter")}</div>
+        {weightInput("max", "basket-parameter")}
       </div>
       {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
     </section> : <button type="button" onClick={() => setOpen(true)} className="rounded-2xl border border-violet-200 bg-violet-50 p-4 text-left focus:outline-none focus:ring-2 focus:ring-violet-500" aria-haspopup="dialog">

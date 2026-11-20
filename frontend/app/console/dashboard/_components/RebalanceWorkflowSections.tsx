@@ -2782,6 +2782,7 @@ function ZerodhaBasketPreviewDialog(props: Parameters<typeof ScopedZerodhaBasket
   return <ScopedZerodhaBasketPreviewDialog
     key={`${preferenceScope}:${props.detailsData.portfolioSnapshot?.captured_at ?? "missing"}:${props.open}`}
     {...props}
+    widthOwner={owner}
     columnPreferences={{
       hiddenColumns: saved?.hidden ?? [],
       order: saved?.order ?? [],
@@ -2843,6 +2844,7 @@ function ScopedZerodhaBasketPreviewDialog({
   primaryButtonLabel,
   basketInfoText = "All rows are visible and selectable. Selection does not assert execution validity. Review the basket here, use protected MARKET for all selected stocks by default whenever direct Kite Connect access is enabled during regular market hours. Market drafts require enabled direct broker access; no silent LIMIT fallback is used.",
   basketCurrency = "INR",
+  widthOwner,
   columnPreferences,
 }: {
   open: boolean;
@@ -2892,6 +2894,7 @@ function ScopedZerodhaBasketPreviewDialog({
   primaryButtonLabel?: string;
   basketInfoText?: ReactNode;
   basketCurrency?: "INR" | "USD";
+  widthOwner?: number | null;
   columnPreferences?: { hiddenColumns: string[]; order?: string[]; names?: Record<string, string>; toggle: (label: string) => void; reorder?: (order: string[]) => void; rename?: (id: string, name: string) => void };
 }) {
   const reviewDialog = useReviewDialog<HTMLDivElement>(open, onClose);
@@ -3124,7 +3127,7 @@ function ScopedZerodhaBasketPreviewDialog({
     <>
     <div inert={displayCalculations.popupOpen || unitsDetailOrder || columnMenu || renameColumn || marketNoticeOpen ? true : undefined} className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm" onClick={onClose}>
       <div {...reviewDialog} role="dialog" aria-modal="true" aria-label={basketTitle} className="relative w-[var(--basket-width,80rem)] max-w-full min-w-[min(320px,100%)] rounded-3xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
-        <BasketResizeHandles panelRef={reviewDialog.ref} />
+        <BasketResizeHandles panelRef={reviewDialog.ref} owner={widthOwner} />
         <div className="flex max-h-[90vh] flex-col overflow-hidden rounded-[inherit]">
         <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-5">
           <div>
@@ -3193,7 +3196,7 @@ function ScopedZerodhaBasketPreviewDialog({
             {openSavedBasket && <button type="button" className="mt-2 underline" onClick={openSavedBasket}>Open basket with saved scoring settings</button>}
           </div>
         ) : null}
-        <div className="min-h-0 flex-1 overflow-auto overscroll-contain p-5">
+        <div role="region" aria-label="Basket orders, scroll to inspect" tabIndex={0} className="min-h-0 flex-1 overflow-auto overscroll-contain px-5 pb-5">
           {loading ? (isZerodhaPreview ? <ZerodhaBasketLoading /> : (
             <div className="flex items-center justify-center gap-2 py-16 text-sm text-slate-500">
               <Loader2 className="size-4 animate-spin" /> {loadingLabel}
@@ -3257,9 +3260,10 @@ function ScopedZerodhaBasketPreviewDialog({
                 {quoteRead.loading ? <p role="status" className="mb-3 text-slate-600">Loading display prices…</p> : quoteRead.error ? <p role="alert" className="mb-3 text-amber-800">{quoteRead.upstoxEnabled ? "Price sources unavailable. " : `Display prices unavailable: ${quoteRead.error}. `}<button type="button" className="underline" onClick={quoteRead.retry}>Retry quotes</button></p> : null}
                 {displayCalculations.error ? <p role="alert" className="mb-3 text-red-700">{displayCalculations.error} <button type="button" onClick={displayCalculations.retry} className="underline">Retry historical scores</button></p> : null}
               </div>
-              <div role="region" aria-label="Basket orders, scroll to inspect" tabIndex={0} className="basket-preview-scroll mb-5 max-h-[min(52vh,38rem)] min-h-0 w-full min-w-0 max-w-full overflow-auto overscroll-contain rounded-2xl border border-slate-200 focus-visible:outline-2 focus-visible:outline-blue-700">
+              <h3 className="sticky left-5 mb-2 text-lg font-bold text-slate-900">Order Basket</h3>
+              <div className="basket-preview-scroll mb-5 w-max min-w-full rounded-2xl border border-slate-200">
                   <BasketColumnTable hidden={hiddenColumns} order={columnPreferences?.order} names={displayCalculations.parameters ? { "Historical Weighted Score": `${displayCalculations.parameters.days}-day mean of run scores (−3 to +3)`, ...columnNames } : columnNames} onOpen={setColumnMenu} onRequestRename={setRenameColumn}>
-                  <table className="min-w-[92rem] w-full border-separate border-spacing-0 text-sm">
+                  <table aria-label="Order Basket" className="min-w-[92rem] w-full border-separate border-spacing-0 text-sm">
                     <thead className="bg-slate-50">
                       <tr className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
                         <th className="px-4 py-3 font-semibold" data-column-label="Selection">
@@ -7847,7 +7851,7 @@ ${zerodhaExecutionMode === "direct_market"
     () => [
       {
         portfolio: "zerodha" as const,
-        title: "Run Zerodha Auto-Rebalance",
+        title: "Indian Stocks Auto-Rebalance",
         buttonLabel: "Run",
       },
       {
@@ -8130,7 +8134,7 @@ ${zerodhaExecutionMode === "direct_market"
                     : () => void openIndmoneyBasketPreview()
                   : undefined
               }
-              placeOrderLabel="Place Order"
+              placeOrderLabel={section.portfolio === "zerodha" ? "View Final Basket" : "Place Order"}
               onCalculationsClick={
                 stage === "actionables"
                   ? () => {

@@ -1,17 +1,24 @@
 "use client";
 
-import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type RefObject } from "react";
+import { useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type RefObject } from "react";
 
 type Drag = { pointerId: number; startX: number; startWidth: number };
 
-export function BasketResizeHandles({ panelRef }: { panelRef: RefObject<HTMLDivElement | null> }) {
+export function BasketResizeHandles({ panelRef, owner }: { owner?: number | null; panelRef: RefObject<HTMLDivElement | null> }) {
   const drag = useRef<Drag | null>(null);
   const [widths, setWidths] = useState({ current: 0, available: 0 });
 
-  useEffect(() => {
+  const preferenceKey = owner ? `basket-width:user:${owner}` : null;
+  useLayoutEffect(() => {
     const panel = panelRef.current;
     const backdrop = panel?.parentElement;
     if (!panel || !backdrop) return;
+    if (preferenceKey) {
+      try {
+        const saved = Number(localStorage.getItem(preferenceKey));
+        if (Number.isFinite(saved) && saved >= 320) panel.style.setProperty("--basket-width", saved + "px");
+      } catch { /* Storage can be disabled in private browsing. */ }
+    }
     const measure = () => {
       const style = getComputedStyle(backdrop);
       const available = backdrop.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
@@ -22,7 +29,7 @@ export function BasketResizeHandles({ panelRef }: { panelRef: RefObject<HTMLDivE
     observer.observe(panel);
     observer.observe(backdrop);
     return () => observer.disconnect();
-  }, [panelRef]);
+  }, [panelRef, preferenceKey]);
 
   function start(event: PointerEvent<HTMLDivElement>) {
     const panel = panelRef.current;
@@ -45,10 +52,17 @@ export function BasketResizeHandles({ panelRef }: { panelRef: RefObject<HTMLDivE
     panelRef.current?.style.setProperty("--basket-width", clamped + "px");
   }
 
+  function saveWidth() {
+    const width = panelRef.current?.style.getPropertyValue("--basket-width");
+    if (!preferenceKey || !width) return;
+    try { localStorage.setItem(preferenceKey, String(parseFloat(width))); } catch { /* Keep the in-session width. */ }
+  }
+
   function finish(event: PointerEvent<HTMLDivElement>) {
     if (drag.current?.pointerId !== event.pointerId) return;
     // A browser can deliver the release before the last pointermove.
     if (event.type === "pointerup") move(event);
+    saveWidth();
     drag.current = null;
   }
 
@@ -63,6 +77,7 @@ export function BasketResizeHandles({ panelRef }: { panelRef: RefObject<HTMLDivE
       case "End": resize(widths.available); break;
       default: return;
     }
+    saveWidth();
     event.preventDefault();
   }
 

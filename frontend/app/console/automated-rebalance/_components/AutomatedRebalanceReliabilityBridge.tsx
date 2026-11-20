@@ -439,7 +439,7 @@ function inferMetricContext(
   while (element && element !== root.parentElement) {
     const text = compactText(element.textContent);
     stage ||= inferStageFromText(text);
-    const hasZerodha = text.includes("Run Zerodha Auto-Rebalance");
+    const hasZerodha = text.includes("Indian Stocks Auto-Rebalance");
     const hasIndMoney = text.includes("Run Indmoney Auto-Rebalance");
     if (hasZerodha !== hasIndMoney) {
       portfolio = hasZerodha ? "india" : "indmoney_us";
