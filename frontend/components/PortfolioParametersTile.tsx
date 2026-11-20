@@ -33,11 +33,28 @@ export function PortfolioParametersTile(props: Props) {
     if (!result.state) { setError(result.error); return; }
     setParameters(result.state); setDraft(null); setError(null);
   };
+  const stocksInput = (id: string) => (
+<div className="mt-5"><label htmlFor={id} className="font-semibold">Maximum Stocks</label>
+        <input id={id} type="number" inputMode="numeric" min="1" step="1" value={maximumStocksDraft ?? maximumStocks} aria-invalid={maximumStocksInvalid} aria-describedby={maximumStocksInvalid ? id + "-error" : undefined} className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2" onChange={event => { const value = event.target.value; setMaximumStocksDraft(value); const parsed = parseMaximumStocks(value); if (parsed !== null) setMaximumStocks(parsed); }} onBlur={() => { if (!maximumStocksInvalid) setMaximumStocksDraft(null); }} />
+        {maximumStocksInvalid ? <p id={id + "-error"} role="alert" className="mt-1 text-sm text-red-700">Enter a positive whole number of stocks.</p> : null}
+      </div>
+  );
+  const weightInput = (key: PortfolioParameterKey, prefix: string) => {
+        const display = displayPortfolioParameter(parameters, key);
+        return <div key={key}><label htmlFor={`${prefix}-${key}`} className="font-semibold">{labels[key]}</label><div className="mt-1 flex overflow-hidden rounded-lg border border-slate-300"><input id={`${prefix}-${key}`} type="number" inputMode="decimal" min="0" max="100" step="0.01" value={draft?.key === key ? draft.value : display.text} aria-describedby="portfolio-parameter-formula" aria-invalid={Boolean(error && draft?.key === key)} className="min-w-0 flex-1 appearance-textfield px-3 py-2 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none" onBlur={() => { if (!error) setDraft(null); }} onChange={event => { const value = event.target.value; setDraft({ key, value }); const result = editPortfolioParameter(parameters, key, value); if (result.state) { setParameters(result.state); setError(null); } else setError(result.error); }} /><span className="self-center px-2">%</span><div className="flex flex-col border-l"><button type="button" aria-label={`Increase ${labels[key]}`} className="px-3" onClick={() => commit(stepPortfolioParameter(parameters, key, 1))}>▲</button><button type="button" aria-label={`Decrease ${labels[key]}`} className="px-3" onClick={() => commit(stepPortfolioParameter(parameters, key, -1))}>▼</button></div></div>{display.rounded ? <p className="mt-1 text-xs text-slate-500">Shown rounded; the full calculated value is retained.</p> : null}</div>;
+        };
   return <>
-    <button type="button" onClick={() => setOpen(true)} className="rounded-2xl border border-violet-200 bg-violet-50 p-4 text-left focus:outline-none focus:ring-2 focus:ring-violet-500" aria-haspopup="dialog">
+    {props.currency === "INR" ? <section className="min-w-0 rounded-2xl border border-violet-200 bg-violet-50 p-4">
+      <button type="button" onClick={() => setOpen(true)} aria-haspopup="dialog" className="text-xs font-bold uppercase tracking-wide text-violet-800 underline">Portfolio Parameters</button>
+      <div className="grid gap-2 text-sm sm:grid-cols-2">
+        {stocksInput("basket-maximum-stocks")}
+        <div className="mt-5">{weightInput("max", "basket-parameter")}</div>
+      </div>
+      {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
+    </section> : <button type="button" onClick={() => setOpen(true)} className="rounded-2xl border border-violet-200 bg-violet-50 p-4 text-left focus:outline-none focus:ring-2 focus:ring-violet-500" aria-haspopup="dialog">
       <span className="block text-xs font-bold uppercase tracking-wide text-violet-800">Portfolio Parameters</span>
       <span className="mt-2 block text-sm text-violet-950">Min Cash {displayPortfolioParameter(parameters, "cash").text}% · Max Weight {displayPortfolioParameter(parameters, "max").text}%</span>
-    </button>
+    </button>}
     {open ? createPortal(<div ref={panel} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="portfolio-parameters-title" className="fixed inset-0 z-[90] flex items-center justify-center overflow-auto bg-slate-950/55 p-4" onClick={event => { event.stopPropagation(); setOpen(false); }} onKeyDown={event => {
       event.stopPropagation();
       if (event.key === "Escape") { event.preventDefault(); setOpen(false); }
@@ -49,14 +66,8 @@ export function PortfolioParametersTile(props: Props) {
     }}><div className="max-h-[85vh] w-full max-w-lg overflow-auto rounded-2xl bg-white p-5 shadow-2xl" onClick={event => event.stopPropagation()}>
       <div className="flex items-center justify-between gap-3"><h2 id="portfolio-parameters-title" className="text-xl font-bold">Portfolio Parameters</h2><button type="button" onClick={() => setOpen(false)} aria-label="Close Portfolio Parameters" className="rounded border px-3 py-2">Close</button></div>
       <p className="mt-2 text-sm text-slate-600">These values update displayed calculations only. Order selections, executable quantities and order amounts remain under the existing controls.</p>
-      <div className="mt-5"><label htmlFor="portfolio-maximum-stocks" className="font-semibold">Maximum Stocks</label>
-        <input id="portfolio-maximum-stocks" type="number" inputMode="numeric" min="1" step="1" value={maximumStocksDraft ?? maximumStocks} aria-invalid={maximumStocksInvalid} aria-describedby={maximumStocksInvalid ? "portfolio-maximum-stocks-error" : undefined} className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2" onChange={event => { const value = event.target.value; setMaximumStocksDraft(value); const parsed = parseMaximumStocks(value); if (parsed !== null) setMaximumStocks(parsed); }} onBlur={() => { if (!maximumStocksInvalid) setMaximumStocksDraft(null); }} />
-        {maximumStocksInvalid ? <p id="portfolio-maximum-stocks-error" role="alert" className="mt-1 text-sm text-red-700">Enter a positive whole number of stocks.</p> : null}
-      </div>
-      <div className="mt-5 space-y-4">{(Object.keys(labels) as PortfolioParameterKey[]).map(key => {
-        const display = displayPortfolioParameter(parameters, key);
-        return <div key={key}><label htmlFor={`portfolio-parameter-${key}`} className="font-semibold">{labels[key]}</label><div className="mt-1 flex overflow-hidden rounded-lg border border-slate-300"><input id={`portfolio-parameter-${key}`} type="number" inputMode="decimal" min="0" max="100" step="0.01" value={draft?.key === key ? draft.value : display.text} aria-describedby="portfolio-parameter-formula" aria-invalid={Boolean(error && draft?.key === key)} className="min-w-0 flex-1 appearance-textfield px-3 py-2 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none" onBlur={() => { if (!error) setDraft(null); }} onChange={event => { const value = event.target.value; setDraft({ key, value }); const result = editPortfolioParameter(parameters, key, value); if (result.state) { setParameters(result.state); setError(null); } else setError(result.error); }} /><span className="self-center px-2">%</span><div className="flex flex-col border-l"><button type="button" aria-label={`Increase ${labels[key]}`} className="px-3" onClick={() => commit(stepPortfolioParameter(parameters, key, 1))}>▲</button><button type="button" aria-label={`Decrease ${labels[key]}`} className="px-3" onClick={() => commit(stepPortfolioParameter(parameters, key, -1))}>▼</button></div></div>{display.rounded ? <p className="mt-1 text-xs text-slate-500">Shown rounded; the full calculated value is retained.</p> : null}</div>;
-      })}</div>
+      {stocksInput("portfolio-maximum-stocks")}
+      <div className="mt-5 space-y-4">{(Object.keys(labels) as PortfolioParameterKey[]).map(key => weightInput(key, "portfolio-parameter"))}</div>
       <div className="mt-4"><label htmlFor="portfolio-history-days" className="font-semibold">Past days considered for Weighted Score</label><div className="mt-1 flex items-center gap-2"><input id="portfolio-history-days" type="number" inputMode="numeric" min="1" max="3650" step="1" value={pastDays} aria-invalid={pastDaysInvalid} className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2" onChange={event => setPastDays(event.target.value)} /><span>Days</span></div>{pastDaysInvalid ? <p role="alert" className="mt-1 text-sm text-red-700">Enter between 1 and 3650 whole days.</p> : null}</div>
       <p id="portfolio-parameter-formula" className="mt-4 text-sm text-slate-600">Normalised Max Weight = (1 − Min Cash / 100) × Max Weight. At 100% Min Cash, Normalised Max Weight is 0% and Max Weight is retained.</p>
       {error ? <p role="alert" className="mt-3 text-sm text-red-700">{error}</p> : null}

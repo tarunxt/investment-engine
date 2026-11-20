@@ -2828,6 +2828,7 @@ function ScopedZerodhaBasketPreviewDialog({
   buyThresholdDraft,
   onBuyThresholdDraftChange,
   previewLabel = "Zerodha Basket Preview",
+  onDefaultSelection,
   basketTitle = "Zerodha India Place Order Basket",
   basketBrokerLabel = "Zerodha",
   tradingViewMarket = "india",
@@ -2853,6 +2854,7 @@ function ScopedZerodhaBasketPreviewDialog({
   onClose: () => void;
   onToggle: (id: string) => void;
   onToggleAll: (ids?: string[]) => void;
+  onDefaultSelection?: (ids: Set<string>) => void;
   onToggleSection: (action: ActionCategory, visibleIds?: string[]) => void;
   onOrderKindChange: (id: string, orderKind: ZerodhaBasketOrderKind) => void;
   onPercentChange: (id: string, percent: ZerodhaBasketOrderPercent) => void;
@@ -2987,10 +2989,24 @@ function ScopedZerodhaBasketPreviewDialog({
     ...legacyDisplayOnlyRows.map(row => buildEditableRow(undefined, row)),
   ];
   const displayOnlyRows: DashboardActionRow[] = [];
+  const quotedOrders = tradingViewMarket === "india"
+    ? basketRows.filter(row => row.draftContext?.source?.startsWith("Upstox ") && row.amount !== null && row.amount > 0 && Number.isFinite(row.amount))
+    : basketRows;
+  const defaultIds = JSON.stringify(quotedOrders.map(order => order.id));
+  const selectionEdited = useRef(false);
+  useEffect(() => {
+    if (!open || loading) {
+      selectionEdited.current = false;
+      return;
+    }
+    if (!selectionEdited.current && !submission && onDefaultSelection) {
+      onDefaultSelection(new Set<string>(JSON.parse(defaultIds)));
+    }
+  }, [open, loading, defaultIds, onDefaultSelection, submission]);
   if (!open) return null;
 
-  const selectableOrders = basketRows;
-  const selectedOrders = selectableOrders.filter((order) => selectedIds.has(order.id));
+  const selectableOrders = quotedOrders;
+  const selectedOrders = basketRows.filter((order) => selectedIds.has(order.id));
   const selectedBuyAmount = selectedOrders
     .filter((order) => order.side === "BUY")
     .reduce((sum, order) => sum + (order.amount ?? 0), 0);
@@ -3055,7 +3071,18 @@ function ScopedZerodhaBasketPreviewDialog({
     ...(!directMarketAvailable || !marketStatus.open || executionMode !== 'direct_market' ? ['Market execution requires enabled direct broker access during regular market hours.'] : []),
   ];
   const affordabilityIssue = isZerodhaPreview ? basketAffordabilityIssue(selectedOrders, availableMargin) : null;
-  const selectedDraftIssues = selectedOrders.flatMap(order => rowDraftIssues(order).map(reason => `${order.exchange}:${order.symbol}: ${reason}`));
+  const issuesByReason = new Map<string, Set<string>>();
+  for (const order of selectedOrders) {
+    for (const detail of rowDraftIssues(order)) {
+      const reason = detail.startsWith("Last Upstox trade on ")
+        ? "Last Upstox trade is older than 2 minutes."
+        : detail;
+      const stocks = issuesByReason.get(reason) ?? new Set<string>();
+      stocks.add(order.exchange + ":" + order.symbol);
+      issuesByReason.set(reason, stocks);
+    }
+  }
+  const selectedDraftIssues = Array.from(issuesByReason.keys());
   const sectionGroups = [...new Set<string>([...ZERODHA_BASKET_SECTION_ORDER, "Hold", "Unavailable"])].map((action) => ({
     action,
     label: ZERODHA_BASKET_SECTION_LABELS[action as ActionCategory] ?? action,
@@ -3136,12 +3163,7 @@ function ScopedZerodhaBasketPreviewDialog({
                 data-testid="basket-score-scan-completed-at"
               >
                 Last score scan: {formatCompactStageTime(scoreScanCompletedAt)}
-                {<span className="ml-2">
-                  {scoreRevision ? `Run #${scoreRevision.sequence} · ${scoreRevision.replayed ? "Saved replay" : "Original record"} · ${scoreRevision.version ?? "revision unavailable"}` : "Saved revision unavailable"}
-                  {detailsData.portfolioSnapshot && ` · Holdings ${formatCompactStageTime(detailsData.portfolioSnapshot.captured_at)}`}
-                  {isZerodhaPreview && calculationStocks.length > 0 && ` · Upstox quote times: ${[...new Set(calculationStocks.map(stock => stock.upstoxAsOf ? formatCompactStageTime(stock.upstoxAsOf) : "unavailable"))].join(", ")}`}
-                  {scoreRevision?.capturedAt && ` · ${formatCompactStageTime(scoreRevision.capturedAt)}`}
-                </span>}
+                {scoreRevision && <span className="ml-2">Run #{scoreRevision.sequence}</span>}
               </p>
             ) : null}
           </div>
@@ -3230,13 +3252,13 @@ function ScopedZerodhaBasketPreviewDialog({
                 {quoteRead.loading ? <p role="status" className="mb-3 text-slate-600">Loading display prices…</p> : quoteRead.error ? <p role="alert" className="mb-3 text-amber-800">{quoteRead.upstoxEnabled ? "Price sources unavailable. " : `Display prices unavailable: ${quoteRead.error}. `}<button type="button" className="underline" onClick={quoteRead.retry}>Retry quotes</button></p> : null}
                 {displayCalculations.error ? <p role="alert" className="mb-3 text-red-700">{displayCalculations.error} <button type="button" onClick={displayCalculations.retry} className="underline">Retry historical scores</button></p> : null}
               </div>
-              <div role="region" aria-label="Basket orders, scroll to inspect" tabIndex={0} className="basket-preview-scroll mb-5 max-h-[min(52vh,38rem)] min-h-0 w-fit min-w-full overflow-auto overscroll-contain rounded-2xl border border-slate-200 focus-visible:outline-2 focus-visible:outline-blue-700">
+              <div role="region" aria-label="Basket orders, scroll to inspect" tabIndex={0} className="basket-preview-scroll mb-5 max-h-[min(52vh,38rem)] min-h-0 w-full min-w-0 max-w-full overflow-auto overscroll-contain rounded-2xl border border-slate-200 focus-visible:outline-2 focus-visible:outline-blue-700">
                   <BasketColumnTable hidden={hiddenColumns} order={columnPreferences?.order} names={displayCalculations.parameters ? { "Historical Weighted Score": `${displayCalculations.parameters.days}-day mean of run scores (−3 to +3)`, ...columnNames } : columnNames} onOpen={setColumnMenu} onRequestRename={setRenameColumn}>
                   <table className="min-w-[92rem] w-full border-separate border-spacing-0 text-sm">
                     <thead className="bg-slate-50">
                       <tr className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
                         <th className="px-4 py-3 font-semibold" data-column-label="Selection">
-                          <input type="checkbox" checked={allSelected} onChange={() => onToggleAll(basketRows.map(row => row.id))} aria-label="Select or deselect all basket rows" className="size-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
+                          <input type="checkbox" checked={allSelected} onChange={() => { selectionEdited.current = true; onToggleAll(selectableOrders.map(row => row.id)); }} aria-label="Select or deselect all basket rows" className="size-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
                         </th>
                         <th className="px-4 py-3 font-semibold">Stock</th>
                         <th className="px-4 py-3 font-semibold">Score</th>
@@ -3257,7 +3279,7 @@ function ScopedZerodhaBasketPreviewDialog({
                     <tbody className="divide-y divide-slate-100">
                       {!orders.length && !allocationUniverse.length ? <tr><td colSpan={23} className="px-4 py-6 text-slate-500">No basket rows available.</td></tr> : null}
                       {sectionGroups.map((group) => {
-                        const sectionSelectable = group.orders;
+                        const sectionSelectable = group.orders.filter(order => selectableOrders.includes(order));
                         const sectionSelected = sectionSelectable.filter(order => selectedIds.has(order.id)).length;
                         const sectionAllSelected = sectionSelectable.length > 0 && sectionSelected === sectionSelectable.length;
                         return (
@@ -3268,7 +3290,7 @@ function ScopedZerodhaBasketPreviewDialog({
                                   <input
                                     type="checkbox"
                                     checked={sectionAllSelected}
-                                    onChange={() => onToggleSection(group.action as ActionCategory, sectionSelectable.map(order => order.id))}
+                                    onChange={() => { selectionEdited.current = true; onToggleSection(group.action as ActionCategory, sectionSelectable.map(order => order.id)); }}
                                     disabled={!sectionSelectable.length}
                                     aria-label={`Select or deselect ${group.label} ${basketBrokerLabel} basket orders`}
                                     className="size-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
@@ -3289,7 +3311,7 @@ function ScopedZerodhaBasketPreviewDialog({
                                   <input
                                     type="checkbox"
                                     checked={selectedIds.has(order.id)}
-                                    onChange={() => onToggle(order.id)}
+                                    onChange={() => { selectionEdited.current = true; onToggle(order.id); }}
                                     aria-label={`Select ${order.exchange} ${order.symbol}`}
                                     className="size-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                                   />
@@ -3421,7 +3443,7 @@ function ScopedZerodhaBasketPreviewDialog({
           {!isZerodhaPreview ? <div className="min-w-0 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
             Review selected US stock quantities and USD amounts before confirming the final basket.
           </div> : null}
-          {orderBlockers.length ? <details id={orderBlockersId} className="min-w-0 flex-1 text-sm text-amber-800"><summary>Why Place Order is unavailable</summary><ul tabIndex={0} aria-label="Blocking order checks" className="mt-2 max-h-40 overflow-y-auto">{orderBlockers.map((reason, index) => <li key={`${index}:${reason}`}>{reason}</li>)}</ul></details> : null}
+          {orderBlockers.length ? <details id={orderBlockersId} className="min-w-0 flex-1 text-sm text-amber-800"><summary>Why Place Order is unavailable</summary><ul tabIndex={0} aria-label="Blocking order checks" className="mt-2 max-h-40 overflow-y-auto">{orderBlockers.map((reason, index) => <li key={`${index}:${reason}`} className="grid grid-cols-[minmax(0,1fr)_minmax(5rem,1fr)] gap-3 py-1"><span>{reason}</span><strong>{issuesByReason.has(reason) ? issuesByReason.get(reason)!.size === selectedOrders.length ? "All" : Array.from(issuesByReason.get(reason)!).join(", ") : selectedOrders.length ? "All" : "—"}</strong></li>)}</ul></details> : null}
           {renderPlaceOrderButton("ml-auto self-end justify-center")}
         </div>
 
@@ -8323,6 +8345,7 @@ ${zerodhaExecutionMode === "direct_market"
         selectedIds={selectedZerodhaBasketIds}
         onClose={() => { zerodhaPreparation.current += 1; setZerodhaBasketOpen(false); }}
         onToggle={toggleZerodhaBasketOrder}
+        onDefaultSelection={setSelectedZerodhaBasketIds}
         onToggleAll={toggleAllZerodhaBasketOrders}
         onToggleSection={toggleZerodhaBasketSection}
         onOrderKindChange={updateZerodhaBasketOrderKind}
