@@ -24,7 +24,16 @@ export function editableDraftIssues(input: { units: number | null; price: number
   if (input.price === null || !Number.isFinite(input.price) || input.price <= 0 || !context?.source?.startsWith('Upstox ')) issues.push('Genuine Upstox LTP unavailable; no substitute price is used.');
   if (editableDraftAmount(input.units, input.price) === null && input.units !== null && input.price !== null) issues.push('Draft amount cannot be calculated as a finite Units × Upstox LTP value.');
   const asOf = Date.parse(context?.asOf ?? '');
-  if (!Number.isFinite(asOf) || now - asOf > 120000 || asOf > now + 1000) issues.push('Upstox last trade is missing, old or future-dated; it is not a fresh execution quote.');
+  if (context?.source?.startsWith('Upstox ')) {
+    if (!Number.isFinite(asOf)) issues.push('Upstox supplied no valid exchange trade time for this listing.');
+    else if (asOf > now + 1000) issues.push('The exchange trade time is ahead of the device clock. Check the device time and refresh the quote.');
+    else if (now - asOf > 120000) {
+      const lastTrade = new Intl.DateTimeFormat('en-IN', {
+        timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+      }).format(asOf);
+      issues.push(`Last Upstox trade on ${input.exchange}: ${lastTrade} IST. Market orders require a trade within the past 2 minutes. Waiting for a newer exchange trade.`);
+    }
+  }
   if (direction === 'SELL') {
     if (input.currentUnits === null || !Number.isFinite(input.currentUnits)) issues.push('Verified exact-venue holding quantity is unavailable.');
     else if (input.units !== null && input.units > Math.floor(input.currentUnits)) issues.push('Sell quantity exceeds verified whole-share holdings.');

@@ -43,7 +43,7 @@ export function useBasketDisplayQuotes(open: boolean, market: "india" | "us", in
       try {
         const result = await load();
         if (active && result) setState({ request, ...result });
-        failures = 0;
+        failures = result?.batchFailed ? failures + 1 : 0;
       } catch (error: unknown) {
         failures += 1;
         if (active) setState({ request, quotes: [], error: error instanceof Error ? error.message : "Live display quotes are unavailable." });
@@ -60,6 +60,7 @@ export function useBasketDisplayQuotes(open: boolean, market: "india" | "us", in
       const upstoxQuotes: typeof quotes = [];
       const vendorQuotes: UsVendorDisplayQuote[] = [];
       const warnings: string[] = [];
+      let batchFailed = false;
       if (requested.length > 500) throw new Error("Display quote batch exceeds 500 instruments.");
       for (let offset = 0; offset < requested.length; offset += 50) {
         if (!active || market === "india" && !visible()) return null;
@@ -78,13 +79,19 @@ export function useBasketDisplayQuotes(open: boolean, market: "india" | "us", in
           warnings.push(...data.missing.map(row => row.reason));
           continue;
         }
-        const data = await apiService.zerodhaDisplayQuotes(batch, controller.signal);
-        if (!Array.isArray(data.quotes) || !Array.isArray(data.missing) || data.quotes.some(quote => !batch.includes(quote.instrument))) throw new Error("Quote response does not match this basket.");
-        quotes.push(...data.quotes);
-        if (data.upstox_quotes !== undefined && (!Array.isArray(data.upstox_quotes) || data.upstox_quotes.some(quote => !batch.includes(quote.instrument) || !quote.source?.startsWith("Upstox ")))) throw new Error("Upstox response does not match this basket.");
-        upstoxQuotes.push(...(data.upstox_quotes ?? []));
+        try {
+          const data = await apiService.zerodhaDisplayQuotes(batch, controller.signal);
+          if (!Array.isArray(data.quotes) || !Array.isArray(data.missing) || data.quotes.some(quote => !batch.includes(quote.instrument))) throw new Error("Quote response does not match this basket.");
+          if (data.upstox_quotes !== undefined && (!Array.isArray(data.upstox_quotes) || data.upstox_quotes.some(quote => !batch.includes(quote.instrument) || !quote.source?.startsWith("Upstox ")))) throw new Error("Upstox response does not match this basket.");
+          quotes.push(...data.quotes);
+          upstoxQuotes.push(...(data.upstox_quotes ?? []));
+        } catch (error) {
+          if (!active || controller.signal.aborted) return null;
+          batchFailed = true;
+          warnings.push(`Quote batch unavailable for ${batch.length} listings: ${error instanceof Error ? error.message : 'request failed'}`);
+        }
       }
-      return { quotes, upstoxQuotes, vendorQuotes, ...(warnings.length ? { error: [...new Set(warnings)].join("; ") } : {}) };
+      return { quotes, upstoxQuotes, vendorQuotes, batchFailed, ...(warnings.length ? { error: [...new Set(warnings)].join("; ") } : {}) };
     };
     const visibilityChanged = () => {
       if (timer) clearTimeout(timer);
