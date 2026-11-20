@@ -404,12 +404,13 @@ jobs:
           FRONTEND_BASE_SHA: ${{ needs.detect-changes.outputs.frontend_base_sha }}
           REMOTE_ARTIFACT_DIR: /tmp/investor-deploy-${{ github.run_id }}-${{ github.run_attempt }}
           REMOTE_ARTIFACT_FILE: ${{ env.FRONTEND_ARTIFACT_FILE }}
+          UPSTOX_LTP_ALLOWED_USERNAMES: ${{ vars.UPSTOX_LTP_ALLOWED_USERNAMES || 'tarunxtcrypto' }}
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           fingerprint: ${{ secrets.EC2_SSH_FINGERPRINT }}
-          envs: DEPLOY_COMMIT_SHA,DEPLOY_SCOPE,FRONTEND_BASE_SHA,REMOTE_ARTIFACT_DIR,REMOTE_ARTIFACT_FILE
+          envs: DEPLOY_COMMIT_SHA,DEPLOY_SCOPE,FRONTEND_BASE_SHA,REMOTE_ARTIFACT_DIR,REMOTE_ARTIFACT_FILE,UPSTOX_LTP_ALLOWED_USERNAMES
           timeout: 3600s
           command_timeout: 3600s
           capture_stdout: true
@@ -475,6 +476,40 @@ jobs:
             command -v git >/dev/null
             sudo test -d "$APP_ROOT/.git"
             id "$APP_USER" >/dev/null
+
+            if [[ "$DEPLOY_SCOPE" != frontend-only ]]; then
+              sudo -n python3 - "$BACKEND_ENV_FILE" "$UPSTOX_LTP_ALLOWED_USERNAMES" <<'PY'
+            import os
+            import re
+            import stat
+            import sys
+            import tempfile
+            from pathlib import Path
+
+            path = Path(sys.argv[1])
+            usernames = sys.argv[2]
+            if not re.fullmatch(r"[A-Za-z0-9_.-]+(?:,[A-Za-z0-9_.-]+)*", usernames):
+                raise SystemExit("Invalid UPSTOX_LTP_ALLOWED_USERNAMES deployment value")
+            existing = path.read_text().splitlines()
+            setting = re.compile(r"^\s*UPSTOX_LTP_ALLOWED_USERNAMES\s*=")
+            kept = [line for line in existing if not setting.match(line)]
+            source_stat = path.stat()
+            temporary = None
+            try:
+                with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent,
+                                                 prefix=".backend.env.", delete=False) as output:
+                    temporary = Path(output.name)
+                    output.write("\n".join([*kept, f"UPSTOX_LTP_ALLOWED_USERNAMES={usernames}"]) + "\n")
+                    output.flush()
+                    os.fsync(output.fileno())
+                os.chmod(temporary, stat.S_IMODE(source_stat.st_mode))
+                os.chown(temporary, source_stat.st_uid, source_stat.st_gid)
+                os.replace(temporary, path)
+            finally:
+                if temporary is not None and temporary.exists():
+                    temporary.unlink()
+            PY
+            fi
 
             case "$DEPLOY_SCOPE" in
               frontend-only)
