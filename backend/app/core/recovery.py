@@ -188,6 +188,8 @@ def recovery_http_allowed(method, path):
             "/jobs", "/prompts", "/providers", "/api-usage",
         ))
     if method == "POST":
+        if re.fullmatch(r"/runs/scorecards/(?:india|indmoney_us)/revisions(?:/[1-9][0-9]*/(?:final|(?:technical|threats|rebalance|pairwise)/start))?", path):
+            return True
         # Recompute from the authenticated owner's saved sources and append only
         # the versioned result. This handler never submits jobs, orders or mail.
         if re.fullmatch(r"/runs/auto-rebalance-history/(?:india|indmoney_us)/[1-9][0-9]*/replay-score-v2", path):

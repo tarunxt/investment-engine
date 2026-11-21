@@ -85,7 +85,7 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
     const lanes = [
       { title: "Sync portfolio", keys: ["sync"] },
       { title: market === "zerodha" ? "Find New Promising Stocks" : "Discover contenders", keys: ["swing"] },
-      { title: market === "zerodha" ? "Scorecards" : "Score & check threats", keys: ["threats", "rebalance", "technical"] },
+      { title: market === "zerodha" ? "Scorecards" : "Score & check threats", keys: ["rebalance", "technical", "threats", "pairwise"] },
       { title: market === "zerodha" ? "Final Actionables" : "Build Actionables", keys: ["actionables"] },
     ];
     return <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Rebalance workflow">
@@ -129,9 +129,7 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
             {item.stage === "swing" && <div className="mt-2 rounded-lg border p-3 text-sm">
               {tileHeader("Merge contenders", [{ label: "Stock Flow", onSelect: onStockFlowClick }, { label: "History", href: historyHref }], item.info.recommendedStocks != null ? item.info : { state: "idle" })}
               <p>{item.info.recommendedStocks != null ? item.info.recommendedStocks + " unique listings" : "Awaiting scan evidence"}</p></div>}
-            {item.stage === "threats" && <div className="mt-2 rounded-lg border p-3 text-sm">
-              {tileHeader("Pairwise scorecard", [{ label: "History", href: historyHref }, ...(item.onOutputClick ? [{ label: "Saved output", onSelect: item.onOutputClick }] : [])], { state: item.info.state === "running" ? "running" : "idle", runStatus: item.info.pairStatus })}<p>{item.info.pairCoverage ?? (item.info.state === "running" ? "Assessing stock pairs" : "Comparison count unavailable in this stage summary")}</p>
-            </div>}
+
           </div>;
         })}
       </section>)}

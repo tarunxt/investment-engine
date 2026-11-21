@@ -13,6 +13,7 @@ export type WorkflowStageKey =
   | "swing"
   | "threats"
   | "rebalance"
+  | "pairwise"
   | "technical"
   | "actionables";
 
@@ -76,6 +77,7 @@ export const STAGE_ORDER: WorkflowStageKey[] = [
   "threats",
   "rebalance",
   "technical",
+  "pairwise",
   "actionables",
 ];
 
@@ -111,6 +113,7 @@ export const STAGE_METADATA: Record<
     chartTitle: "Swing",
     chartLines: ["Momentum, catalysts,", "and opportunity signals"],
   },
+  pairwise: {step:"03", idle:"Pairwise scorecard", running:"Comparing stocks", completed:"Pairwise scores ready", tileDescription:"Compare each pair of Stage 2 listings over the swing horizon.", chartTitle:"Pairwise", chartLines:["Head-to-head comparisons"]},
   threats: {
     step: "02",
     idle: getStageTileLabel("threats"),
@@ -127,7 +130,7 @@ export const STAGE_METADATA: Record<
     running: "Building Rebalance",
     completed: "Rebalance Ready",
     tileDescription:
-      "Merge sync, threats, and swing conviction into target weights, adds, trims, and holds.",
+      "Evaluate the Stage 2 portfolio and contenders for adds, trims and holds.",
     chartTitle: "Rebalance",
     chartLines: ["Merge signals into target", "weights, adds, trims, holds"],
   },
@@ -188,6 +191,7 @@ export function getStageTileLabel(stage: WorkflowStageKey) {
   const labels: Record<WorkflowStageKey, string> = {
     sync: "Sync Portfolio",
     threats: "Threats Scan",
+    pairwise: "Pairwise scorecard",
     swing: "Swing Scan",
     rebalance: "Rebalance",
     technical: "Technical Scan",

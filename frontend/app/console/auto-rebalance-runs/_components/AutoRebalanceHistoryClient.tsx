@@ -33,6 +33,7 @@ export type AutoRebalanceHistoryPortfolio = "zerodha" | "indmoneyUs";
 
 const STAGE_LABELS = {
   sync: getStageTileLabel("sync"),
+  pairwise: getStageTileLabel("pairwise"),
   threats: getStageTileLabel("threats"),
   swing: getStageTileLabel("swing"),
   rebalance: getStageTileLabel("rebalance"),

@@ -45,6 +45,7 @@ from app.domains.bullpen_trade_analysis.models import (
     BullpenTradeAnalysisRecord,
     BullpenTradeAnalysisSnapshotRecord,
 )
+from app.domains.scorecards.models import ScorecardRevision, ScorecardAttempt, ScorecardBatch, ScorecardFinal
 from app.domains.dashboard.models import DashboardPortfolioDailySnapshot
 from app.domains.cost_drivers.models import (
     CostCollectionIntent,

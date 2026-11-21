@@ -336,18 +336,7 @@ export default function IndMoneyUsThreatsPage() {
     }
   }, []);
 
-  const handleRunAnalysis = useCallback(async (target: ProviderModelTarget | null) => {
-    setRunningAnalysis(true);
-    setError(null);
-    try {
-      const queued = await apiService.indmoneyUsRunThreats(target ?? undefined);
-      await loadAnalysisJob(queued.job_id);
-    } catch (err) {
-      setError(normalizeError(err));
-    } finally {
-      setRunningAnalysis(false);
-    }
-  }, [loadAnalysisJob]);
+  const handleRunAnalysis = useCallback(async () => {window.location.assign("/console/scorecards/indmoneyUs/threats");}, []);
 
   useEffect(() => {
     let mounted = true;

@@ -169,7 +169,7 @@ class AutoRebalanceCompletionEmailRequest(BaseModel):
 
 
 AutoRebalanceStageKey = Literal[
-    "sync", "threats", "swing", "rebalance", "technical", "actionables"
+    "sync", "threats", "swing", "rebalance", "technical", "pairwise", "actionables"
 ]
 
 

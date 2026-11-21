@@ -70,7 +70,7 @@ AUTO_REBALANCE_LABEL_PREFIXES = {
     "indmoney_us": "IndMoney US Run",
 }
 AUTO_REBALANCE_STAGE_ORDER: tuple[AutoRebalanceStageKey, ...] = (
-    "sync", "swing", "threats", "rebalance", "technical", "actionables",
+    "sync", "swing", "threats", "rebalance", "technical", "pairwise", "actionables",
 )
 AUTO_REBALANCE_ACTIVE_STATUSES = {"queued", "pending", "processing", "running"}
 AUTO_REBALANCE_TERMINAL_STATUSES = {
@@ -194,6 +194,9 @@ def _base_auto_rebalance_label(label: str | None, portfolio: str, sequence: int)
 
 
 def _infer_auto_rebalance_stage(label: str | None, prompt: str | None) -> AutoRebalanceStageKey:
+    independent = re.match(r"\[INDEPENDENT_SCORECARD:(?:india|us):(rebalance|technical|threats|pairwise):\d+\]", prompt or "")
+    if independent:
+        return independent[1]
     text = f"{label or ''}\n{prompt or ''}".lower()
     if "[zerodha_threats]" in text or "[indmoney_us_threats]" in text or "threat" in (label or "").lower():
         return "threats"
@@ -902,6 +905,11 @@ async def verify_saved_india_score(sequence: int, db: AsyncSession = Depends(get
         return {"verified": False, "reason": "No completed original calculation or saved replay"}
     if not isinstance(record, dict):
         return {"verified": False, "reason": "Saved score revision has an invalid format"}
+    if record.get("schema")=="independent-scorecards-v1":
+        from app.domains.scorecards.models import ScorecardFinal
+        await validate_frozen_final(db,record,user_id=current_user.id,portfolio=portfolio,sequence=sequence)
+        final=await db.get(ScorecardFinal,record["final_id"])
+        return {"verified":True,"record":{"id":final.id,**final.result_json},"replayed":False,"evidence":{}}
     if record.get("formula_version") != "score-matrix-v2":
         return {"verified": False, "reason": "Original formula requires a saved-input v2 replay"}
     candidate = deepcopy(record)

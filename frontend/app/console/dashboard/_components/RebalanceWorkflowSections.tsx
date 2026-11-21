@@ -1,4 +1,7 @@
 "use client";
+import { bindIndependentBasket } from "@/lib/scorecardBasket";
+import { cards, isCard, migratedPolicy, scorecardApi, type CardKey, type CardPolicy } from "@/lib/independentScorecards";
+import { ScorecardReview } from "./ScorecardReview";
 import { useReviewDialog } from "@/hooks/useReviewDialog";
 import { ZerodhaRunGate } from "@/components/shared/ZerodhaRunGate";
 import { defaultStageModelKeys, getCompatibleTargets, isModelStage, previousBrowserSelection, resolveStageModelKeys, type ModelStage } from "@/lib/workflowStageModels";
@@ -371,6 +374,7 @@ function readPersistedWorkflow(): PersistedWorkflow | null {
     if (!raw) return null;
     const parsed = JSON.parse(raw) as PersistedWorkflow;
     if (!parsed?.states?.zerodha || !parsed?.states?.indmoneyUs) return null;
+    for(const portfolio of ["zerodha","indmoneyUs"] as const) parsed.states[portfolio].pairwise ??= {state:"idle"};
     return parsed;
   } catch {
     return null;
@@ -1442,6 +1446,7 @@ function buildZerodhaBasketPreviewOrders(
   const basketRows = rows
     // Keep explicit zero-position non-buy decisions visible in allocationUniverse,
     // without converting them into executable orders through a later formula.
+    .filter(row=>row.independentEligible !== false)
     .filter(row => !isExplicitNonBuyDecision(row.stock))
     .filter((row): row is DashboardActionRow & {formulaAction: ActionCategory} => row.formulaAction !== null && ZERODHA_BASKET_ACTIONS.has(row.formulaAction))
     .filter((row) => {
@@ -2231,6 +2236,7 @@ function buildAutoRebalanceScanGroups(
         Math.max(...sortedItems.map((item) => parseTimestampMs(item.timestamp))),
       ).toISOString();
       const stageRank: Record<AutoRebalanceCostBreakdownItem["stage"], number> = {
+        pairwise: 5,
         threats: 1,
         swing: 2,
         rebalance: 3,
@@ -2742,6 +2748,7 @@ function getStageOutputRoute(
 ) {
   const zerodha = portfolio === "zerodha";
   const routeByStage: Record<WorkflowStageKey, string> = {
+    pairwise: URLs.routes.console.dashboard(),
     sync: zerodha
       ? URLs.routes.console.zerodha()
       : URLs.routes.console.indmoneyUs(),
@@ -4438,6 +4445,9 @@ export function RebalanceWorkflowSections({
   stageLedger?: boolean;
   surface?: WorkflowSurface | null;
 }) {
+  const [cardReview, setCardReview] = useState<{portfolio:WorkflowPortfolio;stage:CardKey|"actionables"|"source"}|null>(null);
+  const [sourceSelections,setSourceSelections] = useState<Partial<Record<WorkflowPortfolio,number>>>({});
+  const [cardPolicies,setCardPolicies] = useState<Partial<Record<WorkflowPortfolio,CardPolicy>>>({});
   const [preflightPortfolio, setPreflightPortfolio] = useState<WorkflowPortfolio | null>(null);
   const [preflightErrors, setPreflightErrors] = useState<Partial<Record<WorkflowPortfolio, string[]>>>({});
   const [runtimeOwner] = useState(captureWorkflowOwner);
@@ -4966,7 +4976,10 @@ export function RebalanceWorkflowSections({
       ]);
       if (stockFlowResult.status === "rejected") throw stockFlowResult.reason;
       if (generation !== zerodhaPreparation.current) return;
-      const { runs, portfolioSnapshot } = stockFlowResult.value;
+      const independent=await scorecardApi(apiService,"india").latestFinal(requested?.sequence);
+      if(generation!==zerodhaPreparation.current)return;
+      const portfolioSnapshot=stockFlowResult.value.portfolioSnapshot;
+      const runs=independent ? await Promise.all(Object.values(independent.source_runs).map(id=>apiService.getRun(id))) : stockFlowResult.value.runs;
       setZerodhaBasketHistoryRuns(runs);
       const status = statusResult.status === "fulfilled" ? statusResult.value : null;
       const login = loginResult.status === "fulfilled" ? loginResult.value : null;
@@ -5002,7 +5015,10 @@ export function RebalanceWorkflowSections({
       const rebalance = getLatestMatchingRebalanceRuns(runs, "india");
       const technicalIds = [...new Set(actionRows.map(row => row.detail?.technicalScanSourceRunId))];
       const technical = technicalIds.length === 1 ? runs.find(run => run.id === technicalIds[0]) : null;
-      if (technical?.auto_rebalance_sequence && !stockFlowResult.value.warning) {
+      if(independent&&!stockFlowResult.value.warning){
+        const verified=bindIndependentBasket(actionRows,independent,formula);
+        actionRows=verified.rows;setScoreRevision(verified.revision);setVerifiedBasketFormula(canonicalBasketInputs(formula));
+      } else if (technical?.auto_rebalance_sequence && !stockFlowResult.value.warning) {
         const sequence = technical.auto_rebalance_sequence;
         try {
           const verified = await verifyBasketRevision("india", stocks, technicalScans, formula, rebalance, technical, sequence, requested);
@@ -5072,7 +5088,10 @@ export function RebalanceWorkflowSections({
         apiService.indmoneyUsThreatsLatest().then((value) => ({ status: "fulfilled" as const, value })).catch((reason) => ({ status: "rejected" as const, reason })),
       ]);
       if (generation !== indmoneyPreparation.current) return;
-      const { runs, portfolioSnapshot } = stockFlowSource;
+      const independent=await scorecardApi(apiService,"indmoney_us").latestFinal(requested?.sequence);
+      if(generation!==indmoneyPreparation.current)return;
+      const portfolioSnapshot=stockFlowSource.portfolioSnapshot;
+      const runs=independent ? await Promise.all(Object.values(independent.source_runs).map(id=>apiService.getRun(id))) : stockFlowSource.runs;
       setIndmoneyBasketHistoryRuns(runs);
       const stocks = buildConsensusRows(
         getLatestMatchingRebalanceRuns(runs, "us"),
@@ -5086,7 +5105,10 @@ export function RebalanceWorkflowSections({
       let actionRows = buildDashboardActionRows(stocks, "us", technicalScans, requested?.formula ?? scoreMatrixFormulaConfig);
       const ids = new Set(actionRows.map(row => row.detail?.technicalScanSourceRunId));
       const technical = ids.size === 1 ? runs.find(run => ids.has(run.id)) : null;
-      if (technical?.auto_rebalance_sequence && !stockFlowSource.warning) {
+      if(independent&&!stockFlowSource.warning){
+        const verified=bindIndependentBasket(actionRows,independent,requested?.formula??scoreMatrixFormulaConfig);
+        actionRows=verified.rows;setUsRevision(verified.revision);setUsFormula(verified.revision.formula);
+      } else if (technical?.auto_rebalance_sequence && !stockFlowSource.warning) {
         const verified = await verifyBasketRevision("us", stocks, technicalScans, requested?.formula ?? scoreMatrixFormulaConfig,
           getLatestMatchingRebalanceRuns(runs, "us"), technical, technical.auto_rebalance_sequence, requested);
         if (generation !== indmoneyPreparation.current) return;
@@ -5620,6 +5642,7 @@ ${zerodhaExecutionMode === "direct_market"
           .sort((a, b) => parseTimestampMs(b) - parseTimestampMs(a))[0] ?? null;
 
         acc[portfolio] = {
+          pairwise: historyInfo("pairwise"),
           sync: {
             ...mergeStageEvidence({
               completedAt: overview?.latest?.captured_at ?? null,
@@ -6676,6 +6699,7 @@ ${zerodhaExecutionMode === "direct_market"
       }
       const zerodha = portfolio === "zerodha";
       const hrefByStage: Record<WorkflowStageKey, string> = {
+        pairwise: URLs.routes.console.dashboard(),
         sync: zerodha
           ? URLs.routes.console.zerodha()
           : URLs.routes.console.indmoneyUs(),
@@ -6850,8 +6874,6 @@ ${zerodhaExecutionMode === "direct_market"
       }
       const shouldRunCurrentStage = (stage: WorkflowStageKey) =>
         !runSpecificMode || stagesToRun.has(stage);
-      const inputPlanIssue = technicalInputPlanIssue(shouldRunCurrentStage("technical"), shouldRunCurrentStage("rebalance"), selectedInputs[portfolio].technical);
-
       let currentStage: WorkflowStageKey = "sync";
 
       // Zerodha authentication must be opened synchronously from the Run click.
@@ -6867,19 +6889,8 @@ ${zerodhaExecutionMode === "direct_market"
       setPreflightErrors(previous => ({ ...previous, [portfolio]: [] }));
       const targets: Partial<Record<WorkflowStageKey, ProviderModelTarget[]>> = {};
       const checks: PreflightCheck[] = [
-        { label: "Stage dependencies", run: async () => {
-          const issues: string[] = [];
-          if (inputPlanIssue) issues.push(inputPlanIssue);
-          if (shouldRunCurrentStage("rebalance") && selectedInputs[portfolio].rebalance.has("rebalance:next") && !shouldRunCurrentStage("swing")) {
-            issues.push("Rebalance selects Next Swing. Include Swing Scan or select saved Swing jobs.");
-          }
-          if (shouldRunCurrentStage("actionables") && !shouldRunCurrentStage("technical")) {
-            issues.push("Final Actionables requires Technical Scan in this workflow. Include Technical Scan.");
-          }
-          if (issues.length) throw new Error(issues.join("\n"));
-        } },
         { label: "LLM configuration", run: async () => {
-          const modelStages = (["threats", "swing", "rebalance", "technical"] as const).filter(shouldRunCurrentStage);
+          const modelStages = (["swing", ...cards] as const).filter(shouldRunCurrentStage);
           if (!modelStages.length) return;
           const [providers, saved] = await Promise.all([
             apiService.getProviders({ prompt: buildSwingTradePrompt(market, getSwingTradeDefaultInvestmentAmount(market)) }),
@@ -6897,28 +6908,6 @@ ${zerodhaExecutionMode === "direct_market"
           if (issues.length) throw new Error(issues.join("\n"));
         } },
       ];
-      for (const stage of ["rebalance", "technical"] as const) {
-        if (!shouldRunCurrentStage(stage)) continue;
-        checks.push({ label: `Saved ${stage} inputs`, run: async () => {
-          const sourceStage = stage === "rebalance" ? "swing" : "rebalance";
-          const selection = selectedInputs[portfolio][stage];
-          if (!selection.size) throw new Error(`Select at least one input for ${stage}.`);
-          const ids = getSelectedStageRunIds(selection, sourceStage);
-          const runs = await Promise.all(ids.map(id => apiService.getRun(id)));
-          const selected = selectStageRunInputs(runs, selection, { market, stage: sourceStage });
-          if (stage === "technical" && selected.length) {
-            const rows = buildConsensusRows(selected, market);
-            if (!rows.length) throw new Error("Selected Rebalance jobs contain no usable stock rows. Choose completed output with stock rows.");
-            if (market === "india") await resolveTechnicalPriceEvidence(rows.map(stock => `${stock.exchange}:${stock.symbol}`), keys => apiService.zerodhaDisplayQuotes(keys));
-          }
-        } });
-      }
-      if (!shouldRunCurrentStage("sync") && ["threats", "rebalance", "actionables"].some(stage => shouldRunCurrentStage(stage as WorkflowStageKey))) {
-        checks.push({ label: "Portfolio snapshot", run: async () => {
-          const overview = portfolio === "zerodha" ? await apiService.zerodhaPortfolioOverview() : await apiService.indmoneyUsPortfolioOverview();
-          if (!overview.latest) throw new Error("No saved portfolio snapshot is available. Include Sync Portfolio.");
-        } });
-      }
       if (portfolio === "indmoneyUs" && shouldRunCurrentStage("sync")) {
         checks.push({ label: "INDmoney snapshot", run: async () => {
           if (indmoneyPayload) {
@@ -6947,9 +6936,7 @@ ${zerodhaExecutionMode === "direct_market"
         return;
       }
       const swingTargets = targets.swing ?? [];
-      const rebalanceTargets = targets.rebalance ?? [];
-      const threatTargets = targets.threats ?? [];
-      const technicalTargets = targets.technical ?? [];
+
       setRunningPortfolio(portfolio);
       resetPortfolio(portfolio);
       activeExecutionRefsRef.current = [];
@@ -7085,12 +7072,7 @@ ${zerodhaExecutionMode === "direct_market"
         // recorded in the run history.
         throw new RecordedWorkflowStageFailure(message, error);
       };
-      let generatedThreatInput: ThreatStageInput | null = null;
       let generatedSwingRun: RunResponse | null = null;
-      let generatedRebalanceRun: RunResponse | null = null;
-      let generatedTechnicalRun: RunResponse | null = null;
-      let usRegistry: Awaited<ReturnType<typeof apiService.indmoneyVerifiedListings>>["listings"] = [];
-      let finalRebalanceInputs: RunResponse[] = [];
       let workflowSnapshot: ZerodhaPortfolioSnapshotDetail | IndMoneyUsPortfolioSnapshotDetail | null = null;
 
       try {
@@ -7213,332 +7195,65 @@ ${zerodhaExecutionMode === "direct_market"
         finishedStages.add("swing");
         if (stopIfRequested()) return;
 
-        currentStage = "threats";
-        if (shouldRunCurrentStage("threats")) {
-          try {
-            markRunning(portfolio, "threats", { totalLlms: 1, completedLlms: 0 });
-            const contenders = generatedSwingRun ? listingsFromSwingRun(generatedSwingRun) : [];
-            if (portfolio === "zerodha" && !workflowSnapshot) {
-              const overview = await retryWorkflowRead(
-                () => apiService.zerodhaPortfolioOverview(),
-                "portfolio snapshot", () => cancelRequestedRef.current || !isCurrentWorkflowOwner(runtimeOwner),
-              );
-              workflowSnapshot = overview.latest;
-              if (!workflowSnapshot) throw new Error("Sync the Zerodha portfolio before running Threats.");
-            }
-            const queuedThreat =
-              portfolio === "zerodha"
-                ? await apiService.zerodhaRunThreats({ ...threatTargets[0], ...runMetadata, contenders, expected_snapshot_captured_at: workflowSnapshot?.captured_at })
-                : await apiService.indmoneyUsRunThreats({ ...threatTargets[0], ...runMetadata, contenders, ...(workflowSnapshot && "id" in workflowSnapshot ? { expected_snapshot_id: workflowSnapshot.id } : {}) });
-            if (portfolio === "indmoneyUs" && workflowSnapshot && "id" in workflowSnapshot && (!("snapshot_id" in queuedThreat) || queuedThreat.snapshot_id !== workflowSnapshot.id)) {
-              throw new Error("Threats scan source does not match the reviewed portfolio snapshot.");
-            }
-            activeExecutionRefsRef.current = [
-              ...activeExecutionRefsRef.current.filter(
-                (entry) => !(entry.kind === "job" && entry.id === queuedThreat.job_id),
-              ),
-              { kind: "job", id: queuedThreat.job_id },
-            ];
-            updateStage(portfolio, "threats", {
-              activeRunId: queuedThreat.job_id,
-            });
-            void recordAutoRebalanceStage(
-              portfolio,
-              "threats",
-              "processing",
-              { activeRunId: queuedThreat.job_id },
-              { jobId: queuedThreat.job_id },
-            );
-            const completedThreat = await waitForThreatCompletion(
-              portfolio,
-              queuedThreat.job_id,
-              () => cancelRequestedRef.current || !isCurrentWorkflowOwner(runtimeOwner),
-            );
-            if (![
-              "completed",
-              "partial",
-            ].includes((completedThreat.status || "").toLowerCase()))
-              throw new Error(
-                `Threats scan failed: ${completedThreat.error_message ?? "Job failed."}`,
-              );
-            generatedThreatInput = {
-              identity: { kind: "threat-job", market, stage: "threats", jobId: queuedThreat.job_id },
-              analysis: completedThreat,
-              origin: "generated",
-            };
-            await markCompleted(portfolio, "threats", {
-              ...summarizeThreat(completedThreat),
-              completedLlms: 1,
-              totalLlms: 1,
-            });
-          } catch (error) {
-            continueAfterStageFailure("threats", error);
-          }
-        } else {
-          completeSkippedStage(
-            portfolio,
-            "threats",
-            "Using latest threats scan",
-          );
-        }
-
-        finishedStages.add("threats");
-        if (stopIfRequested()) return;
-
-        currentStage = "rebalance";
-        if (shouldRunCurrentStage("rebalance")) {
-          try {
-          markRunning(portfolio, "rebalance", {
-            totalLlms: rebalanceTargets.length,
-            completedLlms: 0,
+        const broker = runMetadata.auto_rebalance_portfolio;
+        const sequence = runMetadata.auto_rebalance_sequence;
+        const api = scorecardApi(apiService, broker);
+        const selectedCards = cards.filter(shouldRunCurrentStage);
+        if (generatedSwingRun || selectedCards.length || shouldRunCurrentStage("actionables")) {
+          let revision = sourceSelections[portfolio];
+          const swingSelection = selectedInputs[portfolio].rebalance;
+          const explicitJobs = [...swingSelection].flatMap(key => {
+            const match = /^run:[1-9]\d*:job:([1-9]\d*)$/.exec(key);
+            return match ? [Number(match[1])] : [];
           });
-          const selectedRebalanceInputs = selectedInputs[portfolio].rebalance;
-          const selectedSwingRunIds = getSelectedStageRunIds(selectedRebalanceInputs, "swing");
-          const fullRunCandidates = await retryWorkflowRead(
-            () => Promise.all(selectedSwingRunIds.map(runId => apiService.getRun(runId))),
-            "explicitly selected swing scan inputs", () => cancelRequestedRef.current || !isCurrentWorkflowOwner(runtimeOwner),
-          );
-          if (selectedRebalanceInputs.has("rebalance:next") && !generatedSwingRun) {
-            throw new Error("Next Swing output is unavailable. Run Swing in this workflow or explicitly select saved Swing jobs. Refresh Select Inputs and start a new workflow.");
+          // Selecting a saved Stage 2 publication never re-reads holdings or Swing.
+          if (generatedSwingRun || (!revision && explicitJobs.length)) {
+            const snapshot = workflowSnapshot ?? (portfolio === "zerodha" ? await apiService.zerodhaPortfolioOverview() : await apiService.indmoneyUsPortfolioOverview()).latest;
+            if (!snapshot) throw new Error("Stage 2 requires a portfolio snapshot.");
+            const selectedIds = [...new Set([...explicitJobs,...(generatedSwingRun?.run_jobs ?? []).filter(link => isUsableStageJob(link.job)).map(link=>link.job_id)])];
+            revision = (await api.publish({sequence, request_key:"workflow-"+sequence, captured_at:snapshot.captured_at,
+              ...("id" in snapshot ? {snapshot_id:snapshot.id} : {}), swing_job_ids:selectedIds})).id;
+            setSourceSelections(prev=>({...prev,[portfolio]:revision}));
           }
-          const swingRuns = deduplicateStageRunInputs([
-            ...(selectedRebalanceInputs.has("rebalance:next") && generatedSwingRun ? [generatedSwingRun] : []),
-            ...selectStageRunInputs(fullRunCandidates, selectedRebalanceInputs, { market, stage: "swing" }),
-          ], { market, stage: "swing" });
-          if (!swingRuns.length) throw new Error("Select at least one Swing input; historical scans are never added automatically.");
-          const portfolioRes = workflowSnapshot ? { latest: workflowSnapshot } : await retryWorkflowRead(
-            async (): Promise<{ latest: ZerodhaPortfolioSnapshotDetail | IndMoneyUsPortfolioSnapshotDetail | null }> => portfolio === "zerodha" ? apiService.zerodhaPortfolioOverview() : apiService.indmoneyUsPortfolioOverview(),
-            "portfolio snapshot", () => cancelRequestedRef.current || !isCurrentWorkflowOwner(runtimeOwner),
-          );
-          workflowSnapshot = portfolioRes.latest;
-          if (!workflowSnapshot) throw new Error("The workflow portfolio snapshot is unavailable.");
-          const threatsRes = generatedThreatInput ? { analysis: generatedThreatInput.analysis } : await retryWorkflowRead(
-            () => portfolio === "zerodha" ? apiService.zerodhaThreatsLatest() : apiService.indmoneyUsThreatsLatest(),
-            "threat report", () => cancelRequestedRef.current || !isCurrentWorkflowOwner(runtimeOwner),
-          );
-          if (!threatsRes.analysis?.captured_at || Date.parse(threatsRes.analysis.captured_at) !== Date.parse(workflowSnapshot.captured_at) ||
-              (portfolio === "indmoneyUs" && "id" in workflowSnapshot && (!("snapshot_id" in threatsRes.analysis) || threatsRes.analysis.snapshot_id !== workflowSnapshot.id))) {
-            throw new Error("Threat report and holdings use different snapshots. Run Threats against this workflow snapshot before Rebalance.");
-          }
-          const previousClose = getPreviousMarketClose(market);
-          const inputBundle = buildRebalanceInputBundle({
-            market,
-            previousClose,
-            portfolio: portfolioRes.latest,
-            threats: threatsRes.analysis,
-            swingRuns,
-            swingDisplayMode: "full",
-          });
-          const outputSourceJobs = await buildOutputSourceJobs(swingRuns, market);
-          if (cancelRequestedRef.current) throw new Error("Auto-rebalance flow was cancelled by user.");
-          const rebalanceRun = await apiService.createRun(
-            { ...buildRunPayload({
-              prompt:
-                `${ensureRebalanceFlowMarker(buildRebalancePrompt(market), market)}\n\n---\n\n${inputBundle}`.trim(),
-              targets: rebalanceTargets,
-              sheetName: getRebalanceDefaultExportSheetName(market),
-              runMetadata,
-              scanLabel: "Rebalance Scan",
-              auditContext: { formula: scoreMatrixFormulaConfig },
-            }), output_source_jobs: outputSourceJobs },
-          );
-          const completedRebalanceRun = await waitForRunWithStageHandling(
-            portfolio,
-            "rebalance",
-            rebalanceRun.id,
-          );
-          generatedRebalanceRun = completedRebalanceRun;
-          await markCompleted(portfolio, "rebalance", {
-            ...summarizeRun(completedRebalanceRun),
-            ...getRunProgress(completedRebalanceRun),
-            lastRunId: completedRebalanceRun.id,
-            recommendedStocks:
-              buildConsensusRows(
-                getLatestMatchingRebalanceRuns([completedRebalanceRun], market),
-                market,
-              ).length || null,
-          });
-          } catch (error) {
-            continueAfterStageFailure("rebalance", error);
-          }
-        } else {
-          completeSkippedStage(
-            portfolio,
-            "rebalance",
-            "Using latest rebalance output",
-          );
-        }
-
-        finishedStages.add("rebalance");
-        if (stopIfRequested()) return;
-
-        currentStage = "technical";
-        if (shouldRunCurrentStage("technical")) {
-          try {
-          markRunning(portfolio, "technical", {
-            totalLlms: 1,
-            completedLlms: 0,
-          });
-          const selectedTechnicalInputs = selectedInputs[portfolio].technical;
-          const selectedRebalanceRunIds = getSelectedStageRunIds(selectedTechnicalInputs, "rebalance");
-          const allRuns = await retryWorkflowRead(
-            () => Promise.all(selectedRebalanceRunIds.map(runId => apiService.getRun(runId))),
-            "explicit technical scan inputs", () => cancelRequestedRef.current || !isCurrentWorkflowOwner(runtimeOwner),
-          );
-          if (selectedTechnicalInputs.has("technical:next") && !generatedRebalanceRun) {
-            throw new Error("Technical input unavailable: Next Rebalance was selected, but this invocation produced no Rebalance run. No Technical provider job was created. Select saved completed/partial Rebalance jobs explicitly, or include Rebalance in the selected stages. Previous tile output is not substituted.");
-          }
-          const rebalanceInputs = deduplicateStageRunInputs([
-            ...(selectedTechnicalInputs.has("technical:next") && generatedRebalanceRun ? [generatedRebalanceRun] : []),
-            ...selectStageRunInputs(allRuns, selectedTechnicalInputs, { market, stage: "rebalance" }),
-          ], { market, stage: "rebalance" });
-          finalRebalanceInputs = rebalanceInputs;
-          if (market === "us" && generatedThreatInput) usRegistry = (await apiService.indmoneyVerifiedListings()).listings;
-          const consensus = buildConsensusRows(rebalanceInputs, market, null, rebalanceInputs, usRegistry);
-          if (consensus.length === 0)
-            throw new Error(
-              "No fresh rebalance consensus rows were available for technical scan. Consensus rows are the normalized stock/action rows parsed from completed Rebalance LLM outputs. Run Rebalance in this workflow or explicitly select completed Rebalance outputs in Select Inputs.",
-            );
-          const instruments = consensus.map(stock => `${stock.exchange}:${stock.symbol}`);
-          const priceEvidence = market === "india" ? await resolveTechnicalPriceEvidence(instruments,
-            keys => apiService.zerodhaDisplayQuotes(keys)) : "";
-          const scorecardManifest = generatedThreatInput ? "\n[WORKFLOW_SCORECARDS_V1]" + JSON.stringify({
-            job_id: generatedThreatInput.analysis.job_id,
-            rows: workflowRanking(consensus.map(stock => ({ exchange: stock.exchange, symbol: stock.symbol, effectiveScore: null })),
-              generatedThreatInput.analysis.report).map(({listing, pairwise, stock_threat, comparisons}) => ({listing, pairwise, stock_threat, comparisons})),
-          }) : "";
-          const technicalRun = await apiService.createRun(
-            buildRunPayload({
-              prompt: buildTechnicalScanPrompt(consensus, market) + priceEvidence + scorecardManifest + (market === "us" && generatedThreatInput ? "\n[VERIFIED_US_LISTINGS_V1]" + JSON.stringify(usRegistry) : "") + `\n[TECHNICAL_REBALANCE_SOURCES_V1]${JSON.stringify({ run_ids: rebalanceInputs.map(run => run.id), job_ids: rebalanceInputs.flatMap(run => run.run_jobs.map(link => link.job_id)) })}[/TECHNICAL_REBALANCE_SOURCES_V1]`,
-              targets: [technicalTargets[0]],
-              runMetadata,
-              scanLabel: "Technical Scan",
-              auditContext: { formula: scoreMatrixFormulaConfig, rebalance_run_ids: rebalanceInputs.map(run => run.id), expected_response_hashes: await auditResponseHashes(rebalanceInputs) },
-            }),
-          );
-          const completedTechnicalRun = await waitForRunWithStageHandling(
-            portfolio,
-            "technical",
-            technicalRun.id,
-          );
-          generatedTechnicalRun = completedTechnicalRun;
-          await markCompleted(portfolio, "technical", {
-            ...summarizeRun(completedTechnicalRun),
-            ...getRunProgress(completedTechnicalRun),
-            finalInputs: { ...(market === "us" && generatedThreatInput ? {position_policy:"indmoney-verified-snapshot-v1"} : {}), formula_version: "score-matrix-v2", buy_price_policy: "positive-provider-price-v1", formula: scoreMatrixFormulaConfig, rebalance_run_ids: rebalanceInputs.map(run => run.id),
-              response_hashes: await auditResponseHashes([...rebalanceInputs, completedTechnicalRun], completedTechnicalRun) },
-            lastRunId: completedTechnicalRun.id,
-            recommendedStocks: countUniqueStocksFromRun(completedTechnicalRun),
-          });
-          } catch (error) {
-            continueAfterStageFailure("technical", error);
-          }
-        } else {
-          completeSkippedStage(
-            portfolio,
-            "technical",
-            "Using latest technical scan",
-          );
-        }
-
-        finishedStages.add("technical");
-        if (stopIfRequested()) return;
-
-        currentStage = "actionables";
-        if (shouldRunCurrentStage("actionables")) {
-          const releaseActivity = announceActionablesActivity(actionablesActivityKey(requireWorkflowOwner(runtimeOwner).id, runMetadata.auto_rebalance_portfolio, runMetadata.auto_rebalance_sequence));
-          try {
-          markRunning(portfolio, "actionables", { rebalanceInputs: finalRebalanceInputs.length });
-          // Freeze the actual calculation before marking this system stage complete.
-          // Never silently substitute a latest run for a missing upstream result.
-          if (!finalRebalanceInputs.length || !generatedTechnicalRun) {
-            throw new Error("Final capture requires Rebalance and Technical outputs from this workflow. Run these stages together.");
-          }
-          if (!workflowSnapshot) {
-            throw new Error("Final capture requires the workflow portfolio snapshot to resolve holdings context.");
-          }
-          const finalConsensus = buildConsensusRows(finalRebalanceInputs, market, workflowSnapshot, finalRebalanceInputs, usRegistry);
-          const actionablesCompletedAt = new Date().toISOString();
-          const finalTechnical = buildTechnicalScanMap([generatedTechnicalRun]);
-          const finalRows = buildDashboardActionRows(finalConsensus, market,
-            finalTechnical, scoreMatrixFormulaConfig)
-            .map(row => ({ ...row, coveredAt: actionablesCompletedAt, runId: finalRebalanceInputs[0].id }));
-          const frozenFinal = {
-            schema: "workflow-final-v2", formula_version: "score-matrix-v2", buy_price_policy: "positive-provider-price-v1",
-            basket_order_count: buildZerodhaBasketPreviewOrders(finalRows, finalTechnical,
-              market === "india" ? workflowSnapshot as ZerodhaPortfolioSnapshotDetail : null,
-              {allowFractionalSellUnits: market === "us"}).length,
-            scorePolicy: "score-matrix-raw-effective-v2",
-            broker: runMetadata.auto_rebalance_portfolio, workflow_sequence: runMetadata.auto_rebalance_sequence,
-            ...(generatedThreatInput?.analysis.job_id ? {position_policy:market === "india" ? "zerodha-settled-snapshot-v1" : "indmoney-verified-snapshot-v1"} : {}),
-            scorecard_job_id: generatedThreatInput?.analysis.job_id ?? null,
-            captured_at: actionablesCompletedAt, formula: scoreMatrixFormulaConfig,
-            rebalance_run_id: finalRebalanceInputs[0].id, rebalance_run_ids: finalRebalanceInputs.map(run => run.id), technical_run_id: generatedTechnicalRun.id,
-            response_hashes: await auditResponseHashes([...finalRebalanceInputs, generatedTechnicalRun], generatedTechnicalRun),
-            input_listing_count: finalConsensus.length, final_listing_count: finalRows.length,
-            excluded_non_buy_listings: finalConsensus.filter(stock => !finalRows.some(row => row.stock.key === stock.key))
-              .map(stock => ({ exchange: stock.exchange, symbol: stock.symbol, reason: "All valid models returned zero-position non-buy; no executable allocation" })),
-            rows: finalRows.map(row => ({ exchange: row.stock.exchange, symbol: row.stock.symbol,
-              action: row.formulaAction, score: row.formulaScore,
-              rawScore: row.formulaScore,
-              effectiveScore: row.formulaScore === null ? null : Math.max(-3, Math.min(3, row.formulaScore)),
-              scorePolicy: "score-matrix-raw-effective-v2", estimate: row.formulaEstimate,
-              formula_inputs: row.detail, valid_suggestions: row.stock.totalSuggestions })),
+          if (!revision) throw new Error("Select a saved Stage 2 revision in Merge contenders, or run Swing to publish a new one.");
+          const source = await api.read(revision);
+          const chosen: Partial<Record<CardKey,number>> = {};
+          for (const item of source.attempts) if (!chosen[item.card]) chosen[item.card]=item.id;
+          const runCard = async (card:CardKey) => {
+            if (!shouldRunCurrentStage(card)) { completeSkippedStage(portfolio,card,"Using selected Stage 2 revision"); finishedStages.add(card); return; }
+            markRunning(portfolio,card,{totalLlms:targets[card]?.length});
+            // Never substitute a previous output when the explicitly requested rerun fails.
+            delete chosen[card];
+            try {
+              const queued=await api.start(source.id,card,{sequence, request_key:"workflow-"+sequence,targets:targets[card] ?? []});
+              const run=await waitForRunWithStageHandling(portfolio,card,queued.run_id);
+              const result=await api.result(queued.id);
+              if (result.status === "processing") throw new Error("Scorecard jobs are still settling. Open its saved output to refresh.");
+              chosen[card]=queued.id;
+              await markCompleted(portfolio,card,{...summarizeRun(run),...getRunProgress(run),lastRunId:run.id,
+                recommendedStocks:result.scored ?? 0,evidenceCoverage:String(result.scored ?? 0)+"/"+source.manifest.stocks.length+" scored",
+                finalInputs:{stage2_revision:source.id,attempt:queued.id}});
+            } catch (error) {
+              if (cancelRequestedRef.current) throw error;
+              updateStage(portfolio,card,{state:"failed",error:normalizeError(error),activeRunId:null});
+              await recordAutoRebalanceStage(portfolio,card,"failed",{error:normalizeError(error)});
+            } finally { finishedStages.add(card); }
           };
-          const actionable_ranking = {version: "weighted-98-1-1-v1",
-            rows: workflowRanking(frozenFinal.rows, generatedThreatInput?.analysis.report).map(item => {
-              const row = frozenFinal.rows.find(r => r.exchange + ":" + r.symbol === item.listing);
-              return {...item, score: row?.effectiveScore == null ? null : (row.effectiveScore + 3) * 100 / 6};
-            }).sort((a, b) => (b.score ?? -1) - (a.score ?? -1) || (a.listing < b.listing ? -1 : a.listing > b.listing ? 1 : 0))};
-          const sourceRuns = [...finalRebalanceInputs, generatedTechnicalRun];
-          const valuationInputs = finalRows.map(row => {
-              const ids = new Set([...row.stock.rows.map(source => source.meta.runId), row.detail.technicalScanSourceRunId]);
-              const sources = [...ids].map(id => {
-                const run = sourceRuns.find(source => source.id === id);
-                return {runId:id ?? 0, createdAt:parseApiTimestamp(run?.created_at)?.toISOString() ?? "", completed:run?.status === "completed",
-                  status:run?.status, market:run ? market : null};
-              });
-              return {identity:row.stock.usIdentity, issue:row.stock.identityIssue, symbol:row.stock.symbol, exchange:row.stock.exchange, score:row.formulaScore, action:row.formulaAction, sources};
-            });
-          const valuation = await (market === "india"
-            ? captureIndiaValuation(runMetadata.auto_rebalance_sequence, actionablesCompletedAt, workflowSnapshot as ZerodhaPortfolioSnapshotDetail, valuationInputs)
-            : captureUsValuation(runMetadata.auto_rebalance_sequence, actionablesCompletedAt, workflowSnapshot as IndMoneyUsPortfolioSnapshotDetail, valuationInputs))
-            .catch(error => ({schema:market === "india" ? "india-valuation-unavailable-v1" : "us-valuation-unavailable-v1", reason:normalizeError(error)}));
-          const savedFinal = await markCompleted(portfolio, "actionables", {
-            completedAt: actionablesCompletedAt, runStatus: "saved calculation",
-            rebalanceInputs: finalRebalanceInputs.length, recommendedStocks: finalRows.length, frozenFinal: {...frozenFinal, actionable_ranking, ...(valuation ? {valuation} : {})},
-          });
-          if (savedFinal?.saved === false) {
-            const rejected = savedFinal.error.startsWith("Final calculation could not be verified:");
-            updateStage(portfolio, "actionables", {
-              state: rejected ? "failed" : "completed",
-              runStatus: rejected ? "Verification failed" : "Completion unconfirmed",
-              error: savedFinal.error,
-            });
-            if (rejected) {
-              await recordAutoRebalanceStage(portfolio, "actionables", "failed", {
-                runStatus: "Verification failed", error: savedFinal.error,
-              });
-            }
-          }
-          await Promise.resolve().then(onDashboardRefresh).catch(error => console.error("Could not refresh dashboard after Actionables", error));
-          window.dispatchEvent(new CustomEvent("final-actionables-refresh", {
-            detail: {
-              market,
-              completedAt: actionablesCompletedAt,
-            },
-          }));
-          } catch (error) {
-            continueAfterStageFailure("actionables", error);
-          } finally {
-            releaseActivity();
-          }
+          await Promise.allSettled(cards.map(runCard));
+          if (stopIfRequested()) return;
+          currentStage="actionables";
+          if (shouldRunCurrentStage("actionables")) {
+            markRunning(portfolio,"actionables");
+            const previous = source.finals[0] ? await api.final(source.finals[0].id) : null;
+            const config = cardPolicies[portfolio] ?? previous?.policy ?? await api.savedPolicy() ?? migratedPolicy(scoreMatrixFormulaConfig);
+            const final=await api.finalize(source.id,sequence,chosen,config);
+            const saved=await markCompleted(portfolio,"actionables",{runStatus:"saved calculation",recommendedStocks:final.rows.length,
+              frozenFinal:{schema:final.schema,final_id:final.id,workflow_sequence:sequence}});
+            if (saved?.saved===false) throw new Error(saved.error);
+            window.dispatchEvent(new CustomEvent("final-actionables-refresh",{detail:{market,completedAt:new Date().toISOString()}}));
+          } else completeSkippedStage(portfolio,"actionables","Stage 4 not selected");
         } else {
-          completeSkippedStage(
-            portfolio,
-            "actionables",
-            "Leaving current actionables unchanged",
-          );
+          for (const stage of [...cards,"actionables"] as const) completeSkippedStage(portfolio,stage,"Stage not selected");
         }
         // Computation is complete, but history and completion notifications
         // must wait for every metadata write and matching durable server truth.
@@ -7704,7 +7419,7 @@ ${zerodhaExecutionMode === "direct_market"
       recordAutoRebalanceStage,
       resetPortfolio,
       selectedInputs,
-      selectedStages,
+      selectedStages, sourceSelections, cardPolicies,
       specificMode,
       updateStage,
       usdInrRate,
@@ -7878,7 +7593,7 @@ ${zerodhaExecutionMode === "direct_market"
     const finalStage = states[section.portfolio].actionables;
     const basketRevision = section.portfolio === "zerodha" ? scoreRevision : usRevision;
     const preparedOrders = section.portfolio === "zerodha" ? zerodhaBasketOrders : indmoneyBasketOrders;
-    const basketReady = displayedWorkflowSequence !== null && finalStage.state === "completed" && !finalStage.error &&
+    const basketReady = finalStage.state==="completed" && finalStage.frozenFinal?.schema==="independent-scorecards-v1" || displayedWorkflowSequence !== null && finalStage.state === "completed" && !finalStage.error &&
       finalStage.frozenFinal?.workflow_sequence === displayedWorkflowSequence &&
       (Number(finalStage.frozenFinal.basket_order_count) > 0 ||
        (basketRevision?.sequence === displayedWorkflowSequence && preparedOrders.length > 0));
@@ -7893,11 +7608,7 @@ ${zerodhaExecutionMode === "direct_market"
       specificMode,
       selectedStages,
     );
-    const technicalInputIssue = technicalInputPlanIssue(
-      !specificMode[section.portfolio] || selectedStages[section.portfolio].has("technical"),
-      !specificMode[section.portfolio] || selectedStages[section.portfolio].has("rebalance"),
-      selectedInputs[section.portfolio].technical,
-    );
+    const technicalInputIssue: string | null = null;
     const showQuotaLlmSwitchWarning = shouldShowQuotaLlmSwitchWarning(
       states[section.portfolio],
     );
@@ -8067,7 +7778,7 @@ ${zerodhaExecutionMode === "direct_market"
           </div>
         )}
 
-        <WorkflowStageLedger basketReady={basketReady} active={runningPortfolio === section.portfolio} market={section.portfolio} board enabled={stageLedger} view={ledgerView} historyHref={URLs.routes.console.autoRebalanceRuns(section.portfolio)} onStockFlowClick={() => setStockFlowPortfolio(section.portfolio)}>
+        <WorkflowStageLedger basketReady={basketReady} active={runningPortfolio === section.portfolio} market={section.portfolio} board enabled={stageLedger} view={ledgerView} historyHref={URLs.routes.console.autoRebalanceRuns(section.portfolio)} onStockFlowClick={() => setCardReview({portfolio:section.portfolio,stage:"source"})}>
           {STAGE_ORDER.map((stage) => (
             <WorkflowStageTile
               key={stage}
@@ -8084,37 +7795,25 @@ ${zerodhaExecutionMode === "direct_market"
                 specificMode[section.portfolio] && !isBusy
                   ? () => toggleStageSelection(section.portfolio, stage)
                   : () =>
-                      navigateForStage(
+                      isCard(stage) ? setCardReview({portfolio:section.portfolio,stage}) : navigateForStage(
                         section.portfolio,
                         stage,
                         states[section.portfolio][stage],
                       )
               }
-              onInfoClick={
+              onInfoClick={isCard(stage) ? ()=>setCardReview({portfolio:section.portfolio,stage}) :
                 stage !== "sync" && stage !== "actionables"
                   ? () => void showStageLlmInfo(section.portfolio, stage)
                   : undefined
               }
-              onInputClick={
-                stage === "threats" ||
-                stage === "swing" ||
-                stage === "rebalance" ||
-                stage === "technical" ||
-                stage === "actionables"
-                  ? () => openInputSelection(section.portfolio, stage)
-                  : undefined
-              }
-              onPromptClick={
-                stage === "threats" ||
-                stage === "swing" ||
-                stage === "rebalance" ||
-                stage === "technical"
-                  ? () => showStagePrompt(section.portfolio, stage)
-                  : undefined
-              }
+              onInputClick={isCard(stage) || stage==="actionables" ? ()=>setCardReview({portfolio:section.portfolio,stage}) :
+                stage==="swing" ? ()=>openInputSelection(section.portfolio,stage):undefined}
+              onPromptClick={isCard(stage) ? ()=>setCardReview({portfolio:section.portfolio,stage}) :
+                stage==="swing" ? ()=>showStagePrompt(section.portfolio,stage):undefined}
               onOutputClick={() => {
+                if(isCard(stage) || stage==="actionables"){setCardReview({portfolio:section.portfolio,stage});return;}
                 setActionablesCalculationsPortfolio(null);
-                void showStageOutput(section.portfolio, stage, (stage === "threats" ? states[section.portfolio][stage].jobId : states[section.portfolio][stage].lastRunId) ?? undefined);
+                void showStageOutput(section.portfolio,stage,states[section.portfolio][stage].lastRunId ?? undefined);
               }}
               onSyncNowClick={
                 stage === "sync"
@@ -8248,6 +7947,11 @@ ${zerodhaExecutionMode === "direct_market"
 
   const content = (
     <AutomatedRebalanceReliabilityBridge>
+      {cardReview && <ScorecardReview key={cardReview.portfolio+cardReview.stage} portfolio={cardReview.portfolio} stage={cardReview.stage}
+        revisionId={sourceSelections[cardReview.portfolio]} fallbackPolicy={migratedPolicy(scoreMatrixFormulaConfig)}
+        onRevision={id=>setSourceSelections(previous=>({...previous,[cardReview.portfolio]:id}))}
+        onPolicy={policy=>setCardPolicies(previous=>({...previous,[cardReview.portfolio]:policy}))}
+        onClose={()=>setCardReview(null)} />}
       {stageLedger ? <WorkflowStageLedgerViews market={surface?.market ?? ledgerMarket} portfolioOnly={Boolean(surface)} view={ledgerView} onChange={(market, view) => { setLedgerMarket(market); setLedgerView(view); }} /> : null}
       <section className={stageLedger ? "min-w-0" : "grid gap-6 xl:grid-cols-2"}>
         {(!stageLedger || (surface?.market ?? ledgerMarket) === "zerodha") && renderSectionCard(zerodhaSection)}

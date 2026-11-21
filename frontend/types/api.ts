@@ -826,6 +826,7 @@ export type AutoRebalanceStageKey =
   | 'swing'
   | 'rebalance'
   | 'technical'
+  | 'pairwise'
   | 'actionables';
 
 export type AutoRebalanceStageStatus =

@@ -38,6 +38,11 @@ def analysis_run_identity(run: Any) -> AnalysisRunIdentity:
 
     raw_prompt = getattr(run, "prompt", None)
     prompt = (raw_prompt if raw_prompt is not None else getattr(run, "prompt_preview", None) or "").lstrip()
+    independent = re.match(r"\[INDEPENDENT_SCORECARD:(india|us):(rebalance|technical|threats|pairwise):\d+\]", prompt)
+    if independent:
+        if metadata_market and metadata_market != independent[1]:
+            return unknown
+        return AnalysisRunIdentity(independent[1], independent[2])
     opening = re.split(r"\n\s*\n", prompt, maxsplit=1)[0][:1000]
     marker = re.match(r"\[REBALANCE_FLOW:(india|us)\]", prompt, re.I)
     prompt_stage = None

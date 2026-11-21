@@ -43,6 +43,8 @@ class CreateRunCommand:
     recommendation_audit: Any | None = None
     polymarket_event_context: dict[str, Any] | None = None
     output_source_jobs: list[OutputSourceJobReference] | None = None
+    scorecard_attempt_id: int | None = None
+    batch_prompts: tuple[str, ...] = ()
     prompt_id: int | None = None
     scheduled_at: datetime | None = None
     auto_export_enabled: bool = False
@@ -66,6 +68,8 @@ class CreateRunUseCase:
     async def execute(self, cmd: CreateRunCommand) -> Run:
         require_equity_analysis(cmd.auto_rebalance_portfolio, cmd.polymarket_event_context)
         validate_prompt(cmd.prompt)
+        for batch_prompt in cmd.batch_prompts:
+            validate_prompt(batch_prompt)
         validate_targets(cmd.targets)
         for target in cmd.targets:
             validate_model_identifiers(target.provider, target.model)
@@ -95,6 +99,8 @@ class CreateRunUseCase:
                     for target, _availability in blocked_targets
                 ),
             )
+        if cmd.scorecard_attempt_id and blocked_targets:
+            raise ValidationException("A selected scorecard model is temporarily unavailable")
         if not targets:
             reasons = "; ".join(
                 availability.reason
@@ -156,9 +162,12 @@ class CreateRunUseCase:
                 await self._run_repo.create(run)  # flush → run.id populated
 
                 jobs: list[Job] = []
-                for target in targets:
+                if cmd.scorecard_attempt_id is not None:
+                    from app.domains.scorecards.models import ScorecardBatch
+                    self._session.add(ScorecardBatch(attempt_id=cmd.scorecard_attempt_id, ordinal=0, run_id=run.id))
+                for prompt, target in ((p, t) for p in cmd.batch_prompts or (cmd.prompt,) for t in targets):
                     job = Job(
-                        prompt=cmd.prompt,
+                        prompt=prompt,
                         provider=target.provider,
                         model=target.model,
                         user_id=cmd.user_id,

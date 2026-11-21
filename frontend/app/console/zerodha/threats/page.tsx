@@ -258,18 +258,7 @@ export default function ZerodhaThreatsPage() {
     }
   }, [loadStatusAndPortfolio, overview?.latest?.captured_at, pollPortfolioOverview]);
 
-  const handleRunAnalysis = useCallback(async (target: ProviderModelTarget | null) => {
-    setRunningAnalysis(true);
-    setError(null);
-    try {
-      const queued = await apiService.zerodhaRunThreats(target ?? undefined);
-      await loadAnalysisJob(queued.job_id);
-    } catch (err) {
-      setError(normalizeError(err));
-    } finally {
-      setRunningAnalysis(false);
-    }
-  }, [loadAnalysisJob]);
+  const handleRunAnalysis = useCallback(async () => {window.location.assign("/console/scorecards/zerodha/threats");}, []);
 
   useEffect(() => {
     let mounted = true;

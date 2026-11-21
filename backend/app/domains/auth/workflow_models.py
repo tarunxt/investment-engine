@@ -12,7 +12,7 @@ from app.domains.auth.models import ActivityLog
 from app.domains.jobs.resource_policy import MAX_TARGETS
 from app.domains.jobs.resource_validation import MODEL_IDENTIFIER_MAX_CHARS
 
-ModelStage = Literal["swing", "rebalance", "technical", "threats"]
+ModelStage = Literal["swing", "rebalance", "technical", "threats", "pairwise"]
 ACTION = "workflow.models_selected"
 
 
@@ -23,8 +23,6 @@ class StageModelSelection(BaseModel):
 
     @model_validator(mode="after")
     def validate_selection(self):
-        if self.stage in {"technical", "threats"} and len(self.keys) > 1:
-            raise ValueError("Choose at most one model for this stage")
         for key in self.keys:
             parts = key.split("::")
             if len(parts) != 2 or any(not part or len(part) > MODEL_IDENTIFIER_MAX_CHARS or not part.isprintable() or part != part.strip() for part in parts):
