@@ -335,6 +335,15 @@ def test_named_threat_category_with_zoned_observation_uses_exact_cutoff():
     assert cards["BSE:HAL"]["categories"][8]["score"] == 24
     assert cards["BSE:HAL"]["provisional"] and cards["BSE:HAL"]["categories"][1]["score"] is None
     assert trail[0]["Publication timestamp"] == item["published_at"]
+    item["published_at"] += " session close; observed 2026-11-21T20:18:01Z"
+    item["confidence"] = "moderate"
+    assert audit()[1][0]["Disposition"] == "Accepted"
+    assert audit()[1][0]["Confidence"] == "medium"
+    item["confidence"] = "moderate on price, low on cause"
+    assert audit()[1][0]["Disposition"].startswith("Excluded")
+    item["confidence"] = "low"
+    item["published_at"] = "2026-11-20T15:30:00+05:30; observed 2026-11-21T20:21:00Z"
+    assert audit()[1][0]["Disposition"].startswith("Excluded")
     item["published_at"] = "2026-11-22T01:51:00+05:30"
     assert audit()[1][0]["Disposition"].startswith("Excluded")
     item["published_at"] = "2026-11-20"

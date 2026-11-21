@@ -158,6 +158,20 @@ def json_items(raw):
     return [r for r in data if isinstance(r,dict)] if isinstance(data,list) else []
 
 
+def normalize_threat_publication(entry, cutoff):
+    reported = entry["As of"].strip()
+    annotated = re.fullmatch(r"(\S+)(?: session close)?;\s*observed(?: at)?\s+(\S+)", reported, re.IGNORECASE)
+    try:
+        published = datetime.fromisoformat(annotated[1] if annotated else reported)
+        observed = datetime.fromisoformat(annotated[2]) if annotated else published
+        if (cutoff.tzinfo is not None and published.tzinfo is not None and observed.tzinfo is not None
+                and published <= observed <= cutoff):
+            entry["Publication timestamp"] = reported
+            entry["As of"] = published.astimezone(cutoff.tzinfo).date().isoformat()
+    except ValueError:
+        pass  # The common evidence audit records the exclusion.
+
+
 def threats_by_slot(slot_rows, cutoff):
     fields = {"Category":"category","Scenario":"scenario_id","Trigger":"trigger","Likelihood":"likelihood","Impact":"impact",
               "Downside":"downside","Source":"source_url","As of":"published_at","Confidence":"confidence","Rationale":"rationale"}
@@ -172,13 +186,9 @@ def threats_by_slot(slot_rows, cutoff):
                 entry["Category"] = category[1]
             # The common auditor consumes dates. A timestamp must first pass
             # the exact decision cutoff, including its original time zone.
-            try:
-                stamp = datetime.fromisoformat(entry["As of"])
-            except ValueError:
-                stamp = None
-            if stamp is not None and stamp.tzinfo is not None and boundary.tzinfo is not None and stamp <= boundary:
-                entry["Publication timestamp"] = entry["As of"]
-                entry["As of"] = stamp.astimezone(boundary.tzinfo).date().isoformat()
+            normalize_threat_publication(entry, boundary)
+            if entry["Confidence"].strip().casefold() == "moderate":
+                entry["Confidence"] = "medium"
             evidence.append(entry)
     accepted, dispositions = audited_evidence(evidence, strict=True,snapshot_date=boundary.date())
     return {":".join(k):v for k,v in stock_scorecards(accepted).items()}, dispositions
