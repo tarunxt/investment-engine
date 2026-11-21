@@ -93,27 +93,46 @@ def rebalance(rowset, stock, cutoff):
 def dated_reference(text, cutoff):
     if not isinstance(text, str):
         return False
-    url = re.search(r"https?://[^\s\])>]+", text)
-    stamp = re.search(r"\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+−-]\d{2}:\d{2}))?", text)
-    if not url or not stamp:
+    url_pattern = r"https?://[^\s\])>]+"
+    urls = re.findall(url_pattern, text)
+    observation = re.sub(url_pattern, " ", text)
+    stamp_pattern = r"\b\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+−-]\d{2}:\d{2}))?(?![\w:+-])"
+    stamps = re.findall(stamp_pattern, observation)
+    if not urls or not stamps:
         return False
     try:
-        if not urlparse(url[0]).hostname:
+        if not all(urlparse(url).hostname for url in urls):
             return False
-        moment = datetime.fromisoformat(stamp[0].replace("−", "-"))
         boundary = datetime.fromisoformat(cutoff)
-        if moment.tzinfo is None:
-            return moment.date() < boundary.date()
-        return moment <= boundary
+        for stamp in stamps:
+            moment = datetime.fromisoformat(stamp.replace("−", "-"))
+            if moment.tzinfo is None:
+                if moment.date() >= boundary.date():
+                    return False
+            elif moment > boundary:
+                return False
+        return True
     except (ValueError, TypeError):
         return False
+
+
+def approved_setup(row):
+    label = str(row.get("Primary Setup") or "").strip()
+    if label in CATALOGUE:
+        return CATALOGUE[label]
+    annotated = re.fullmatch(r"(.+?)\s*\((\d+(?:\.\d+)?)\)", label)
+    if annotated:
+        setup = CATALOGUE.get(annotated[1].rstrip())
+        if setup and number(annotated[2], 0, 10) == setup["confidence"]:
+            return setup
+    return None
 
 
 def technical(rowset, cutoff):
     def verified(row):
         return dated_reference(str(row.get("Evidence source and as-of","")), cutoff)
     rows = [r for r in rowset if verified(r)]
-    candidates = [(r,CATALOGUE.get(r.get("Primary Setup"))) for r in rows]
+    candidates = [(r, approved_setup(r)) for r in rows]
     strengths = [3*s["confidence"]/10*(1 if s["direction"]=="bullish" else -1) for r,s in candidates
                  if s and number(r.get("Confidence Score"),0,10)==s["confidence"] and r.get("Bias","").casefold()==s["direction"]]
     terms = {"candles":average(number(r.get("Last 5 candles trend"),-3,3,integer=True) for r in rows),
