@@ -27,6 +27,21 @@ MAX_OUTPUT_SOURCE_IDENTITIES = 20_000
 MAX_OUTPUT_SOURCE_IDENTITY_CHARS = 128
 
 
+def scorecard_batch_for_job(job):
+    """Return this equity job's frozen assignment, including pre-envelope jobs."""
+    context = getattr(job, "request_context_json", None)
+    if not isinstance(context, dict):
+        return None
+    if context.get("kind") == SOURCE_CONTEXT_KIND:
+        market = {"india": "india", "indmoney_us": "us"}.get(job.auto_rebalance_portfolio)
+        if not market or context.get("market") != market:
+            return None
+        context = context.get("scorecard_batch")
+    if isinstance(context, dict) and context.get("kind") == "equity_scorecard_batch_v1":
+        return context
+    return None
+
+
 class OutputSourceJobReference(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 

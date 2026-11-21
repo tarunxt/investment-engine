@@ -520,11 +520,15 @@ def test_failed_fresh_read_fallback_cannot_resurrect_or_replace_owner(monkeypatc
     assert current_output_context() is None
 
 
-def test_pairwise_batch_embedded_swing_header_does_not_trigger_swing_repairs():
+@pytest.mark.parametrize("enveloped", [False, True])
+def test_pairwise_batch_embedded_swing_header_does_not_trigger_swing_repairs(enveloped):
     from app.domains.scorecards.prompts import HEADERS
     job = make_job(prompt="[INDEPENDENT_SCORECARD:india:pairwise:7]\nSwing evidence: Stock Name | Units to Buy",
                    auto_rebalance_label="India Run #9 (Pairwise Scan)",
                    request_context_json={"kind":"equity_scorecard_batch_v1", "card":"pairwise", "listings":["NSE:ABC"]})
+    if enveloped:
+        job.request_context_json = {"kind": "equity_output_sources_v1", "market": "india",
+                                    "scorecard_batch": job.request_context_json}
     header = HEADERS["pairwise"]
     content = "\n".join("|" + "|".join(row) + "|" for row in (header, ["---"]*len(header), ["NSE","ABC","0","0","[]"]))
     response = AIProviderResponse(content=content, tokens_in=5, tokens_out=5, cost=.001, provider=job.provider, model=job.model)

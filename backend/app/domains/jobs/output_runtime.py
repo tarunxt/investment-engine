@@ -20,7 +20,7 @@ from app.domains.jobs.output_contracts import (
 from app.domains.jobs.output_contracts.document import parse_markdown, split_row
 from app.domains.jobs.output_contracts.schemas import Finding
 from app.domains.jobs.output_contracts.consistency import FrozenSwingSource, inspect_output_consistency
-from app.domains.jobs.output_sources import frozen_sources_from_context
+from app.domains.jobs.output_sources import frozen_sources_from_context, scorecard_batch_for_job
 from app.domains.jobs.output_contracts.validation import aliases, header_key, identity, prepare_holdings
 from app.domains.runs.run_identity import analysis_run_identity
 
@@ -124,9 +124,9 @@ def configure_output_context(job: Any, dimensions: Mapping[str, str | None]) -> 
                                           market=analysis_run_identity(job).market)
     if kind == "rebalance" and "[REBALANCE_UNIVERSE_V1]" in _instruction_prefix(prompt) and sources is None:
         raise OutputPreflightError("Complete Swing coverage requires frozen selected source references; refresh inputs before starting.")
-    batch = getattr(job, "request_context_json", None)
+    batch = scorecard_batch_for_job(job)
     assigned, contenders = frozenset(), frozenset()
-    if isinstance(batch, dict) and batch.get("kind") == "equity_scorecard_batch_v1" and batch.get("card") == kind == "rebalance":
+    if batch and batch.get("card") == kind == "rebalance":
         assigned = frozenset(tuple(key.split(":", 1)) for key in batch["listings"])
         contenders = frozenset(tuple(key.split(":", 1)) for key in batch["absent_contenders"]) & assigned
     return _context.set(OutputContext(kind, metadata, holdings, expected, sources, contenders, assigned))
