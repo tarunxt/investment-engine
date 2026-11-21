@@ -44,7 +44,8 @@ def favorable(value):
 
 def parse_rows(response, card, assigned):
     blocks, findings = parse_markdown(response or "")
-    tables = [b for b in blocks if b.kind == "table"]
+    identity_headers = {"Exchange Symbol", "Stock Symbol"}
+    tables = [block for block in blocks if block.kind == "table" and identity_headers.intersection(block.headers)]
     if len(tables) != 1 or any(f.severity == "error" for f in findings):
         return {}, "Response requires one well-formed table"
     table = tables[0]
@@ -238,7 +239,13 @@ def project(card, manifest, jobs):
     slots, raw, votes, errors = defaultdict(dict),defaultdict(list),defaultdict(dict),[]
     model_tables = []
     for job, slot, assigned, pairs, *packet in jobs:
-        rows,error = parse_rows(job.response,card,set(assigned)) if job.status in ("partial","completed") else ({},str(job.error_message or job.status))
+        rows, error = {}, str(getattr(job, "error_message", None) or job.status)
+        # A prior worker may have rejected a valid scorecard accompanied by
+        # a separate verification table. Revalidate only that parser failure.
+        old_table_rejection = (job.status == "failed" and card in {"technical", "threats", "pairwise"}
+                               and error.endswith("returned invalid output contract (Response requires one well-formed table)"))
+        if job.status in ("partial", "completed") or old_table_rejection:
+            rows, error = parse_rows(job.response, card, set(assigned))
         if error:
             errors.append({"job_id":job.id,"reason":error})
         if card == "rebalance":

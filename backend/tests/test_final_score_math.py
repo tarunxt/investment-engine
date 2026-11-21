@@ -297,3 +297,27 @@ def test_candle_url_range_is_not_an_observation_timestamp():
     assert result["signed_terms"]["setup"] == pytest.approx(2.34)
     row["Primary Setup"] = "Support bounce (9.2)"
     assert technical([row], cutoff)["signed_terms"]["setup"] is None
+
+
+def test_scorecard_uses_one_exact_equity_table_and_preserves_failed_job_status():
+    from types import SimpleNamespace
+    from app.domains.scorecards.prompts import HEADERS
+    from app.domains.scorecards.scoring import parse_rows, project
+    headers = HEADERS["technical"]
+    fields = {"Exchange Symbol":"NSE", "Stock Symbol":"ABC", "Last 5 candles trend":"+1",
+              "Evidence source and as-of":"https://example.org/bars 2026-11-20T15:30:00+05:30"}
+    table = "\n".join("|" + "|".join(cells) + "|" for cells in
+                      (headers, ["---"] * len(headers), [fields.get(h, "—") for h in headers]))
+    notes = "| Item | Result |\n|---|---|\n| Prices | Verified independently |\n\n"
+    assigned = ["NSE:ABC"]
+    rows, issue = parse_rows(notes + table, "technical", set(assigned))
+    assert not issue and set(rows) == set(assigned)
+    assert parse_rows(table + "\n\n" + table, "technical", set(assigned))[1]
+    assert parse_rows(notes + table.replace("Exchange Symbol", "Venue"), "technical", set(assigned))[1]
+    job = SimpleNamespace(id=1, status="failed", response=notes+table,
+                          error_message="provider/model returned invalid output contract (Response requires one well-formed table)")
+    manifest = {"stocks":[{"listing":"NSE:ABC"}], "as_of":"2026-11-21T20:20:00+00:00"}
+    assert project("technical", manifest, [(job, 0, assigned, [])])["rows"][0]["score"] == pytest.approx(200/3)
+    assert job.status == "failed"
+    job.error_message = "provider timed out"
+    assert project("technical", manifest, [(job, 0, assigned, [])])["rows"][0]["score"] is None
