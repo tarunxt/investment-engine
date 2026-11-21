@@ -180,17 +180,51 @@ def pair_results(votes, keys):
     return results
 
 
+def supported_row(row, card, key, research, job):
+    if research is None:
+        return row
+    records = research.get("listings",{}).get(key,[])
+    provider_sources = set(getattr(job,"web_sources",None) or [])
+    observed = {r["url"] for r in records if r["kind"]!="filing_index"} | provider_sources
+    def cited(text, urls):
+        return isinstance(text,str) and any(url in urls for url in re.findall(r"https?://[^\s<>\])]+",text))
+    if card=="rebalance" and not cited(row.get("Analyst/Source"),observed):
+        return None
+    if card=="technical":
+        evidence = row.get("Evidence source and as-of")
+        daily = [r for r in records if r["kind"]=="daily_bar"]
+        if not cited(evidence,provider_sources) and (len({r["as_of"][:10] for r in daily})<5 or not cited(evidence,{r["url"] for r in daily})):
+            return None
+    if card=="threats":
+        row={**row,"Evidence":json.dumps([item for item in json_items(row.get("Evidence")) if isinstance(item.get("source_url"),str) and item["source_url"] in observed])}
+    if card=="pairwise":
+        judgments=[]
+        for item in json_items(row.get("Judgments")):
+            opponent=item.get("opponent_id")
+            if not isinstance(opponent,str):
+                continue
+            other={r["url"] for r in research.get("listings",{}).get(opponent,[]) if r["kind"]!="filing_index"}
+            refs=item.get("source_refs")
+            if not isinstance(refs,list):
+                continue
+            refs=[r for r in refs if isinstance(r,dict) and isinstance(r.get("url"),str) and r["url"] in observed|other]
+            judgments.append({**item,"source_refs":refs})
+        row={**row,"Judgments":json.dumps(judgments)}
+    return row
+
+
 def project(card, manifest, jobs):
     stocks = manifest["stocks"]
     keys = [s["listing"] for s in stocks]
     slots, raw, votes, errors = defaultdict(dict),defaultdict(list),defaultdict(dict),[]
     model_tables = []
-    for job, slot, assigned, pairs in jobs:
+    for job, slot, assigned, pairs, *packet in jobs:
         rows,error = parse_rows(job.response,card,set(assigned)) if job.status in ("partial","completed") else ({},str(job.error_message or job.status))
         if error:
             errors.append({"job_id":job.id,"reason":error})
         if card == "rebalance":
             model_tables.append({"job_id":job.id, "slot":slot+1, "model":job.model, "rows":list(rows.values())})
+        rows={key:r for key,raw_row in rows.items() if (r:=supported_row(raw_row,card,key,packet[0] if packet else None,job)) is not None}
         for key,r in rows.items():
             raw[key].append(r)
             slots[slot][key] = r

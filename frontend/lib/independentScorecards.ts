@@ -22,7 +22,7 @@ export type SourceRevision = {id:number;sequence:number;created_at:string};
 export type CardRef = {id:number;card:CardKey;run_id:number};
 export type SourceDetail = {id:number;manifest:{sequence:number;as_of:string;snapshot_id:number;snapshot_at:string;swing_job_ids:number[];verified_listings?:VerifiedListing[];stocks:StockInput[];unresolved:Record<string,unknown>[]};attempts:CardRef[]; finals:{id:number}[]};
 export type CardRow = {listing:string;score:number|null;coverage:string;terms?:Record<string,number|null>; [field:string]:unknown};
-export type CardResult = {id:number;status:string;rows:CardRow[];jobs:number;completed:number;model_tables?:{job_id:number;slot:number;model:string;rows:Record<string,unknown>[]}[];scored?:number;errors?:{job_id:number;reason:string}[]};
+export type CardResult = {id:number;status:string;research_notices?:string[];rows:CardRow[];jobs:number;completed:number;model_tables?:{job_id:number;slot:number;model:string;rows:Record<string,unknown>[]}[];scored?:number;errors?:{job_id:number;reason:string}[]};
 export type FinalRow = StockInput & {symbol:string;exchange:string;scores:Record<CardKey,number|null>;contributions:Record<CardKey,number|null>;status:string;rank:number|null;final:number|null;signed:number|null;action:string|null;suggested_units:number|null;sizing_reason?:string;settled:number|null;price:number|null;value:number|null;available_weight:number};
 export type CardFinal = {id:number;sequence:number;revision_id:number;schema:"independent-scorecards-v1";policy:CardPolicy;rows:FinalRow[];attempts:Partial<Record<CardKey,number>>;source_runs:Partial<Record<CardKey,number>>};
 export const isCard = (value:string):value is CardKey => (cards as readonly string[]).includes(value);

@@ -22,6 +22,7 @@ from .scoring import project
 from app.domains.recommendation_audit.schemas import Formula
 from .final import DEFAULT_WEIGHTS, calculate_final, compare_formula, policy
 from .universe import digest, publish_manifest
+from .research import collect as collect_research
 
 router = APIRouter(prefix="/runs/scorecards", tags=["equity-scorecards"])
 Portfolio = Literal["india","indmoney_us"]
@@ -117,10 +118,19 @@ async def detail(portfolio:Portfolio,revision_id:int,db:AsyncSession=Depends(get
 
 @router.post("/{portfolio}/revisions/{revision_id}/{card}/start")
 async def start(portfolio:Portfolio,revision_id:int,card:Card,body:Start,db:AsyncSession=Depends(get_async_db),user:User=Depends(get_current_user)):
-    w=await workflow(db,user.id,portfolio,body.sequence)
-    rev=await owned(db,user.id,portfolio,Revision,revision_id)
+    owner = user.id
+    rev = await owned(db,owner,portfolio,Revision,revision_id)
     if not rev.manifest["stocks"]:
         raise HTTPException(422,"Resolve the flagged Stage 2 listing identities before scoring")
+    identity = (Attempt.revision_id==rev.id,Attempt.card==card,Attempt.request_key==body.request_key)
+    already_started = await db.scalar(select(Attempt.id).where(*identity))
+    research = {}
+    if not already_started:
+        manifest = rev.manifest
+        await db.commit()
+        research = await collect_research(manifest,card)
+    w=await workflow(db,owner,portfolio,body.sequence)
+    rev=await owned(db,owner,portfolio,Revision,revision_id)
     config={"targets":[t.model_dump() for t in body.targets],"parent":body.retry_attempt_id}
     existing=await db.scalar(select(Attempt).where(Attempt.revision_id==rev.id,Attempt.card==card,Attempt.request_key==body.request_key))
     if existing:
@@ -138,11 +148,12 @@ async def start(portfolio:Portfolio,revision_id:int,card:Card,body:Start,db:Asyn
         if not missing:
             raise HTTPException(422,"All pair assignments have been resolved")
     assignments=list(batches(rev.manifest["stocks"],card,pairs=missing))
+    config["research"]=research
     config["assignments"]=assignments
     attempt=Attempt(workflow_id=w.id,revision_id=rev.id,card=card,request_key=body.request_key,settings_json=config)
     db.add(attempt)
     await db.flush()
-    prompts=tuple(build_prompt(rev,card,keys,pairs) for keys,pairs in assignments)
+    prompts=tuple(build_prompt(rev,card,keys,pairs,research) for keys,pairs in assignments)
     redis=_get_redis()
     try:
         result=await CreateRunUseCase(db,RedisLock(redis)).execute(CreateRunCommand(
@@ -170,7 +181,7 @@ async def observations(db, attempt):
         assignments=a.settings_json["assignments"]
         if len(jobs)!=count*len(assignments):
             raise HTTPException(409,"Scorecard batch coverage is incomplete")
-        evidence.extend((job,i%count,*assignments[i//count]) for i,job in enumerate(jobs))
+        evidence.extend((job,i%count,*assignments[i//count],a.settings_json.get("research")) for i,job in enumerate(jobs))
     return evidence
 
 
@@ -188,7 +199,7 @@ async def attempt_result(portfolio:Portfolio,attempt_id:int,db:AsyncSession=Depe
     result=project(a.card,rev.manifest,jobs)
     scored=sum(r["score"] is not None for r in result["rows"])
     a.result_json={**base,**result,"status":"completed" if all(r["coverage"]=="Complete" for r in result["rows"]) and not result["errors"] else "partial" if scored else "unassessed",
-                   "scored":scored,"source_hashes":{str(j.id):digest(j.response or "") for j,*_ in jobs}}
+                   "research_notices":a.settings_json.get("research",{}).get("notices",[]),"scored":scored,"source_hashes":{str(j.id):digest(j.response or "") for j,*_ in jobs}}
     out=a.result_json
     await db.commit()
     return out

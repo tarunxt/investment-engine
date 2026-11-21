@@ -254,3 +254,18 @@ def test_independent_threat_safety_inverts_once_and_clear_is_measured():
     assert row["stock_threat"] == pytest.approx(68)
     assert row["score"] == pytest.approx(32) and row["coverage"] == "Partial"
     assert row["assessed"] == 3
+
+
+def test_exchange_evidence_coheres_with_the_decision_time_and_listing():
+    from datetime import date, datetime, timezone
+    from app.domains.scorecards.research import indian_bars
+    from app.domains.scorecards.scoring import supported_row
+    from types import SimpleNamespace
+    data=b"SYMBOL,SERIES,DATE1,OPEN_PRICE,HIGH_PRICE,LOW_PRICE,CLOSE_PRICE,TTL_TRD_QNTY\nABC,EQ,20-Nov-2026,100,103,99,101,1350\n"
+    day, lookup, url = date(2026,11,20), {("NSE","ABC"):"NSE:ABC"}, "https://example.org/archive.csv"
+    assert not indian_bars(data,"NSE",day,lookup,url,datetime(2026,11,20,8,tzinfo=timezone.utc))
+    observed = indian_bars(data,"NSE",day,lookup,url,datetime(2026,11,20,12,tzinfo=timezone.utc))
+    assert len(observed)==1 and observed[0][1]["close"]==101
+    fixture={"listings":{"NSE:ABC":[observed[0][1]]}}
+    assert supported_row({"Evidence source and as-of":url},"technical","NSE:ABC",fixture,SimpleNamespace(web_sources=[])) is None
+    assert supported_row({"Analyst/Source":"https://example.org/invented"},"rebalance","NSE:ABC",fixture,SimpleNamespace(web_sources=[])) is None

@@ -335,6 +335,8 @@ async def test_stage2_publication_source_ownership_and_frozen_independent_final(
     @asynccontextmanager
     async def local_lock(*args, **kwargs):
         yield
+    research={"listings":{"NSE:ABC":[{"kind":"daily_bar","url":"https://example.org/chart","as_of":f"2025-01-{d:02d}T12:00:00Z"} for d in range(1,6)]},"notices":[]}
+    monkeypatch.setattr(cards,"collect_research",AsyncMock(return_value=research))
     monkeypatch.setattr(cards, "_get_redis", lambda: SimpleNamespace(aclose=AsyncMock()))
     monkeypatch.setattr(cards, "RedisLock", lambda redis: SimpleNamespace(acquire=local_lock))
     monkeypatch.setattr(create_run, "filter_recently_available_targets", AsyncMock(side_effect=lambda db,targets:(targets,[])))

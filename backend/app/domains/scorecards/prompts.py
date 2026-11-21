@@ -33,7 +33,7 @@ def batches(stocks, card, *, pairs=None):
             yield keys[start:start + size], []
 
 
-def build_prompt(revision, card, keys, pairs):
+def build_prompt(revision, card, keys, pairs, research=None):
     manifest = revision.manifest
     context = {k: v for k, v in manifest.items() if k not in ("stocks", "evidence", "unresolved")}
     context.pop("owner_id", None)
@@ -54,6 +54,10 @@ def build_prompt(revision, card, keys, pairs):
         template = template.replace("{{" + key + "}}", value)
     marker = f"[INDEPENDENT_SCORECARD:{manifest['market']}:{card}:{revision.id}]"
     bundle = {"context": context, "listings": rows}
+    if research is not None:
+        bundle["fresh_research"] = {k:research.get("listings",{}).get(k,[]) for k in keys}
+        bundle["research_notices"] = research.get("notices",[])
+        template += "\nCite an exact retrieved URL and its observation time. A filing index establishes filing identity and date only. Use the underlying document or exchange notice for substantive claims. A five-candle trend requires five supported completed sessions on a consistent price scale. Report any missing or unverified signal.\n"
     if evidence:
         bundle["swing_evidence"] = evidence
     if card == "technical":

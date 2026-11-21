@@ -129,6 +129,7 @@ export function ScorecardReview({portfolio,stage:initial,revisionId,fallbackPoli
       {prompt&&<details><summary>LLM prompt · first batch</summary><pre className="max-h-80 overflow-auto whitespace-pre-wrap text-xs">{prompt}</pre></details>}
       {result&&<><p>{result.status} · {result.completed}/{result.jobs} model jobs · {result.scored??0} stocks scored</p>{card!=="rebalance"&&<Grid rows={resultRows}/>}
         {card==="rebalance"&&<><h3>Rebalance output</h3>{result.model_tables?.map(t=><section key={t.job_id}><h4>Slot {t.slot} · {t.model} · Job {t.job_id}</h4><Grid rows={t.rows}/></section>)}<h3>Scores for Stage 4</h3><Grid rows={resultRows}/></>}
+        {!!result.research_notices?.length&&<details><summary>Research source availability</summary><ul>{result.research_notices.map(n=><li key={n}>{n}</li>)}</ul></details>}
         {!!result.errors?.length&&<details><summary>Job diagnostics</summary><Grid rows={result.errors}/></details>}</>}</section>}
     {stage==="actionables"&&<section className="space-y-3 py-3">
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{cards.map(c=><fieldset key={c} className="rounded-lg border p-2"><legend>{titles[c]}</legend>
