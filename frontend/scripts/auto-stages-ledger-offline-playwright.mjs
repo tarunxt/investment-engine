@@ -28,11 +28,11 @@ try {
  function Fixture(){
  const [market,setMarket]=useState('India'),[view,setView]=useState('ledger'),[state,setState]=useState(new URLSearchParams(location.search).get('fixture')||'loaded'),[checks,setChecks]=useState({});
  const call=(name)=>()=>window.actions.push(name);
- const stages=[...STAGE_ORDER].sort((a,b)=>["sync","threats","swing","rebalance","technical","actionables"].indexOf(a)-["sync","threats","swing","rebalance","technical","actionables"].indexOf(b)).map((stage,index)=>{
+ const stages=[...STAGE_ORDER].sort((a,b)=>["sync","swing","rebalance","technical","threats","pairwise","actionables"].indexOf(a)-["sync","swing","rebalance","technical","threats","pairwise","actionables"].indexOf(b)).map((stage,index)=>{
  const palette=new URLSearchParams(location.search).get('palette');
  const partial=stage==='rebalance'&&state==='loaded';
  const completed=state==='empty'?null:'2026-10-30T14:13:00Z';
- const info=state==='empty'?{state:'idle'}:{state:state==='loading'?'queued':state==='failed'&&stage==='rebalance'?'failed':'completed',completedAt:completed,startedAt:'2026-10-30T14:11:00Z',endedAt:'2026-10-30T14:13:00Z',totalLlms:2,completedLlms:2,passedLlms:partial?1:2,partialLlms:partial?${mixedFailure ? 0 : 1}:0,failedLlms:partial?${mixedFailure ? 1 : 0}:0,recommendedStocks:index===1?null:state==='zero'?0:13,rebalanceInputs:1,costInr:null,runStatus:partial?'partial':state==='stale'?'stale':null,error:state==='failed'&&stage==='rebalance'?'Provider timeout':null,partialNotice:partial?'${mixedFailure ? 'One provider completed and one provider failed.' : 'One saved LLM response was partial.'}':null};
+ const info=state==='empty'?{state:'idle'}:{state:state==='loading'?'queued':state==='failed'&&stage==='rebalance'?'failed':'completed',completedAt:completed,startedAt:'2026-10-30T14:11:00Z',endedAt:'2026-10-30T14:13:00Z',totalLlms:2,completedLlms:2,passedLlms:partial?1:2,partialLlms:partial?${mixedFailure ? 0 : 1}:0,failedLlms:partial?${mixedFailure ? 1 : 0}:0,recommendedStocks:state==='zero'?0:stage==="threats"?null:13,rebalanceInputs:1,costInr:null,runStatus:partial?'partial':state==='stale'?'stale':null,error:state==='failed'&&stage==='rebalance'?'Provider timeout':null,partialNotice:partial?'${mixedFailure ? 'One provider completed and one provider failed.' : 'One saved LLM response was partial.'}':null};
  if(palette)Object.assign(info,{state:palette,runStatus:null,partialLlms:0,failedLlms:0,partialNotice:null});
  if(stage==='sync' && state!=='empty')info.portfolioStockCount=state==='zero'?0:8;
  if(state==='recovered' && stage==='rebalance'){
@@ -94,7 +94,7 @@ try {
  assert.deepEqual(await page.getByRole('menuitem').allTextContents(),['Inputs','Models','Prompt','Saved output','Duration','Stock Flow','History','Open stage']);
  await page.keyboard.press('Escape');
  assert.equal(await board.getByRole('button',{name:'Swing Scan actions'}).evaluate(el=>el===document.activeElement),true);
- await board.getByRole('button',{name:'Sync Portfolio actions'}).click();
+ await board.getByRole('button',{name:'Sync Kite Portfolio actions'}).click();
  await page.getByRole('menuitem',{name:'Sync Now',exact:true}).click();
  assert.equal(await page.evaluate(()=>window.actions.at(-1)),'sync');
  assert.equal(await board.getByText('Query Screener',{exact:true}).count(),0);
@@ -110,12 +110,12 @@ try {
  await board.getByRole('button',{name:'Final Order',exact:true}).click();
  assert.equal(await page.evaluate(()=>window.actions.at(-1)),'order:US');
  await page.goto(origin);await page.getByRole('table').waitFor();
- assert.equal(await page.locator('tbody tr').count(),6);
+ assert.equal(await page.locator('tbody tr').count(),7);
  assert.deepEqual(await page.locator('thead th').allTextContents(),['Stage','Evidence time','Completion / inputs','Stocks','Duration','Error']);
  assert.equal(await page.getByRole('status').count(),0);
  const indiaError=page.getByRole('cell').getByRole('button',{name:'Show error details for Rebalance'});
  await indiaError.click();await page.getByRole('dialog').waitFor();await page.keyboard.press('Escape');await page.getByRole('dialog').waitFor({state:'detached'});
- for(const index of [0,1]) assert.equal(await page.locator('tbody tr').nth(index).locator('td').nth(2).innerText(),'8');
+ assert.equal(await page.locator('tbody tr').first().locator('td').nth(2).innerText(),'8');
  assert.match(await page.locator('tbody tr').first().locator('th').getAttribute('class'),/bg-blue-100/);
  await page.screenshot({path:path.join(evidence,'india-desktop.png'),fullPage:true});
  await page.getByRole('button',{name:'US stage ledger',exact:true}).focus();await page.keyboard.press('Enter');
@@ -127,20 +127,20 @@ try {
  // Error dialog repeated opening, Escape and native focus restoration.
  const errors=page.getByRole('button',{name:/Show error details/});
  for(let i=0;i<2;i++){await errors.click();await page.getByRole('dialog').waitFor();await page.keyboard.press('Escape');await page.getByRole('dialog').waitFor({state:'detached'});assert.equal(await errors.evaluate(el=>el===document.activeElement),true);}
- const rebalance=page.getByRole('button',{name:/04 Rebalance/});await rebalance.focus();await page.keyboard.press('Enter');
+ const rebalance=page.getByRole('button',{name:/03.1 Rebalance/});await rebalance.focus();await page.keyboard.press('Enter');
  assert.match(await page.getByRole('region',{name:'Saved evidence and configuration'}).innerText(),/Rebalance/);
  assert.equal(await rebalance.getAttribute('aria-pressed'),'true');
- assert.match(await page.locator('tbody tr').nth(3).locator('th').getAttribute('class'),/bg-blue-100/);
+ assert.match(await page.locator('tbody tr').nth(2).locator('th').getAttribute('class'),/bg-blue-100/);
  assert.doesNotMatch(await page.locator('tbody tr').first().locator('th').getAttribute('class'),/bg-blue-100/);
  await page.getByLabel('Fixture state').selectOption('recovered');
  assert.equal(await page.getByRole('status').count(),0);
  assert.equal(await page.getByRole('button',{name:'Show error details for Rebalance'}).count(),0);
- assert.match(await page.locator('tbody tr').nth(3).getAttribute('class'),/bg-emerald-50/);
+ assert.match(await page.locator('tbody tr').nth(2).getAttribute('class'),/bg-emerald-50/);
  assert.equal(await page.getByRole('button',{name:'Open Rebalance LLM details'}).getAttribute('data-workflow-run-id'),'502');
  await page.getByLabel('Fixture state').selectOption('loaded');
  for(const [name,action] of [['Inputs','inputs:rebalance'],['Models','models:rebalance'],['Prompt','prompt:rebalance'],['Saved output','output:rebalance'],['Stock Flow','flow'],['Open stage','open:rebalance']]){await page.getByRole('button',{name,exact:true}).click();assert.equal(await page.evaluate(()=>window.actions.at(-1)),action);}
  assert.equal(await page.evaluate(()=>window.actions.some(a=>a==='run'||a==='sync'||a.startsWith('order:'))),false);
- await page.getByRole('link',{name:'History',exact:true}).click();assert.match(page.url(),/#history$/);await page.goBack();assert.equal(await page.locator('tbody tr').count(),6);
+ await page.getByRole('link',{name:'History',exact:true}).click();assert.match(page.url(),/#history$/);await page.goBack();assert.equal(await page.locator('tbody tr').count(),7);
  const duration=page.getByRole('button',{name:'Duration',exact:true});
  for(let i=0;i<2;i++){await duration.click();const dialog=page.getByRole('dialog');await dialog.waitFor();assert.equal(await dialog.evaluate(el=>el.contains(document.activeElement)),true);await page.keyboard.press('Tab');assert.equal(await dialog.evaluate(el=>el.contains(document.activeElement)),true);await page.keyboard.press('Escape');await dialog.waitFor({state:'detached'});assert.equal(await duration.evaluate(el=>el===document.activeElement),true);}
  await page.getByRole('button',{name:'Saved evidence and configuration',exact:true}).click();await page.getByLabel('Stage',{exact:true}).selectOption('actionables');
@@ -150,12 +150,12 @@ try {
  await page.screenshot({path:path.join(evidence,'execution-desktop.png'),fullPage:true});
  await page.getByRole('button',{name:'India stage ledger',exact:true}).click();assert.equal(await page.getByRole('button',{name:'Place Order',exact:true}).count(),1);assert.equal(await page.getByRole('button',{name:'Final Order',exact:true}).count(),0);
  for(const state of ['loading','empty','failed','stale','zero','selection']){
- await page.getByLabel('Fixture state').selectOption(state);assert.equal(await page.locator('tbody tr').count(),6);
+ await page.getByLabel('Fixture state').selectOption(state);assert.equal(await page.locator('tbody tr').count(),7);
  if(state==='loading')assert.ok(await page.locator('tbody').getByRole('img',{name:'queued',exact:true}).count()>0);
  if(state==='empty'){assert.match(await page.locator('tbody').innerText(),/Not available/);assert.doesNotMatch(await page.locator('tbody').innerText(),/Passed:2/);}
  if(state==='failed')assert.equal(await page.locator('tbody tr').filter({hasText:'Request timed out'}).count(),1);
  if(state==='stale')assert.ok(await page.locator('tbody').getByRole('img',{name:'stale',exact:true}).count()>0);
- if(state==='zero'){assert.equal(await page.locator('tbody tr').nth(2).locator('td').nth(2).innerText(),'0');assert.equal(await page.locator('tbody tr').nth(1).locator('td').nth(2).innerText(),'0');}
+ if(state==='zero'){assert.equal(await page.locator('tbody tr').nth(4).locator('td').nth(2).innerText(),'0');assert.equal(await page.locator('tbody tr').nth(1).locator('td').nth(2).innerText(),'0');}
  if(state==='selection'){const check=page.getByRole('checkbox',{name:/Select Rebalance/});await check.focus();await page.keyboard.press('Space');assert.equal(await check.isChecked(),true);await page.getByRole('button',{name:'Run and order controls',exact:true}).click();assert.match(await page.getByRole('region',{name:'Sync and order controls'}).innerText(),/Next run: Rebalance/);assert.equal(await page.getByRole('checkbox',{name:'Rebalance',exact:true}).isChecked(),true);await page.getByRole('button',{name:'India stage ledger',exact:true}).click();}
  }
  await page.getByLabel('Fixture state').selectOption('loaded');
@@ -165,16 +165,16 @@ try {
  const region=page.getByRole('region',{name:'Saved stage ledger, scroll for all columns'});await region.focus();await page.keyboard.press('ArrowRight');await region.evaluate(el=>el.scrollLeft=el.scrollWidth);
  assert.equal(await region.evaluate(el=>el.scrollLeft>0),true);
  await page.screenshot({path:path.join(evidence,'us-partial-narrow.png'),fullPage:true});
- await page.getByRole('button',{name:/06 Actionables/}).click();await page.getByRole('button',{name:'Calculation',exact:true}).focus();await page.keyboard.press('Enter');assert.equal(await page.evaluate(()=>window.actions.at(-1)),'calculation');
+ await page.getByRole('button',{name:/04 Actionables/}).click();await page.getByRole('button',{name:'Calculation',exact:true}).focus();await page.keyboard.press('Enter');assert.equal(await page.evaluate(()=>window.actions.at(-1)),'calculation');
  // Reload and repeated stage selection retain separate failed/historical/derived labels.
  await page.goto(origin+'/?fixture=derived');
  for(let i=0;i<2;i++){
- await page.getByRole('button',{name:/06 Actionables/}).click();
+ await page.getByRole('button',{name:/04 Actionables/}).click();
  assert.match(await page.locator('tbody tr').last().innerText(),/Derived summary · saved final execution not established/);
  const sources=page.getByRole('list',{name:'Evidence sources'});
  assert.match(await sources.innerText(),/Timestamp source: run #102 · failed/);
  assert.match(await sources.innerText(),/Stock-count source: run #101 · completed/);
- await page.getByRole('button',{name:/05 Technical/}).click();
+ await page.getByRole('button',{name:/03.2 Technical/}).click();
  assert.match(await page.getByRole('list',{name:'Evidence sources'}).innerText(),/india workflow #7 · technical · failed/);
  await page.reload();await page.getByRole('table').waitFor();
  }
@@ -197,8 +197,8 @@ try {
      await page.addStyleTag({content:'*, *::before, *::after { transition: none !important; }'});
      await page.evaluate(dark=>document.documentElement.classList.toggle('dark',dark),dark);
      const rows=page.locator('tbody tr'),tiles=page.locator('[data-palette-tiles] article');
-     assert.equal(await rows.count(),6);assert.equal(await tiles.count(),6);
-     for(const targets of [rows,tiles])for(let i=0;i<6;i++){
+     assert.equal(await rows.count(),7);assert.equal(await tiles.count(),7);
+     for(const targets of [rows,tiles])for(let i=0;i<7;i++){
        assert.equal(await targets.nth(i).evaluate((el,bg)=>el.classList.contains(bg),background),true,market+' '+state);
      }
      const rowColour=await rows.first().evaluate(backgroundRgba);
@@ -206,7 +206,7 @@ try {
      assert.equal(rowColour,tileColour,market+' '+state+' theme '+dark);
      assert.notEqual(rowColour.split(',').at(-1),'0');colours.push(rowColour);
      // Selecting another stage must preserve its state colour.
-     await page.getByRole('button',{name:/04 Rebalance/}).click();
+     await page.getByRole('button',{name:/03.1 Rebalance/}).click();
      assert.equal(await rows.nth(3).evaluate(backgroundRgba),rowColour);
      if(state==='idle'){
        await page.getByLabel('Fixture state').selectOption('selection');
@@ -215,8 +215,8 @@ try {
    }
    assert.equal(new Set(colours).size,5,market+' distinguishable state colours, dark='+dark);
  }
- console.log('PASS: all 5 statuses × 6 stages × both brokers × both themes; tiles and ledger computed backgrounds match; selection preserves state colours.');
+ console.log('PASS: all 5 statuses × 7 steps × both brokers × both themes; tiles and ledger computed backgrounds match; selection preserves state colours.');
  assert.deepEqual(consoleErrors,[]);
- console.log('PASS: 6 rows; value inventory; India/US; partial row and summary; all evidence callbacks; loading/empty/failed/stale/zero/selection; repeated dialogs; Escape/focus/keyboard; back navigation; narrow scroll; market-specific orders; no execution callbacks triggered.');
+ console.log('PASS: 7 rows; value inventory; India/US; partial row and summary; all evidence callbacks; loading/empty/failed/stale/zero/selection; repeated dialogs; Escape/focus/keyboard; back navigation; narrow scroll; market-specific orders; no execution callbacks triggered.');
  console.log('Screenshots: '+evidence);
 }finally{await browser?.close();if(server)await new Promise(resolve=>server.close(resolve));await rm(temporary,{recursive:true,force:true});}
