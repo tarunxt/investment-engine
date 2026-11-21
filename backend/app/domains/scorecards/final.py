@@ -49,8 +49,12 @@ def calculate_final(manifest, attempts, config):
         rebal=tables.get("rebalance",{}).get(key,{})
         buys=[n for r in rebal.get("raw_rows",[]) if (n:=number(r.get("Units Change"),0,1e15)) is not None and n>0]
         units=position if action=="Sell All" else position/2 if action=="Trim" else mean(buys) if action in ("Add more","Buy New") and buys else 0 if action=="Hold" else None
+        eligibility = ("Incomplete positive-weight scores" if not complete else "Position unavailable" if position is None
+                       else "No position to sell" if action in ("Trim","Sell All") and position == 0
+                       else "Hold" if action == "Hold" else "Suggested quantity unavailable" if units is None or units<=0
+                       else "Subject to broker order checks")
         rows.append({**stock,"scores":scores,"contributions":contributions,"coverage":coverage,"available_weight":available,
-                     "final":final,"signed":signed,"action":action,"suggested_units":units,"status":"Complete" if complete else "Provisional" if final is not None else "Unassessed"})
+                     "final":final,"signed":signed,"action":action,"suggested_units":units,"sizing_reason":eligibility,"status":"Complete" if complete else "Provisional" if final is not None else "Unassessed"})
     rows.sort(key=lambda r:(r["status"]!="Complete", r["final"] is None, -(r["final"] or 0), r["listing"]))
     ranks={}
     for row in rows:
@@ -59,3 +63,32 @@ def calculate_final(manifest, attempts, config):
         row["rank"]=ranks[status] if row["final"] is not None else None
     return rows
 
+
+
+def compare_formula(rows, outputs, previous):
+    """Evaluate the previous base divisor and signed multipliers on the same slot means."""
+    from app.domains.runs.final_score_math import weighted_score, normalize_action, ACTION_HEADER, ACTION_VALUES
+    from app.domains.runs.supplemental_scores import blend_actionable_score
+    groups = {card: {row["listing"]:row for row in attempt["rows"]} for card,attempt in outputs.items()}
+    comparisons = []
+    for row in rows:
+        key = row["listing"]
+        reb = groups.get("rebalance",{}).get(key,{})
+        tech = groups.get("technical",{}).get(key,{})
+        terms = dict(reb.get("signed_terms",{}))
+        terms["mean-mode-action"] = previous.actionScores.get(reb.get("action"))
+        terms["last-5-candles-trend"] = tech.get("signed_terms",{}).get("candles")
+        terms["premarket-trend"] = tech.get("signed_terms",{}).get("premarket")
+        terms.pop("action",None)
+        factors = [{"id":name,"score":float(terms[name]) if terms.get(name) is not None else None,
+                    "multiplier":float(weight)} for name,weight in previous.detailedRationaleMultipliers.items()
+                   if name != "technical-scan-confidence" and (tech or name not in ("last-5-candles-trend","premarket-trend"))]
+        signed, divisor = weighted_score(factors,float(previous.detailedRationaleDenominator) if previous.detailedRationaleDenominator else None)
+        if signed is None:
+            votes = [ACTION_VALUES[a] for r in reb.get("raw_rows",[]) if (a:=normalize_action(r.get(ACTION_HEADER))) in ACTION_VALUES]
+            signed = mean(votes) if votes else None
+        original = blend_actionable_score(max(-3,min(3,signed)),groups.get("pairwise",{}).get(key,{}).get("score"),
+                                          groups.get("threats",{}).get(key,{}).get("score")) if signed is not None else None
+        comparisons.append({"Listing":key,"Previous formula /100":favorable(original),"Previous divisor":divisor,
+                            "Selected weights /100":row["final"],"Coverage":row["status"]})
+    return comparisons

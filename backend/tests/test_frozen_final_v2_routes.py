@@ -320,16 +320,28 @@ async def test_failed_actionables_only_replays_confirmed_verification_rejections
 
 
 @pytest.mark.anyio
-async def test_stage2_publication_source_ownership_and_frozen_independent_final(audit_db):
+async def test_stage2_publication_source_ownership_and_frozen_independent_final(audit_db, monkeypatch):
     from datetime import datetime, timezone
     from app.domains.scorecards import router as cards
     from app.domains.scorecards.models import ScorecardRevision, ScorecardAttempt, ScorecardBatch, ScorecardFinal
     from app.domains.zerodha.models import ZerodhaPortfolioSnapshot as Snapshot
     from app.infrastructure.database.base import Base
     from app.domains.scorecards.final import DEFAULT_WEIGHTS
+    from unittest.mock import AsyncMock
+    from contextlib import asynccontextmanager
+    from app.infrastructure.database.outbox.models import OutboxMessage
+    from app.domains.scorecards.prompts import HEADERS
+    from app.domains.runs.use_cases import create_run
+    @asynccontextmanager
+    async def local_lock(*args, **kwargs):
+        yield
+    monkeypatch.setattr(cards, "_get_redis", lambda: SimpleNamespace(aclose=AsyncMock()))
+    monkeypatch.setattr(cards, "RedisLock", lambda redis: SimpleNamespace(acquire=local_lock))
+    monkeypatch.setattr(create_run, "filter_recently_available_targets", AsyncMock(side_effect=lambda db,targets:(targets,[])))
+    monkeypatch.setattr(create_run, "dispatch_one", AsyncMock())
     stamp = datetime(2026, 10, 1, 9, tzinfo=timezone.utc)
     async with audit_db.engine.begin() as conn:
-        await conn.run_sync(lambda c: Base.metadata.create_all(c, tables=[Snapshot.__table__, ScorecardRevision.__table__,
+        await conn.run_sync(lambda c: Base.metadata.create_all(c, tables=[Snapshot.__table__, OutboxMessage.__table__, ScorecardRevision.__table__,
             ScorecardAttempt.__table__, ScorecardBatch.__table__, ScorecardFinal.__table__]))
     async with audit_db.sessions() as db:
         db.add(Snapshot(id=1,user_id=7,captured_at=stamp,snapshot_date=stamp.date(),holdings_count=1,
@@ -342,12 +354,28 @@ async def test_stage2_publication_source_ownership_and_frozen_independent_final(
         with pytest.raises(HTTPException) as denied:
             await cards.detail("india",rev["id"],db,SimpleNamespace(id=8))
         assert denied.value.status_code == 404
-        attempt = ScorecardAttempt(revision_id=rev["id"],workflow_id=7001,card="technical",request_key="one",
-            settings_json={}, result_json={"rows":[{"listing":"NSE:ABC","score":0,"coverage":"Complete"}]})
-        db.add(attempt)
+        target = {"provider":"test","model":"sample"}
+        start = cards.Start(sequence=42,request_key="only-once",targets=[target,target])
+        queued = await cards.start("india",rev["id"],"technical",start,db,OWNER)
+        assert (await cards.start("india",rev["id"],"technical",start,db,OWNER)) == queued
+        jobs=(await db.execute(select(Job).join(RunJob,RunJob.job_id==Job.id).where(RunJob.run_id==queued["run_id"]))).scalars().all()
+        assert len(jobs)==2 and create_run.dispatch_one.await_count==2
+        values = {"Exchange Symbol":"NSE","Stock Symbol":"ABC","Last 5 candles trend":"-3",
+                  "Technical rationale":"Five verified lower closes","Evidence source and as-of":"https://example.org/chart 2025-01-01T12:00:00Z"}
+        header=HEADERS["technical"]
+        response="\n".join("|"+"|".join(row)+"|" for row in (header,["---"]*len(header),[values.get(k,"—") for k in header]))
+        for job in jobs:
+            assert job.prompt.startswith("[INDEPENDENT_SCORECARD:india:technical:")
+            job.status=JobStatus.COMPLETED
+            job.response=response
         await db.commit()
-        request = cards.Finalize(sequence=42,attempts={"technical":attempt.id},weights=DEFAULT_WEIGHTS)
+        output=await cards.attempt_result("india",queued["id"],db,OWNER)
+        assert output["status"]=="completed" and output["rows"][0]["score"]==0
+        request = cards.Finalize(sequence=42,attempts={"technical":queued["id"]},weights=DEFAULT_WEIGHTS)
         result = await cards.finalize("india",rev["id"],request,db,OWNER)
         assert result["rows"][0]["final"] == 0
         assert result["rows"][0]["status"] == "Provisional"
         assert (await cards.finalize("india",rev["id"],request,db,OWNER))["id"] == result["id"]
+        from app.domains.recommendation_audit.schemas import Formula
+        preview = await cards.finalize("india",rev["id"],request.model_copy(update={"compare_with":Formula()}),db,OWNER)
+        assert preview["comparison"][0]["Selected weights /100"] == 0

@@ -63,9 +63,11 @@ def parse_rows(response, card, assigned):
     return {k:r for k,r in rows.items() if r}, None
 
 
-def rebalance(rowset, stock):
+def rebalance(rowset, stock, cutoff):
     observations = []
     for r in rowset:
+        if not dated_reference(r.get("Analyst/Source"), cutoff):
+            continue
         action = normalize_action(r.get(ACTION_HEADER))
         units, change, final = [number(r.get(k), -1e15, 1e15) for k in ("Current Units","Units Change","Final Units")]
         if action is None or units is None or units != stock["units"] or change is None or final is None or final < 0 or not math.isclose(units+change,final,abs_tol=1e-8):
@@ -145,7 +147,7 @@ def threats(listing, slots, raw):
     cards = [table[listing] for table,_ in slots if listing in table]
     risk = average(c["score"] for c in cards)
     categories = {label:average(c["categories"][i]["score"] for c in cards) for i,label in enumerate(CATEGORIES,1)}
-    trails = [r for _, records in slots for r in records if r["Exchange"]+":"+r["Symbol"]==listing]
+    trails = [{**r,"slot":slot} for slot,(_, records) in enumerate(slots,1) for r in records if r["Exchange"]+":"+r["Symbol"]==listing]
     return {"score":None if risk is None else 100-risk, "stock_threat":risk, "categories":categories,
             "terms":{k:None if v is None else 100-v for k,v in categories.items()}, "assessed":sum(v is not None for v in categories.values()),
             "extreme":any(r.get("Impact")=="5" and r["Disposition"]=="Accepted" for r in trails),
@@ -202,14 +204,16 @@ def project(card, manifest, jobs):
                 if not isinstance(refs, list) or not any(isinstance(ref, dict) and dated_reference(
                     f"{ref.get('url', '')} {ref.get('as_of', '')}", manifest["as_of"]) for ref in refs):
                     v = None
-            votes[(left,right)][slot]=v
+            earlier = votes[(left,right)].get(slot)
+            if v and v["result"]!="UNKNOWN" or not earlier or earlier["result"]=="UNKNOWN":
+                votes[(left,right)][slot]={**v,"job_id":job.id,"slot":slot+1} if v else None
     threat_slots = [threats_by_slot(rows,manifest["as_of"]) for rows in slots.values()] if card=="threats" else []
     pairwise = pair_results(votes,keys) if card=="pairwise" else {}
     result = []
     for stock in stocks:
         key = stock["listing"]
         if card=="rebalance":
-            row = rebalance(raw[key],stock)
+            row = rebalance(raw[key],stock,manifest["as_of"])
         elif card=="technical":
             row = technical(raw[key],manifest["as_of"])
         elif card=="threats":

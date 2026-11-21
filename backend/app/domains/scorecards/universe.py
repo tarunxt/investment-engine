@@ -98,6 +98,7 @@ async def publish_manifest(db, owner, workflow, body):
         source = normalize_output(job.response, "swing")
         if not source.rows:
             raise HTTPException(422, f"Swing job {job.id} has no readable recommendations")
+        blocks = {block.index:block for block in source.blocks}
         for observation in source.rows:
             raw = dict(observation.source_values)
             row = listing(raw.get("exchange_symbol"), raw.get("stock_symbol"), raw.get("stock_name"), "swing")
@@ -107,15 +108,19 @@ async def publish_manifest(db, owner, workflow, body):
                 row["origin"] = "both"
             if job.id not in row["sources"]:
                 row["sources"].append(job.id)
-            evidence.append({"listing": row["listing"], "run_id": run.id, "job_id": job.id, "model": job.model,
+            block = blocks[observation.source.fragment]
+            original = dict(zip(block.headers, block.rows[observation.source.row-1]))
+            evidence.append({"original_headers":list(block.headers),"original_row":original,"listing": row["listing"], "run_id": run.id, "job_id": job.id, "model": job.model,
                              "source_time": utc(job.updated_at).isoformat(), "row": {k: str(v) if v is not None else None for k,v in raw.items()}})
     # A ticker-only US position with an unresolved share class cannot establish zero units for a contender.
     for row in listings.values():
         if row["origin"] == "contender" and any(h["origin"] == "holding" and h["symbol"] == row["symbol"] for h in unresolved):
             row.update(units=None, settled=None, weight=None, value=None)
-    return {"version": 1, "research_horizon_weeks": [2,12], "portfolio": workflow.portfolio, "sequence": workflow.sequence, "market": market,
+    for row in listings.values():
+        row.update(currency="INR" if india else "USD", position_status="unknown" if row["units"] is None else "held" if row["units"] else "absent")
+    return {"version": 1, "owner_id":owner,"research_horizon_weeks": [2,12], "portfolio": workflow.portfolio, "sequence": workflow.sequence, "market": market,
             "currency": "INR" if india else "USD", "as_of": datetime.now(timezone.utc).isoformat(),
             "verified_listings":corrections, "snapshot_id": snap.id, "snapshot_at": utc(snap.captured_at).isoformat(), "swing_job_ids": selected,
-            "funds": {"type": "available_margin" if india else "wallet_balance", "value": snap.available_margin if india else snap.wallet_balance},
+            "funds": {"type": "available_margin" if india else "wallet_balance", "value": snap.available_margin if india else snap.wallet_balance,"captured_at":utc(snap.captured_at).isoformat()},
             "stocks": sorted(listings.values(), key=lambda row: row["listing"]), "evidence": evidence, "unresolved": unresolved}
 

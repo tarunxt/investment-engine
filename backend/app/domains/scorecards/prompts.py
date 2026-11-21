@@ -36,6 +36,9 @@ def batches(stocks, card, *, pairs=None):
 def build_prompt(revision, card, keys, pairs):
     manifest = revision.manifest
     context = {k: v for k, v in manifest.items() if k not in ("stocks", "evidence", "unresolved")}
+    context.pop("owner_id", None)
+    context.pop("verified_listings", None)
+    context["revision_hash"] = revision.digest
     rows = [r for r in manifest["stocks"] if r["listing"] in keys]
     if card == "technical":
         rows = [{k: row[k] for k in ("listing","exchange","symbol","price")} for row in rows]
@@ -65,6 +68,7 @@ def build_prompt(revision, card, keys, pairs):
         template += 'Evidence source and as-of must contain the underlying URL and ISO 8601 candle or quote timestamp including time zone.\n'
     # Keep the provider's standard holdings validator on the same Stage 2 batch.
     if card == "rebalance":
+        template += "\nAnalyst/Source must include the specific source URL and an ISO 8601 publication or quote time with a zone.\n"
         template += "\n## 1. Latest Portfolio Snapshot\n| Exchange | Stock Symbol | Current Units |\n|---|---|---|\n"
         template += "\n".join(f"| {r['exchange']} | {r['symbol']} | {r['units']} |" for r in rows if r["origin"] in ("holding","both"))
         template += "\n## 2. Stage 2 evidence\n"

@@ -493,7 +493,7 @@ async def test_only_actionables_selected_can_email_with_explicitly_skipped_llm_s
     for stage in routes.AUTO_REBALANCE_STAGE_ORDER:
         await write(audit_db, stage, "completed" if stage == "actionables" else "skipped", completed_at=FINISH)
     assert await email(audit_db) == {"status": "queued"}
-    assert (await overall_events(audit_db))[0][1]["stages_completed"] == ["Stage 6 · Final actionables"]
+    assert (await overall_events(audit_db))[0][1]["stages_completed"] == ["Stage 4 · Final actionables"]
 
 
 async def overall_events(audit_db):
@@ -642,7 +642,7 @@ async def test_broker_failure_leaves_recoverable_outbox_and_delivery_is_idempote
         if mail_enabled:
             assert smtp.call_args.args[0] == "owner@example.test"
             assert "India Run #42 completed successfully" in smtp.call_args.args[1]
-            assert "Stage 6 · Final actionables" in smtp.call_args.args[3]
+            assert "Stage 4 · Final actionables" in smtp.call_args.args[3]
         with sessionmaker(sync_engine)() as db:
             row = db.get(ActivityLog, event_id)
             assert row.action == "completion.processed"
@@ -675,7 +675,7 @@ async def test_partial_run_uses_aggregate_outcome_with_a_terminal_linked_provide
         await db.commit()
     if expected:
         assert await email(audit_db) == {"status": expected}
-        assert "Stage 3 · Swing scan (partial)" in (await overall_events(audit_db))[0][1]["stages_completed"]
+        assert "Stage 2 · Swing scan (partial)" in (await overall_events(audit_db))[0][1]["stages_completed"]
     else:
         with pytest.raises(HTTPException) as error:
             await email(audit_db)

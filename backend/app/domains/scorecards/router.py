@@ -19,7 +19,8 @@ from app.shared.exceptions import AppException
 from .models import ScorecardRevision as Revision, ScorecardAttempt as Attempt, ScorecardBatch as Batch, ScorecardFinal as Final
 from .prompts import build_prompt, batches, CARDS
 from .scoring import project
-from .final import DEFAULT_WEIGHTS, calculate_final, policy
+from app.domains.recommendation_audit.schemas import Formula
+from .final import DEFAULT_WEIGHTS, calculate_final, compare_formula, policy
 from .universe import digest, publish_manifest
 
 router = APIRouter(prefix="/runs/scorecards", tags=["equity-scorecards"])
@@ -61,6 +62,7 @@ class Finalize(Request):
     weights: dict[Card,float]
     factors: dict[Card,dict[str,float]] = Field(default_factory=dict)
     actions: dict[str,float] | None = None
+    compare_with: Formula | None = None
 
 
 async def workflow(db, uid, portfolio, sequence):
@@ -185,7 +187,7 @@ async def attempt_result(portfolio:Portfolio,attempt_id:int,db:AsyncSession=Depe
     rev=await db.get(Revision,a.revision_id)
     result=project(a.card,rev.manifest,jobs)
     scored=sum(r["score"] is not None for r in result["rows"])
-    a.result_json={**base,**result,"status":"completed" if scored==len(result["rows"]) and not result["errors"] else "partial" if scored else "unassessed",
+    a.result_json={**base,**result,"status":"completed" if all(r["coverage"]=="Complete" for r in result["rows"]) and not result["errors"] else "partial" if scored else "unassessed",
                    "scored":scored,"source_hashes":{str(j.id):digest(j.response or "") for j,*_ in jobs}}
     out=a.result_json
     await db.commit()
@@ -216,12 +218,15 @@ async def finalize(portfolio:Portfolio,revision_id:int,body:Finalize,db:AsyncSes
         run_ids[card]=await db.scalar(select(Batch.run_id).where(Batch.attempt_id==a.id))
     if not outputs:
         raise HTTPException(422,"Select at least one saved output")
+    rows=calculate_final(rev.manifest,outputs,cfg)
+    if body.compare_with is not None:
+        return {"comparison":compare_formula(rows,outputs,body.compare_with)}
     key=digest([rev.digest,body.attempts,cfg])
     item=await db.scalar(select(Final).where(Final.workflow_id==w.id,Final.digest==key))
     if not item:
         result={"schema":"independent-scorecards-v1","portfolio":portfolio,"sequence":w.sequence,"revision_id":rev.id,
                 "manifest_hash":rev.digest,"attempts":body.attempts,"source_runs":run_ids,"policy":cfg,
-                "rows":calculate_final(rev.manifest,outputs,cfg)}
+                "rows":rows}
         item=Final(workflow_id=w.id,revision_id=rev.id,digest=key,result_json=result)
         db.add(item)
         await db.flush()

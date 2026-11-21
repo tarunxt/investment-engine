@@ -10,11 +10,12 @@ import { loadScoreMatrixFormulaConfig } from "./FinalActionablesConsole";
 export function ScorecardStandalone({portfolio,stage}:{portfolio:"zerodha"|"indmoneyUs";stage:CardKey|"actionables"|"source"}){
   const {user}=useAuth();
   const router=useRouter();
-  const [policy,setPolicy]=useState(()=>migratedPolicy(loadScoreMatrixFormulaConfig()));
+  const [previousFormula]=useState(loadScoreMatrixFormulaConfig);
+  const [policy,setPolicy]=useState(()=>migratedPolicy(previousFormula));
   const [revision,setRevision]=useState<number>();
   const owner=useSyncExternalStore(onWorkflowOwnerInvalidated,captureWorkflowOwner,()=>null);
   if(!user||owner?.id!==user.id)return null;
-  return <ScorecardReview key={owner.generation} portfolio={portfolio} stage={stage} fallbackPolicy={policy} revisionId={revision}
+  return <ScorecardReview key={owner.generation} portfolio={portfolio} stage={stage} previousFormula={previousFormula} fallbackPolicy={policy} revisionId={revision}
     onRevision={setRevision} onPolicy={setPolicy} onClose={()=>router.push(portfolio==="zerodha"?"/console/zerodha#india-workflow":"/console/indmoney-us")}/>;
 }
 

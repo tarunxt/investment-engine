@@ -7958,7 +7958,7 @@ ${zerodhaExecutionMode === "direct_market"
   const content = (
     <AutomatedRebalanceReliabilityBridge>
       {cardReview && <ScorecardReview key={cardReview.portfolio+cardReview.stage} portfolio={cardReview.portfolio} stage={cardReview.stage}
-        revisionId={sourceSelections[cardReview.portfolio]} fallbackPolicy={migratedPolicy(scoreMatrixFormulaConfig)}
+        revisionId={sourceSelections[cardReview.portfolio]} previousFormula={scoreMatrixFormulaConfig} fallbackPolicy={migratedPolicy(scoreMatrixFormulaConfig)}
         onRevision={id=>setSourceSelections(previous=>({...previous,[cardReview.portfolio]:id}))}
         onPolicy={policy=>setCardPolicies(previous=>({...previous,[cardReview.portfolio]:policy}))}
         onClose={()=>setCardReview(null)} />}
