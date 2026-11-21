@@ -61,7 +61,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { formatRebalanceCost, knownCost, sumRebalanceCosts, type StageCost } from "@/lib/rebalanceCost";
-import { useUsdInrRate } from "@/hooks/useUsdInrRate";
+import { useRebalanceCostQuote } from "@/hooks/useRebalanceCostQuote";
 import {
   formatUsdAsVerifiedInr,
   isVerifiedFxRate,
@@ -2022,44 +2022,34 @@ function getRunOutputDisplayLabel(run: RunResponse) {
   return getAutoRebalanceRunDisplayLabel(run);
 }
 
-function getRunOutputSummary(run: RunResponse) {
+function getRunOutputSummary(run: RunResponse, usdInrRate: number) {
   const runLabel = getRunOutputDisplayLabel(run);
   const jobs = run.run_jobs?.map((link) => link.job).filter((job): job is JobResponse => Boolean(job)) ?? [];
   const classifications = jobs.map(classifyRunOutputJob);
   const completed = classifications.filter((state) => state === "completed").length;
   const partial = classifications.filter((state) => state === "partial").length;
   const failed = classifications.filter((state) => state === "failed").length;
-  const costUsd = jobs.reduce(
-    (total, job) => total + (job.estimated_cost ?? 0),
-    0,
-  );
+  const totalCost = sumRebalanceCosts(jobs.map(job => ({ costUsd: job.estimated_cost })), usdInrRate);
   const duration = getRunDuration(run);
   return [
     `${runLabel} · ${formatTimestamp(run.created_at)} · LLMs used: ${jobs.length}`,
     `Completed: ${completed} · Partial: ${partial} · Failed: ${failed}`,
     duration ? `Time taken: ${duration}` : null,
-    costUsd > 0 ? `Cost incurred: $${costUsd.toFixed(4)}` : null,
+    `Cost incurred: ${formatRebalanceCost(totalCost)}`,
   ]
     .filter(Boolean)
     .join("\n");
 }
 
 function formatInrCostFromUsd(value: number | null | undefined, usdInrRate: number) {
-  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
     return "Cost n/a";
   }
-  return formatUsdAsVerifiedInr(value, usdInrRate);
+  return formatRebalanceCost({ costUsd: value }, usdInrRate);
 }
 
 function getJobDuration(job?: JobResponse | null) {
   return formatDuration(job?.created_at, job?.updated_at);
-}
-
-function getRunCostUsd(run: RunResponse) {
-  return (run.run_jobs ?? []).reduce(
-    (total, link) => total + (link.job?.estimated_cost ?? 0),
-    0,
-  );
 }
 
 function getRunJobDisplayModels(jobs: JobResponse[]) {
@@ -2138,7 +2128,7 @@ function buildRunCostBreakdownItems(
       provider,
       model,
       status: run.status,
-      costUsd: getRunCostUsd(run),
+      costUsd: null,
       llmCount: 0,
       autoRebalancePortfolio: run.auto_rebalance_portfolio ?? null,
       autoRebalanceSequence: run.auto_rebalance_sequence ?? null,
@@ -2586,7 +2576,7 @@ function StandardLlmOutputRenderer({ content }: { content: string }) {
 }
 
 function RunOutputDetails({ run }: { run: RunResponse }) {
-  const usdInrRate = useUsdInrRate();
+  const { rate: usdInrRate } = useRebalanceCostQuote();
   const [highlightedJobId, setHighlightedJobId] = useState<number | null>(null);
   const jobs = run.run_jobs?.map((link) => link.job).filter((job): job is JobResponse => Boolean(job)) ?? [];
   const classifications = jobs.map(classifyRunOutputJob);
@@ -2594,7 +2584,7 @@ function RunOutputDetails({ run }: { run: RunResponse }) {
   const partial = classifications.filter((state) => state === "partial").length;
   const failed = classifications.filter((state) => state === "failed").length;
   const duration = getRunDuration(run);
-  const costUsd = getRunCostUsd(run);
+  const totalCost = sumRebalanceCosts(jobs.map(job => ({ costUsd: job.estimated_cost })), usdInrRate);
   const runLabel = getRunOutputDisplayLabel(run);
   const displayModels = getRunJobDisplayModels(jobs);
 
@@ -2634,9 +2624,7 @@ function RunOutputDetails({ run }: { run: RunResponse }) {
             </div>
           </div>
         </div>
-        {costUsd > 0 ? (
-          <p className="mt-2 text-sm font-semibold text-slate-600">Cumulative cost: {formatInrCostFromUsd(costUsd, usdInrRate)}</p>
-        ) : null}
+        <p className="mt-2 text-sm font-semibold text-slate-600">Cumulative cost: {formatRebalanceCost(totalCost)}</p>
         <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200 bg-white">
           <div className="overflow-x-auto">
             <table className="min-w-full text-left text-sm">
@@ -3928,7 +3916,7 @@ function AutoRebalanceCostHistoryDialog({
                       </div>
                       <div className="text-left sm:text-right">
                         <p className="text-base font-extrabold text-emerald-700">
-                          {formatInrCostFromUsd(group.totalCostUsd, usdInrRate)}
+                          {formatRebalanceCost(sumRebalanceCosts(group.items, usdInrRate))}
                         </p>
                         <p className="mt-1 text-[11px] font-bold uppercase tracking-[0.14em] text-slate-400">
                           Total incurred
@@ -3952,10 +3940,6 @@ function AutoRebalanceCostHistoryDialog({
                             {groupAutoRebalanceItemsByStage(group.items).map((section) => {
                               const sectionKey = `${group.id}:${section.stage}`;
                               const sectionCollapsed = collapsedStageKeys.has(sectionKey);
-                              const sectionCostUsd = section.items.reduce(
-                                (total, item) => total + (item.costUsd ?? 0),
-                                0,
-                              );
                               const showSectionCost =
                                 section.stage === "swing" || section.stage === "rebalance";
 
@@ -3984,7 +3968,7 @@ function AutoRebalanceCostHistoryDialog({
                                         {showSectionCost ? (
                                           <span className="text-emerald-700">
                                             Cumulative cost:{" "}
-                                            {formatInrCostFromUsd(sectionCostUsd, usdInrRate)}
+                                            {formatRebalanceCost(sumRebalanceCosts(section.items, usdInrRate))}
                                           </span>
                                         ) : null}
                                       </span>
@@ -4093,7 +4077,7 @@ function StageLlmSelectorDialog({
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [historyEntries, setHistoryEntries] = useState<StageLlmHistoryEntry[]>([]);
   const [historyKey, setHistoryKey] = useState("");
-  const usdInrRate = useUsdInrRate();
+  const { rate: usdInrRate } = useRebalanceCostQuote();
   const currentHistoryKey = stage && portfolio ? `${portfolio}:${stage}` : "";
   const activeHistoryOpen = historyOpen && historyKey === currentHistoryKey;
   const hasLastRunCost =
@@ -4442,7 +4426,7 @@ export function RebalanceWorkflowSections({
   const [preflightErrors, setPreflightErrors] = useState<Partial<Record<WorkflowPortfolio, string[]>>>({});
   const [runtimeOwner] = useState(captureWorkflowOwner);
   const apiService = useMemo(() => workflowOwnedApi(workflowApiService, runtimeOwner), [runtimeOwner]);
-  const usdInrRate = useUsdInrRate();
+  const { rate: usdInrRate, verifiedRate, label: costRateLabel } = useRebalanceCostQuote();
   const { user: basketOwner } = useAuth();
   const basketSafety = useBasketSubmissionSafety(basketOwner?.id ?? null);
   const [initialPersisted] = useState<PersistedWorkflow | null>(() =>
@@ -5961,7 +5945,7 @@ ${zerodhaExecutionMode === "direct_market"
       info: Partial<StageInfo>,
     ) => {
       const timestamp = new Date().toISOString();
-      const infoWithInrCost = withInrCost(info, usdInrRate);
+      const infoWithInrCost = withInrCost(info, verifiedRate);
       updateStage(portfolio, stage, {
         state: "completed",
         endedAt: timestamp,
@@ -5983,13 +5967,13 @@ ${zerodhaExecutionMode === "direct_market"
         },
       );
     },
-    [recordAutoRebalanceStage, updateStage, usdInrRate],
+    [recordAutoRebalanceStage, updateStage, verifiedRate],
   );
 
   // Poll ownership changes only with execution identity, never progress/cost/display updates.
   const restoredPollingIdentity = JSON.stringify([runningPortfolio, runningPortfolio ? STAGE_ORDER.map(stage => [stage, states[runningPortfolio][stage].state, states[runningPortfolio][stage].activeRunId ?? null]) : null]);
-  const restoredPollingContext = useRef({ states, specificMode, selectedStages, markCompleted, recordAutoRebalanceStage, updateStage, usdInrRate });
-  restoredPollingContext.current = { states, specificMode, selectedStages, markCompleted, recordAutoRebalanceStage, updateStage, usdInrRate };
+  const restoredPollingContext = useRef({ states, specificMode, selectedStages, markCompleted, recordAutoRebalanceStage, updateStage, usdInrRate: verifiedRate });
+  restoredPollingContext.current = { states, specificMode, selectedStages, markCompleted, recordAutoRebalanceStage, updateStage, usdInrRate: verifiedRate };
   useEffect(() => {
     const { states, specificMode, selectedStages, recordAutoRebalanceStage } = restoredPollingContext.current;
     if (!runningPortfolio) return;
@@ -6559,7 +6543,7 @@ ${zerodhaExecutionMode === "direct_market"
             selectedRun?.run_jobs?.map((link) => link.job).filter(Boolean) ?? [];
           body = jobs.length
             ? [
-                `## Last run summary\n${selectedRun ? getRunOutputSummary(selectedRun) : "Not available"}`,
+                `## Last run summary\n${selectedRun ? getRunOutputSummary(selectedRun, usdInrRate) : "Not available"}`,
                 jobs
                   .map(
                     (job) =>
@@ -6598,7 +6582,7 @@ ${zerodhaExecutionMode === "direct_market"
         });
       }
     },
-    [apiService, ],
+    [apiService, usdInrRate],
   );
 
   useEffect(() => {
@@ -8205,12 +8189,12 @@ ${zerodhaExecutionMode === "direct_market"
               {getWorkflowRunDuration(states[section.portfolio], now)
                 ? `Cumulative LLM time: ${getWorkflowRunDuration(states[section.portfolio], now)} · `
                 : ""}
-              Total cost incurred in last Auto-rebalance:{" "}
+              <span title={costRateLabel}>Total cost incurred in last Auto-rebalance:{" "}
               {formatRebalanceCost(
                 !isSectionRunning && savedRunCosts[section.portfolio]?.sequence === displayedWorkflowSequence
                   ? savedRunCosts[section.portfolio]!
-                  : getWorkflowRunCost(states[section.portfolio], displayedWorkflowSequence, usdInrRate)
-              )}
+                  : getWorkflowRunCost(states[section.portfolio], displayedWorkflowSequence, usdInrRate), usdInrRate
+              )}</span>
             </div>
           </div>
           <button

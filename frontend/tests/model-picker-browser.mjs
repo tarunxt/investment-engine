@@ -42,7 +42,7 @@ const inventory=${JSON.stringify(inventory)};
 const catalog=Object.entries(inventory).map(([name,models])=>({name,models,configured:true,model_estimated_cost_inr:Object.fromEntries(models.map(model=>[model,0])),model_compatibility:Object.fromEntries(models.map((model,index)=>[model,{compatible:name!=='anthropic'||index<2,reason:'Unavailable with current API access.'}])),model_last_run_web_search_used:{'gpt-4o-mini':true,'deepseek-v4-flash':true}}));
 const MODEL_MIX_STORAGE_KEY='offline-fixture-mixes';
 const readSavedModelMixes=()=>[{id:'compatible-models-system',name:'Compatible models',targets:['openai::gpt-4o-mini']}];
-const useUsdInrRate=()=>0;
+const useRebalanceCostQuote=()=>({ rate: 92.9699 });
 const formatInrCost=value=>typeof value==='number'?'₹'+value.toFixed(2):'n/a';
 ${stageLabelSource}
 ${stageMetadata}
