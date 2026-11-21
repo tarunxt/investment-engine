@@ -35,7 +35,7 @@ test('Excel reference examples, nearest whole rounding, fractional USD shares an
 test('inclusive outer-range visibility, Show all and unknown scores do not change financial calculations',()=>{
  for(const score of [-3,-2.5,1.5,3])assert.equal(math.displayScoreAccepted(score,-2.5,1.5,false),true);
  for(const score of [-2.49,0,1.49,null,NaN])assert.equal(math.displayScoreAccepted(score,-2.5,1.5,false),false);assert.equal(math.displayScoreAccepted(null,-2.5,1.5,true),true);
- const source=readFileSync(new URL('../app/console/dashboard/_components/RebalanceWorkflowSections.tsx',import.meta.url),'utf8');assert.match(source,/lg:grid-cols-3/);assert.match(source,/displayOnlyRows/);assert.match(source,/No executable order/);assert.match(source,/useBasketDisplayCalculations/);
+ const source=readFileSync(new URL('../app/console/dashboard/_components/RebalanceWorkflowSections.tsx',import.meta.url),'utf8');assert.match(source,/lg:grid-cols-3/);assert.match(source,/useBasketDisplayCalculations/);
 });
 
 function hooks() {
@@ -188,6 +188,19 @@ test('actual broker preview renders US copy and labels without India routing con
  assert.match(html,/IndMoney US basket review/);assert.match(html,/Select or deselect Hold IndMoney basket orders/);assert.match(html,/USD/);assert.equal(executions,0);
  const button=find(us,n=>n.type===Button);assert.ok(button);assert.equal(typeof button.props.onClick,'function');
  const india=result.exports.ScopedZerodhaBasketPreviewDialog({...props,tradingViewMarket:'india',basketBrokerLabel:'Zerodha',onPlaceOrder});
+ for (const market of ['india','us']) {
+   const finalRows = new Map([
+     ['NSE:ONE', {listing:'NSE:ONE', symbol:'ONE', exchange:'NSE', name:'One', final:73.53, signed:1.41, status:'Provisional', scores:{rebalance:73.53, technical:null}}],
+     ['NSE:TWO', {listing:'NSE:TWO', symbol:'TWO', exchange:'NSE', name:'Two', final:null, signed:null, status:'Unassessed', scores:{}}],
+     ['NSE:ZERO', {listing:'NSE:ZERO', symbol:'ZERO', exchange:'NSE', name:'Zero', final:0, signed:-3, status:'Provisional', scores:{rebalance:0}}],
+   ]);
+   const review=result.exports.ScopedZerodhaBasketPreviewDialog({...props,orders:[],tradingViewMarket:market,onPlaceOrder,scoreRevision:{finalRows,divisors:[],differences:[],saved:new Map()}});
+   const reviewHtml=renderToStaticMarkup(review);
+   assert.match(reviewHtml,/73.53 \/ 100/); assert.match(reviewHtml,/0.00 \/ 100/); assert.match(reviewHtml,/Unassessed/);
+   assert.equal((reviewHtml.match(/data-display-only="true"/g)??[]).length,3);
+   assert.doesNotMatch(reviewHtml,/No basket rows available/);
+   assert.equal(find(review,n=>n.type===Button&&n.props.children==='Place Order').props.disabled,true);
+ }
  const valuationFixture={captured_at:end,snapshot_date:'2026-10-28',holdings_count:2,holdings_market_value:500,available_margin:1000,holdings:[{exchange:'NSE',tradingsymbol:'HAL',quantity:5,t1_quantity:2,last_price:100},{exchange:'BSE',tradingsymbol:'OIL',quantity:0,t1_quantity:3,last_price:200}]};
  const valued=result.exports.ScopedZerodhaBasketPreviewDialog({...props,detailsData:{portfolioSnapshot:valuationFixture},tradingViewMarket:'india',basketBrokerLabel:'Zerodha',onPlaceOrder});
  const tile=find(valued,node=>node.type===tileComponent);assert.equal(tile.props.portfolioValue,1300);assert.equal(tile.props.availableMargin,1000);assert.equal(tile.props.totalAssets,2300);assert.equal(sizingAssets,2300);assert.match(tile.props.valuationNote,/T1/);
@@ -564,7 +577,7 @@ test('Action New group identity is independent of original Side/action and misma
  assert.equal(math.basketActionGroup('Add More'),'Add more');assert.equal(math.basketActionGroup(null),'Unavailable');
  for(const [current,target,group]of[[500,0,'Sell All'],[500,.1,'Trim'],[0,.1,'Buy New'],[10,.1,'Add more'],[100,.1,'Hold']])assert.equal(math.basketActionGroup(math.weightComparison(current,1000,target).action),group);
  assert.equal(math.actionQuantityMatchesDraft(-5,'SELL',5),true);assert.equal(math.actionQuantityMatchesDraft(25,'BUY',25),true);for(const args of [[-5,'BUY',5],[25,'BUY',7],[null,'SELL',5],[0,'BUY',0],[-5,'SELL',2]])assert.equal(math.actionQuantityMatchesDraft(...args),false);
- const source=readFileSync(new URL('../app/console/dashboard/_components/RebalanceWorkflowSections.tsx',import.meta.url),'utf8');assert.match(source,/groupForDisplay\(row\) === action/);assert.match(source,/groupForOrder\(order\) === action/);assert.match(source,/Boolean\(orderSubmissionBlockedReason\) \|\| selectedDraftIssues.length > 0/);assert.match(source,/After sales: <strong>/);
+ const source=readFileSync(new URL('../app/console/dashboard/_components/RebalanceWorkflowSections.tsx',import.meta.url),'utf8');assert.match(source,/groupForOrder\(order\) === action/);assert.match(source,/Boolean\(orderSubmissionBlockedReason\) \|\| selectedDraftIssues.length > 0/);assert.match(source,/After sales: <strong>/);
 });
 
 test('reordered and renamed table uses stable IDs for every cell and preserves selection controls',()=>{
@@ -860,24 +873,24 @@ test('a positive quote rounding to zero paise cannot produce actionable shares',
   assert.match(target.reason, /prices/);
 });
 
-test('basket width uses the release position when the final pointer move is coalesced', () => {
+test('all four basket edges use the release position when the final pointer move is coalesced', () => {
   const { BasketResizeHandles } = load('../components/BasketResizeHandles.tsx', {
     useEffect: () => {},
     useRef: current => ({ current }),
-    useState: () => [{ current: 900, available: 1400 }, () => {}],
+    useState: () => [{ width: 900, height: 900, availableWidth: 1400, availableHeight: 1200 }, () => {}],
   });
-  for (const side of ['left', 'right']) {
+  for (const side of ['left', 'right', 'top', 'bottom']) {
     let width = 900;
     const panel = {
-      getBoundingClientRect: () => ({ width }),
-      style: { getPropertyValue: () => width + 'px', setProperty: (_, value) => { width = parseFloat(value); } },
+      getBoundingClientRect: () => ({ width, height: width }),
+      style: { getPropertyValue: () => width + 'px', setProperty: (axis, value) => { assert.equal(axis, ["top","bottom"].includes(side) ? "--basket-height" : "--basket-width"); width = parseFloat(value); } },
     };
     const handle = BasketResizeHandles({ panelRef: { current: panel } }).find(edge => edge.key === side);
     const target = { dataset: { side }, setPointerCapture() {} };
     const event = (type, clientX) => ({
-      type, clientX, currentTarget: target, isPrimary: true, button: 0, pointerId: 1, preventDefault() {},
+      type, clientX, clientY: clientX, currentTarget: target, isPrimary: true, button: 0, pointerId: 1, preventDefault() {},
     });
-    const direction = side === 'left' ? 1 : -1;
+    const direction = ['left','top'].includes(side) ? 1 : -1;
     handle.props.onPointerDown(event('pointerdown', 400));
     handle.props.onPointerMove(event('pointermove', 400 + direction * 6));
     assert.equal(width, 888);
@@ -895,7 +908,7 @@ test('basket width restores after the parent attaches its ref and stays scoped t
     const { BasketResizeHandles } = load('../components/BasketResizeHandles.tsx', {
       ...h.bindings,
       localStorage: { getItem: key => saved.get(key), setItem: (key, value) => saved.set(key, value) },
-      getComputedStyle: () => ({paddingLeft: '16px', paddingRight: '16px'}),
+      getComputedStyle: () => ({paddingLeft: '16px', paddingRight: '16px', paddingTop:'16px', paddingBottom:'16px'}),
       ResizeObserver: class { observe() {} disconnect() {} },
     });
     const panelRef = { current: null };
@@ -903,9 +916,9 @@ test('basket width restores after the parent attaches its ref and stays scoped t
     render();
     let width = 900;
     panelRef.current = {
-      parentElement: { clientWidth: 1440 },
+      parentElement: { clientWidth: 1440, clientHeight: 900 },
       getBoundingClientRect: () => ({ width }),
-      style: { setProperty: (_, value) => { width = parseFloat(value); }, getPropertyValue: () => width + 'px' },
+      style: { removeProperty() {}, setProperty: (_, value) => { width = parseFloat(value); }, getPropertyValue: () => width + 'px' },
     };
     h.flush();
     const expected = owner === 42 ? 1000 : 900;

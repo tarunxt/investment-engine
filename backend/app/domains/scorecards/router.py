@@ -126,8 +126,9 @@ async def start(portfolio:Portfolio,revision_id:int,card:Card,body:Start,db:Asyn
     research = {}
     if not already_started:
         manifest = rev.manifest
+        username = user.username
         await db.commit()
-        research = await collect_research(manifest,card)
+        research = await collect_research(manifest, card, username=username)
     w=await workflow(db,owner,portfolio,body.sequence)
     rev=await owned(db,owner,portfolio,"revision",revision_id,lock=True)
     config={"targets":[t.model_dump() for t in body.targets],"parent":body.retry_attempt_id}
@@ -149,11 +150,14 @@ async def start(portfolio:Portfolio,revision_id:int,card:Card,body:Start,db:Asyn
     config["research"]=research
     config["assignments"]=assignments
     attempt=await storage.append(db,w.id,"attempt",identity,{"card":card,"settings":config},revision_id=rev.id)
+    absent = {r["listing"] for r in rev.manifest["stocks"] if r["origin"] == "contender" and r["units"] == 0}
+    batch_contexts = tuple({"kind": "equity_scorecard_batch_v1", "card": card, "listings": keys,
+                           "absent_contenders": sorted(absent.intersection(keys))} for keys, _ in assignments)
     prompts=tuple(build_prompt(rev,card,keys,pairs,research) for keys,pairs in assignments)
     redis=_get_redis()
     try:
         result=await CreateRunUseCase(db,RedisLock(redis)).execute(CreateRunCommand(
-            prompt=prompts[0],batch_prompts=prompts,scorecard_attempt_id=attempt.id,targets=[RunModelTarget(**t.model_dump()) for t in body.targets],
+            prompt=prompts[0],batch_prompts=prompts,scorecard_batches=batch_contexts,scorecard_attempt_id=attempt.id,targets=[RunModelTarget(**t.model_dump()) for t in body.targets],
             user_id=UserId(user.id),allow_parallel=True,auto_rebalance_portfolio=portfolio,auto_rebalance_sequence=w.sequence,
             auto_rebalance_label=f"{w.label} ({card.title()} Scan)"))
     except AppException as exc:

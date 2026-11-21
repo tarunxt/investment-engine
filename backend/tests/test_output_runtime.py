@@ -518,3 +518,27 @@ def test_failed_fresh_read_fallback_cannot_resurrect_or_replace_owner(monkeypatc
         assert job.status == JobStatus.PROCESSING
         assert job.runtime_metadata_json[KEY]['owner_token'] == 'replacement-owner'
     assert current_output_context() is None
+
+
+def test_pairwise_batch_embedded_swing_header_does_not_trigger_swing_repairs():
+    from app.domains.scorecards.prompts import HEADERS
+    job = make_job(prompt="[INDEPENDENT_SCORECARD:india:pairwise:7]\nSwing evidence: Stock Name | Units to Buy",
+                   auto_rebalance_label="India Run #9 (Pairwise Scan)",
+                   request_context_json={"kind":"equity_scorecard_batch_v1", "card":"pairwise", "listings":["NSE:ABC"]})
+    header = HEADERS["pairwise"]
+    content = "\n".join("|" + "|".join(row) + "|" for row in (header, ["---"]*len(header), ["NSE","ABC","0","0","[]"]))
+    response = AIProviderResponse(content=content, tokens_in=5, tokens_out=5, cost=.001, provider=job.provider, model=job.model)
+    _, provider, _, failed = execute_mocked(job, [response])
+    provider.generate.assert_called_once()
+    failed.assert_not_called()
+    assert job.status == JobStatus.COMPLETED and job.response == content
+
+
+def test_rebalance_hold_for_frozen_absent_contender_only(scoped):
+    batch = {"kind":"equity_scorecard_batch_v1", "card":"rebalance", "listings":["NSE:ABC","NSE:XYZ"], "absent_contenders":["NSE:XYZ"]}
+    scoped(make_job("rebalance",request_context_json=batch))
+    rows = [rebalance_row("ABC"), rebalance_row("XYZ", current_units=0, final_units=0)]
+    assert normalize_runtime_output(json.dumps(rows)).safe_to_replace
+    rows[1]["stock_symbol"] = "OTHER"
+    findings = normalize_runtime_output(json.dumps(rows)).findings
+    assert {"scorecard_assignment","holding_not_in_snapshot"} <= {f.code for f in findings}

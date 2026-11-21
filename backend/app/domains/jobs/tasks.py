@@ -1482,7 +1482,18 @@ def execute_ai_job(self, job_id: int) -> None:
             except MissingTechnicalListings:
                 pass  # A partial supplement can still contribute validated rows.
             content = merge_technical_rows(content, supplement)
-        if _requires_generic_table_output(job.prompt):
+        batch = getattr(job, "request_context_json", None)
+        if isinstance(batch, dict) and batch.get("kind") == "equity_scorecard_batch_v1" and batch.get("card") in {"pairwise", "technical", "threats"}:
+            # Swing evidence embedded in a card can contain an entire stock-recommendation header.
+            # Validate the actual assignment before any legacy prompt-text heuristics run.
+            from app.domains.scorecards.scoring import parse_rows
+            assigned = set(batch["listings"])
+            delivered, issue = parse_rows(content, batch["card"], assigned)
+            if issue or not delivered:
+                raise RuntimeError(f"{job.provider}/{job.model} returned invalid output contract ({issue or 'no assigned listings'})")
+            if delivered.keys() != assigned:
+                partial_price_notice = f"Scorecard received {len(delivered)}/{len(assigned)} assigned listings"
+        elif _requires_generic_table_output(job.prompt):
             if _is_rebalance_output(job.prompt):
                 content, rebalance_table_issue, _parsed_rebalance_rows = _validate_rebalance_table_content(content, job.prompt)
                 for attempt in range(_MAX_STOCK_REPAIR_ATTEMPTS):

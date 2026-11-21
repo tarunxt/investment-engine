@@ -45,6 +45,7 @@ class CreateRunCommand:
     output_source_jobs: list[OutputSourceJobReference] | None = None
     scorecard_attempt_id: int | None = None
     batch_prompts: tuple[str, ...] = ()
+    scorecard_batches: tuple[dict, ...] = ()
     prompt_id: int | None = None
     scheduled_at: datetime | None = None
     auto_export_enabled: bool = False
@@ -68,6 +69,8 @@ class CreateRunUseCase:
     async def execute(self, cmd: CreateRunCommand) -> Run:
         require_equity_analysis(cmd.auto_rebalance_portfolio, cmd.polymarket_event_context)
         validate_prompt(cmd.prompt)
+        if cmd.scorecard_batches and (not cmd.scorecard_attempt_id or len(cmd.scorecard_batches) != len(cmd.batch_prompts)):
+            raise ValidationException("Scorecard assignments must match their dispatched prompts.")
         for batch_prompt in cmd.batch_prompts:
             validate_prompt(batch_prompt)
         validate_targets(cmd.targets)
@@ -169,15 +172,16 @@ class CreateRunUseCase:
                     if attempt is None or attempt.row.run_id is not None:
                         raise ConflictException("Scorecard attempt is missing or already dispatched")
                     attempt.row.run_id = run.id
-                for prompt, target in ((p, t) for p in cmd.batch_prompts or (cmd.prompt,) for t in targets):
+                default_context = output_source_context if output_source_context is not None else cmd.polymarket_event_context
+                batch_jobs = ((i, prompt, target) for i, prompt in enumerate(cmd.batch_prompts or (cmd.prompt,)) for target in targets)
+                for index, prompt, target in batch_jobs:
                     job = Job(
                         prompt=prompt,
                         provider=target.provider,
                         model=target.model,
                         user_id=cmd.user_id,
                         status=initial_status,
-                        request_context_json=(output_source_context if output_source_context is not None
-                                              else cmd.polymarket_event_context),
+                        request_context_json=cmd.scorecard_batches[index] if cmd.scorecard_batches else default_context,
                         scheduled_at=scheduled_at.replace(tzinfo=None) if scheduled_at else None,
                         auto_rebalance_portfolio=cmd.auto_rebalance_portfolio,
                         auto_rebalance_sequence=cmd.auto_rebalance_sequence,

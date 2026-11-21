@@ -5,15 +5,17 @@ import io
 import html
 import json
 import math
+import os
 import re
 import zipfile
 from datetime import datetime, time, timedelta, timezone
 from email.utils import parsedate_to_datetime
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 from xml.etree import ElementTree
 from zoneinfo import ZoneInfo
 
 import httpx
+from redis.exceptions import RedisError
 
 
 INDIA = ZoneInfo("Asia/Kolkata")
@@ -112,7 +114,59 @@ def indian_news(data, venue, stocks, cutoff):
     return matches
 
 
-async def collect(manifest, card):
+def upstox_daily_bars(payload, cutoff, url):
+    sessions = {}
+    for row in (payload.get("data") or {}).get("candles") or []:
+        if not isinstance(row, list) or len(row) < 6:
+            continue
+        try:
+            stamp = datetime.fromisoformat(row[0])
+        except (TypeError, ValueError):
+            continue
+        if stamp.tzinfo is None:
+            continue
+        day = stamp.astimezone(INDIA).date()
+        item = bar(day, INDIA, row[1:6], url, cutoff)
+        if item:
+            sessions[day] = item
+    return [sessions[day] for day in sorted(sessions, reverse=True)[:10]]
+
+
+async def supplement_indian_bars(client, result, cutoff, notices, owner):
+    from app.domains.zerodha.upstox_quote_guard import QuoteGuard, redis_client
+    from app.domains.zerodha.upstox_quotes import load_instruments
+    missing = [key for key, items in result.items() if len({r["as_of"][:10] for r in items if r["kind"] == "daily_bar"}) < 5]
+    if not missing:
+        return
+    mapping = await load_instruments(client)
+    end = cutoff.astimezone(INDIA).date()
+    semaphore = asyncio.Semaphore(4)
+
+    async def fetch(key, guard):
+        instrument = mapping.get(key)
+        if not instrument:
+            return
+        url = f"https://api.upstox.com/v3/historical-candle/{quote(instrument, safe='')}/days/1/{end}/{end-timedelta(days=24)}"
+        async with semaphore:
+            try:
+                if not await guard.admit():
+                    notices.append("Upstox historical requests limited")
+                    return
+                response = await client.get(url, headers={"Authorization": "Bearer " + os.environ["UPSTOX_ANALYTICS_TOKEN"]})
+                if response.status_code == 429:
+                    await guard.backoff(response.headers.get("Retry-After"))
+                response.raise_for_status()
+                bars = upstox_daily_bars(response.json(), cutoff, url)
+                if len(bars) >= 5:
+                    result[key] = [r for r in result[key] if r["kind"] != "daily_bar"] + bars
+            except (ValueError, TypeError, AttributeError, httpx.HTTPError):
+                notices.append("Historical candles unavailable: " + key)
+    async with redis_client() as redis:
+        guard = QuoteGuard(redis, os.getenv("UPSTOX_LTP_OWNER_USER_ID") or owner, "history", missing)
+        await asyncio.gather(*(fetch(key, guard) for key in missing))
+
+
+async def collect(manifest, card, *, username=None):
     stocks, cutoff = manifest["stocks"], datetime.fromisoformat(manifest["as_of"])
     result = {s["listing"]:[] for s in stocks}
     lookup = {(s["exchange"],s["symbol"]):s["listing"] for s in stocks}
@@ -184,6 +238,13 @@ async def collect(manifest, card):
             await asyncio.wait_for(asyncio.gather(*requests),timeout=19)
         except TimeoutError:
             notices.append("Research time limit reached")
+        if manifest["market"] == "india":
+            from app.domains.zerodha.upstox_quotes import configured_for
+            if configured_for(manifest["owner_id"], username):
+                try:
+                    await asyncio.wait_for(supplement_indian_bars(client, result, cutoff, notices, manifest["owner_id"]), timeout=17)
+                except (TimeoutError, httpx.HTTPError, ValueError, OSError, KeyError, EOFError, RuntimeError, RedisError):
+                    notices.append("Upstox historical candles unavailable")
         if manifest["market"]=="us" and card!="technical":
             documents=[]
             for key,items in result.items():

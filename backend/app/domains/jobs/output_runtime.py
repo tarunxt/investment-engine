@@ -32,6 +32,8 @@ class OutputContext:
     holdings: tuple[Mapping[str, Any], ...] | None
     expected_rows: int | None
     swing_sources: tuple[FrozenSwingSource, ...] | None = None
+    batch_contenders: frozenset[tuple[str, str]] = frozenset()
+    batch_listings: frozenset[tuple[str, str]] = frozenset()
 
 
 _context: ContextVar[OutputContext | None] = ContextVar('validated_output_context', default=None)
@@ -122,7 +124,12 @@ def configure_output_context(job: Any, dimensions: Mapping[str, str | None]) -> 
                                           market=analysis_run_identity(job).market)
     if kind == "rebalance" and "[REBALANCE_UNIVERSE_V1]" in _instruction_prefix(prompt) and sources is None:
         raise OutputPreflightError("Complete Swing coverage requires frozen selected source references; refresh inputs before starting.")
-    return _context.set(OutputContext(kind, metadata, holdings, expected, sources))
+    batch = getattr(job, "request_context_json", None)
+    assigned, contenders = frozenset(), frozenset()
+    if isinstance(batch, dict) and batch.get("kind") == "equity_scorecard_batch_v1" and batch.get("card") == kind == "rebalance":
+        assigned = frozenset(tuple(key.split(":", 1)) for key in batch["listings"])
+        contenders = frozenset(tuple(key.split(":", 1)) for key in batch["absent_contenders"]) & assigned
+    return _context.set(OutputContext(kind, metadata, holdings, expected, sources, contenders, assigned))
 
 
 def reset_output_context(token: Token | None) -> None:
@@ -160,8 +167,12 @@ def normalize_runtime_output(content: str, *, kind: str | None = None, fragment:
     result = normalize_output(content, context.kind, metadata=context.metadata,
                               holdings=context.holdings, derive_arithmetic=True,
                               minimum_rows=1 if fragment or context.kind == 'rebalance' else context.expected_rows or 5,
-                              non_buy_candidates=frozenset(key for source in context.swing_sources or () for key in source.identities))
+                              non_buy_candidates=frozenset(key for source in context.swing_sources or () for key in source.identities) | context.batch_contenders)
     findings = list(result.findings)
+    if context.batch_listings and not fragment:
+        reported = [identity(row.values) for row in result.rows]
+        if set(reported) != context.batch_listings or len(reported) != len(context.batch_listings):
+            findings.append(Finding("scorecard_assignment", "Return each assigned listing exactly once."))
     if context.kind == 'rebalance' and not fragment and context.swing_sources is not None:
         required = {key for source in context.swing_sources for key in source.identities}
         present = {identity(row.values) for row in result.rows if row.valid}
