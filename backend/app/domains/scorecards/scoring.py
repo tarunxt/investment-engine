@@ -1,6 +1,6 @@
 """Publish one row per listing from the actual queued jobs; null denotes missing evidence."""
 from collections import Counter, defaultdict
-from datetime import date, datetime
+from datetime import datetime
 import re
 from urllib.parse import urlparse
 import json
@@ -58,7 +58,14 @@ def parse_rows(response, card, assigned):
         if len(cells) != len(table.headers):
             continue
         r = dict(zip(table.headers, cells))
-        key = r["Exchange Symbol"] + ":" + r["Stock Symbol"]
+        exchange, symbol = r["Exchange Symbol"], r["Stock Symbol"]
+        if ":" in exchange:
+            venue, ticker = exchange.split(":", 1)
+            if exchange not in assigned or ticker != symbol:
+                continue
+            exchange = venue
+            r["Exchange Symbol"] = venue
+        key = exchange + ":" + symbol
         if key in assigned:
             rows[key] = None if key in rows else r
     return {k:r for k,r in rows.items() if r}, None
@@ -154,12 +161,26 @@ def json_items(raw):
 def threats_by_slot(slot_rows, cutoff):
     fields = {"Category":"category","Scenario":"scenario_id","Trigger":"trigger","Likelihood":"likelihood","Impact":"impact",
               "Downside":"downside","Source":"source_url","As of":"published_at","Confidence":"confidence","Rationale":"rationale"}
+    boundary = datetime.fromisoformat(cutoff)
     evidence = []
     for listing, row in slot_rows.items():
         exchange,symbol = listing.split(":",1)
         for item in json_items(row.get("Evidence")):
-            evidence.append({"Exchange":exchange,"Symbol":symbol,**{k:str(item.get(v,"")) for k,v in fields.items()}})
-    accepted, dispositions = audited_evidence(evidence, strict=True,snapshot_date=date.fromisoformat(cutoff[:10]))
+            entry = {"Exchange":exchange,"Symbol":symbol,**{k:str(item.get(v,"")) for k,v in fields.items()}}
+            category = re.fullmatch(r"C([1-8])", entry["Category"].strip(), re.IGNORECASE)
+            if category:
+                entry["Category"] = category[1]
+            # The common auditor consumes dates. A timestamp must first pass
+            # the exact decision cutoff, including its original time zone.
+            try:
+                stamp = datetime.fromisoformat(entry["As of"])
+            except ValueError:
+                stamp = None
+            if stamp is not None and stamp.tzinfo is not None and boundary.tzinfo is not None and stamp <= boundary:
+                entry["Publication timestamp"] = entry["As of"]
+                entry["As of"] = stamp.astimezone(boundary.tzinfo).date().isoformat()
+            evidence.append(entry)
+    accepted, dispositions = audited_evidence(evidence, strict=True,snapshot_date=boundary.date())
     return {":".join(k):v for k,v in stock_scorecards(accepted).items()}, dispositions
 
 
@@ -241,9 +262,10 @@ def project(card, manifest, jobs):
     for job, slot, assigned, pairs, *packet in jobs:
         rows, error = {}, str(getattr(job, "error_message", None) or job.status)
         # A prior worker may have rejected a valid scorecard accompanied by
-        # a separate verification table. Revalidate only that parser failure.
+        # verification notes or an exact venue-qualified label. Only reparse those failures.
         old_table_rejection = (job.status == "failed" and card in {"technical", "threats", "pairwise"}
-                               and error.endswith("returned invalid output contract (Response requires one well-formed table)"))
+                               and error.endswith(("returned invalid output contract (Response requires one well-formed table)",
+                                                   "returned invalid output contract (no assigned listings)")))
         if job.status in ("partial", "completed") or old_table_rejection:
             rows, error = parse_rows(job.response, card, set(assigned))
         if error:
