@@ -158,7 +158,7 @@ sudo systemctl start investor-recovery-analysis investor-backend
 wait_for_backend_ready
 [[ "$(mode_for_service investor-backend)" == 1 ]]
 [[ "$(mode_for_service investor-recovery-analysis)" == 1 ]]
-for path in /zerodha/status /zerodha/connection /zerodha/login-url /zerodha/portfolio /zerodha/threats/latest /zerodha/events/latest; do
+for path in /zerodha/status /zerodha/connection /zerodha/login-url /zerodha/portfolio /zerodha/threats/latest /zerodha/events/latest /runs/scorecards/india/revisions /runs/scorecards/indmoney_us/revisions; do
   code=$(curl -sS --max-time 5 -o /dev/null -w '%{http_code}' "http://127.0.0.1:8000$path")
   [[ "$code" == 401 ]]
   echo "$path now reaches authentication (HTTP $code)."

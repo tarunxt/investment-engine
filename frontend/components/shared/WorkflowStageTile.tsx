@@ -157,6 +157,7 @@ export const STAGE_METADATA: Record<
 };
 
 export const LLM_STAGE_TILE_KEYS = new Set<WorkflowStageKey>([
+  "pairwise",
   "threats",
   "swing",
   "rebalance",

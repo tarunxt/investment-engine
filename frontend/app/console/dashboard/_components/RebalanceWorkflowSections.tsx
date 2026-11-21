@@ -7624,7 +7624,6 @@ ${zerodhaExecutionMode === "direct_market"
       specificMode,
       selectedStages,
     );
-    const technicalInputIssue: string | null = null;
     const showQuotaLlmSwitchWarning = shouldShowQuotaLlmSwitchWarning(
       states[section.portfolio],
     );
@@ -7855,6 +7854,10 @@ ${zerodhaExecutionMode === "direct_market"
               onCalculationsClick={
                 stage === "actionables"
                   ? () => {
+                      if (finalStage.frozenFinal?.schema === "independent-scorecards-v1" || !finalStage.frozenFinal) {
+                        setCardReview({portfolio:section.portfolio,stage:"actionables"});
+                        return;
+                      }
                       window.location.hash = "final-actionables";
                       setActionablesCalculationsPortfolio(section.portfolio);
                       void showStageOutput(section.portfolio, "actionables");
@@ -7864,7 +7867,6 @@ ${zerodhaExecutionMode === "direct_market"
             />
           ))}
         </WorkflowStageLedger>
-        {technicalInputIssue ? <div role="alert" className="mt-5 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950"><p>{technicalInputIssue}</p><button type="button" className="mt-2 font-semibold text-blue-800 underline" onClick={() => openInputSelection(section.portfolio, "technical")}>Choose saved Rebalance inputs</button></div> : null}
         {showQuotaLlmSwitchWarning ? (
           <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm leading-6 text-amber-950 shadow-sm">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -7873,8 +7875,7 @@ ${zerodhaExecutionMode === "direct_market"
                 <div>
                   <p className="font-extrabold">Threat Scan quota exceeded.</p>
                   <p className="mt-1">
-                    Switch LLMs for both the Threats Scan and Technical Scan
-                    stages before rerunning auto-rebalance.
+                    Choose another model for Threats and rerun it against the same Stage 2 revision.
                   </p>
                 </div>
               </div>
@@ -7884,20 +7885,10 @@ ${zerodhaExecutionMode === "direct_market"
                   variant="outline"
                   className="h-9 rounded-full border-amber-300 bg-white px-4 text-xs font-extrabold text-amber-950 hover:bg-amber-100"
                   onClick={() =>
-                    void showStageLlmInfo(section.portfolio, "threats")
+                    setCardReview({portfolio:section.portfolio,stage:"threats"})
                   }
                 >
                   Switch Threats LLMs
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-9 rounded-full border-amber-300 bg-white px-4 text-xs font-extrabold text-amber-950 hover:bg-amber-100"
-                  onClick={() =>
-                    void showStageLlmInfo(section.portfolio, "technical")
-                  }
-                >
-                  Switch Technical LLMs
                 </Button>
               </div>
             </div>
