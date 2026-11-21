@@ -1,6 +1,7 @@
 import json
 import os
 import unittest
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -53,6 +54,17 @@ class DeepSeekProviderTests(unittest.TestCase):
             "none",
         )
 
+    def test_response_cost_currency_and_peak_boundaries(self):
+        from app.domains.ai_providers.deepseek_billing import reported_cost_usd, tariff_rates
+
+        for usage in ({"cost": 2}, {"cost": 2, "currency": "CNY"}, {"cost_usd": "NaN"}):
+            self.assertIsNone(reported_cost_usd(usage))
+        self.assertEqual(reported_cost_usd({"cost": "0", "currency": "USD"}), 0)
+        for hour, rate in [(0, .6), (1, 1.2), (4, .6), (6, 1.2), (10, .6)]:
+            self.assertEqual(tariff_rates("deepseek-v4-flash", datetime(2026, 11, 20, hour, tzinfo=UTC))["output"], rate)
+        for month, day in [(10, 1), (11, 21)]:
+            self.assertEqual(tariff_rates("deepseek-v4-flash", datetime(2026, month, day, 6, tzinfo=UTC))["output"], .6)
+
     def test_extract_dsml_web_search_calls_parses_queries(self):
         dsml = (
             "<｜｜DSML｜｜tool_calls>\n"
@@ -98,7 +110,8 @@ class DeepSeekProviderTests(unittest.TestCase):
         mock_client = MagicMock()
         mock_client.chat.completions.create.side_effect = [
             SimpleNamespace(
-                usage=SimpleNamespace(prompt_tokens=100, completion_tokens=40),
+                created=datetime(2026, 11, 21, tzinfo=UTC).timestamp(),
+                usage=SimpleNamespace(prompt_tokens=100, completion_tokens=40, cost_usd="0.0005"),
                 choices=[
                     SimpleNamespace(
                         message=SimpleNamespace(content=dsml_trace, tool_calls=None)
@@ -106,6 +119,7 @@ class DeepSeekProviderTests(unittest.TestCase):
                 ],
             ),
             SimpleNamespace(
+                created=datetime(2026, 11, 21, tzinfo=UTC).timestamp(),
                 usage=SimpleNamespace(prompt_tokens=200, completion_tokens=120),
                 choices=[
                     SimpleNamespace(message=SimpleNamespace(content=recovered_table))
@@ -127,7 +141,7 @@ class DeepSeekProviderTests(unittest.TestCase):
         self.assertEqual(result.content, recovered_table)
         self.assertEqual(result.tokens_in, 300)
         self.assertEqual(result.tokens_out, 160)
-        self.assertEqual(result.cost, 0.000087)
+        self.assertEqual(result.cost, 0.000602)
         self.assertEqual(result.web_search_used, True)
         self.assertEqual(
             result.web_search_queries,
@@ -167,7 +181,7 @@ class DeepSeekProviderTests(unittest.TestCase):
                     f'<｜｜DSML｜｜parameter name="query" string="true">{query}</｜｜DSML｜｜parameter>'
                     '</｜｜DSML｜｜invoke>'
                 )
-                _, _, queries, sources = provider._recover_from_dsml_tool_trace(
+                _, _, queries, sources, _ = provider._recover_from_dsml_tool_trace(
                     prompt="Summarize current evidence", tool_trace=trace, model="deepseek-v4-flash",
                     output_kind="json",
                 )
@@ -184,6 +198,7 @@ class DeepSeekProviderTests(unittest.TestCase):
     def test_generate_uses_deepseek_cache_hit_pricing(self, openai_cls_mock):
         mock_client = MagicMock()
         mock_client.chat.completions.create.return_value = SimpleNamespace(
+            created=datetime(2026, 11, 21, tzinfo=UTC).timestamp(),
             usage=SimpleNamespace(
                 prompt_tokens=100_000,
                 prompt_cache_hit_tokens=90_000,
@@ -216,7 +231,7 @@ class DeepSeekProviderTests(unittest.TestCase):
 
         self.assertEqual(result.tokens_in, 100_000)
         self.assertEqual(result.tokens_out, 20_000)
-        self.assertEqual(result.cost, 0.022076)
+        self.assertEqual(result.cost, 0.04818)
 
     @patch("app.domains.ai_providers.deepseek.OpenAI")
     def test_generate_preserves_valid_json_output_without_table_rewrite(

@@ -60,6 +60,7 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
+import { formatRebalanceCost, knownCost, sumRebalanceCosts, type StageCost } from "@/lib/rebalanceCost";
 import { useUsdInrRate } from "@/hooks/useUsdInrRate";
 import {
   formatUsdAsVerifiedInr,
@@ -337,7 +338,6 @@ type PersistedWorkflow = {
   activeAutoRebalanceMetadata?: Partial<
     Record<WorkflowPortfolio, AutoRebalanceRunMetadata>
   >;
-  lastAutoRebalanceCosts?: Record<WorkflowPortfolio, number | null>;
   auditStates?: Partial<Record<WorkflowPortfolio, AutoRebalanceAuditState>>;
   savedAt: string;
 };
@@ -589,10 +589,7 @@ function readFailureDiagnostics(
 function summarizeRun(run: RunResponse) {
   const jobs = run.run_jobs?.map((link) => link.job).filter((job): job is JobResponse => Boolean(job)) ?? [];
   const firstJob = jobs[0];
-  const costUsd = jobs.reduce(
-    (total, job) => total + (job.estimated_cost ?? 0),
-    0,
-  );
+  const jobCosts = jobs.map(job => job.estimated_cost).filter(knownCost);
   const failedJobs = jobs.filter(
     (job) => classifyRunOutputJob(job) === "failed",
   );
@@ -633,7 +630,8 @@ function summarizeRun(run: RunResponse) {
     model: jobs.length > 1 ? [...new Set(jobs.map(job => job.model).filter(Boolean))].join(", ") : firstJob?.model,
     runStatus: failedJobs.length && jobs.some(job => job.status === "completed") ? "partial" : run.status,
     exportStatus: run.export_status ?? firstJob?.export_status,
-    costUsd: costUsd || null,
+    costUsd: jobCosts.length ? jobCosts.reduce((sum, cost) => sum + cost, 0) : null,
+    costIncomplete: jobCosts.length < jobs.length,
     error: primaryError,
     partialNotice: jobs.some(job => classifyRunOutputJob(job) === "partial")
       ? "LLM output is partially used: available rows and values are retained; missing or unaligned values are excluded from calculations." : null,
@@ -1755,7 +1753,7 @@ function withInrCost(info: Partial<StageInfo>, usdInrRate: number) {
   }
   return {
     ...info,
-    costInr: info.costInr ?? info.costUsd * usdInrRate,
+    costInr: info.costInr && info.costInr > 0 ? info.costInr : info.costUsd * usdInrRate,
   };
 }
 
@@ -1896,8 +1894,7 @@ function summarizeAutoRebalanceHistoryStage(
     item.provider_count ??
     null;
   const costUsd =
-    getAutoRebalanceSummaryNumber(summary, "cost_usd") ??
-    (item.estimated_cost > 0 ? item.estimated_cost : null);
+    item.estimated_cost > 0 ? item.estimated_cost : getAutoRebalanceSummaryNumber(summary, "cost_usd");
   return withInrCost(
     {
       startedAt: item.started_at ?? history?.created_at ?? null,
@@ -1919,6 +1916,7 @@ function summarizeAutoRebalanceHistoryStage(
         typeof summary.provider === "string" ? summary.provider : null,
       model: typeof summary.model === "string" ? summary.model : null,
       costUsd,
+      costIncomplete: summary.cost_incomplete === true,
       costInr: getAutoRebalanceSummaryNumber(summary, "cost_inr"),
       error: item.error_message ?? null,
       lastRunId: item.run_id ?? null,
@@ -1977,11 +1975,11 @@ function getStageCostInr(info: StageInfo, usdInrRate: number) {
   return 0;
 }
 
-function getWorkflowRunCost(state: WorkflowState, usdInrRate: number) {
-  return COST_BEARING_STAGES.reduce(
-    (total, stage) => total + getStageCostInr(state[stage], usdInrRate),
-    0,
-  );
+function getWorkflowRunCost(state: WorkflowState, sequence: number | null, fx: number) {
+  const stages = COST_BEARING_STAGES.map(stage => state[stage]).filter(info =>
+    info.workflowSequence === sequence && (knownCost(info.costUsd) || knownCost(info.costInr) ||
+      info.state === "running" || info.state === "failed" || (info.totalLlms ?? 0) > 0));
+  return sumRebalanceCosts(stages, fx);
 }
 
 function getWorkflowRunDuration(state: WorkflowState, now = Date.now()) {
@@ -4572,15 +4570,7 @@ export function RebalanceWorkflowSections({
       ),
     },
   }));
-  const [lastAutoRebalanceCosts, setLastAutoRebalanceCosts] = useState<
-    Record<WorkflowPortfolio, number | null>
-  >(
-    () =>
-      initialPersisted?.lastAutoRebalanceCosts ?? {
-        zerodha: null,
-        indmoneyUs: null,
-      },
-  );
+  const [savedRunCosts, setSavedRunCosts] = useState<Partial<Record<WorkflowPortfolio, StageCost & { sequence: number }>>>({});
   const [activeAutoRebalanceMetadata, setActiveAutoRebalanceMetadata] = useState<
     Partial<Record<WorkflowPortfolio, AutoRebalanceRunMetadata>>
   >(() => {
@@ -4754,13 +4744,11 @@ export function RebalanceWorkflowSections({
       },
       activeAutoRebalanceMetadata,
       auditStates,
-      lastAutoRebalanceCosts,
       savedAt: new Date().toISOString(),
     });
   }, [runtimeOwner,
     activeAutoRebalanceMetadata,
     auditStates,
-    lastAutoRebalanceCosts,
     runningPortfolio,
     selectedInputs,
     selectedStages,
@@ -5564,6 +5552,23 @@ ${zerodhaExecutionMode === "direct_market"
           : [],
     };
 
+    setSavedRunCosts(current => {
+      const next = { ...current };
+      for (const portfolio of ["zerodha", "indmoneyUs"] as const) {
+        const latest = historyByPortfolio[portfolio].reduce<AutoRebalanceHistoryItemResponse | null>(
+          (entry, item) => !entry || item.sequence > entry.sequence ? item : entry, null);
+        if (!latest) continue;
+        const stages = latest.stages.filter(item => COST_BEARING_STAGES.includes(item.stage) &&
+          item.status !== "skipped" && (item.provider_count > 0 || item.estimated_cost > 0 ||
+            knownCost(item.summary?.cost_usd) || knownCost(item.summary?.cost_inr)));
+        next[portfolio] = {
+          ...sumRebalanceCosts(stages.map(item => summarizeAutoRebalanceHistoryStage(latest, item.stage, usdInrRate)), usdInrRate),
+          sequence: latest.sequence,
+        };
+      }
+      return next;
+    });
+
     const nextByPortfolio = (
       ["zerodha", "indmoneyUs"] as WorkflowPortfolio[]
     ).reduce(
@@ -5767,7 +5772,8 @@ ${zerodhaExecutionMode === "direct_market"
           ...current,
           [portfolio]: {
             ...current[portfolio],
-            [stage]: { ...current[portfolio][stage], evidence: undefined, ...info },
+            [stage]: { ...current[portfolio][stage], evidence: undefined, ...info,
+              workflowSequence: info.workflowSequence ?? activeAutoRebalanceMetadataRef.current[portfolio]?.auto_rebalance_sequence ?? current[portfolio][stage].workflowSequence },
           },
         };
         const persisted = readPersistedWorkflow();
@@ -5858,6 +5864,7 @@ ${zerodhaExecutionMode === "direct_market"
           ...(info.pairCoverage ? { pair_coverage: info.pairCoverage } : {}),
           ...(info.portfolioThreat ? { portfolio_threat: info.portfolioThreat } : {}),
           ...(info.frozenFinal ? { frozen_final: info.frozenFinal } : {}),
+          cost_incomplete: info.costIncomplete ?? false,
           cost_usd: info.costUsd ?? null,
           cost_inr: info.costInr ?? null,
         },
@@ -5934,7 +5941,7 @@ ${zerodhaExecutionMode === "direct_market"
         errorDetails: [],
         lastRunId: null, activeRunId: null, recommendedStocks: null, jobId: null, workflowSequence: null,
         passedLlms: 0, partialLlms: 0, failedLlms: 0, completedLlms: 0,
-        partialNotice: null, exportStatus: null, costUsd: null, costInr: null,
+        partialNotice: null, exportStatus: null, costUsd: null, costInr: null, costIncomplete: false,
         provider: null, model: null, runStatus: "processing", totalLlms: null,
         rebalanceInputs: null, frozenFinal: undefined,
         ...extra,
@@ -7561,11 +7568,6 @@ ${zerodhaExecutionMode === "direct_market"
         window.setTimeout(() => {
           if (isWorkflowExecutingRef.current || auditSessionsRef.current[portfolio]?.key !== auditSession.key) return;
           setStates((current) => {
-            const lastCost = getWorkflowRunCost(current[portfolio], usdInrRate);
-            setLastAutoRebalanceCosts((costs) => ({
-              ...costs,
-              [portfolio]: lastCost,
-            }));
             return {
               ...current,
               [portfolio]: STAGE_ORDER.reduce((acc, stage) => {
@@ -8204,9 +8206,10 @@ ${zerodhaExecutionMode === "direct_market"
                 ? `Cumulative LLM time: ${getWorkflowRunDuration(states[section.portfolio], now)} · `
                 : ""}
               Total cost incurred in last Auto-rebalance:{" "}
-              {formatInrCost(
-                getWorkflowRunCost(states[section.portfolio], usdInrRate) ||
-                  lastAutoRebalanceCosts[section.portfolio],
+              {formatRebalanceCost(
+                !isSectionRunning && savedRunCosts[section.portfolio]?.sequence === displayedWorkflowSequence
+                  ? savedRunCosts[section.portfolio]!
+                  : getWorkflowRunCost(states[section.portfolio], displayedWorkflowSequence, usdInrRate)
               )}
             </div>
           </div>

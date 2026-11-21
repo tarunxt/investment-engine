@@ -79,6 +79,14 @@ async def test_complete_stream_preserves_rows_and_identity_beyond_old_limit(monk
     {'prompt_tokens':100,'completion_tokens':0,'prompt_cache_hit_tokens':120,'prompt_cache_miss_tokens':80}])
 def test_actual_deepseek_adapter_emits_separate_versioned_evidence(monkeypatch, usage):
     from copy import deepcopy
+    from app.domains.ai_providers import deepseek_billing
+
+    class OffPeakClock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return START
+
+    monkeypatch.setattr(deepseek_billing, 'datetime', OffPeakClock)
     saved = []
     monkeypatch.setattr(metering,'_persist_attempt',lambda values:saved.append(deepcopy(values)))
     token = set_provider_usage_context(user_id=17,job_id=None)
@@ -91,7 +99,7 @@ def test_actual_deepseek_adapter_emits_separate_versioned_evidence(monkeypatch, 
         assert result.tokens_in == (usage or {}).get('prompt_tokens', 0)
         row = next(row for row in saved if row['event_kind']=='finished')
         contract = row['inferred_usage']['accounting_provenance']
-        assert contract == tariff_provenance(RATES)
+        assert contract == tariff_provenance({'cache_hit_input': .003, 'cache_miss_input': .15, 'output': .6})
         assert contract['rate_version'].startswith('repository-sha256-')
         assert contract['settled_billed_cost_usd'] is None and contract['effective_date'] is None
         cache = row['inferred_usage']['cache_fields']

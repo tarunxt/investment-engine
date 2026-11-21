@@ -370,7 +370,7 @@ test("workflow card retains pending status and omits the failed-history banner",
       stageLedger: false, ledgerView: "ledger", surface: undefined,
       WorkflowStageLedger: ({ children }) => createElement("div", null, children),
       RebalanceStockFlowTrigger: () => null, getWorkflowRunDuration: () => null,
-      getWorkflowRunCost: () => 0, formatInrCost: () => "0", usdInrRate: 1, lastAutoRebalanceCosts: { zerodha: 0 },
+      getWorkflowRunCost: () => ({}), formatRebalanceCost: () => "Usage unavailable", usdInrRate: 1, savedRunCosts: {},
     };
     const card = new Function(...Object.keys(bindings), source)(...Object.values(bindings));
     const html = renderToStaticMarkup(card({ portfolio: "zerodha", title: "Run Zerodha Auto-Rebalance", buttonLabel: "Run" }));

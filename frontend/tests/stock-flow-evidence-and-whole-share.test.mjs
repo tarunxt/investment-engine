@@ -178,6 +178,7 @@ test('rebalance saved-input union preserves both Swing jobs, missing candidates,
 test('LLM completion separates passed, partial and failed and partial notices are not errors', () => {
   const ui = load('../app/console/dashboard/_components/RebalanceWorkflowSections.tsx', {
     parseTimestampMs: v => Date.parse(v || '') || 0,
+    knownCost: load('../lib/rebalanceCost.ts').knownCost,
     readFailureDiagnostics: () => ({}),
     classifyRunOutputJob: load('../lib/workflowLlmEvidence.ts').classifyWorkflowLlmJob,
   }, ['getRunProgress', 'formatLlmCompletion', 'summarizeRun'], true);

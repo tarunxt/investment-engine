@@ -22,7 +22,7 @@ async function hydrate({ runs = [], histories = [], initial, historyFailure, sna
   apiService.zerodhaPortfolioOverview = async () => ({latest: snapshot});
   apiService.getAutoRebalanceHistory = async market => { await readBarrier; if (historyFailure) throw historyFailure; return { items: market === 'india' ? histories : [] }; };
   const context = {
-    setWorkflowHistoryError: onError, normalizeError: error => error.message,
+    setSavedRunCosts: () => {}, setWorkflowHistoryError: onError, normalizeError: error => error.message,
     runningPortfolio, isWorkflowExecutingRef: {current: executing},
     runtimeOwner: {}, isCurrentWorkflowOwner: () => true, savedStageReadGeneration: generation,
     apiService, fetchDashboardRecentFullRuns: async () => runs, useCallback: fn => fn, usdInrRate: 1,

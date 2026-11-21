@@ -11,6 +11,7 @@ from openai import OpenAI
 from app.domains.api_usage.metering import metered_call
 from app.core.config import settings
 from app.domains.api_usage.recorder import record_provider_usage_call
+from app.domains.ai_providers.deepseek_billing import reported_cost_usd, tariff_rates
 from app.domains.ai_providers.base import (
     AIProviderResponse,
     BaseAIProvider,
@@ -24,22 +25,6 @@ from app.domains.ai_providers.web_metadata import (
 )
 
 logger = logging.getLogger("app")
-
-DEEPSEEK_PRICING_PER_1M_TOKENS = {
-    "deepseek-v4-flash": {
-        "cache_hit_input": 0.0028,
-        "cache_miss_input": 0.14,
-        "output": 0.28,
-    },
-    "deepseek-v4-pro": {
-        "cache_hit_input": 0.003625,
-        "cache_miss_input": 0.435,
-        "output": 0.87,
-    },
-}
-DEFAULT_DEEPSEEK_PRICING_PER_1M_TOKENS = DEEPSEEK_PRICING_PER_1M_TOKENS[
-    "deepseek-v4-flash"
-]
 
 SUPPORTED_MODELS = [
     "deepseek-v4-flash",
@@ -218,11 +203,11 @@ class DeepSeekProvider(BaseAIProvider):
         tool_trace: str,
         model: str,
         output_kind: str,
-    ) -> tuple[str, dict[str, int], list[str], list[str]]:
+    ) -> tuple[str, dict[str, int], list[str], list[str], float]:
         empty_token_usage = self._token_usage_from_response_usage(None)
         search_calls = _extract_dsml_web_search_calls(tool_trace)
         if not search_calls:
-            return tool_trace, empty_token_usage, [], []
+            return tool_trace, empty_token_usage, [], [], 0.0
 
         search_payloads: list[dict[str, str | int]] = []
         search_queries: list[str] = []
@@ -273,7 +258,7 @@ class DeepSeekProvider(BaseAIProvider):
 
         recovery_response = metered_call(
             self.client.chat.completions.create, provider=self.provider_name, meter_model=model,
-            phase="recovery", tariff_rates=DEEPSEEK_PRICING_PER_1M_TOKENS.get(model),
+            phase="recovery", tariff_rates=tariff_rates(model),
             model=model,
             messages=[
                 {
@@ -297,14 +282,14 @@ class DeepSeekProvider(BaseAIProvider):
         )
         usage = getattr(recovery_response, "usage", None)
         token_usage = self._token_usage_from_response_usage(usage)
-        self._record_response_usage(recovery_response, model, token_usage)
+        cost = self._record_response_usage(recovery_response, model, token_usage)
         choices = getattr(recovery_response, "choices", []) or []
         recovered = tool_trace
         if choices:
             recovered = (
                 getattr(choices[0].message, "content", "") or ""
             ).strip() or tool_trace
-        return recovered, token_usage, search_queries, search_sources
+        return recovered, token_usage, search_queries, search_sources, cost
 
     def generate(self, *, prompt: str, model: str) -> AIProviderResponse:
         if model not in self.supported_models:
@@ -341,8 +326,7 @@ class DeepSeekProvider(BaseAIProvider):
 
         total_tokens_in = 0
         total_tokens_out = 0
-        total_cache_hit_tokens = 0
-        total_cache_miss_tokens = 0
+        total_cost = 0.0
         content = ""
         web_search_used = False
         web_search_queries: list[str] = []
@@ -352,17 +336,15 @@ class DeepSeekProvider(BaseAIProvider):
         for round_num in range(_MAX_TOOL_ROUNDS):
             response = metered_call(
                 self.client.chat.completions.create, provider=self.provider_name, meter_model=model,
-                phase="request" if round_num == 0 else "tool_round", tariff_rates=DEEPSEEK_PRICING_PER_1M_TOKENS.get(model),
+                phase="request" if round_num == 0 else "tool_round", tariff_rates=tariff_rates(model),
                 **kwargs,
             )
             logger.info("DeepSeek response round %d received", round_num + 1)
             usage = getattr(response, "usage", None)
             token_usage = self._token_usage_from_response_usage(usage)
-            self._record_response_usage(response, model, token_usage)
+            total_cost += self._record_response_usage(response, model, token_usage)
             total_tokens_in += token_usage["tokens_in"]
             total_tokens_out += token_usage["tokens_out"]
-            total_cache_hit_tokens += token_usage["cache_hit_tokens"]
-            total_cache_miss_tokens += token_usage["cache_miss_tokens"]
 
             choices = getattr(response, "choices", []) or []
             if not choices:
@@ -446,7 +428,7 @@ class DeepSeekProvider(BaseAIProvider):
             for recovery_attempt in range(_MAX_EMPTY_FINAL_RECOVERY_ATTEMPTS):
                 final_response = metered_call(
                     self.client.chat.completions.create, provider=self.provider_name, meter_model=model,
-                    phase="empty_recovery", tariff_rates=DEEPSEEK_PRICING_PER_1M_TOKENS.get(model),
+                    phase="empty_recovery", tariff_rates=tariff_rates(model),
                     model=model,
                     messages=messages
                     + [
@@ -463,11 +445,9 @@ class DeepSeekProvider(BaseAIProvider):
                 )
                 final_usage = getattr(final_response, "usage", None)
                 final_token_usage = self._token_usage_from_response_usage(final_usage)
-                self._record_response_usage(final_response, model, final_token_usage)
+                total_cost += self._record_response_usage(final_response, model, final_token_usage)
                 total_tokens_in += final_token_usage["tokens_in"]
                 total_tokens_out += final_token_usage["tokens_out"]
-                total_cache_hit_tokens += final_token_usage["cache_hit_tokens"]
-                total_cache_miss_tokens += final_token_usage["cache_miss_tokens"]
                 final_choices = getattr(final_response, "choices", []) or []
                 if final_choices:
                     content = (
@@ -488,6 +468,7 @@ class DeepSeekProvider(BaseAIProvider):
                 recovered_token_usage,
                 recovered_queries,
                 recovered_sources,
+                recovered_cost,
             ) = self._recover_from_dsml_tool_trace(
                 prompt=prompt,
                 tool_trace=cleaned,
@@ -495,10 +476,9 @@ class DeepSeekProvider(BaseAIProvider):
                 output_kind=output_kind,
             )
             cleaned = recovered.strip()
+            total_cost += recovered_cost
             total_tokens_in += recovered_token_usage["tokens_in"]
             total_tokens_out += recovered_token_usage["tokens_out"]
-            total_cache_hit_tokens += recovered_token_usage["cache_hit_tokens"]
-            total_cache_miss_tokens += recovered_token_usage["cache_miss_tokens"]
             web_search_used, web_search_queries, web_sources = merge_web_metadata(
                 web_search_used,
                 web_search_queries,
@@ -517,7 +497,7 @@ class DeepSeekProvider(BaseAIProvider):
             if needs_rewrite:
                 rewrite_response = metered_call(
                     self.client.chat.completions.create, provider=self.provider_name, meter_model=model,
-                    phase="format_repair", tariff_rates=DEEPSEEK_PRICING_PER_1M_TOKENS.get(model),
+                    phase="format_repair", tariff_rates=tariff_rates(model),
                     model=model,
                     messages=[
                         {
@@ -535,11 +515,9 @@ class DeepSeekProvider(BaseAIProvider):
                 )
                 rewrite_usage = getattr(rewrite_response, "usage", None)
                 rewrite_token_usage = self._token_usage_from_response_usage(rewrite_usage)
-                self._record_response_usage(rewrite_response, model, rewrite_token_usage)
+                total_cost += self._record_response_usage(rewrite_response, model, rewrite_token_usage)
                 total_tokens_in += rewrite_token_usage["tokens_in"]
                 total_tokens_out += rewrite_token_usage["tokens_out"]
-                total_cache_hit_tokens += rewrite_token_usage["cache_hit_tokens"]
-                total_cache_miss_tokens += rewrite_token_usage["cache_miss_tokens"]
                 rewrite_choices = getattr(rewrite_response, "choices", []) or []
                 if rewrite_choices:
                     rewritten = (
@@ -564,7 +542,7 @@ class DeepSeekProvider(BaseAIProvider):
             if needs_rewrite:
                 rewrite_response = metered_call(
                     self.client.chat.completions.create, provider=self.provider_name, meter_model=model,
-                    phase="format_repair", tariff_rates=DEEPSEEK_PRICING_PER_1M_TOKENS.get(model),
+                    phase="format_repair", tariff_rates=tariff_rates(model),
                     model=model,
                     messages=[
                         {
@@ -587,11 +565,9 @@ class DeepSeekProvider(BaseAIProvider):
                 )
                 rewrite_usage = getattr(rewrite_response, "usage", None)
                 rewrite_token_usage = self._token_usage_from_response_usage(rewrite_usage)
-                self._record_response_usage(rewrite_response, model, rewrite_token_usage)
+                total_cost += self._record_response_usage(rewrite_response, model, rewrite_token_usage)
                 total_tokens_in += rewrite_token_usage["tokens_in"]
                 total_tokens_out += rewrite_token_usage["tokens_out"]
-                total_cache_hit_tokens += rewrite_token_usage["cache_hit_tokens"]
-                total_cache_miss_tokens += rewrite_token_usage["cache_miss_tokens"]
                 rewrite_choices = getattr(rewrite_response, "choices", []) or []
                 if rewrite_choices:
                     cleaned = (
@@ -600,7 +576,7 @@ class DeepSeekProvider(BaseAIProvider):
         elif _looks_like_tool_trace(cleaned):
             rewrite_response = metered_call(
                 self.client.chat.completions.create, provider=self.provider_name, meter_model=model,
-                phase="format_repair", tariff_rates=DEEPSEEK_PRICING_PER_1M_TOKENS.get(model),
+                phase="format_repair", tariff_rates=tariff_rates(model),
                 model=model,
                 messages=[
                     {
@@ -618,11 +594,9 @@ class DeepSeekProvider(BaseAIProvider):
             )
             rewrite_usage = getattr(rewrite_response, "usage", None)
             rewrite_token_usage = self._token_usage_from_response_usage(rewrite_usage)
-            self._record_response_usage(rewrite_response, model, rewrite_token_usage)
+            total_cost += self._record_response_usage(rewrite_response, model, rewrite_token_usage)
             total_tokens_in += rewrite_token_usage["tokens_in"]
             total_tokens_out += rewrite_token_usage["tokens_out"]
-            total_cache_hit_tokens += rewrite_token_usage["cache_hit_tokens"]
-            total_cache_miss_tokens += rewrite_token_usage["cache_miss_tokens"]
             rewrite_choices = getattr(rewrite_response, "choices", []) or []
             if rewrite_choices:
                 cleaned = (
@@ -633,13 +607,7 @@ class DeepSeekProvider(BaseAIProvider):
             content=cleaned,
             tokens_in=total_tokens_in,
             tokens_out=total_tokens_out,
-            cost=self._estimate_cost(
-                model=model,
-                tokens_in=total_tokens_in,
-                tokens_out=total_tokens_out,
-                cache_hit_tokens=total_cache_hit_tokens,
-                cache_miss_tokens=total_cache_miss_tokens,
-            ),
+            cost=round(total_cost, 12),
             provider=self.provider_name,
             model=model,
             web_search_used=web_search_used,
@@ -686,13 +654,16 @@ class DeepSeekProvider(BaseAIProvider):
         response: object,
         model: str,
         token_usage: dict[str, int],
-    ) -> None:
+    ) -> float:
         created = getattr(response, "created", None)
         occurred_at = None
         if isinstance(created, (int, float)):
             occurred_at = datetime.datetime.fromtimestamp(
                 created, tz=datetime.timezone.utc
             )
+        cost = reported_cost_usd(getattr(response, "usage", None))
+        if cost is None:
+            cost = self._estimate_cost(model=model, when=occurred_at, **token_usage)
         record_provider_usage_call(
             provider=self.provider_name,
             model=model,
@@ -702,14 +673,9 @@ class DeepSeekProvider(BaseAIProvider):
             tokens_out=token_usage["tokens_out"],
             cache_hit_tokens=token_usage["cache_hit_tokens"],
             cache_miss_tokens=token_usage["cache_miss_tokens"],
-            actual_cost=self._estimate_cost(
-                model=model,
-                tokens_in=token_usage["tokens_in"],
-                tokens_out=token_usage["tokens_out"],
-                cache_hit_tokens=token_usage["cache_hit_tokens"],
-                cache_miss_tokens=token_usage["cache_miss_tokens"],
-            ),
+            actual_cost=cost,
         )
+        return cost
 
     @staticmethod
     def _estimate_cost(
@@ -719,10 +685,9 @@ class DeepSeekProvider(BaseAIProvider):
         tokens_out: int,
         cache_hit_tokens: int = 0,
         cache_miss_tokens: int | None = None,
+        when: datetime.datetime | None = None,
     ) -> float:
-        pricing = DEEPSEEK_PRICING_PER_1M_TOKENS.get(
-            model, DEFAULT_DEEPSEEK_PRICING_PER_1M_TOKENS
-        )
+        pricing = tariff_rates(model, when)
         billable_cache_miss_tokens = (
             max(0, tokens_in - cache_hit_tokens)
             if cache_miss_tokens is None
@@ -732,14 +697,12 @@ class DeepSeekProvider(BaseAIProvider):
             (cache_hit_tokens / 1_000_000) * pricing["cache_hit_input"]
             + (billable_cache_miss_tokens / 1_000_000) * pricing["cache_miss_input"]
             + (tokens_out / 1_000_000) * pricing["output"],
-            6,
+            12,
         )
 
     @staticmethod
     def estimate_prompt_cost_usd(model: str, prompt: str) -> float:
-        pricing = DEEPSEEK_PRICING_PER_1M_TOKENS.get(
-            model, DEFAULT_DEEPSEEK_PRICING_PER_1M_TOKENS
-        )
+        pricing = tariff_rates(model)
         prompt_tokens = max(1, math.ceil(len(prompt) / 4))
         expected_output_tokens = 1800
         return round(

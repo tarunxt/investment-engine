@@ -13,7 +13,7 @@ function load(relative, names=[], bindings={}) {
 }
 const date=load('../lib/datetime.ts');
 const workflowPath='../components/shared/WorkflowStageTile.tsx';
-const ui=load(workflowPath,['formatLlmCompletion','formatRecommendedStockProgress','getLlmStageTileRows','getActionablesStageTileRows','getIdleStageRows','LLM_STAGE_TILE_KEYS','formatBriefTileError','getStageTileError','getTileErrorDetail','isSheetExportError','isInsufficientBalanceError'],{formatCompactStageTime:date.formatCompactStageTime,formatDuration:()=>null,formatInrCost:()=>'-'});
+const ui=load(workflowPath,['formatLlmCompletion','formatRecommendedStockProgress','getLlmStageTileRows','getActionablesStageTileRows','getIdleStageRows','LLM_STAGE_TILE_KEYS','formatBriefTileError','getStageTileError','getTileErrorDetail','isSheetExportError','isInsufficientBalanceError'],{formatCompactStageTime:date.formatCompactStageTime,formatDuration:()=>null,formatRebalanceCost:load('../lib/rebalanceCost.ts').formatRebalanceCost});
 
 test('stage timestamp matches requested IST 24-hour examples and preserves offset/naive-UTC parsing',()=>{
   assert.equal(date.formatCompactStageTime('2026-10-30T14:07:01Z'),'30 Oct 19:37');
@@ -85,4 +85,17 @@ test('every stage combines partial and error details in a single concise Error r
   for (const message of ['quota exceeded','Insufficient balance','authentication failed','invalid output contract','cancelled','unclassified failure']) {
     const words=ui.formatBriefTileError(message).split(/\s+/);assert.ok(words.length>=2&&words.length<=3,message);
   }
+});
+
+
+test('stage and run costs keep fractional USD when FX is unavailable and distinguish partial coverage', () => {
+  const { formatRebalanceCost, sumRebalanceCosts } = load('../lib/rebalanceCost.ts');
+  const costs = [0.007272, 0.009695, 0.015, 0.001431].map(costUsd => ({costUsd}));
+  const row = ui.getLlmStageTileRows({state: 'completed', ...costs[0]}, 0).find(r => r.label === 'Cost incurred');
+  assert.equal(row.value, '$0.007272 (est.)');
+  assert.equal(formatRebalanceCost(sumRebalanceCosts(costs, 0)), '$0.033398 (est.)');
+  assert.equal(formatRebalanceCost(sumRebalanceCosts(costs, 85)), '₹2.84 (est.)');
+  assert.equal(formatRebalanceCost(sumRebalanceCosts([...costs, {}], 0)), '$0.033398 (partial estimate)');
+  assert.equal(formatRebalanceCost({costUsd: 0}), '$0.00 (est.)');
+  assert.equal(formatRebalanceCost(sumRebalanceCosts([{}], 0)), 'Usage unavailable');
 });
