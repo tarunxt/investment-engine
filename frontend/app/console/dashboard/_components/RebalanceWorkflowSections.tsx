@@ -7263,7 +7263,7 @@ ${zerodhaExecutionMode === "direct_market"
             const previous = source.finals[0] ? await api.final(source.finals[0].id) : null;
             const config = cardPolicies[portfolio] ?? previous?.policy ?? await api.savedPolicy() ?? migratedPolicy(scoreMatrixFormulaConfig);
             const final=await api.finalize(source.id,sequence,chosen,config);
-            const saved=await markCompleted(portfolio,"actionables",{runStatus:"saved calculation",recommendedStocks:final.rows.length,
+            const saved=await markCompleted(portfolio,"actionables",{runStatus:"saved calculation",recommendedStocks:final.rows.filter(row=>row.status==="Complete" && row.action!==null && row.action!=="Hold" && (row.suggested_units??0)>0).length,
               frozenFinal:{schema:final.schema,final_id:final.id,workflow_sequence:sequence}});
             if (saved?.saved===false && /Final calculation could not be verified/i.test(saved.error)) throw new Error(saved.error);
             window.dispatchEvent(new CustomEvent("final-actionables-refresh",{detail:{market,completedAt:new Date().toISOString()}}));
@@ -7609,9 +7609,10 @@ ${zerodhaExecutionMode === "direct_market"
     const finalStage = states[section.portfolio].actionables;
     const basketRevision = section.portfolio === "zerodha" ? scoreRevision : usRevision;
     const preparedOrders = section.portfolio === "zerodha" ? zerodhaBasketOrders : indmoneyBasketOrders;
-    const basketReady = finalStage.state==="completed" && finalStage.frozenFinal?.schema==="independent-scorecards-v1" || displayedWorkflowSequence !== null && finalStage.state === "completed" && !finalStage.error &&
+    const basketReady = displayedWorkflowSequence !== null && finalStage.state === "completed" && !finalStage.error &&
       finalStage.frozenFinal?.workflow_sequence === displayedWorkflowSequence &&
-      (Number(finalStage.frozenFinal.basket_order_count) > 0 ||
+      ((finalStage.frozenFinal.schema === "independent-scorecards-v1" && (finalStage.recommendedStocks ?? 0) > 0) ||
+       Number(finalStage.frozenFinal.basket_order_count) > 0 ||
        (basketRevision?.sequence === displayedWorkflowSequence && preparedOrders.length > 0));
     const emailWarning = completionEmailWarnings[section.portfolio];
     const isSectionRunning = runningPortfolio === section.portfolio;
