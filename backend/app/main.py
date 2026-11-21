@@ -4,6 +4,7 @@ from app.domains.jobs.resource_body import ResourceBodyMiddleware
 
 from app.core.recovery import recovery_mode
 import json
+import re
 import time
 from contextlib import asynccontextmanager
 from os import getenv
@@ -188,10 +189,19 @@ async def general_exception_handler(request: Request, exc: Exception):
             headers={"Retry-After": "3", "Cache-Control": "no-store"},
             content={"error": "DATABASE_UNAVAILABLE", "message": "The service is temporarily unavailable. Please retry shortly."},
         )
-    logger.error("Unhandled exception", exc_info=exc)
+    correlation_id = getattr(request.state, "correlation_id", None) or str(uuid4())
+    logger.error(
+        "Unhandled exception method=%s route=%s correlation_id=%s",
+        request.method, getattr(request.scope.get("route"), "path", "unmatched"), correlation_id, exc_info=exc,
+    )
     return JSONResponse(
         status_code=500,
-        content={"error": "INTERNAL_SERVER_ERROR", "message": "An unexpected error occurred"},
+        headers={"X-Correlation-ID": correlation_id},
+        content={
+            "error": "INTERNAL_SERVER_ERROR",
+            "message": "An unexpected error occurred",
+            "details": {"correlation_id": correlation_id},
+        },
     )
 
 
@@ -231,7 +241,8 @@ async def security_headers_middleware(request: Request, call_next):
 
 @app.middleware("http")
 async def correlation_id_middleware(request: Request, call_next):
-    corr_id = request.headers.get("X-Correlation-ID", str(uuid4()))
+    supplied_id = request.headers.get("X-Correlation-ID", "")
+    corr_id = supplied_id if re.fullmatch(r"[A-Za-z0-9._-]{1,128}", supplied_id) else str(uuid4())
     request.state.correlation_id = corr_id
     start = time.monotonic()
     timing_token = begin_request_timing()
