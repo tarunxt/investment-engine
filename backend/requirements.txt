@@ -35,7 +35,6 @@ google-auth-oauthlib==1.2.2
 google-genai==2.0.1
 googleapis-common-protos==1.75.0
 greenlet==3.5.0
-holidays==0.109
 h11==0.16.0
 httpcore==1.0.9
 httplib2==0.31.2
