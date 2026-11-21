@@ -386,7 +386,7 @@ async def test_email_uses_persisted_evidence_and_deduplicates(audit_db, email_qu
     for index, stage in enumerate(routes.AUTO_REBALANCE_STAGE_ORDER):
         status = "skipped" if stage == "technical" else "partial" if stage == "threats" else "completed"
         fields = {}
-        if stage in {"threats", "swing", "rebalance"}:
+        if stage in {"threats", "swing", "rebalance", "pairwise"}:
             async with audit_db.sessions() as db:
                 run = Run(id=400 + index, user_id=7, prompt="scan", prompt_preview="scan",
                           auto_rebalance_portfolio="india", auto_rebalance_sequence=42,
@@ -401,8 +401,8 @@ async def test_email_uses_persisted_evidence_and_deduplicates(audit_db, email_qu
     event_id, payload = (await overall_events(audit_db))[0]
     assert payload["portfolio"] == "india" and payload["workflow_label"] == "India Run #42"
     assert datetime.fromisoformat(payload["completed_at"]).replace(tzinfo=timezone.utc) == FINISH
-    assert len(payload["stages_completed"]) == 5
-    assert "Stage 2 · Threats and guardrails (partial)" in payload["stages_completed"]
+    assert len(payload["stages_completed"]) == len(routes.AUTO_REBALANCE_STAGE_ORDER) - 1
+    assert "Stage 3 · Threats scorecard (partial)" in payload["stages_completed"]
     assert all("Technical" not in label and "Unpersisted" not in label for label in payload["stages_completed"])
     assert email_queue.redis.calls == ["auto_rebalance_success_email_sent:7:india:42"]
     assert email_queue.redis.closed == 1
@@ -440,7 +440,7 @@ async def test_delayed_callbacks_preserve_terminal_progress_and_confirmed_links(
 async def seed_verified_workflow(audit_db, *, reference="run_id"):
     for index, stage in enumerate(routes.AUTO_REBALANCE_STAGE_ORDER):
         fields = {}
-        if stage in {"threats", "swing", "rebalance", "technical"}:
+        if stage in routes.LLM_STAGES:
             async with audit_db.sessions() as db:
                 values = dict(id=400 + index, user_id=7, prompt="scan",
                               auto_rebalance_portfolio="india", auto_rebalance_sequence=42,
@@ -485,7 +485,7 @@ async def test_email_requires_matching_execution_evidence(audit_db, email_queue,
 async def test_matching_completed_execution_evidence_permits_email(audit_db, email_queue, reference):
     await seed_verified_workflow(audit_db, reference=reference)
     assert await email(audit_db) == {"status": "queued"}
-    assert len((await overall_events(audit_db))[0][1]["stages_completed"]) == 6
+    assert len((await overall_events(audit_db))[0][1]["stages_completed"]) == len(routes.AUTO_REBALANCE_STAGE_ORDER)
 
 
 @pytest.mark.anyio

@@ -10,6 +10,14 @@ CARDS = ("rebalance", "technical", "threats", "pairwise")
 CATEGORIES = ("Geopolitics/trade", "Global financial conditions", "Domestic economy", "Domestic policy",
               "Sector/technology", "Company/governance", "Physical/operational", "Liquidity/positioning")
 
+HEADERS = {
+    "rebalance": tuple(c.label for c in REBALANCE_COLUMNS),
+    "technical": ("Exchange Symbol", "Stock Symbol", "Primary Setup", "Secondary Setups", "Bias", "Premarket trend",
+                  "Last 5 candles trend", "Confidence Score", "Trigger Level", "Invalidation Level", "Evidence source and as-of", "Technical rationale"),
+    "pairwise": ("Exchange Symbol", "Stock Symbol", "Assigned pairs", "Judged pairs", "Judgments"),
+    "threats": ("Exchange Symbol", "Stock Symbol", *(f"C{i}" for i in range(1, 9)), "Leading threat", "Trigger or event date", "Evidence"),
+}
+
 
 def batches(stocks, card, *, pairs=None):
     keys = sorted(row["listing"] for row in stocks)
@@ -49,6 +57,12 @@ def build_prompt(revision, card, keys, pairs):
         bundle["setup_catalogue"] = CATALOGUE
     if card == "pairwise":
         bundle["assigned_pairs"] = pairs
+    if card != "rebalance":
+        template += "\nExact Markdown header (one line)\n| " + " | ".join(HEADERS[card]) + " |\n"
+    if card == "pairwise":
+        template += 'Each source_refs entry must contain url and as_of (ISO 8601). The first listing owns each ordered pair.\n'
+    if card == "technical":
+        template += 'Evidence source and as-of must contain the underlying URL and ISO 8601 candle or quote timestamp including time zone.\n'
     # Keep the provider's standard holdings validator on the same Stage 2 batch.
     if card == "rebalance":
         template += "\n## 1. Latest Portfolio Snapshot\n| Exchange | Stock Symbol | Current Units |\n|---|---|---|\n"

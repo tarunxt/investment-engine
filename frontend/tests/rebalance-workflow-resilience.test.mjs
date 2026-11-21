@@ -83,14 +83,9 @@ test("auto-rebalance does not clear local run controls during stage handoffs", (
 });
 
 test("a real stage failure is persisted and never feeds stale output to later stages", () => {
-  for (const stage of ["threats", "swing", "rebalance", "technical"]) {
-    assert.match(
-      source,
-      new RegExp(`continueAfterStageFailure\\("${stage}", error\\);`),
-    );
-  }
-  assert.match(source, /void recordAutoRebalanceStage\([\s\S]*?"failed"/);
-  assert.match(source, /Never run a later trading stage from stale output after a genuine/);
+  assert.match(source, /delete chosen\[card\]/);
+  assert.match(source, /recordAutoRebalanceStage\(portfolio,card,"failed"/);
+  assert.match(source, /Promise.allSettled\(cards.map\(runCard\)\)/);
   assert.doesNotMatch(source, /promptToContinueAfterProblem/);
 });
 

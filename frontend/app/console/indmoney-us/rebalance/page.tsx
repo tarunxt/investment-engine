@@ -3,5 +3,5 @@ import { PortfolioRebalanceConsole } from '@/app/console/_components/PortfolioRe
 
 export default async function IndMoneyUsRebalancePage({searchParams}:{searchParams:Promise<{history?:string}>}) {
   if((await searchParams).history!=="1") return <ScorecardStandalone portfolio="indmoneyUs" stage="rebalance"/>;
-  return <PortfolioRebalanceConsole portfolio="indmoneyUs" market="us" />;
+  return <PortfolioRebalanceConsole historyOnly portfolio="indmoneyUs" market="us" />;
 }

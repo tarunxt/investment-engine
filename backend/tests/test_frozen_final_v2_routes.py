@@ -9,7 +9,7 @@ from fastapi import FastAPI, HTTPException
 from sqlalchemy import select
 
 # Reuse the existing isolated SQLite/no-network route fixture and its writers.
-from test_auto_rebalance_audit_durability import audit_db, write
+from test_auto_rebalance_audit_durability import OWNER, audit_db, write
 from test_final_recompute import inputs as calculation_inputs, capture
 from app.domains.jobs.models import Job
 from app.domains.runs.models import Run, RunJob, AutoRebalanceWorkflowStage
@@ -317,3 +317,37 @@ async def test_failed_actionables_only_replays_confirmed_verification_rejections
                 await replay_india_score(42, db, OWNER)
     workflow, _, _ = await snapshot(audit_db)
     assert workflow.status == 'failed'
+
+
+@pytest.mark.anyio
+async def test_stage2_publication_source_ownership_and_frozen_independent_final(audit_db):
+    from datetime import datetime, timezone
+    from app.domains.scorecards import router as cards
+    from app.domains.scorecards.models import ScorecardRevision, ScorecardAttempt, ScorecardBatch, ScorecardFinal
+    from app.domains.zerodha.models import ZerodhaPortfolioSnapshot as Snapshot
+    from app.infrastructure.database.base import Base
+    from app.domains.scorecards.final import DEFAULT_WEIGHTS
+    stamp = datetime(2026, 10, 1, 9, tzinfo=timezone.utc)
+    async with audit_db.engine.begin() as conn:
+        await conn.run_sync(lambda c: Base.metadata.create_all(c, tables=[Snapshot.__table__, ScorecardRevision.__table__,
+            ScorecardAttempt.__table__, ScorecardBatch.__table__, ScorecardFinal.__table__]))
+    async with audit_db.sessions() as db:
+        db.add(Snapshot(id=1,user_id=7,captured_at=stamp,snapshot_date=stamp.date(),holdings_count=1,
+                        holdings=[{"exchange":"NSE","tradingsymbol":"ABC","quantity":2,"last_price":100}]))
+        await db.commit()
+        body = cards.Publication(sequence=42,request_key="once",snapshot_id=1,captured_at=stamp,swing_job_ids=[])
+        rev = await cards.publish("india",body,db,OWNER)
+        assert (await cards.publish("india",body,db,OWNER))["id"] == rev["id"]
+        assert rev["manifest"]["stocks"][0]["listing"] == "NSE:ABC"
+        with pytest.raises(HTTPException) as denied:
+            await cards.detail("india",rev["id"],db,SimpleNamespace(id=8))
+        assert denied.value.status_code == 404
+        attempt = ScorecardAttempt(revision_id=rev["id"],workflow_id=7001,card="technical",request_key="one",
+            settings_json={}, result_json={"rows":[{"listing":"NSE:ABC","score":0,"coverage":"Complete"}]})
+        db.add(attempt)
+        await db.commit()
+        request = cards.Finalize(sequence=42,attempts={"technical":attempt.id},weights=DEFAULT_WEIGHTS)
+        result = await cards.finalize("india",rev["id"],request,db,OWNER)
+        assert result["rows"][0]["final"] == 0
+        assert result["rows"][0]["status"] == "Provisional"
+        assert (await cards.finalize("india",rev["id"],request,db,OWNER))["id"] == result["id"]

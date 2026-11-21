@@ -206,3 +206,51 @@ def test_us_snapshot_identity_and_fractional_position():
     snap = SimpleNamespace(parse_status="parsed", holdings_count=1, reported_holdings_count=1, holdings=[{"symbol":"ACME","quantity":0.1278,"current_value":23.45}])
     assert holding(snap, key, safe) == (0.1278,23.45,"matched")
     assert holding(snap, key, False) == (None,None,"unresolved")
+
+
+def test_independent_card_numerics_and_missing_coverage():
+    from app.domains.scorecards.final import calculate_final, policy, DEFAULT_WEIGHTS
+    from app.domains.scorecards.prompts import CARDS
+    stock = {"listing":"NSE:ABC","units":0,"settled":0}
+    manifest = {"stocks":[stock]}
+    source = {card:{"rows":[{"listing":stock["listing"],"score":score,"coverage":"Complete"}]}
+              for card, score in zip(CARDS, [75,250/3,32,75])}
+    config = policy(DEFAULT_WEIGHTS, {})
+    row, = calculate_final(manifest, source, config)
+    assert row["final"] == pytest.approx(76.4271212121, abs=0.005)
+    assert row["status"] == "Complete" and row["available_weight"] == pytest.approx(100)
+    source["rebalance"]["rows"][0]["score"] = 0
+    del source["pairwise"]
+    row, = calculate_final(manifest, source, config)
+    assert row["status"] == "Provisional" and row["available_weight"] == pytest.approx(99)
+    assert row["contributions"]["rebalance"] == 0 and row["contributions"]["pairwise"] is None
+
+
+def test_independent_pairwise_schedule_and_symmetric_projection():
+    from app.domains.scorecards.prompts import batches
+    from app.domains.scorecards.scoring import pair_results, dated_reference
+    keys = [f"NSE:S{i}" for i in range(20)]
+    pairs = [pair for _, block in batches([{"listing":k} for k in keys],"pairwise") for pair in block]
+    assert len(pairs) == len(set(pairs)) == 190
+    votes = {p:{0:{"result":p[0]},1:{"result":p[1]}} for p in pairs}
+    votes[pairs[0]][2] = {"result":pairs[0][1]}
+    a,b = pairs[0]
+    rows = pair_results(votes,keys)
+    assert (rows[a]["score"],rows[b]["score"]) == (0,100)
+    assert rows[a]["expected"] == 19 and rows[b]["valid"] == 1
+    assert rows[b]["coverage"] == "Partial"
+    assert not dated_reference("https://example.org/doc 2026-11-21T15:01:00Z","2026-11-21T15:00:00Z")
+
+
+def test_independent_threat_safety_inverts_once_and_clear_is_measured():
+    from app.domains.scorecards.scoring import threats_by_slot, threats
+    items = [dict(category=i,scenario_id=f"event{i}",trigger="reported event", likelihood=l,impact=k,
+                  downside="5%",source_url=f"https://example.org/event/{i}",published_at="2026-10-31",
+                  confidence="high",rationale="verified event")
+             for i,(l,k) in enumerate([(5,4),(3,4),(3,2)],1)]
+    rows = {"NSE:ABC":{"Evidence":json.dumps(items)}}
+    slot = threats_by_slot(rows,"2026-11-01T10:00:00+00:00")
+    row = threats("NSE:ABC",[slot],[])
+    assert row["stock_threat"] == pytest.approx(68)
+    assert row["score"] == pytest.approx(32) and row["coverage"] == "Partial"
+    assert row["assessed"] == 3

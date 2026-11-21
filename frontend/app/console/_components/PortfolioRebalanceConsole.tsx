@@ -878,9 +878,11 @@ function RebalanceInputBox({
 export function PortfolioRebalanceConsole({
   portfolio,
   market,
+  historyOnly = false,
 }: {
   portfolio: RebalancePortfolioKey;
   market: SwingTradeMarket;
+  historyOnly?: boolean;
 }) {
   const copy = PAGE_COPY[portfolio];
   const basePrompt = useMemo(() => buildRebalancePrompt(market), [market]);
@@ -918,11 +920,11 @@ export function PortfolioRebalanceConsole({
         />
 
         <div className="grid gap-6">
-          <RebalanceInputBox
+          {!historyOnly && <RebalanceInputBox
             portfolio={portfolio}
             market={market}
             basePrompt={basePrompt}
-          />
+          />}
           <RecentJobsTable />
         </div>
       </div>

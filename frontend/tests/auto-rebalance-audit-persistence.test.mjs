@@ -51,7 +51,7 @@ function extract(start, end) {
 const callbacks = extract("  const getAuditSession = useCallback(", "  // Poll ownership changes");
 const workflow = extract("  const runWorkflow = useCallback(", "  const syncPortfolioNow = useCallback(");
 const executable = compile(`${callbacks}\n${workflow}\nreturn { getAuditSession, recordAutoRebalanceStage, markCompleted, runWorkflow };`);
-const stages = ["sync", "swing", "threats", "rebalance", "technical", "actionables"];
+const stages = ["sync", "swing", "threats", "pairwise", "rebalance", "technical", "actionables"];
 const metadata = (portfolio = "india", sequence = 42) => ({ auto_rebalance_portfolio: portfolio, auto_rebalance_sequence: sequence, auto_rebalance_label: `${portfolio} ${sequence}` });
 const deferred = () => {
   let resolve;
@@ -97,7 +97,7 @@ function harness({ analysisOnly = false, formulaScore = 0, intercept, read, emai
     getAutoRebalanceHistoryDetail: async (portfolio, sequence) => {
       if (read) return read({ portfolio, sequence, durable });
       const savedStages = stages.map((stage) => durable.get(`${portfolio}:${sequence}:${stage}`)).filter(Boolean);
-      return { portfolio, sequence, status: savedStages.length === 6 && savedStages.every((stage) => ["completed", "partial", "skipped"].includes(stage.status)) ? "completed" : "processing", stages: savedStages };
+      return { portfolio, sequence, status: savedStages.length === stages.length && savedStages.every((stage) => ["completed", "partial", "skipped"].includes(stage.status)) ? "completed" : "processing", stages: savedStages };
     },
     queueAutoRebalanceCompletionEmail: async (payload) => {
       emails.push(payload);
@@ -112,7 +112,18 @@ function harness({ analysisOnly = false, formulaScore = 0, intercept, read, emai
     indmoneyUsCreatePortfolioSnapshot: async () => snapshot,
     createRun: async (payload) => { modelCalls.push(payload); return { id: modelCalls.length }; },
   };
+  const publications = [], finals = [];
+  const cards = ["rebalance","technical","threats","pairwise"];
+  const scorecards = {
+    publish: async body=>{publications.push(body);return {id:17};},
+    read: async id=>({id,attempts:[],finals:[],manifest:{stocks:[{listing:"NSE:TEST"}]}}),
+    start: async (revision,card,body)=>{modelCalls.push({revision,card,...body});return {id:modelCalls.length,run_id:modelCalls.length};},
+    result: async id=>({id,status:"completed",scored:1}),
+    savedPolicy: async ()=>null,
+    finalize: async (id,sequence,attempts,policy)=>{finals.push({id,sequence,attempts,policy});return {id:70,schema:"independent-scorecards-v1",rows:[{}]};},
+  };
   const bindings = {
+    cards, isCard:key=>cards.includes(key), sourceSelections:{zerodha:17,indmoneyUs:17},setSourceSelections:()=>{},cardPolicies:{},scorecardApi:()=>scorecards,migratedPolicy:()=>({}), isUsableStageJob:()=>true,
     runtimeOwner: { id: 7 }, isCurrentWorkflowOwner: () => true, requireWorkflowOwner: owner => owner,
     actionablesActivityKey: helperModule.exports.actionablesActivityKey, announceActionablesActivity: helperModule.exports.announceActionablesActivity,
     savedStageReadGeneration: {current:0}, setWorkflowHistoryError: set("historyError"),
@@ -160,7 +171,7 @@ function harness({ analysisOnly = false, formulaScore = 0, intercept, read, emai
     window: { setTimeout: (fn) => { timers.push(fn); }, dispatchEvent: () => {}, alert: (message) => { alerts.push(message); } },
     CustomEvent: class {}, console: { error: () => {} },
   };
-  return { ...new Function(...Object.keys(bindings), executable)(...Object.values(bindings)), view, active, sessions, execution, cancel, pause, auditWrites, emails, modelCalls, consensusCalls, delays, timers, durable, updates, alerts };
+  return { publications,finals,...new Function(...Object.keys(bindings), executable)(...Object.values(bindings)), view, active, sessions, execution, cancel, pause, auditWrites, emails, modelCalls, consensusCalls, delays, timers, durable, updates, alerts };
 }
 
 for (const rejectedStage of ["sync", "actionables"]) {
@@ -354,7 +365,7 @@ test("workflow card retains pending status and omits the failed-history banner",
   const workflowStates = Object.fromEntries(stages.map((stage) => [stage, { state: "completed" }]));
   for (const status of ["pending", "failed"]) {
     const bindings = {
-      exports: {}, technicalInputPlanIssue, selectedInputs: { zerodha: { technical: new Set(["technical:next"]) } },
+      isCard:stage=>["rebalance","technical","threats","pairwise"].includes(stage),exports: {}, technicalInputPlanIssue, selectedInputs: { zerodha: { technical: new Set(["technical:next"]) } },
       require: (name) => { assert.equal(name, "react/jsx-runtime"); return jsxRuntime; },
       scoreRevision: null, zerodhaBasketOrders: [],
       auditStates: { zerodha: { key: "india:42", label: "India 42", status, message: "History not acknowledged" } },
@@ -378,8 +389,8 @@ test("workflow card retains pending status and omits the failed-history banner",
     const specificBindings = { ...bindings, specificMode: { zerodha: true }, selectedStages: { zerodha: new Set(["technical"]) } };
     const specificCard = new Function(...Object.keys(specificBindings), source)(...Object.values(specificBindings));
     const specificHtml = renderToStaticMarkup(specificCard({ portfolio: "zerodha", title: "Run Zerodha Auto-Rebalance", buttonLabel: "Run" }));
-    assert.match(specificHtml, /Choose saved Rebalance inputs/);
-    assert.match(specificHtml, /Next means a new result from this invocation/);
+    assert.match(specificHtml, /View output technical/);
+    assert.match(specificHtml, /View output pairwise/);
     if (status === "failed") {
       assert.doesNotMatch(html, /completion email has not been queued/);
       assert.doesNotMatch(html, /Check saved run history/);
@@ -529,30 +540,19 @@ test("kill during stage audit records cancellation on an unstarted stage and pre
 });
 
 
-test("Personal API denial still creates Technical and completes frozen Actionables", async () => {
-  const h = harness({quoteRead: async () => {throw Object.assign(new Error("Zerodha denied market-data access (PermissionException). This connection cannot provide live quotes."),{status:403});}});
+test("Technical uses the published revision after broker quote access is denied", async () => {
+  const h = harness({quoteRead:async()=>{throw Error("quote access denied");}});
   await h.runWorkflow("zerodha");
-  const technical = h.modelCalls.find(call => call.scanLabel === "Technical Scan");
-  assert.ok(technical);
-  assert.match(technical.prompt,/internet_research_no_broker_quotes/);
-  assert.match(technical.prompt,/TECHNICAL_REBALANCE_SOURCES_V1/);
-  assert.doesNotMatch(technical.prompt,/TECHNICAL_PRICE_ANCHORS_V1/);
-  assert.equal(h.view.states.zerodha.technical.state,"completed");
+  assert.equal(h.modelCalls.find(call=>call.card==="technical").revision,17);
   assert.equal(h.view.states.zerodha.actionables.state,"completed");
 });
 
-
-test("final capture uses the retained workflow snapshot on repeated runs", async () => {
-  const retained = { ...holdingsSnapshot, holdings: [{ symbol: "TEST", quantity: 6 }] };
-  const h = harness({ snapshot: retained });
-  for (let attempt = 0; attempt < 2; attempt++) {
-    await h.runWorkflow("indmoneyUs");
-    const finalCall = h.consensusCalls.at(-1);
-    assert.ok(finalCall, JSON.stringify(h.updates.filter(x => x.info.error)));
-    assert.equal(finalCall[1], "us");
-    assert.equal(finalCall[2], retained, "final calculation uses the exact retained snapshot");
-    assert.equal(h.view.states.indmoneyUs.actionables.state, "completed");
-  }
+test("subsequent runs publish the exact retained holdings snapshot",async()=>{
+  const h=harness({snapshot:holdingsSnapshot});
+  await h.runWorkflow("indmoneyUs");
+  await h.runWorkflow("indmoneyUs");
+  assert.deepEqual(h.publications.map(p=>p.snapshot_id),[7001,7001]);
+  assert.ok(h.publications.every(p=>p.captured_at===holdingsSnapshot.captured_at));
 });
 for (const analysisOnly of [false, true]) {
   test(`actual workflow freezes analysis-only selection=${analysisOnly} in reservation`, async () => {
@@ -562,48 +562,13 @@ for (const analysisOnly of [false, true]) {
     assert.deepEqual(reservations, [{ portfolio: "zerodha", flag: analysisOnly }]);
   });
 }
-test("stale India quotes start unanchored Technical research with the exact listing and reason", async () => {
-  const h = harness({quoteRead: async instruments => ({
-    quotes: instruments.map(instrument => ({instrument,price:100,as_of:'2000-01-01T00:00:00Z',source:'synthetic stale fixture'})),
-    missing:[],
-  })});
+test("a final audit references the exact server calculation and sequence",async()=>{
+  const h=harness();
   await h.runWorkflow("zerodha");
-  const technicalCalls = h.modelCalls.filter(call => call.scanLabel === "Technical Scan");
-  assert.equal(technicalCalls.length, 1);
-  assert.match(technicalCalls[0].prompt, /\[TECHNICAL_PRICE_MODE_V1\]internet_research_no_broker_quotes\[\/TECHNICAL_PRICE_MODE_V1\]/);
-  assert.match(technicalCalls[0].prompt, /NSE:TEST \(stale quote\)/);
-  assert.doesNotMatch(technicalCalls[0].prompt, /\[TECHNICAL_PRICE_ANCHORS_V1\]/);
+  assert.deepEqual(h.durable.get("india:42:actionables").summary.frozen_final,
+    {schema:"independent-scorecards-v1",workflow_sequence:42,final_id:70});
+  assert.deepEqual(h.finals[0].attempts,{rebalance:2,technical:3});
 });
-
-test("future-dated India quotes stop the actual workflow before Technical job creation and final acceptance", async () => {
-  const futureQuote = new Date(Date.now() + 10 * 60_000).toISOString();
-  const h = harness({quoteRead: async instruments => ({
-    quotes: instruments.map(instrument => ({instrument, price:100, as_of:futureQuote, source:'synthetic future fixture'})),
-    missing:[],
-  })});
-  await h.runWorkflow("zerodha");
-  assert.equal(h.modelCalls.filter(call => call.scanLabel === "Technical Scan").length,0);
-  assert.equal(h.view.states.zerodha.technical.state,"failed");
-  assert.notEqual(h.view.states.zerodha.actionables.state,"completed");
-  assert.equal(h.emails.length,0);
-  assert.equal(h.durable.get("india:42:technical").status,"failed");
-  assert.equal(h.durable.get("india:42:actionables")?.summary?.frozen_final, undefined);
-});
-for (const rawScore of [3.033333333333333, -3.033333333333333, 0, null]) {
-  test(`actual workflow freezes explicit v2 raw/effective evidence for ${rawScore}`, async () => {
-    const h = harness({ formulaScore: rawScore });
-    await h.runWorkflow("zerodha");
-    const frozen = h.durable.get("india:42:actionables").summary.frozen_final;
-    assert.equal(frozen.schema, "workflow-final-v2");
-    assert.equal(frozen.formula_version, "score-matrix-v2");
-    assert.equal(h.durable.get("india:42:technical").summary.final_inputs.formula_version, frozen.formula_version);
-    assert.equal(frozen.scorePolicy, "score-matrix-raw-effective-v2");
-    assert.equal(frozen.rows[0].score, rawScore);
-    assert.equal(frozen.rows[0].rawScore, rawScore);
-    assert.equal(frozen.rows[0].effectiveScore, rawScore === null ? null : Math.max(-3, Math.min(3, rawScore)));
-    assert.equal(frozen.rows[0].scorePolicy, frozen.scorePolicy);
-  });
-}
 
 test('actual selective workflow clears cached evidence before each reservation acknowledgement', async () => {
   let gate=deferred();

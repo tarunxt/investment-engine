@@ -341,6 +341,7 @@ function isZerodhaSyncRequest(method: string, path: string) {
 }
 
 function getProxyAttemptTimeoutMs(method: string, path: string) {
+  if (/^runs\/scorecards\/(india|indmoney_us)\//.test(path)) return method === "POST" ? 60_000 : 20_000;
   if (method === "POST" && ["zerodha/orders/place-protected-market", "zerodha/orders/place-protected-market-sequenced"].includes(path)) return ZERODHA_PROTECTED_ORDER_TIMEOUT_MS;
   if (isZerodhaSyncRequest(method, path)) return ZERODHA_SYNC_PROXY_ATTEMPT_TIMEOUT_MS;
   if (getCapturedPortfolioAnalysisReadScope(method, path) || getResearchHistoryReadScope(method, path)) {
@@ -395,6 +396,7 @@ function getProxyAttemptTimeoutMs(method: string, path: string) {
 }
 
 function getProxyTotalTimeoutMs(method: string, path: string) {
+  if (/^runs\/scorecards\/(india|indmoney_us)\//.test(path)) return method === "POST" ? 60_000 : 20_000;
   if (method === "POST" && ["zerodha/orders/place-protected-market", "zerodha/orders/place-protected-market-sequenced"].includes(path)) return ZERODHA_PROTECTED_ORDER_TIMEOUT_MS;
   if (isZerodhaSyncRequest(method, path)) return ZERODHA_SYNC_PROXY_TOTAL_TIMEOUT_MS;
   if (getCapturedPortfolioAnalysisReadScope(method, path) || getResearchHistoryReadScope(method, path)) {

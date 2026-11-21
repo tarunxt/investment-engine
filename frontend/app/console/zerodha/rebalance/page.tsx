@@ -3,5 +3,5 @@ import { PortfolioRebalanceConsole } from '@/app/console/_components/PortfolioRe
 
 export default async function ZerodhaRebalancePage({searchParams}:{searchParams:Promise<{history?:string}>}) {
   if((await searchParams).history!=="1") return <ScorecardStandalone portfolio="zerodha" stage="rebalance"/>;
-  return <PortfolioRebalanceConsole portfolio="zerodha" market="india" />;
+  return <PortfolioRebalanceConsole historyOnly portfolio="zerodha" market="india" />;
 }

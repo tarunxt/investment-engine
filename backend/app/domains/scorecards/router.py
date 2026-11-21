@@ -31,12 +31,21 @@ class Request(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class VerifiedListing(Request):
+    symbol: str = Field(pattern=r"^[A-Z0-9.-]{1,24}$")
+    venue: Literal["NASDAQ","NYSE","NYSEAMERICAN","NYSEARCA"]
+    security_id: str = Field(min_length=1,max_length=100)
+    share_class: str = Field(min_length=1,max_length=100)
+    source_url: str = Field(pattern=r"^https://[^ /]+/[^ ]+$",max_length=1000)
+
+
 class Publication(Request):
     request_key: str = Field(min_length=1,max_length=80)
     sequence: int = Field(gt=0)
     snapshot_id: int | None = Field(default=None,gt=0)
     captured_at: datetime
     swing_job_ids: list[int] = Field(max_length=500)
+    verified_listings: list[VerifiedListing] = Field(default_factory=list,max_length=1000)
 
 
 class Start(Request):
@@ -75,7 +84,7 @@ async def publish(portfolio:Portfolio, body:Publication, db:AsyncSession=Depends
     previous=await db.scalar(select(Revision).where(Revision.workflow_id==w.id,Revision.request_key==body.request_key))
     if previous:
         m=previous.manifest
-        if body.snapshot_id is not None and m["snapshot_id"]!=body.snapshot_id or m["swing_job_ids"]!=sorted(set(body.swing_job_ids)) or datetime.fromisoformat(m["snapshot_at"])!=body.captured_at:
+        if m.get("verified_listings",[]) != [v.model_dump() for v in body.verified_listings] or body.snapshot_id is not None and m["snapshot_id"]!=body.snapshot_id or m["swing_job_ids"]!=sorted(set(body.swing_job_ids)) or datetime.fromisoformat(m["snapshot_at"])!=body.captured_at:
             raise HTTPException(409,"Publication key already names different source inputs")
         return {"id":previous.id,"manifest":m,"digest":previous.digest}
     m=await publish_manifest(db,user.id,w,body)
@@ -108,7 +117,7 @@ async def detail(portfolio:Portfolio,revision_id:int,db:AsyncSession=Depends(get
 async def start(portfolio:Portfolio,revision_id:int,card:Card,body:Start,db:AsyncSession=Depends(get_async_db),user:User=Depends(get_current_user)):
     w=await workflow(db,user.id,portfolio,body.sequence)
     rev=await owned(db,user.id,portfolio,Revision,revision_id)
-    if rev.manifest["unresolved"] or not rev.manifest["stocks"]:
+    if not rev.manifest["stocks"]:
         raise HTTPException(422,"Resolve the flagged Stage 2 listing identities before scoring")
     config={"targets":[t.model_dump() for t in body.targets],"parent":body.retry_attempt_id}
     existing=await db.scalar(select(Attempt).where(Attempt.revision_id==rev.id,Attempt.card==card,Attempt.request_key==body.request_key))

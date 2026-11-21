@@ -1,6 +1,7 @@
 "use client";
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
+import { captureWorkflowOwner, onWorkflowOwnerInvalidated } from "@/lib/workflowOwnerLifetime";
 import { useAuth } from "@/hooks/useAuth";
 import { ScorecardReview } from "@/app/console/dashboard/_components/ScorecardReview";
 import { migratedPolicy, type CardKey } from "@/lib/independentScorecards";
@@ -11,8 +12,9 @@ export function ScorecardStandalone({portfolio,stage}:{portfolio:"zerodha"|"indm
   const router=useRouter();
   const [policy,setPolicy]=useState(()=>migratedPolicy(loadScoreMatrixFormulaConfig()));
   const [revision,setRevision]=useState<number>();
-  if(!user)return null;
-  return <ScorecardReview key={user.id} portfolio={portfolio} stage={stage} fallbackPolicy={policy} revisionId={revision}
+  const owner=useSyncExternalStore(onWorkflowOwnerInvalidated,captureWorkflowOwner,()=>null);
+  if(!user||owner?.id!==user.id)return null;
+  return <ScorecardReview key={owner.generation} portfolio={portfolio} stage={stage} fallbackPolicy={policy} revisionId={revision}
     onRevision={setRevision} onPolicy={setPolicy} onClose={()=>router.push(portfolio==="zerodha"?"/console/zerodha#india-workflow":"/console/indmoney-us")}/>;
 }
 

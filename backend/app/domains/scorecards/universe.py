@@ -45,6 +45,20 @@ async def publish_manifest(db, owner, workflow, body):
     if len(jobs) != len(selected):
         raise HTTPException(422, "A selected Swing job is unavailable")
     registry = [] if india else read_verified_listings(owner)["listings"]
+    corrections = [v.model_dump() for v in body.verified_listings]
+    if india and corrections:
+        raise HTTPException(422, "Listing confirmations apply to US equities")
+    for item in corrections:
+        venue, symbol = item["venue"], item["symbol"]
+        match = {"instrument": f"{venue}:{symbol}", "symbol":symbol, "share_class":item["share_class"].strip(),
+                 "security_id":item["security_id"].strip(), "listing_mic":{"NASDAQ":"XNAS","NYSE":"XNYS","NYSEARCA":"ARCX","NYSEAMERICAN":"XASE"}[venue]}
+        if not match["share_class"] or not match["security_id"]:
+            raise HTTPException(422, "A listing confirmation requires a security ID and share class")
+        existing = [r for r in registry if r["instrument"] == match["instrument"]]
+        if existing and any(any(r[k] != val for k,val in match.items()) for r in existing):
+            raise HTTPException(422, f"Conflicting listing identity for {venue}:{symbol}")
+        if not existing:
+            registry.append(match)
     listings, evidence, unresolved = {}, [], []
     def listing(venue, ticker, name, origin):
         venue, ticker = str(venue or "").strip().upper(), str(ticker or "").strip().upper()
@@ -95,9 +109,13 @@ async def publish_manifest(db, owner, workflow, body):
                 row["sources"].append(job.id)
             evidence.append({"listing": row["listing"], "run_id": run.id, "job_id": job.id, "model": job.model,
                              "source_time": utc(job.updated_at).isoformat(), "row": {k: str(v) if v is not None else None for k,v in raw.items()}})
-    return {"version": 1, "portfolio": workflow.portfolio, "sequence": workflow.sequence, "market": market,
+    # A ticker-only US position with an unresolved share class cannot establish zero units for a contender.
+    for row in listings.values():
+        if row["origin"] == "contender" and any(h["origin"] == "holding" and h["symbol"] == row["symbol"] for h in unresolved):
+            row.update(units=None, settled=None, weight=None, value=None)
+    return {"version": 1, "research_horizon_weeks": [2,12], "portfolio": workflow.portfolio, "sequence": workflow.sequence, "market": market,
             "currency": "INR" if india else "USD", "as_of": datetime.now(timezone.utc).isoformat(),
-            "snapshot_id": snap.id, "snapshot_at": utc(snap.captured_at).isoformat(), "swing_job_ids": selected,
+            "verified_listings":corrections, "snapshot_id": snap.id, "snapshot_at": utc(snap.captured_at).isoformat(), "swing_job_ids": selected,
             "funds": {"type": "available_margin" if india else "wallet_balance", "value": snap.available_margin if india else snap.wallet_balance},
             "stocks": sorted(listings.values(), key=lambda row: row["listing"]), "evidence": evidence, "unresolved": unresolved}
 

@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { apiService } from "@/services/api";
-import { scorecardApi, cards, type CardKey, type CardPolicy, type CardResult, type CardFinal, type SourceDetail, type SourceRevision } from "@/lib/independentScorecards";
+import { scorecardApi, cards, type CardKey, type CardPolicy, type CardResult, type CardFinal, type SourceDetail, type SourceRevision, type VerifiedListing } from "@/lib/independentScorecards";
 import { getCompatibleTargets, resolveStageModelKeys, type StageModelPreferences } from "@/lib/workflowStageModels";
 import { getAnalysisRunIdentity } from "@/lib/rebalanceRunIdentity";
 import type { ProviderModelTarget, RunListItem } from "@/types/api";
@@ -30,11 +30,14 @@ export function ScorecardReview({portfolio,stage:initial,revisionId,fallbackPoli
   const [stage,setStage]=useState(initial),[revs,setRevs]=useState<SourceRevision[]>([]),[id,setId]=useState(revisionId??0);
   const [detail,setDetail]=useState<SourceDetail|null>(null),[version,setVersion]=useState(0),[attempt,setAttempt]=useState(0);
   const [result,setResult]=useState<CardResult|null>(null),[final,setFinal]=useState<CardFinal|null>(null),[finalId,setFinalId]=useState(0);
+  const [chosen,setChosen]=useState<Partial<Record<CardKey,number>>>({});
   const [policy,setPolicy]=useState<CardPolicy>(fallbackPolicy),[models,setModels]=useState<StageModelPreferences>({});
   const [providers,setProviders]=useState<ProviderModelTarget[]>([]),[swings,setSwings]=useState<RunListItem[]>([]),[jobs,setJobs]=useState<number[]>([]);
   const [prompt,setPrompt]=useState(""),[error,setError]=useState(""),[busy,setBusy]=useState(false);
   const card=stage==="source"||stage==="actionables"?null:stage;
+  const [confirmation,setConfirmation]=useState<VerifiedListing>({symbol:"",venue:"NASDAQ",security_id:"",share_class:"",source_url:""});
   const requestGuard=useRef(false);
+  const selectedOutput=useRef<number|null>(null);
   useEffect(()=>{const el=dialog.current;el?.showModal();return()=>el?.close();},[]);
   useEffect(()=>{let active=true; void (async()=>{
     const values=await Promise.all([api.list(),client.getWorkflowModels(),client.getProviders({}),api.savedPolicy()]);
@@ -42,7 +45,7 @@ export function ScorecardReview({portfolio,stage:initial,revisionId,fallbackPoli
     setId(prev=>prev||values[0]?.[0]?.id||0);
   })().catch(e=>active&&setError(String(e)));return()=>{active=false;};},[api,client,version]);
   useEffect(()=>{if(!id)return;let active=true;setDetail(null);setPrompt("");setResult(null);
-    void api.read(id).then(d=>{if(active){setDetail(d);setAttempt(card?d.attempts.find(a=>a.card===card)?.id??0:0);setFinalId(d.finals[0]?.id??0);}}).catch(e=>active&&setError(String(e)));
+    void api.read(id).then(d=>{if(active){setDetail(d);setChosen(Object.fromEntries(cards.map(c=>[c,d.attempts.find(a=>a.card===c)?.id??0])));setAttempt(card?(d.attempts.find(a=>a.id===selectedOutput.current&&a.card===card)??d.attempts.find(a=>a.card===card))?.id??0:0);selectedOutput.current=null;setFinalId(d.finals[0]?.id??0);}}).catch(e=>active&&setError(String(e)));
     return()=>{active=false;};},[api,id,card,version]);
   useEffect(()=>{if(!id||!card)return;let active=true;void api.prompt(id,card).then(x=>active&&setPrompt(x.prompt)).catch(e=>active&&setError(String(e)));return()=>{active=false;};},[api,id,card]);
   useEffect(()=>{if(!attempt){setResult(null);return;}let active=true;let timer:ReturnType<typeof setTimeout>;
@@ -69,7 +72,7 @@ export function ScorecardReview({portfolio,stage:initial,revisionId,fallbackPoli
   async function compute(){
     if(!detail)return;
     const refs:Partial<Record<CardKey,number>>={};
-    for(const c of cards){const ref=detail.attempts.find(a=>a.card===c);if(!ref)continue;const output=await api.result(ref.id);if(output.status==="processing")throw Error(titles[c]+" is still running.");refs[c]=ref.id;}
+    for(const c of cards){const ref=detail.attempts.find(a=>a.card===c && a.id===chosen[c]);if(!ref)continue;const output=await api.result(ref.id);if(output.status==="processing")throw Error(titles[c]+" is still running.");refs[c]=ref.id;}
     const f=await api.finalize(detail.id,detail.manifest.sequence,refs,policy);
     setFinal(f);setFinalId(f.id);onPolicy(policy);setVersion(n=>n+1);
   }
@@ -79,12 +82,19 @@ export function ScorecardReview({portfolio,stage:initial,revisionId,fallbackPoli
   return <dialog ref={dialog} onCancel={onClose} className="fixed inset-0 m-auto max-h-[94vh] w-[min(96vw,1320px)] max-w-none overflow-auto rounded-2xl border bg-white p-5 text-slate-900 shadow-xl backdrop:bg-slate-900/40" aria-label="Scorecards">
     <div className="flex items-center justify-between"><h2 className="text-xl font-semibold">{titles[stage]}</h2><button className={button} onClick={onClose}>Close</button></div>
     <nav className="my-3 flex flex-wrap gap-2">{(["source",...cards,"actionables"] as const).map(c=><button className={button} aria-pressed={c===stage} key={c} onClick={()=>{setStage(c);setError("");}}>{titles[c]}</button>)}</nav>
-    <label>Stage 2 revision <select className={input} value={id} onChange={e=>sourceChanged(Number(e.target.value))}><option value={0}>Select a publication</option>{revs.map(r=><option key={r.id} value={r.id}>#{r.id} · Run {r.sequence} · {r.created_at}</option>)}</select></label>
+    <label>Stage 2 revision <select className={input} value={id} onChange={e=>sourceChanged(Number(e.target.value))}><option value={0}>Select a publication</option>{revs.map(r=><option key={r.id} value={r.id}>#{r.id} · Run {r.sequence} · {r.created_at}</option>)}</select></label> {id>0&&revisionId!==id&&<button className={button} onClick={()=>onRevision(id)}>Use this revision for the workflow</button>}
     {error&&<p role="alert" className="my-2 text-red-700">{error}</p>}
     {stage==="source"&&<section className="space-y-3 py-3"><details open={!id}><summary>Publish holdings and selected Swing jobs</summary>
       <div className="my-2 max-h-48 overflow-auto">{swings.flatMap(r=>r.run_jobs.filter(j=>["completed","partial"].includes(j.job?.status??"")).map(j=><label className="block" key={j.job_id}><input type="checkbox" checked={jobs.includes(j.job_id)} onChange={e=>setJobs(old=>e.target.checked?[...old,j.job_id]:old.filter(n=>n!==j.job_id))}/> Run {r.id} · Job {j.job_id} · {j.job?.model}</label>))}</div>
       <button disabled={busy} className={button} onClick={()=>void perform(publish)}>Publish Stage 2 revision</button></details>
-      {detail&&<><p>{detail.manifest.stocks.length} listings · Decision time {detail.manifest.as_of}</p><Grid rows={detail.manifest.stocks}/>{detail.manifest.unresolved.length>0&&<><h3>Unresolved listings</h3><Grid rows={detail.manifest.unresolved}/></>}
+      {detail&&<><p>{detail.manifest.stocks.length} listings · Decision time {detail.manifest.as_of}</p><Grid rows={detail.manifest.stocks}/>{detail.manifest.unresolved.length>0&&<><h3>Unresolved listings</h3><Grid rows={detail.manifest.unresolved}/>{broker==="indmoney_us"&&<fieldset className="flex flex-wrap items-end gap-2"><legend>Confirm a listing from a broker or exchange record</legend>
+        {(["symbol","venue","security_id","share_class","source_url"] as const).map(k=><label key={k} className="grid text-xs">{k.replaceAll("_"," ")}{k==="venue"?<select className={input} value={confirmation.venue} onChange={e=>setConfirmation(f=>({...f,venue:e.target.value}))}>{["NASDAQ","NYSE","NYSEAMERICAN","NYSEARCA"].map(v=><option key={v}>{v}</option>)}</select>:<input className={input} value={confirmation[k]} onChange={e=>setConfirmation(f=>({...f,[k]:k==="symbol"?e.target.value.toUpperCase():e.target.value}))}/>}</label>)}
+        <button disabled={busy||Object.values(confirmation).some(v=>!v.trim())} className={button} onClick={()=>void perform(async()=>{
+          if(!detail.manifest.unresolved.some(r=>r.symbol===confirmation.symbol))throw Error("Choose a symbol listed as unresolved.");
+          const f=detail.manifest;
+          const next=await api.publish({sequence:f.sequence,request_key:crypto.randomUUID(),snapshot_id:f.snapshot_id,captured_at:f.snapshot_at,swing_job_ids:f.swing_job_ids,verified_listings:[...(f.verified_listings??[]),confirmation]});
+          setId(next.id);onRevision(next.id);setVersion(v=>v+1);
+        })}>Publish corrected revision</button></fieldset>}</>}
       <button className={button} disabled={busy} onClick={()=>void perform(async()=>{const outcomes=await Promise.allSettled(cards.map(c=>launch(c)));setVersion(n=>n+1);const failed=outcomes.flatMap((r,i)=>r.status==="rejected"?[titles[cards[i]]+" · "+String(r.reason)]:[]);if(failed.length)throw Error(failed.join("\n"));})}>Run all four scorecards</button></>}</section>}
     {card&&<section className="space-y-3 py-3"><div className="flex flex-wrap gap-2">{keys(card).map((key,i)=><label key={i}>Model {i+1} <select className={input} value={key} onChange={e=>setModels(old=>({...old,[card]:keys(card).map((v,n)=>i===n?e.target.value:v)}))}>{[...new Set([key,...providers.map(t=>t.provider+"::"+t.model)])].map(k=><option key={k}>{k}</option>)}</select></label>)}
       <button className={button} disabled={keys(card).length>=8} onClick={()=>setModels(old=>({...old,[card]:[...keys(card),keys(card)[0]??providers.map(t=>t.provider+"::"+t.model)[0]]}))}>Add model slot</button>
@@ -95,18 +105,19 @@ export function ScorecardReview({portfolio,stage:initial,revisionId,fallbackPoli
       <select aria-label="Scorecard output revision" className={input} value={attempt} onChange={e=>setAttempt(Number(e.target.value))}><option value={0}>Select output</option>{detail?.attempts.filter(a=>a.card===card).map(a=><option key={a.id} value={a.id}>Output #{a.id} · Run {a.run_id}</option>)}</select></div>
       {prompt&&<details><summary>LLM prompt · first batch</summary><pre className="max-h-80 overflow-auto whitespace-pre-wrap text-xs">{prompt}</pre></details>}
       {result&&<><p>{result.status} · {result.completed}/{result.jobs} model jobs · {result.scored??0} stocks scored</p><Grid rows={resultRows}/>
-        {card==="rebalance"&&<details><summary>Original 29-column model rows</summary><Grid rows={result.rows.flatMap(r=>Array.isArray(r.raw_rows)?r.raw_rows:[])}/></details>}
+        {card==="rebalance"&&<details><summary>Original 29-column model rows</summary>{result.model_tables?.map(t=><section key={t.job_id}><h4>Slot {t.slot} · {t.model} · Job {t.job_id}</h4><Grid rows={t.rows}/></section>)}</details>}
         {!!result.errors?.length&&<details><summary>Job diagnostics</summary><Grid rows={result.errors}/></details>}</>}</section>}
     {stage==="actionables"&&<section className="space-y-3 py-3">
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{cards.map(c=><fieldset key={c} className="rounded-lg border p-2"><legend>{titles[c]}</legend>
+        <label className="block">Output <select className={input} value={chosen[c]??0} onChange={e=>setChosen(p=>({...p,[c]:Number(e.target.value)}))}><option value={0}>Unassessed</option>{detail?.attempts.filter(a=>a.card===c).map(a=><option key={a.id} value={a.id}>#{a.id} · Run {a.run_id}</option>)}</select></label>
         <label>Weight % <input className={input+" w-24"} type="number" step="any" min={0} max={100} value={policy.weights[c]} onChange={e=>setPolicy(p=>({...p,weights:{...p.weights,[c]:Number(e.target.value)}}))}/></label>
         <label className="block text-sm"><input type="checkbox" checked={!!policy.factors[c]} onChange={e=>setPolicy(p=>{const f={...p.factors};if(e.target.checked)f[c]=Object.fromEntries(factors[c].map(k=>[k,1]));else delete f[c];return {...p,factors:f};})}/> Weight subsections</label>
         {policy.factors[c]&&factors[c].map(k=><label className="flex justify-between gap-1 text-xs" key={k}>{k}<input className="w-14 border" type="number" min={0} step="any" value={policy.factors[c]?.[k]??0} onChange={e=>setPolicy(p=>({...p,factors:{...p.factors,[c]:{...p.factors[c],[k]:Number(e.target.value)}}}))}/></label>)}</fieldset>)}</div>
       <button className={button} disabled={busy||!detail} onClick={()=>void perform(compute)}>Recalculate and save</button>
       <select aria-label="Final revision" className={input} value={finalId} onChange={e=>setFinalId(Number(e.target.value))}><option value={0}>Select final</option>{detail?.finals.map(f=><option value={f.id} key={f.id}>Final #{f.id}</option>)}</select>
-      {final&&<><p>Final #{final.id} · Stage 2 #{final.revision_id} · {cards.map(c=>titles[c]+" "+fmt(final.policy.weights[c])+"%").join(" · ")}</p>
+      {final&&<>{cards.some(c=>chosen[c] && final.attempts[c]!==chosen[c])&&<p>Selected scorecard outputs have changed. Recalculate to save a new final.</p>}<p>Final #{final.id} · Stage 2 #{final.revision_id} · {cards.map(c=>titles[c]+" "+fmt(final.policy.weights[c])+"%").join(" · ")}</p>
       <Grid rows={final.rows.map(r=>({"Rank":r.rank,"Listing":r.listing,"Name":r.name,"Origin":r.origin,"Current units":r.units,...r.scores,"Weighted contributions":r.contributions,"Available weight %":r.available_weight,"Final /100":r.final,"Coverage":r.status,"Action":r.action,"Suggested units":r.suggested_units}))}/>
-      <div className="flex gap-2">{cards.filter(c=>final.attempts[c]).map(c=><button className={button} key={c} onClick={()=>{setStage(c);setAttempt(final.attempts[c]!);}}>{titles[c]} #{final.attempts[c]}</button>)}</div></>}
+      <div className="flex gap-2">{cards.filter(c=>final.attempts[c]).map(c=><button className={button} key={c} onClick={()=>{selectedOutput.current=final.attempts[c]!;setStage(c);}}>{titles[c]} #{final.attempts[c]}</button>)}</div></>}
     </section>}
   </dialog>;
 }

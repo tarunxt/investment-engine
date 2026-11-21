@@ -28,7 +28,7 @@ def analysis_run_identity(run: Any) -> AnalysisRunIdentity:
         return unknown
     metadata_market = {"india": "india", "indmoney_us": "us"}.get(portfolio)
     label = (getattr(run, "auto_rebalance_label", None) or "").strip()
-    label_match = re.search(r"\b(swing|rebalance|technical|threats?)\s+scan\)?\s*$", label, re.I)
+    label_match = re.search(r"\b(swing|rebalance|technical|pairwise|threats?)\s+scan\)?\s*$", label, re.I)
     label_stage = label_match.group(1).lower() if label_match else None
     if label_stage and label_stage.startswith("threat"):
         label_stage = "threats"
@@ -40,7 +40,7 @@ def analysis_run_identity(run: Any) -> AnalysisRunIdentity:
     prompt = (raw_prompt if raw_prompt is not None else getattr(run, "prompt_preview", None) or "").lstrip()
     independent = re.match(r"\[INDEPENDENT_SCORECARD:(india|us):(rebalance|technical|threats|pairwise):\d+\]", prompt)
     if independent:
-        if metadata_market and metadata_market != independent[1]:
+        if (metadata_market or label_market) not in (None, independent[1]) or label_stage not in (None, independent[2]):
             return unknown
         return AnalysisRunIdentity(independent[1], independent[2])
     opening = re.split(r"\n\s*\n", prompt, maxsplit=1)[0][:1000]

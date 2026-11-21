@@ -2971,7 +2971,7 @@ function ScopedZerodhaBasketPreviewDialog({
   };
   const calculationStocks = allocationUniverse.map(displayStock);
   const displayCalculations = useBasketDisplayCalculations(open, tradingViewMarket, calculationStocks, portfolioAssets.totalAssets, detailsData.portfolioSnapshot?.captured_at ?? null, basketBrokerLabel, { portfolioValue: portfolioAssets.portfolioValue, availableMargin: portfolioAssets.availableMargin }, tradingViewMarket === "india" ? "issuer-v2" : "listing-v1");
-  const legacyDisplayOnlyRows = allocationUniverse.filter(row => !orders.some(order => order.symbol === row.stock.symbol && order.exchange === row.stock.exchange));
+  const legacyDisplayOnlyRows = allocationUniverse.filter(row => row.independentEligible !== false && !orders.some(order => order.symbol === row.stock.symbol && order.exchange === row.stock.exchange));
   const visibleScore = (_score: number | null) => true;
   const buildEditableRow = (existing: ZerodhaBasketPreviewOrder | undefined, row?: DashboardActionRow): ZerodhaBasketPreviewOrder => {
     const stock = existing ? { symbol: existing.symbol, exchange: existing.exchange, score: existing.detail.calculatedScore, ...displayQuote(existing.symbol, existing.exchange) } : displayStock(row!);
@@ -5015,7 +5015,7 @@ export function RebalanceWorkflowSections({
       const rebalance = getLatestMatchingRebalanceRuns(runs, "india");
       const technicalIds = [...new Set(actionRows.map(row => row.detail?.technicalScanSourceRunId))];
       const technical = technicalIds.length === 1 ? runs.find(run => run.id === technicalIds[0]) : null;
-      if(independent&&!stockFlowResult.value.warning){
+      if(independent){
         const verified=bindIndependentBasket(actionRows,independent,formula);
         actionRows=verified.rows;setScoreRevision(verified.revision);setVerifiedBasketFormula(canonicalBasketInputs(formula));
       } else if (technical?.auto_rebalance_sequence && !stockFlowResult.value.warning) {
@@ -5047,8 +5047,8 @@ export function RebalanceWorkflowSections({
         threatsAnalysis: threatsResult.status === "fulfilled" ? threatsResult.value.analysis : null,
         error: capturedDetailsErrors.length ? capturedDetailsErrors.join("; ") : null,
       });
-      setZerodhaAllocationUniverse(stockFlowResult.value.warning ? [] : actionRows);
-      if (stockFlowResult.value.warning) setZerodhaBasketError(`Display calculations unavailable for cached source: ${stockFlowResult.value.warning}`);
+      setZerodhaAllocationUniverse(!independent && stockFlowResult.value.warning ? [] : actionRows);
+      if (!independent && stockFlowResult.value.warning) setZerodhaBasketError(`Display calculations unavailable for cached source: ${stockFlowResult.value.warning}`);
       setZerodhaBasketOrders(orders);
       setSelectedZerodhaBasketIds(new Set());
     } catch (error) {
@@ -5105,7 +5105,7 @@ export function RebalanceWorkflowSections({
       let actionRows = buildDashboardActionRows(stocks, "us", technicalScans, requested?.formula ?? scoreMatrixFormulaConfig);
       const ids = new Set(actionRows.map(row => row.detail?.technicalScanSourceRunId));
       const technical = ids.size === 1 ? runs.find(run => ids.has(run.id)) : null;
-      if(independent&&!stockFlowSource.warning){
+      if(independent){
         const verified=bindIndependentBasket(actionRows,independent,requested?.formula??scoreMatrixFormulaConfig);
         actionRows=verified.rows;setUsRevision(verified.revision);setUsFormula(verified.revision.formula);
       } else if (technical?.auto_rebalance_sequence && !stockFlowSource.warning) {
@@ -5134,8 +5134,8 @@ export function RebalanceWorkflowSections({
         threatsAnalysis: threatsResult.status === "fulfilled" ? threatsResult.value.analysis : null,
         error: capturedDetailsErrors.length ? capturedDetailsErrors.join("; ") : null,
       });
-      setIndmoneyAllocationUniverse(stockFlowSource.warning ? [] : actionRows);
-      if (stockFlowSource.warning) setIndmoneyBasketError(`Display calculations unavailable for cached source: ${stockFlowSource.warning}`);
+      setIndmoneyAllocationUniverse(!independent && stockFlowSource.warning ? [] : actionRows);
+      if (!independent && stockFlowSource.warning) setIndmoneyBasketError(`Display calculations unavailable for cached source: ${stockFlowSource.warning}`);
       setIndmoneyBasketOrders(orders);
       setSelectedIndmoneyBasketIds(new Set());
     } catch (error) {
@@ -6908,6 +6908,13 @@ ${zerodhaExecutionMode === "direct_market"
           if (issues.length) throw new Error(issues.join("\n"));
         } },
       ];
+      if (!shouldRunCurrentStage("swing") && (cards.some(shouldRunCurrentStage) || shouldRunCurrentStage("actionables"))) {
+        checks.push({label:"Stage 2 publication", run:async()=>{
+          const id=sourceSelections[portfolio];
+          if (id) { await scorecardApi(apiService, portfolio==="zerodha"?"india":"indmoney_us").read(id); return; }
+          if (![...selectedInputs[portfolio].rebalance].some(key=>/^run:[1-9]\d*:job:[1-9]\d*$/.test(key))) throw new Error("Select a Stage 2 revision or choose Swing to publish one.");
+        }});
+      }
       if (portfolio === "indmoneyUs" && shouldRunCurrentStage("sync")) {
         checks.push({ label: "INDmoney snapshot", run: async () => {
           if (indmoneyPayload) {
@@ -7216,7 +7223,9 @@ ${zerodhaExecutionMode === "direct_market"
             setSourceSelections(prev=>({...prev,[portfolio]:revision}));
           }
           if (!revision) throw new Error("Select a saved Stage 2 revision in Merge contenders, or run Swing to publish a new one.");
+          if (stopIfRequested()) return;
           const source = await api.read(revision);
+          if (stopIfRequested()) return;
           const chosen: Partial<Record<CardKey,number>> = {};
           for (const item of source.attempts) if (!chosen[item.card]) chosen[item.card]=item.id;
           const runCard = async (card:CardKey) => {
@@ -7225,6 +7234,7 @@ ${zerodhaExecutionMode === "direct_market"
             // Never substitute a previous output when the explicitly requested rerun fails.
             delete chosen[card];
             try {
+              if (cancelRequestedRef.current || !isCurrentWorkflowOwner(runtimeOwner)) return;
               const queued=await api.start(source.id,card,{sequence, request_key:"workflow-"+sequence,targets:targets[card] ?? []});
               const run=await waitForRunWithStageHandling(portfolio,card,queued.run_id);
               const result=await api.result(queued.id);
@@ -7236,7 +7246,7 @@ ${zerodhaExecutionMode === "direct_market"
             } catch (error) {
               if (cancelRequestedRef.current) throw error;
               updateStage(portfolio,card,{state:"failed",error:normalizeError(error),activeRunId:null});
-              await recordAutoRebalanceStage(portfolio,card,"failed",{error:normalizeError(error)});
+              await recordAutoRebalanceStage(portfolio,card,"failed",{error:normalizeError(error),finalInputs:{stage2_revision:source.id}});
             } finally { finishedStages.add(card); }
           };
           await Promise.allSettled(cards.map(runCard));
@@ -7249,7 +7259,7 @@ ${zerodhaExecutionMode === "direct_market"
             const final=await api.finalize(source.id,sequence,chosen,config);
             const saved=await markCompleted(portfolio,"actionables",{runStatus:"saved calculation",recommendedStocks:final.rows.length,
               frozenFinal:{schema:final.schema,final_id:final.id,workflow_sequence:sequence}});
-            if (saved?.saved===false) throw new Error(saved.error);
+            if (saved?.saved===false && /Final calculation could not be verified/i.test(saved.error)) throw new Error(saved.error);
             window.dispatchEvent(new CustomEvent("final-actionables-refresh",{detail:{market,completedAt:new Date().toISOString()}}));
           } else completeSkippedStage(portfolio,"actionables","Stage 4 not selected");
         } else {

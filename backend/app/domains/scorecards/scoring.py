@@ -1,15 +1,16 @@
 """Publish one row per listing from the actual queued jobs; null denotes missing evidence."""
 from collections import Counter, defaultdict
-from datetime import date
+from datetime import date, datetime
+import re
+from urllib.parse import urlparse
 import json
 import math
 from statistics import mean
 
 from app.domains.jobs.output_contracts.document import parse_markdown
-from app.domains.jobs.output_contracts.schemas import REBALANCE_COLUMNS
 from app.domains.runs.final_score_math import ACTIONS, ACTION_VALUES, ACTION_HEADER, RATIONALE_HEADERS, normalize_action
 from app.domains.runs.threat_evidence import audited_evidence, stock_scorecards
-from .prompts import CATEGORIES, CATALOGUE
+from .prompts import CATEGORIES, CATALOGUE, HEADERS
 
 R_WEIGHTS = dict(zip([*RATIONALE_HEADERS, "action"], [3,3,2,1,3,1,4]))
 ACTION_SCORES = {"Sell All": -2.5, "Trim": -1.5, "Hold": 0, "Buy New": 1.5, "Add more": 2.5}
@@ -49,8 +50,8 @@ def parse_rows(response, card, assigned):
     table = tables[0]
     if len(set(table.headers)) != len(table.headers) or not {"Exchange Symbol","Stock Symbol"} <= set(table.headers):
         return {}, "Missing or duplicate identity columns"
-    if card == "rebalance" and list(table.headers) != [c.label for c in REBALANCE_COLUMNS]:
-        return {}, "Rebalance header differs from its 29-column contract"
+    if tuple(table.headers) != HEADERS[card]:
+        return {}, f"{card.title()} headers differ from the scorecard contract"
     rows = {}
     for cells in table.rows:
         if len(cells) != len(table.headers):
@@ -84,13 +85,31 @@ def rebalance(rowset, stock):
     terms["action"] = ACTION_SCORES.get(mode)
     result, divisor = weighted(terms,R_WEIGHTS)
     return {"score":favorable(result),"terms":{k:favorable(v) for k,v in terms.items()},"signed_terms":terms,
-            "action":mode,"raw_rows":observations,"coverage": "Complete" if divisor == sum(R_WEIGHTS.values()) else "Partial"}
+            "action":mode,"raw_rows":observations,"available_weight":divisor,"model_count":len(observations),"coverage": "Complete" if divisor == sum(R_WEIGHTS.values()) else "Partial"}
 
 
-def technical(rowset):
+def dated_reference(text, cutoff):
+    if not isinstance(text, str):
+        return False
+    url = re.search(r"https?://[^\s\])>]+", text)
+    stamp = re.search(r"\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+−-]\d{2}:\d{2}))?", text)
+    if not url or not stamp:
+        return False
+    try:
+        if not urlparse(url[0]).hostname:
+            return False
+        moment = datetime.fromisoformat(stamp[0].replace("−", "-"))
+        boundary = datetime.fromisoformat(cutoff)
+        if moment.tzinfo is None:
+            return moment.date() < boundary.date()
+        return moment <= boundary
+    except (ValueError, TypeError):
+        return False
+
+
+def technical(rowset, cutoff):
     def verified(row):
-        text = str(row.get("Evidence source and as-of","")).lower()
-        return "https://" in text or "http://" in text
+        return dated_reference(str(row.get("Evidence source and as-of","")), cutoff)
     rows = [r for r in rowset if verified(r)]
     candidates = [(r,CATALOGUE.get(r.get("Primary Setup"))) for r in rows]
     strengths = [3*s["confidence"]/10*(1 if s["direction"]=="bullish" else -1) for r,s in candidates
@@ -163,10 +182,13 @@ def project(card, manifest, jobs):
     stocks = manifest["stocks"]
     keys = [s["listing"] for s in stocks]
     slots, raw, votes, errors = defaultdict(dict),defaultdict(list),defaultdict(dict),[]
+    model_tables = []
     for job, slot, assigned, pairs in jobs:
         rows,error = parse_rows(job.response,card,set(assigned)) if job.status in ("partial","completed") else ({},str(job.error_message or job.status))
         if error:
             errors.append({"job_id":job.id,"reason":error})
+        if card == "rebalance":
+            model_tables.append({"job_id":job.id, "slot":slot+1, "model":job.model, "rows":list(rows.values())})
         for key,r in rows.items():
             raw[key].append(r)
             slots[slot][key] = r
@@ -175,6 +197,11 @@ def project(card, manifest, jobs):
             v = verdicts[0] if len(verdicts)==1 else None
             if v and (v.get("result") not in (left,right,"TIE","UNKNOWN") or not v.get("rationale") or not v.get("source_refs")):
                 v = None
+            if v and v["result"] != "UNKNOWN":
+                refs = v["source_refs"]
+                if not isinstance(refs, list) or not any(isinstance(ref, dict) and dated_reference(
+                    f"{ref.get('url', '')} {ref.get('as_of', '')}", manifest["as_of"]) for ref in refs):
+                    v = None
             votes[(left,right)][slot]=v
     threat_slots = [threats_by_slot(rows,manifest["as_of"]) for rows in slots.values()] if card=="threats" else []
     pairwise = pair_results(votes,keys) if card=="pairwise" else {}
@@ -184,7 +211,7 @@ def project(card, manifest, jobs):
         if card=="rebalance":
             row = rebalance(raw[key],stock)
         elif card=="technical":
-            row = technical(raw[key])
+            row = technical(raw[key],manifest["as_of"])
         elif card=="threats":
             row = threats(key,threat_slots,raw[key])
         else:
@@ -192,5 +219,5 @@ def project(card, manifest, jobs):
         if row["score"] is None:
             row.update(coverage="Unassessed",reason="Insufficient verified observations")
         result.append({"listing":key,**row})
-    return {"rows":result,"errors":errors,"job_ids":[j.id for j,*_ in jobs]}
+    return {"rows":result,"errors":errors,"model_tables":model_tables,"job_ids":[j.id for j,*_ in jobs]}
 

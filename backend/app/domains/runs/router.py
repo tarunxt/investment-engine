@@ -837,20 +837,24 @@ async def update_auto_rebalance_stage(
         )
         if stage_rank >= current_rank:
             workflow.current_stage = stage
-        if status in {"failed", "paused", "cancelled", "interrupted"}:
+        def independent(event):
+            receipt = (event.summary_json or {}).get("final_inputs")
+            return isinstance(receipt, dict) and bool(receipt.get("stage2_revision"))
+        if status in {"paused", "cancelled", "interrupted"} or status == "failed" and not independent(stage_record):
             workflow.status = status
             workflow.error_message = stage_record.error_message or f"{stage} stage {status}"
             workflow.completed_at = stage_record.completed_at
         elif all(
             any(
                 event.stage == required_stage
-                and event.status in {"completed", "partial", "skipped"}
+                and (event.status in {"completed", "partial", "skipped"} or event.status == "failed" and independent(event))
                 and event.completed_at is not None
                 for event in workflow.stages
             )
             for required_stage in AUTO_REBALANCE_STAGE_ORDER
+            if required_stage != "pairwise" or any(e.stage == "pairwise" or independent(e) for e in workflow.stages)
         ):
-            workflow.status = "partial" if any(event.status == "partial" for event in workflow.stages) else "completed"
+            workflow.status = "partial" if any(event.status in {"failed", "partial"} for event in workflow.stages) else "completed"
             workflow.current_stage = "actionables"
             workflow.error_message = None
             workflow.completed_at = _latest_timestamp([event.completed_at for event in workflow.stages])
@@ -995,7 +999,7 @@ async def queue_auto_rebalance_completion_email(
             stage not in stages
             or stages[stage].status not in {"completed", "partial", "skipped"}
             or stages[stage].completed_at is None
-            for stage in AUTO_REBALANCE_STAGE_ORDER
+            for stage in AUTO_REBALANCE_STAGE_ORDER if stage != "pairwise" or stage in stages
         )
     ):
         raise HTTPException(
@@ -1003,8 +1007,8 @@ async def queue_auto_rebalance_completion_email(
             detail="Auto-rebalance completion audit is incomplete or unsuccessful; retry after audit persistence succeeds",
         )
     for stage in LLM_STAGES:
-        record = stages[stage]
-        if record.status == "skipped":
+        record = stages.get(stage)
+        if record is None or record.status == "skipped":
             continue
         try:
             await validate_execution(
@@ -1024,7 +1028,7 @@ async def queue_auto_rebalance_completion_email(
     completed_stages = [
         label + (" (partial)" if stages[stage].status == "partial" else "")
         for stage, label in STOCK_STAGES
-        if stages[stage].status in {"completed", "partial"}
+        if stage in stages and stages[stage].status in {"completed", "partial"}
     ]
     if not completed_stages:
         raise HTTPException(409, detail="Auto-rebalance has no completed stages")
