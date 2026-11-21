@@ -88,14 +88,17 @@ test('every stage combines partial and error details in a single concise Error r
 });
 
 
-test('stage and run costs keep fractional USD when FX is unavailable and distinguish partial coverage', () => {
+test('stage and run costs use rupees with the reference rate when FX is unavailable and distinguish partial coverage', () => {
   const { formatRebalanceCost, sumRebalanceCosts } = load('../lib/rebalanceCost.ts');
-  const costs = [0.007272, 0.009695, 0.015, 0.001431].map(costUsd => ({costUsd}));
+  const costs = [0.007272, 0.009695, 0.015806, 0.001431].map(costUsd => ({costUsd}));
   const row = ui.getLlmStageTileRows({state: 'completed', ...costs[0]}, 0).find(r => r.label === 'Cost incurred');
-  assert.equal(row.value, '$0.007272 (est.)');
-  assert.equal(formatRebalanceCost(sumRebalanceCosts(costs, 0)), '$0.033398 (est.)');
-  assert.equal(formatRebalanceCost(sumRebalanceCosts(costs, 85)), '₹2.84 (est.)');
-  assert.equal(formatRebalanceCost(sumRebalanceCosts([...costs, {}], 0)), '$0.033398 (partial estimate)');
-  assert.equal(formatRebalanceCost({costUsd: 0}), '$0.00 (est.)');
+  assert.equal(row.value, '₹0.68 (est.)');
+  assert.equal(formatRebalanceCost(sumRebalanceCosts(costs, 0)), '₹3.18 (est.)');
+  assert.equal(formatRebalanceCost(sumRebalanceCosts(costs, 85)), '₹2.91 (est.)');
+  assert.equal(formatRebalanceCost(sumRebalanceCosts([...costs, {}], 0)), '₹3.18 (partial estimate)');
+  assert.equal(formatRebalanceCost({costUsd: 0}), '₹0.00 (est.)');
+  assert.deepEqual(costs.map(cost => formatRebalanceCost(cost)), ['₹0.68 (est.)', '₹0.90 (est.)', '₹1.47 (est.)', '₹0.13 (est.)']);
+  assert.equal(formatRebalanceCost({costUsd: 0.00001}), '<₹0.01 (est.)');
+  assert.equal(formatRebalanceCost(sumRebalanceCosts([{costUsd: 1, costInr: 80}, {costUsd: 0.1}, {}], 90)), '₹89.00 (partial estimate)');
   assert.equal(formatRebalanceCost(sumRebalanceCosts([{}], 0)), 'Usage unavailable');
 });

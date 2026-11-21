@@ -122,7 +122,7 @@ function harness({ analysisOnly = false, formulaScore = 0, intercept, read, emai
     apiService, sleep: async (ms) => { delays.push(ms); },
     setAuditStates: set("audits"), setCompletionEmailWarnings: set("warnings"), setStates: set("states"),
     updateStage: (portfolio, stage, info) => { updates.push({ portfolio, stage, info }); view.states[portfolio][stage] = { ...view.states[portfolio][stage], ...info }; },
-    withInrCost: (info) => info, usdInrRate: 1, STAGE_ORDER: stages,
+    withInrCost: (info) => info, usdInrRate: 1, verifiedRate: 1, STAGE_ORDER: stages,
     specificMode: { zerodha: true, indmoneyUs: true },
     selectedStages: { zerodha: new Set(selection), indmoneyUs: new Set(selection) },
     selectedInputs: Object.fromEntries(["zerodha", "indmoneyUs"].map((p) => [p, Object.fromEntries(stages.map((stage) => [stage, new Set([`${stage}:next`])]))])),
@@ -370,7 +370,7 @@ test("workflow card retains pending status and omits the failed-history banner",
       stageLedger: false, ledgerView: "ledger", surface: undefined,
       WorkflowStageLedger: ({ children }) => createElement("div", null, children),
       RebalanceStockFlowTrigger: () => null, getWorkflowRunDuration: () => null,
-      getWorkflowRunCost: () => ({}), formatRebalanceCost: () => "Usage unavailable", usdInrRate: 1, savedRunCosts: {},
+      getWorkflowRunCost: () => ({}), formatRebalanceCost: () => "Usage unavailable", usdInrRate: 1, costRateLabel: "Test rate", savedRunCosts: {},
     };
     const card = new Function(...Object.keys(bindings), source)(...Object.values(bindings));
     const html = renderToStaticMarkup(card({ portfolio: "zerodha", title: "Run Zerodha Auto-Rebalance", buttonLabel: "Run" }));
