@@ -5,6 +5,9 @@ import { parseActionLabel } from "./actionColorScheme";
 export function bindIndependentBasket(rows:DashboardActionRow[], final:CardFinal, formula:ScoreMatrixFormulaConfig) {
   const evidence=new Map(final.rows.map(row=>[row.listing,row]));
   const saved=new Map<string,{score:number}>();
+  for (const source of final.rows) {
+    if (source.signed != null) saved.set(source.listing, {score: source.signed});
+  }
   const bound=rows.flatMap(row=>{
     const listing=row.stock.exchange+":"+row.stock.symbol;
     const source=evidence.get(listing);
@@ -14,7 +17,6 @@ export function bindIndependentBasket(rows:DashboardActionRow[], final:CardFinal
     const price=source.price ?? Number(row.stock.representative["Price Per Unit"]);
     const estimate={currentUnits:source.settled,currentInvestmentAmount:source.value,
       units,amount:units!=null&&price!=null&&Number.isFinite(price)&&price>0?units*price:null};
-    if(source.signed!=null)saved.set(listing,{score:source.signed});
     return [{...row,formulaScore:source.signed,formulaAction:action,formulaEstimate:estimate,
       independentEligible:source.status==="Complete" && source.signed!=null && source.settled!=null && source.action!=null,
       detail:{...row.detail,calculationPolicy:final.schema,calculatedScore:source.signed,detailedRationaleFinalScore:source.signed,
@@ -22,6 +24,6 @@ export function bindIndependentBasket(rows:DashboardActionRow[], final:CardFinal
         technicalScanSourceRunId:final.source_runs.technical??null}}];
   });
   return {rows:bound,revision:{sequence:final.sequence,version:final.schema,formula,capturedAt:null,replayed:false,
-    differences:[],divisors:[],originals:new Map<string,number>(),saved}};
+    differences:[],divisors:[],originals:new Map<string,number>(),saved, finalRows:evidence}};
 }
 

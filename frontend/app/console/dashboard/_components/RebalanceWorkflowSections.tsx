@@ -1,6 +1,6 @@
 "use client";
 import { bindIndependentBasket } from "@/lib/scorecardBasket";
-import { cards, isCard, migratedPolicy, scorecardApi, type CardKey, type CardPolicy } from "@/lib/independentScorecards";
+import { cards, isCard, migratedPolicy, scorecardApi, type FinalRow, type CardKey, type CardPolicy } from "@/lib/independentScorecards";
 import { ScorecardReview } from "./ScorecardReview";
 import { useReviewDialog } from "@/hooks/useReviewDialog";
 import { ZerodhaRunGate } from "@/components/shared/ZerodhaRunGate";
@@ -834,6 +834,7 @@ function getLatestMatchingRebalanceRuns(
 }
 
 type BasketScoreRevision = {
+  finalRows?: Map<string, FinalRow>;
   formula: ScoreMatrixFormulaConfig | null;
   differences: string[];
   divisors: string[];
@@ -2958,7 +2959,12 @@ function ScopedZerodhaBasketPreviewDialog({
     return { savedComparison: saved && {score: saved.score, divisor: saved.divisor, currentDivisor: currentDetail.detailedRationaleDenominator}, modelUnits: currentDetail.meanUnitsChange, isin: hasOutsideHolding ? null : issuer, modelPrices, verifiedUsIdentity: row.stock.usIdentity?.listing ? {securityId:row.stock.usIdentity.listing.security_id,exchangeAliases:row.stock.usIdentity.holdingSafe ? ["US"] : []} : undefined, identityIssue: row.stock.identityIssue, vendorReady: (quoteRead.vendorQuotes ?? []).find(quote => quote.instrument === stockIdentity(row.stock.symbol, row.stock.exchange))?.eligible_for_readiness === true, investedValue: usHolding?.investedValue ?? null, vendorLtp: vendor?.price ?? null, vendorSource: vendor?.source, vendorAsOf: vendor?.asOf, currentValue: tradingViewMarket === "us" ? usHolding?.currentValue ?? null : currentWeights.valid ? currentWeights.values.get(stockIdentity(row.stock.symbol, row.stock.exchange)) ?? 0 : null, holdingQuantity: tradingViewMarket === "us" ? usHolding?.quantity ?? null : holding?.quantity ?? null, holdingAsOf: holding?.asOf, holdingSource: holding?.source, upstoxLtp: upstox?.price ?? null, upstoxAsOf: upstox?.asOf, upstoxSource: upstox?.source, symbol: row.stock.symbol, exchange: row.stock.exchange, score: currentOrder ? currentDetail.calculatedScore : row.formulaScore, action: currentOrder ? getZerodhaBasketActionForPercent(currentOrder) : row.formulaAction, scoreSources, ...displayQuote(row.stock.symbol, row.stock.exchange) };
   };
   const calculationStocks = allocationUniverse.map(displayStock);
-  const displayCalculations = useBasketDisplayCalculations(open, tradingViewMarket, calculationStocks, portfolioAssets.totalAssets, detailsData.portfolioSnapshot?.captured_at ?? null, basketBrokerLabel, { portfolioValue: portfolioAssets.portfolioValue, availableMargin: portfolioAssets.availableMargin }, tradingViewMarket === "india" ? "issuer-v2" : "listing-v1");
+  const knownListings = new Set(calculationStocks.map(stock => stockIdentity(stock.symbol, stock.exchange)));
+  const finalOnlyStocks = Array.from(scoreRevision?.finalRows?.values() ?? [])
+    .filter(row => !knownListings.has(row.listing))
+    .map(row => ({symbol:row.symbol, exchange:row.exchange, score:row.signed, currentValue:row.value,
+      holdingQuantity:row.units, action:row.action, ...displayQuote(row.symbol, row.exchange)}));
+  const displayCalculations = useBasketDisplayCalculations(open, tradingViewMarket, [...calculationStocks, ...finalOnlyStocks], portfolioAssets.totalAssets, detailsData.portfolioSnapshot?.captured_at ?? null, basketBrokerLabel, { portfolioValue: portfolioAssets.portfolioValue, availableMargin: portfolioAssets.availableMargin }, tradingViewMarket === "india" ? "issuer-v2" : "listing-v1");
   const legacyDisplayOnlyRows = allocationUniverse.filter(row => row.independentEligible !== false && !orders.some(order => order.symbol === row.stock.symbol && order.exchange === row.stock.exchange));
   const visibleScore = (_score: number | null) => true;
   const buildEditableRow = (existing: ZerodhaBasketPreviewOrder | undefined, row?: DashboardActionRow): ZerodhaBasketPreviewOrder => {
@@ -2985,7 +2991,13 @@ function ScopedZerodhaBasketPreviewDialog({
     ...orders.map(order => buildEditableRow(order)),
     ...legacyDisplayOnlyRows.map(row => buildEditableRow(undefined, row)),
   ];
-  const displayOnlyRows: DashboardActionRow[] = [];
+  const editableListings = new Set(basketRows.map(row => stockIdentity(row.symbol, row.exchange)));
+  const renderSavedScore = (row: FinalRow) => <details>
+    <summary className="cursor-pointer font-semibold">{row.final == null ? "Unavailable" : row.final.toFixed(2) + " / 100"}<small className="block text-slate-600">{row.status}</small></summary>
+    {Object.entries(row.scores).map(([card, score]) => <div key={card}>{card} · {score?.toFixed(2) ?? "Unavailable"}</div>)}
+  </details>;
+  const reviewRows = Array.from(scoreRevision?.finalRows?.values() ?? [])
+    .filter(row => !editableListings.has(row.listing));
   const quotedOrders = tradingViewMarket === "india"
     ? basketRows.filter(row => row.draftContext?.source?.startsWith("Upstox ") && row.amount !== null && row.amount > 0 && Number.isFinite(row.amount))
     : basketRows;
@@ -3034,7 +3046,6 @@ function ScopedZerodhaBasketPreviewDialog({
   );
   const orderCalculation = (order: ZerodhaBasketPreviewOrder) => displayCalculations.metrics?.({ symbol: order.symbol, exchange: order.exchange, score: order.detail.calculatedScore, ...displayQuote(order.symbol, order.exchange) });
   const groupForOrder = (order: ZerodhaBasketPreviewOrder) => typeof displayCalculations.metrics === "function" ? basketActionGroup(orderCalculation(order)?.comparison.action) : getZerodhaBasketActionForPercent(order);
-  const groupForDisplay = (row: DashboardActionRow) => typeof displayCalculations.metrics === "function" ? basketActionGroup(displayCalculations.metrics(displayStock(row)).comparison.action) : row.formulaAction;
   const indiaSource = (order: ZerodhaBasketPreviewOrder) => calculationStocks.find(stock => stockIdentity(stock.symbol, stock.exchange) === stockIdentity(order.symbol, order.exchange));
   const priceReviewKey = (order: ZerodhaBasketPreviewOrder) => JSON.stringify([order.exchange, order.symbol, order.price, order.draftContext?.asOf, indiaSource(order)?.modelPrices]);
   const divergent = (order: ZerodhaBasketPreviewOrder) => indiaSource(order)?.modelPrices.some(model => model.price && order.price && Math.abs(order.price / model.price - 1) >= 0.10);
@@ -3085,11 +3096,10 @@ function ScopedZerodhaBasketPreviewDialog({
   const sectionGroups = [...new Set<string>([...ZERODHA_BASKET_SECTION_ORDER, "Hold", "Unavailable"])].map((action) => ({
     action,
     label: ZERODHA_BASKET_SECTION_LABELS[action as ActionCategory] ?? action,
-    displayRows: displayOnlyRows.filter(row => groupForDisplay(row) === action && visibleScore(row.formulaScore)).sort((a, b) => (b.formulaScore ?? -Infinity) - (a.formulaScore ?? -Infinity) || a.stock.key.localeCompare(b.stock.key)),
     orders: basketRows
       .filter((order) => groupForOrder(order) === action && visibleScore(order.detail.calculatedScore))
       .sort(compareZerodhaBasketOrdersByScore),
-  })).filter((group) => group.orders.length > 0 || group.displayRows.length > 0);
+  })).filter((group) => group.orders.length > 0);
 
   const orderBlockers = [
     ...(!selectedOrders.length ? ["Select at least one stock."] : []),
@@ -3121,7 +3131,7 @@ function ScopedZerodhaBasketPreviewDialog({
     <div inert={displayCalculations.popupOpen || unitsDetailOrder || columnMenu || renameColumn || marketNoticeOpen ? true : undefined} className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm" onClick={onClose}>
       <div {...reviewDialog} role="dialog" aria-modal="true" aria-label={basketTitle} className="relative w-[var(--basket-width,80rem)] max-w-full min-w-[min(320px,100%)] rounded-3xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
         <BasketResizeHandles panelRef={reviewDialog.ref} owner={widthOwner} />
-        <div className="flex max-h-[90vh] flex-col overflow-hidden rounded-[inherit]">
+        <div className="flex h-[var(--basket-height,auto)] max-h-[min(var(--basket-height,90dvh),calc(100dvh-2rem))] flex-col overflow-hidden rounded-[inherit]">
         <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-5">
           <div>
             <div className="text-[11px] font-semibold uppercase tracking-[0.35em] text-slate-400">
@@ -3194,7 +3204,7 @@ function ScopedZerodhaBasketPreviewDialog({
             <div className="flex items-center justify-center gap-2 py-16 text-sm text-slate-500">
               <Loader2 className="size-4 animate-spin" /> {loadingLabel}
             </div>
-          )) : orders.length || allocationUniverse.length || !error ? (
+          )) : orders.length || allocationUniverse.length || reviewRows.length || !error ? (
             <>
               <div className="sticky left-5">
                 {error ? (
@@ -3279,7 +3289,7 @@ function ScopedZerodhaBasketPreviewDialog({
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {!orders.length && !allocationUniverse.length ? <tr><td colSpan={23} className="px-4 py-6 text-slate-500">No basket rows available.</td></tr> : null}
+                      {!sectionGroups.length && !reviewRows.length ? <tr><td colSpan={23} className="px-4 py-6 text-slate-500">No basket rows available.</td></tr> : null}
                       {sectionGroups.map((group) => {
                         const sectionSelectable = group.orders.filter(order => selectableOrders.includes(order));
                         const sectionSelected = sectionSelectable.filter(order => selectedIds.has(order.id)).length;
@@ -3302,6 +3312,7 @@ function ScopedZerodhaBasketPreviewDialog({
                               </td>
                             </tr>
                             {group.orders.map((order) => {
+                              const savedRow = scoreRevision?.finalRows?.get(stockIdentity(order.symbol, order.exchange));
                               const isSubmitted = submittedOrderIds.has(order.id);
                               const isSkipped = skippedOrderIds.has(order.id);
                               const isPlaced = placedOrderIds.has(order.id) || (submission?.executionMode === "publisher_limit" && isSubmitted);
@@ -3340,7 +3351,7 @@ function ScopedZerodhaBasketPreviewDialog({
                                   </div>
                                 </td>
                                 <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-800">
-                                  <ScoreMatrixButton workflowScale detail={order.detail} savedScore={scoreRevision?.saved.get(stockIdentity(order.symbol, order.exchange))} originalDenominator={scoreRevision?.originals.get(stockIdentity(order.symbol, order.exchange))} formulaConfig={formulaConfig} onOpenDetail={setSelectedMatrixDetail} />
+                                  {savedRow ? renderSavedScore(savedRow) : <ScoreMatrixButton workflowScale detail={order.detail} savedScore={scoreRevision?.saved.get(stockIdentity(order.symbol, order.exchange))} originalDenominator={scoreRevision?.originals.get(stockIdentity(order.symbol, order.exchange))} formulaConfig={formulaConfig} onOpenDetail={setSelectedMatrixDetail} />}
                                 </td>
                                 <td className="whitespace-nowrap px-4 py-3">
                                   <ConsensusBreakupButton stock={order.stock} action={getZerodhaBasketActionForPercent(order)} />
@@ -3401,28 +3412,24 @@ function ScopedZerodhaBasketPreviewDialog({
                               </Fragment>
                               );
                             })}
-                            {group.displayRows.map(row => {
-                              const quote = displayQuote(row.stock.symbol, row.stock.exchange);
-                              const side = row.formulaAction == null || row.formulaAction === "Hold" ? null : row.formulaAction === "Sell All" || row.formulaAction === "Trim" ? "SELL" : "BUY";
-                              return <tr key={`display-only:${row.id}`} data-display-only="true" className="bg-white transition">
-                                <td className="px-4 py-3"><input type="checkbox" disabled aria-label={`${row.stock.exchange} ${row.stock.symbol} display only; no executable order`} className="size-4 rounded border-slate-300" /></td>
-                                <td className="whitespace-nowrap px-4 py-3 font-bold text-slate-950"><div className="inline-flex items-center gap-1.5"><StockDetailsButton stock={row.stock} formulaConfig={formulaConfig} market={tradingViewMarket} technicalScan={null} detailsData={detailsData} historicalRows={historicalRows} /><span className="text-xs font-semibold text-slate-500">{row.stock.exchange}</span><TradingViewSymbolLink symbol={row.stock.symbol} market={tradingViewMarket} exchange={row.stock.exchange}>{row.stock.symbol}</TradingViewSymbolLink></div></td>
-                                <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-800"><ScoreMatrixButton workflowScale savedScore={scoreRevision?.saved.get(stockIdentity(row.stock.symbol, row.stock.exchange))} originalDenominator={scoreRevision?.originals.get(stockIdentity(row.stock.symbol, row.stock.exchange))} detail={row.detail} formulaConfig={formulaConfig} onOpenDetail={setSelectedMatrixDetail} /></td>
-                                <td className="whitespace-nowrap px-4 py-3"><ConsensusBreakupButton stock={row.stock} action={row.formulaAction} /></td>
-                                <td className="whitespace-nowrap px-4 py-3 text-slate-700">{row.formulaAction ?? (row.formulaScore == null ? "Score unavailable" : "Holdings unavailable")}</td>
-                                <td className="px-4 py-3">{side ? <span className={cn("rounded-full px-3 py-1 text-xs font-bold", side === "BUY" ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700")}>{side}</span> : <span title="Hold has no order side">Not applicable</span>}</td>
-                                {displayCalculations.cells(displayStock(row))}
-                                <td className="px-4 py-3 text-slate-500">{isZerodhaPreview ? displayCalculations.units?.(displayStock(row), "Units action") : "Not applicable"}</td><td className="px-4 py-3 text-slate-500">Not applicable</td>
-                                {providerPriceCell(row.stock.symbol, row.stock.exchange)}
-                                <td className="whitespace-nowrap px-4 py-3 text-slate-700" title={quote.ltpSource}>{quote.ltp === null ? "Unavailable" : formatBasketCurrency(quote.ltp, basketCurrency)}</td>
-                                <td className="px-4 py-3 text-slate-500">Not applicable</td><td className="px-4 py-3 text-slate-500">Not applicable</td><td className="px-4 py-3 text-slate-500">Not applicable</td>
-                                <td className="whitespace-nowrap px-4 py-3 text-xs font-semibold text-slate-600">{row.formulaAction === "Hold" ? "Hold · No executable order" : "Display only · No executable order"}</td>
-                              </tr>;
-                            })}
                           </Fragment>
                         );
                       })}
 
+                      {reviewRows.length > 0 && <tr className="bg-slate-100"><td colSpan={23} className="px-4 py-3 font-bold">Scorecard review · {reviewRows.length} listings</td></tr>}
+                      {reviewRows.map(row => {
+                        const stock = {symbol:row.symbol, exchange:row.exchange, score:row.signed, ...displayQuote(row.symbol, row.exchange)};
+                        return <tr key={row.listing} data-display-only="true">
+                          <td className="px-4"><input type="checkbox" disabled aria-label={row.listing + " review only"} /></td>
+                          <td className="whitespace-nowrap px-4 py-3"><strong>{row.listing}</strong><small className="block">{row.name}</small></td>
+                          <td className="whitespace-nowrap px-4 py-3">{renderSavedScore(row)}</td>
+                          <td>—</td><td>{row.action ?? "Unavailable"}</td><td>—</td>
+                          {displayCalculations.cells(stock)}
+                          <td>—</td><td>—</td>{providerPriceCell(row.symbol, row.exchange)}
+                          <td>—</td><td>—</td><td>—</td><td>—</td>
+                          <td className="px-4 text-xs">{row.sizing_reason ?? "Review only"}</td>
+                        </tr>;
+                      })}
                     </tbody>
                   </table>
                   </BasketColumnTable>
@@ -7231,6 +7238,7 @@ ${zerodhaExecutionMode === "direct_market"
               if (result.status === "processing") throw new Error("Scorecard jobs are still settling. Open its saved output to refresh.");
               chosen[card]=queued.id;
               await markCompleted(portfolio,card,{...summarizeRun(run),...getRunProgress(run),lastRunId:run.id,
+                ...(result.status !== "completed" ? {partialNotice:`Scorecard ${result.status}. ${result.scored ?? 0} of ${source.manifest.stocks.length} listings have verified scores.`} : {}),
                 recommendedStocks:result.scored ?? 0,evidenceCoverage:String(result.scored ?? 0)+"/"+source.manifest.stocks.length+" scored",
                 finalInputs:{stage2_revision:source.id,attempt:queued.id}});
             } catch (error) {
@@ -7247,7 +7255,9 @@ ${zerodhaExecutionMode === "direct_market"
             const previous = source.finals[0] ? await api.final(source.finals[0].id) : null;
             const config = cardPolicies[portfolio] ?? previous?.policy ?? await api.savedPolicy() ?? migratedPolicy(scoreMatrixFormulaConfig);
             const final=await api.finalize(source.id,sequence,chosen,config);
-            const saved=await markCompleted(portfolio,"actionables",{runStatus:"saved calculation",recommendedStocks:final.rows.filter(row=>row.status==="Complete" && row.action!==null && row.action!=="Hold" && (row.suggested_units??0)>0).length,
+            const saved=await markCompleted(portfolio,"actionables",{runStatus: final.rows.every(row => row.status === "Complete") ? "saved calculation" : "partial",
+              partialNotice: final.rows.some(row => row.status !== "Complete") ? `Final saved with ${final.rows.filter(row => row.status === "Complete").length}/${final.rows.length} complete listings.` : undefined,
+              recommendedStocks:final.rows.filter(row=>row.status==="Complete" && row.action!==null && row.action!=="Hold" && (row.suggested_units??0)>0).length,
               frozenFinal:{schema:final.schema,final_id:final.id,workflow_sequence:sequence}});
             if (saved?.saved===false && /Final calculation could not be verified/i.test(saved.error)) throw new Error(saved.error);
             window.dispatchEvent(new CustomEvent("final-actionables-refresh",{detail:{market,completedAt:new Date().toISOString()}}));
@@ -7831,8 +7841,8 @@ ${zerodhaExecutionMode === "direct_market"
               onPlaceOrderClick={
                 stage === "actionables"
                   ? section.portfolio === "zerodha"
-                    ? () => void openZerodhaBasketPreview()
-                    : () => void openIndmoneyBasketPreview()
+                    ? () => void openZerodhaBasketPreview(displayedWorkflowSequence ? {sequence:displayedWorkflowSequence, formula:scoreMatrixFormulaConfig} : undefined)
+                    : () => void openIndmoneyBasketPreview(displayedWorkflowSequence ? {sequence:displayedWorkflowSequence, formula:scoreMatrixFormulaConfig} : undefined)
                   : undefined
               }
               placeOrderLabel={section.portfolio === "zerodha" ? "View Final Basket" : "Place Order"}

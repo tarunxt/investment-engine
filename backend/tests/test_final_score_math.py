@@ -269,3 +269,12 @@ def test_exchange_evidence_coheres_with_the_decision_time_and_listing():
     fixture={"listings":{"NSE:ABC":[observed[0][1]]}}
     assert supported_row({"Evidence source and as-of":url},"technical","NSE:ABC",fixture,SimpleNamespace(web_sources=[])) is None
     assert supported_row({"Analyst/Source":"https://example.org/invented"},"rebalance","NSE:ABC",fixture,SimpleNamespace(web_sources=[])) is None
+
+
+def test_upstox_fallback_only_keeps_valid_completed_local_sessions():
+    from app.domains.scorecards.research import upstox_daily_bars
+    from datetime import datetime
+    data = {"data":{"candles":[[f"2026-11-{day}T00:00:00+05:30",100,106,98,104,10000] for day in (18,19,19,20)]}}
+    rows = upstox_daily_bars(data, datetime.fromisoformat("2026-11-20T14:00:00+05:30"), "https://example.org/candles")
+    assert [r["as_of"][:10] for r in rows] == ["2026-11-19","2026-11-18"]
+    assert all(r["close"] == 104 and r["kind"] == "daily_bar" for r in rows)

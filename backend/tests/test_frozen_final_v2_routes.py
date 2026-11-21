@@ -356,8 +356,9 @@ async def test_stage2_publication_source_ownership_and_frozen_independent_final(
         assert denied.value.status_code == 404
         target = {"provider":"test","model":"sample"}
         start = cards.Start(sequence=42,request_key="only-once",targets=[target,target])
-        queued = await cards.start("india",rev["id"],"technical",start,db,OWNER)
-        assert (await cards.start("india",rev["id"],"technical",start,db,OWNER)) == queued
+        owner = SimpleNamespace(id=OWNER.id, username="fixture")
+        queued = await cards.start("india",rev["id"],"technical",start,db,owner)
+        assert (await cards.start("india",rev["id"],"technical",start,db,owner)) == queued
         jobs=(await db.execute(select(Job).join(RunJob,RunJob.job_id==Job.id).where(RunJob.run_id==queued["run_id"]))).scalars().all()
         assert len(jobs)==2 and create_run.dispatch_one.await_count==2
         values = {"Exchange Symbol":"NSE","Stock Symbol":"ABC","Last 5 candles trend":"-3",
@@ -366,6 +367,7 @@ async def test_stage2_publication_source_ownership_and_frozen_independent_final(
         response="\n".join("|"+"|".join(row)+"|" for row in (header,["---"]*len(header),[values.get(k,"—") for k in header]))
         for job in jobs:
             assert job.prompt.startswith("[INDEPENDENT_SCORECARD:india:technical:")
+            assert job.request_context_json == {"kind":"equity_scorecard_batch_v1", "card":"technical", "listings":["NSE:ABC"], "absent_contenders":[]}
             job.status=JobStatus.COMPLETED
             job.response=response
         await db.commit()
