@@ -37,7 +37,8 @@ export function historicalStageInfo(stage?: AutoRebalanceStageResponse): StageIn
     failedLlms: failed,
     recommendedStocks: number('recommended_stocks'),
     rebalanceInputs: number('rebalance_inputs'),
-    costUsd: number('cost_usd') ?? stage.estimated_cost,
+    costUsd: number('cost_usd') ?? (stage.estimated_cost > 0 ? stage.estimated_cost : null),
+    costIncomplete: summary.cost_incomplete === true,
     // Keep saved currency evidence; never reprice old runs using today's FX.
     costInr: number('cost_inr'),
     partialNotice: typeof summary.partial_notice === 'string' ? summary.partial_notice : null,

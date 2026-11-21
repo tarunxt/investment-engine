@@ -3,6 +3,7 @@
 import { useState, useCallback, type SVGProps } from "react";
 import { FileSpreadsheet } from "lucide-react";
 import { StageErrorDetails } from "@/components/shared/StageErrorDetails";
+import { formatRebalanceCost, type StageCost } from "@/lib/rebalanceCost";
 import { cn } from "@/lib/utils";
 import { formatCompactStageTime } from "@/lib/datetime";
 import { StageDurationBreakdownDialog } from "@/app/console/dashboard/_components/StageDurationBreakdownDialog";
@@ -33,7 +34,7 @@ export type StageErrorDetail = {
   attempt?: number | null;
 };
 
-export type StageInfo = {
+export type StageInfo = StageCost & {
   state: StageState;
   evidence?: { kind: "saved" | "derived"; references: string[] };
   startedAt?: string | null;
@@ -43,8 +44,6 @@ export type StageInfo = {
   model?: string | null;
   runStatus?: string | null;
   exportStatus?: string | null;
-  costUsd?: number | null;
-  costInr?: number | null;
   error?: string | null;
   errorDetails?: StageErrorDetail[];
   activeRunId?: number | null;
@@ -347,7 +346,7 @@ export function getLlmStageTileRows(info: StageInfo, now: number): StageTileRow[
     ...(info.distinctModels != null ? [{label: "Model coverage", value: `${info.totalLlms ?? "?"} jobs · ${info.distinctModels} distinct model${info.distinctModels === 1 ? "" : "s"}`}] : []),
     { label: "Stocks recommended", value: formatRecommendedStockProgress(info) },
     { label: "Duration", value: formatDuration(info.startedAt, info.endedAt, now) ?? "n/a" },
-    { label: "Cost incurred", value: formatInrCost(info.costInr) },
+    { label: "Cost incurred", value: formatRebalanceCost(info) },
     getStageTileError(info),
   ];
 }

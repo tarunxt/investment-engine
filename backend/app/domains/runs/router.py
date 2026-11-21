@@ -296,6 +296,10 @@ def _stage_response(
             status = derived_status
     partial_count = sum(_status_value(job.status) == "partial" for job in jobs)
     summary = dict(event.summary_json or {}) if event else {}
+    costed_jobs = [job.estimated_cost for job in jobs if job.estimated_cost is not None]
+    if costed_jobs:
+        summary["cost_usd"] = round(sum(costed_jobs), 12)
+        summary["cost_incomplete"] = len(costed_jobs) < len(jobs)
     if partial_count:
         summary.update(
             completed_llms=sum(_status_value(job.status) in {"completed", "partial", "failed"} for job in jobs),
