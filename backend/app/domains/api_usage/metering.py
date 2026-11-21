@@ -223,6 +223,8 @@ class ApiAttempt:
             "tariff_effective_date": TARIFF_EFFECTIVE_DATE,
             "tariff_rates": tariff_rates,
         }
+        if provider == "deepseek" and tariff_rates:
+            self.values["tariff_version"] = tariff_provenance(tariff_rates)["rate_version"]
         for field in ("execution_id", "job_attempt", "run_id", "workflow_id", "market", "stage", "sample_id", "evidence_hash", "schema_hash"):
             value = getattr(context, field, None)
             if field.endswith("_hash") and not (isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value)):
