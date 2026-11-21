@@ -163,8 +163,12 @@ class CreateRunUseCase:
 
                 jobs: list[Job] = []
                 if cmd.scorecard_attempt_id is not None:
-                    from app.domains.scorecards.models import ScorecardBatch
-                    self._session.add(ScorecardBatch(attempt_id=cmd.scorecard_attempt_id, ordinal=0, run_id=run.id))
+                    from app.domains.scorecards.storage import lookup
+                    attempt = await lookup(self._session, int(cmd.user_id), cmd.auto_rebalance_portfolio,
+                                           "attempt", cmd.scorecard_attempt_id, sequence=cmd.auto_rebalance_sequence)
+                    if attempt is None or attempt.row.run_id is not None:
+                        raise ConflictException("Scorecard attempt is missing or already dispatched")
+                    attempt.row.run_id = run.id
                 for prompt, target in ((p, t) for p in cmd.batch_prompts or (cmd.prompt,) for t in targets):
                     job = Job(
                         prompt=prompt,

@@ -323,7 +323,6 @@ async def test_failed_actionables_only_replays_confirmed_verification_rejections
 async def test_stage2_publication_source_ownership_and_frozen_independent_final(audit_db, monkeypatch):
     from datetime import datetime, timezone
     from app.domains.scorecards import router as cards
-    from app.domains.scorecards.models import ScorecardRevision, ScorecardAttempt, ScorecardBatch, ScorecardFinal
     from app.domains.zerodha.models import ZerodhaPortfolioSnapshot as Snapshot
     from app.infrastructure.database.base import Base
     from app.domains.scorecards.final import DEFAULT_WEIGHTS
@@ -343,8 +342,7 @@ async def test_stage2_publication_source_ownership_and_frozen_independent_final(
     monkeypatch.setattr(create_run, "dispatch_one", AsyncMock())
     stamp = datetime(2026, 10, 1, 9, tzinfo=timezone.utc)
     async with audit_db.engine.begin() as conn:
-        await conn.run_sync(lambda c: Base.metadata.create_all(c, tables=[Snapshot.__table__, OutboxMessage.__table__, ScorecardRevision.__table__,
-            ScorecardAttempt.__table__, ScorecardBatch.__table__, ScorecardFinal.__table__]))
+        await conn.run_sync(lambda c: Base.metadata.create_all(c, tables=[Snapshot.__table__, OutboxMessage.__table__]))
     async with audit_db.sessions() as db:
         db.add(Snapshot(id=1,user_id=7,captured_at=stamp,snapshot_date=stamp.date(),holdings_count=1,
                         holdings=[{"exchange":"NSE","tradingsymbol":"ABC","quantity":2,"last_price":100}]))
@@ -381,3 +379,14 @@ async def test_stage2_publication_source_ownership_and_frozen_independent_final(
         from app.domains.recommendation_audit.schemas import Formula
         preview = await cards.finalize("india",rev["id"],request.model_copy(update={"compare_with":Formula()}),db,OWNER)
         assert preview["comparison"][0]["Selected weights /100"] == 0
+
+        assert (await cards.saved_policy("india",db,OWNER)) == result["policy"]
+        assert (await cards.latest_final("india",42,db,OWNER))["id"] == result["id"]
+        detail = await cards.detail("india",rev["id"],db,OWNER)
+        assert detail["attempts"] == [{"id":queued["id"],"card":"technical","run_id":queued["run_id"]}]
+        assert detail["finals"][0]["id"] == result["id"]
+    from sqlalchemy.orm import selectinload
+    from app.domains.runs.models import AutoRebalanceWorkflow as Workflow
+    async with audit_db.sessions() as db:
+        wf=await db.scalar(select(Workflow).where(Workflow.id==7001).options(selectinload(Workflow.stages)))
+        assert all(not stage.stage.startswith("sc1.") for stage in wf.stages)

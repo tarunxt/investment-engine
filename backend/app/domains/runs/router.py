@@ -910,9 +910,7 @@ async def verify_saved_india_score(sequence: int, db: AsyncSession = Depends(get
     if not isinstance(record, dict):
         return {"verified": False, "reason": "Saved score revision has an invalid format"}
     if record.get("schema")=="independent-scorecards-v1":
-        from app.domains.scorecards.models import ScorecardFinal
-        await validate_frozen_final(db,record,user_id=current_user.id,portfolio=portfolio,sequence=sequence)
-        final=await db.get(ScorecardFinal,record["final_id"])
+        final=await validate_frozen_final(db,record,user_id=current_user.id,portfolio=portfolio,sequence=sequence)
         return {"verified":True,"record":{"id":final.id,**final.result_json},"replayed":False,"evidence":{}}
     if record.get("formula_version") != "score-matrix-v2":
         return {"verified": False, "reason": "Original formula requires a saved-input v2 replay"}

@@ -31,7 +31,7 @@ for path in (root/'alembic/versions').glob('*.py'):
 parents={p for v in revisions.values()for p in(v if isinstance(v,(tuple,list))else[v])if p}
 assert not parents-set(revisions)
 heads = set(revisions)-parents
-assert len(heads)==1 and revisions['scorecard_revisions_001']=='jobs_admission_dispatch_001'
+assert len(heads)==1 and revisions['jobs_admission_dispatch_001']=='a12_cost_session_merge_001'
 def walk(rev,seen):
     assert rev not in seen,'migration cycle'
     for p in (revisions[rev]if isinstance(revisions[rev],(tuple,list))else[revisions[rev]]):
