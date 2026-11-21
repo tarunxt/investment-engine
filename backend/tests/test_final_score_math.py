@@ -321,3 +321,37 @@ def test_scorecard_uses_one_exact_equity_table_and_preserves_failed_job_status()
     assert job.status == "failed"
     job.error_message = "provider timed out"
     assert project("technical", manifest, [(job, 0, assigned, [])])["rows"][0]["score"] is None
+
+
+def test_named_threat_category_with_zoned_observation_uses_exact_cutoff():
+    from app.domains.scorecards.scoring import threats_by_slot
+    cutoff = "2026-11-21T20:20:00+00:00"
+    item = {"category":"C8", "scenario_id":"HAL-C8-01", "trigger":"Close below support",
+            "likelihood":3, "impact":2, "downside":"3.5%", "source_url":"https://example.org/candles/HAL",
+            "published_at":"2026-11-20T15:30:00+05:30", "confidence":"low", "rationale":"Dated high-volume decline"}
+    def audit():
+        return threats_by_slot({"BSE:HAL":{"Evidence":json.dumps([item])}}, cutoff)
+    cards, trail = audit()
+    assert cards["BSE:HAL"]["categories"][8]["score"] == 24
+    assert cards["BSE:HAL"]["provisional"] and cards["BSE:HAL"]["categories"][1]["score"] is None
+    assert trail[0]["Publication timestamp"] == item["published_at"]
+    item["published_at"] = "2026-11-22T01:51:00+05:30"
+    assert audit()[1][0]["Disposition"].startswith("Excluded")
+    item["published_at"] = "2026-11-20"
+    item["category"] = "C8 geopolitics"
+    assert audit()[1][0]["Disposition"].startswith("Excluded")
+
+
+def test_qualified_exchange_cell_must_match_the_frozen_venue_and_ticker():
+    from app.domains.scorecards.prompts import HEADERS
+    from app.domains.scorecards.scoring import parse_rows
+    header = HEADERS["pairwise"]
+    prefix = "|" + "|".join(header) + "|\n|" + "|".join(["---"]*len(header)) + "|\n"
+    assigned = {"NSE:BSE"}
+    def parsed(exchange, ticker):
+        result, issue = parse_rows(prefix+f"|{exchange}|{ticker}|0|0|[]|","pairwise",assigned)
+        assert issue is None
+        return result
+    assert parsed("NSE:BSE","BSE")["NSE:BSE"]["Exchange Symbol"] == "NSE"
+    assert parsed("NSE:BSE","BEL") == {}
+    assert parsed("BSE:BSE","BSE") == {}
