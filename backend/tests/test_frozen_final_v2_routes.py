@@ -357,6 +357,7 @@ async def test_stage2_publication_source_ownership_and_frozen_independent_final(
         target = {"provider":"test","model":"sample"}
         start = cards.Start(sequence=42,request_key="only-once",targets=[target,target])
         owner = SimpleNamespace(id=OWNER.id, username="fixture")
+        monkeypatch.setenv("CREDX_RECOVERY_MODE", "1")
         queued = await cards.start("india",rev["id"],"technical",start,db,owner)
         assert (await cards.start("india",rev["id"],"technical",start,db,owner)) == queued
         jobs=(await db.execute(select(Job).join(RunJob,RunJob.job_id==Job.id).where(RunJob.run_id==queued["run_id"]))).scalars().all()
@@ -367,7 +368,8 @@ async def test_stage2_publication_source_ownership_and_frozen_independent_final(
         response="\n".join("|"+"|".join(row)+"|" for row in (header,["---"]*len(header),[values.get(k,"—") for k in header]))
         for job in jobs:
             assert job.prompt.startswith("[INDEPENDENT_SCORECARD:india:technical:")
-            assert job.request_context_json == {"kind":"equity_scorecard_batch_v1", "card":"technical", "listings":["NSE:ABC"], "absent_contenders":[]}
+            from app.domains.jobs.output_sources import scorecard_batch_for_job
+            assert scorecard_batch_for_job(job) == {"kind":"equity_scorecard_batch_v1", "card":"technical", "listings":["NSE:ABC"], "absent_contenders":[]}
             job.status=JobStatus.COMPLETED
             job.response=response
         await db.commit()

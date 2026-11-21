@@ -9,6 +9,7 @@ from app.domains.auth.dependencies import get_current_user
 from app.domains.auth.models import User
 from app.domains.runs.models import AutoRebalanceWorkflow as Workflow, RunJob
 from app.domains.jobs.models import Job
+from app.domains.jobs.output_sources import SOURCE_CONTEXT_KIND
 from app.domains.runs.schemas import RunModelTarget as Target
 from app.domains.runs.use_cases.create_run import CreateRunUseCase, CreateRunCommand, RunModelTarget
 from app.infrastructure.database.session import get_async_db
@@ -151,8 +152,14 @@ async def start(portfolio:Portfolio,revision_id:int,card:Card,body:Start,db:Asyn
     config["assignments"]=assignments
     attempt=await storage.append(db,w.id,"attempt",identity,{"card":card,"settings":config},revision_id=rev.id)
     absent = {r["listing"] for r in rev.manifest["stocks"] if r["origin"] == "contender" and r["units"] == 0}
-    batch_contexts = tuple({"kind": "equity_scorecard_batch_v1", "card": card, "listings": keys,
-                           "absent_contenders": sorted(absent.intersection(keys))} for keys, _ in assignments)
+    batch_contexts = tuple({
+        "kind": SOURCE_CONTEXT_KIND,
+        "market": rev.manifest["market"],
+        "scorecard_batch": {
+            "kind": "equity_scorecard_batch_v1", "card": card, "listings": keys,
+            "absent_contenders": sorted(absent.intersection(keys)),
+        },
+    } for keys, _ in assignments)
     prompts=tuple(build_prompt(rev,card,keys,pairs,research) for keys,pairs in assignments)
     redis=_get_redis()
     try:
