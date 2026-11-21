@@ -6888,6 +6888,7 @@ ${zerodhaExecutionMode === "direct_market"
       setPreflightPortfolio(portfolio);
       setPreflightErrors(previous => ({ ...previous, [portfolio]: [] }));
       const targets: Partial<Record<WorkflowStageKey, ProviderModelTarget[]>> = {};
+      const cardModelErrors: Partial<Record<CardKey,string>> = {};
       const checks: PreflightCheck[] = [
         { label: "LLM configuration", run: async () => {
           const modelStages = (["swing", ...cards] as const).filter(shouldRunCurrentStage);
@@ -6902,8 +6903,12 @@ ${zerodhaExecutionMode === "direct_market"
             const keys = resolveStageModelKeys(stage, saved);
             targets[stage] = keys.flatMap(key => compatible.get(key) ?? []);
             const unavailable = [...new Set(keys.filter(key => !compatible.has(key)))];
-            if (unavailable.length) issues.push(`${stage} has unavailable selected models (${unavailable.join(", ")}). Open its LLM selector and update the selection.`);
-            if (!targets[stage]?.length) issues.push(`${stage} has no compatible model. Open its LLM selector and choose a configured model.`);
+            const modelIssue = unavailable.length ? `${stage} has unavailable selected models (${unavailable.join(", ")}). Open its LLM selector and update the selection.`
+              : !targets[stage]?.length ? `${stage} has no compatible model. Open its LLM selector and choose a configured model.` : null;
+            if (modelIssue) {
+              if (stage === "swing") issues.push(modelIssue);
+              else cardModelErrors[stage] = modelIssue;
+            }
           }
           if (issues.length) throw new Error(issues.join("\n"));
         } },
@@ -7235,6 +7240,7 @@ ${zerodhaExecutionMode === "direct_market"
             delete chosen[card];
             try {
               if (cancelRequestedRef.current || !isCurrentWorkflowOwner(runtimeOwner)) return;
+              if (cardModelErrors[card]) throw new Error(cardModelErrors[card]);
               const queued=await api.start(source.id,card,{sequence, request_key:"workflow-"+sequence,targets:targets[card] ?? []});
               const run=await waitForRunWithStageHandling(portfolio,card,queued.run_id);
               const result=await api.result(queued.id);

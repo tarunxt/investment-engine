@@ -39,6 +39,7 @@ export function ScorecardReview({portfolio,stage:initial,revisionId,fallbackPoli
   const card=stage==="source"||stage==="actionables"?null:stage;
   const [confirmation,setConfirmation]=useState<VerifiedListing>({symbol:"",venue:"NASDAQ",security_id:"",share_class:"",source_url:""});
   const requestGuard=useRef(false);
+  const pendingStarts=useRef(new Map<string,string>());
   const selectedOutput=useRef<number|null>(null);
   useEffect(()=>{const el=dialog.current;el?.showModal();return()=>el?.close();},[]);
   useEffect(()=>{let active=true; void (async()=>{
@@ -69,7 +70,11 @@ export function ScorecardReview({portfolio,stage:initial,revisionId,fallbackPoli
     if(!detail)throw Error("Select a Stage 2 revision first.");
     const targets=keys(c).map(key=>{const target=providers.find(t=>t.provider+"::"+t.model===key);if(!target)throw Error("Choose available models for "+titles[c]);return target;});
     await client.saveWorkflowModels(c,keys(c));
-    const queued=await api.start(detail.id,c,{sequence:detail.manifest.sequence,request_key:crypto.randomUUID(),targets,retry_attempt_id:retry});
+    const identity=JSON.stringify([detail.id,c,targets,retry]);
+    const token=pendingStarts.current.get(identity)??crypto.randomUUID();
+    pendingStarts.current.set(identity,token);
+    const queued=await api.start(detail.id,c,{sequence:detail.manifest.sequence,request_key:token,targets,retry_attempt_id:retry});
+    pendingStarts.current.delete(identity);
     return queued.id;
   }
   async function compute(preview=false){
@@ -120,6 +125,7 @@ export function ScorecardReview({portfolio,stage:initial,revisionId,fallbackPoli
       <div className="flex flex-wrap gap-2"><button disabled={busy||!detail} className={button} onClick={()=>void perform(async()=>{await launch(card);setVersion(n=>n+1);})}>Run {titles[card]}</button>
       {card==="pairwise"&&result&&result.rows.some(r=>Number(r.valid)<Number(r.expected))&&<button className={button} disabled={busy} onClick={()=>void perform(async()=>{await launch(card,attempt);setVersion(n=>n+1);})}>Retry unresolved pairs</button>}
       <select aria-label="Scorecard output revision" className={input} value={attempt} onChange={e=>setAttempt(Number(e.target.value))}><option value={0}>Select output</option>{detail?.attempts.filter(a=>a.card===card).map(a=><option key={a.id} value={a.id}>Output #{a.id} · Run {a.run_id}</option>)}</select></div>
+      {attempt>0&&<button className={button} disabled={busy} onClick={()=>void perform(async()=>{setResult(await api.result(attempt));})}>Refresh output</button>}
       {prompt&&<details><summary>LLM prompt · first batch</summary><pre className="max-h-80 overflow-auto whitespace-pre-wrap text-xs">{prompt}</pre></details>}
       {result&&<><p>{result.status} · {result.completed}/{result.jobs} model jobs · {result.scored??0} stocks scored</p>{card!=="rebalance"&&<Grid rows={resultRows}/>}
         {card==="rebalance"&&<><h3>Rebalance output</h3>{result.model_tables?.map(t=><section key={t.job_id}><h4>Slot {t.slot} · {t.model} · Job {t.job_id}</h4><Grid rows={t.rows}/></section>)}<h3>Scores for Stage 4</h3><Grid rows={resultRows}/></>}

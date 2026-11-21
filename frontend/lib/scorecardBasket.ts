@@ -16,7 +16,7 @@ export function bindIndependentBasket(rows:DashboardActionRow[], final:CardFinal
       units,amount:units!=null&&price!=null&&Number.isFinite(price)&&price>0?units*price:null};
     if(source.signed!=null)saved.set(listing,{score:source.signed});
     return [{...row,formulaScore:source.signed,formulaAction:action,formulaEstimate:estimate,
-      independentEligible:source.status==="Complete" && source.signed!=null && (!source.origin.includes("holding")||source.settled!=null),
+      independentEligible:source.status==="Complete" && source.signed!=null && source.settled!=null && source.action!=null,
       detail:{...row.detail,calculationPolicy:final.schema,calculatedScore:source.signed,detailedRationaleFinalScore:source.signed,
         calculatedAction:action,calculatedUnitsChange:units==null?null:action==="Sell All"||action==="Trim"?-units:units,
         technicalScanSourceRunId:final.source_runs.technical??null}}];
