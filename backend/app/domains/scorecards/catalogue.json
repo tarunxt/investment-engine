@@ -1,0 +1,182 @@
+{
+  "Bottom of rising channel": {
+    "direction": "bullish",
+    "confidence": 8.2
+  },
+  "Bottom of falling channel": {
+    "direction": "bullish",
+    "confidence": 6.0
+  },
+  "Support bounce": {
+    "direction": "bullish",
+    "confidence": 7.8
+  },
+  "Resistance breakout": {
+    "direction": "bullish",
+    "confidence": 7.2
+  },
+  "Breakout + retest": {
+    "direction": "bullish",
+    "confidence": 8.8
+  },
+  "Bull flag": {
+    "direction": "bullish",
+    "confidence": 8.2
+  },
+  "Ascending triangle": {
+    "direction": "bullish",
+    "confidence": 7.7
+  },
+  "Symmetrical triangle – upside breakout": {
+    "direction": "bullish",
+    "confidence": 6.5
+  },
+  "Rectangle range breakout – upside": {
+    "direction": "bullish",
+    "confidence": 7.0
+  },
+  "Double bottom / W pattern": {
+    "direction": "bullish",
+    "confidence": 7.7
+  },
+  "Inverse head & shoulders": {
+    "direction": "bullish",
+    "confidence": 7.7
+  },
+  "Cup and handle": {
+    "direction": "bullish",
+    "confidence": 8.2
+  },
+  "Higher-low pullback": {
+    "direction": "bullish",
+    "confidence": 8.8
+  },
+  "20 EMA / 50 EMA support": {
+    "direction": "bullish",
+    "confidence": 8.2
+  },
+  "200 DMA reclaim": {
+    "direction": "bullish",
+    "confidence": 7.7
+  },
+  "VWAP reclaim": {
+    "direction": "bullish",
+    "confidence": 7.7
+  },
+  "Volume dry-up pullback": {
+    "direction": "bullish",
+    "confidence": 8.8
+  },
+  "Volume climax reversal at support": {
+    "direction": "bullish",
+    "confidence": 6.5
+  },
+  "Bollinger Band squeeze – upside breakout": {
+    "direction": "bullish",
+    "confidence": 7.0
+  },
+  "Failed breakdown / bear trap": {
+    "direction": "bullish",
+    "confidence": 8.3
+  },
+  "RSI bullish divergence at support": {
+    "direction": "bullish",
+    "confidence": 6.6
+  },
+  "Relative strength breakout": {
+    "direction": "bullish",
+    "confidence": 8.8
+  },
+  "Gap-up hold / gap-and-go": {
+    "direction": "bullish",
+    "confidence": 7.7
+  },
+  "52-week high breakout": {
+    "direction": "bullish",
+    "confidence": 8.3
+  },
+  "Top of rising channel": {
+    "direction": "bearish",
+    "confidence": 6.8
+  },
+  "Top of falling channel": {
+    "direction": "bearish",
+    "confidence": 8.2
+  },
+  "Resistance rejection": {
+    "direction": "bearish",
+    "confidence": 7.8
+  },
+  "Support breakdown": {
+    "direction": "bearish",
+    "confidence": 7.3
+  },
+  "Breakdown + retest": {
+    "direction": "bearish",
+    "confidence": 8.7
+  },
+  "Bear flag": {
+    "direction": "bearish",
+    "confidence": 8.2
+  },
+  "Descending triangle": {
+    "direction": "bearish",
+    "confidence": 7.7
+  },
+  "Symmetrical triangle – downside breakdown": {
+    "direction": "bearish",
+    "confidence": 6.6
+  },
+  "Rectangle range breakout – downside": {
+    "direction": "bearish",
+    "confidence": 7.1
+  },
+  "Double top / M pattern": {
+    "direction": "bearish",
+    "confidence": 7.8
+  },
+  "Head & shoulders": {
+    "direction": "bearish",
+    "confidence": 7.8
+  },
+  "Lower-high pullback": {
+    "direction": "bearish",
+    "confidence": 8.8
+  },
+  "200 DMA rejection": {
+    "direction": "bearish",
+    "confidence": 7.7
+  },
+  "VWAP rejection": {
+    "direction": "bearish",
+    "confidence": 7.7
+  },
+  "Volume climax reversal at top": {
+    "direction": "bearish",
+    "confidence": 6.6
+  },
+  "Bollinger Band squeeze – downside breakdown": {
+    "direction": "bearish",
+    "confidence": 7.1
+  },
+  "Failed breakout / bull trap": {
+    "direction": "bearish",
+    "confidence": 8.3
+  },
+  "RSI bearish divergence at resistance": {
+    "direction": "bearish",
+    "confidence": 6.6
+  },
+  "Relative weakness breakdown": {
+    "direction": "bearish",
+    "confidence": 8.6
+  },
+  "Gap-up fade": {
+    "direction": "bearish",
+    "confidence": 7.0
+  },
+  "Parabolic blow-off top": {
+    "direction": "bearish",
+    "confidence": 6.7
+  }
+}

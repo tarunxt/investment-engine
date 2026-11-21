@@ -67,12 +67,12 @@ def resolve_job_usage_identity(db: Any, job: Any) -> dict[str, str | None]:
             workflows = db.execute(
                 select(AutoRebalanceWorkflow.id, AutoRebalanceWorkflowStage.stage)
                 .join(AutoRebalanceWorkflowStage, AutoRebalanceWorkflowStage.workflow_id == AutoRebalanceWorkflow.id)
-                .where(AutoRebalanceWorkflow.user_id == user_id, or_(*targets))
+                .where(AutoRebalanceWorkflow.user_id == user_id, ~AutoRebalanceWorkflowStage.stage.startswith("sc1."), or_(*targets))
             ).all()
             if len(workflows) == 1:
                 dimensions["workflow_id"] = str(workflows[0].id)
                 stage = workflows[0].stage
-                if not stage_conflicted and stage in {"threats", "swing", "rebalance", "technical"}:
+                if not stage_conflicted and stage in {"threats", "swing", "rebalance", "technical", "pairwise"}:
                     if dimensions["stage"] is None:
                         dimensions["stage"] = stage
                     elif dimensions["stage"] != stage:

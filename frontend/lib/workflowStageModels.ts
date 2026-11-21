@@ -1,10 +1,10 @@
 import type { ProviderInfo, ProviderModelTarget } from "@/types/api";
 
-export type ModelStage = "swing" | "rebalance" | "technical" | "threats";
+export type ModelStage = "swing" | "rebalance" | "technical" | "threats" | "pairwise";
 export type StageModelPreferences = Partial<Record<ModelStage, string[]>>;
 
 export function isModelStage(stage: string): stage is ModelStage {
-  return ["swing", "rebalance", "technical", "threats"].includes(stage);
+  return ["swing", "rebalance", "technical", "threats", "pairwise"].includes(stage);
 }
 
 export function defaultStageModelKeys(stage: ModelStage): string[] {

@@ -1,11 +1,12 @@
 """Granular completion subscriptions; legacy switches remain API-compatible."""
 STOCK_STAGES = (
     ("sync", "Stage 1 · Portfolio sync"),
-    ("threats", "Stage 2 · Threats and guardrails"),
-    ("swing", "Stage 3 · Swing scan"),
-    ("rebalance", "Stage 4 · Rebalance scan"),
-    ("technical", "Stage 5 · Technical scan"),
-    ("actionables", "Stage 6 · Final actionables"),
+    ("swing", "Stage 2 · Swing scan"),
+    ("threats", "Stage 3 · Threats scorecard"),
+    ("pairwise", "Stage 3 · Pairwise scorecard"),
+    ("rebalance", "Stage 3 · Rebalance scorecard"),
+    ("technical", "Stage 3 · Technical scorecard"),
+    ("actionables", "Stage 4 · Final actionables"),
 )
 BULLPEN_STAGES = (
     ("scan", "Stage 1 · Bullpen scan"),
@@ -54,7 +55,9 @@ def stock_run_preference(run):
         return None
     label = (run.auto_rebalance_label or "").lower()
     prompt = (run.prompt or "").lower()
-    if "threat" in label or "_threats]" in prompt:
+    if "pairwise scan" in label:
+        stage = "pairwise"
+    elif "threat" in label or "_threats]" in prompt:
         stage = "threats"
     elif "technical scan" in label or "## technical scan input bundle" in prompt:
         stage = "technical"

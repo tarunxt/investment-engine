@@ -7,7 +7,7 @@ from app.domains.jobs.models import Job
 from app.domains.runs.models import Run, RunJob
 from app.domains.runs.run_identity import analysis_run_identity
 
-LLM_STAGES = ("threats", "swing", "rebalance", "technical")
+LLM_STAGES = ("threats", "swing", "rebalance", "technical", "pairwise")
 
 
 def _status(record):

@@ -3333,7 +3333,7 @@ function getDashboardSummaryMarket(run: RunListItem): SwingTradeMarket | null {
 
 function getDashboardSummaryStage(run: RunListItem): DashboardRecentRunStage | null {
   const stage = getAnalysisRunIdentity(run).stage;
-  return stage === "threats" ? null : stage;
+  return stage === "threats" || stage === "pairwise" ? null : stage;
 }
 
 function selectLatestDashboardSummaryGroup(
@@ -7752,6 +7752,7 @@ function OpenActionablesCalculationsModal({
 
 
 export type DashboardActionRow = {
+  independentEligible?: boolean;
   id: string;
   market: SwingTradeMarket;
   stock: StockConsensus;
@@ -9013,23 +9014,8 @@ function ScopedFinalActionablesConsole({
   }, [technicalScanHistory, usdInrRate]);
   const copy = PAGE_COPY[portfolio];
 
-  const handleTechnicalScan = async (target: ProviderModelTarget | null) => {
-    if (!target || !consensus.length) return;
-    setTechnicalScanRunning(true);
-    try {
-      const run = await apiService.createRun({
-        prompt: buildTechnicalScanPrompt(consensus, market),
-        targets: [target],
-        allow_parallel: true,
-      });
-      await loadRuns();
-      await waitForTechnicalScanRunCompletion(run.id);
-      await loadRuns();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to queue technical scan.");
-    } finally {
-      setTechnicalScanRunning(false);
-    }
+  const handleTechnicalScan = async () => {
+    window.location.assign("/console/scorecards/"+portfolio+"/technical");
   };
 
   const toggleExpanded = (key: string) => {

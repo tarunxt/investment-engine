@@ -148,6 +148,16 @@ assert ZERODHA_SYNC_TASK in celery.tasks
 if stored_audit_recovery_enabled(settings): assert AUDIT_TASK in celery.tasks
 assert not recovery_http_allowed('POST','/zerodha/orders')
 assert all(q.name == ANALYSIS_QUEUE for q in celery.conf.task_queues)
+# Compile and execute the analysis reads without loading a single customer row.
+from sqlalchemy import select
+from app.infrastructure.database.sync_session import sync_engine
+from app.domains.scorecards.storage import Stage, Workflow, of_kind
+from app.infrastructure.database.outbox.models import OutboxMessage
+with sync_engine.connect() as connection:
+    connection.execute(select(Stage.id, Stage.summary_json, Workflow.side_effect_policy_json)
+                       .join(Workflow).where(of_kind("revision")).limit(0))
+    connection.execute(select(OutboxMessage.__table__).limit(0))
+print('Candidate scorecard ledger and existing analysis dispatch schema verified.')
 print('Candidate recovery queue and portfolio sync registration verified.')
 PY
 SH
@@ -158,7 +168,7 @@ sudo systemctl start investor-recovery-analysis investor-backend
 wait_for_backend_ready
 [[ "$(mode_for_service investor-backend)" == 1 ]]
 [[ "$(mode_for_service investor-recovery-analysis)" == 1 ]]
-for path in /zerodha/status /zerodha/connection /zerodha/login-url /zerodha/portfolio /zerodha/threats/latest /zerodha/events/latest; do
+for path in /zerodha/status /zerodha/connection /zerodha/login-url /zerodha/portfolio /zerodha/threats/latest /zerodha/events/latest /runs/scorecards/india/revisions /runs/scorecards/indmoney_us/revisions; do
   code=$(curl -sS --max-time 5 -o /dev/null -w '%{http_code}' "http://127.0.0.1:8000$path")
   [[ "$code" == 401 ]]
   echo "$path now reaches authentication (HTTP $code)."

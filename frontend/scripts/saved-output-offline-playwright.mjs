@@ -26,6 +26,7 @@ import {SavedOutputDialog} from ${JSON.stringify(path.join(frontend,'components/
 ${stageLabelSource}
 ${stageMetadata}
 const getStageOutputRoute=(portfolio,stage)=>'/console/'+portfolio+'/'+stage;
+const usdInrRate=86;
 const normalizeError=e=>e.message;
 const getLatestRunTimestamp=run=>run.updated_at;
 const sortRunsByLatestTimestamp=runs=>runs;
@@ -98,7 +99,7 @@ try {
   await page.evaluate(()=>window.fixture={mode:'success',delay:0});await page.getByText('Open India',{exact:true}).click();await dialog.getByText(/Saved threat report for zerodha/).waitFor();await page.screenshot({path:path.join(artifact,'saved-output-success.png')});
   const result={result:'PASS',checks:['loading','success','confirmed-empty','403-failure','retry','saved-job-failure','structured-report','timestamp-and-provenance','escaped-output','safe-new-tab-link','keyboard-close','focus-cycle-and-restore','repeated-open','late-response-does-not-reopen-or-replace','snapshot-empty','historical-run-retry-preserves-id','historical-run-market-filter'],externalRequests:external,errors};
   await close.click();await dialog.waitFor({state:'detached'});
-  const canonical={sync:'Sync Portfolio',threats:'Threats Scan',swing:'Swing Scan',rebalance:'Rebalance',technical:'Technical Scan',actionables:'Actionables'};
+  const canonical={sync:'Sync Portfolio',threats:'Threats Scan',pairwise:'Pairwise scorecard',swing:'Swing Scan',rebalance:'Rebalance',technical:'Technical Scan',actionables:'Actionables'};
   for(const width of [1180,390]){
     await page.setViewportSize({width,height:844});
     for(const portfolio of ['zerodha','indmoneyUs']){

@@ -177,6 +177,8 @@ class AutoRebalanceWorkflow(Base, TimestampMixin):
 
     user: Mapped[User] = relationship()
     stages: Mapped[list[AutoRebalanceWorkflowStage]] = relationship(
+        primaryjoin=lambda: (AutoRebalanceWorkflow.id == AutoRebalanceWorkflowStage.workflow_id)
+        & ~AutoRebalanceWorkflowStage.stage.startswith("sc1."),
         back_populates="workflow", cascade="all, delete-orphan"
     )
 

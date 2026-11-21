@@ -9,7 +9,7 @@ from fastapi import FastAPI, HTTPException
 from sqlalchemy import select
 
 # Reuse the existing isolated SQLite/no-network route fixture and its writers.
-from test_auto_rebalance_audit_durability import audit_db, write
+from test_auto_rebalance_audit_durability import OWNER, audit_db, write
 from test_final_recompute import inputs as calculation_inputs, capture
 from app.domains.jobs.models import Job
 from app.domains.runs.models import Run, RunJob, AutoRebalanceWorkflowStage
@@ -317,3 +317,76 @@ async def test_failed_actionables_only_replays_confirmed_verification_rejections
                 await replay_india_score(42, db, OWNER)
     workflow, _, _ = await snapshot(audit_db)
     assert workflow.status == 'failed'
+
+
+@pytest.mark.anyio
+async def test_stage2_publication_source_ownership_and_frozen_independent_final(audit_db, monkeypatch):
+    from datetime import datetime, timezone
+    from app.domains.scorecards import router as cards
+    from app.domains.zerodha.models import ZerodhaPortfolioSnapshot as Snapshot
+    from app.infrastructure.database.base import Base
+    from app.domains.scorecards.final import DEFAULT_WEIGHTS
+    from unittest.mock import AsyncMock
+    from contextlib import asynccontextmanager
+    from app.infrastructure.database.outbox.models import OutboxMessage
+    from app.domains.scorecards.prompts import HEADERS
+    from app.domains.runs.use_cases import create_run
+    @asynccontextmanager
+    async def local_lock(*args, **kwargs):
+        yield
+    research={"listings":{"NSE:ABC":[{"kind":"daily_bar","url":"https://example.org/chart","as_of":f"2025-01-{d:02d}T12:00:00Z"} for d in range(1,6)]},"notices":[]}
+    monkeypatch.setattr(cards,"collect_research",AsyncMock(return_value=research))
+    monkeypatch.setattr(cards, "_get_redis", lambda: SimpleNamespace(aclose=AsyncMock()))
+    monkeypatch.setattr(cards, "RedisLock", lambda redis: SimpleNamespace(acquire=local_lock))
+    monkeypatch.setattr(create_run, "filter_recently_available_targets", AsyncMock(side_effect=lambda db,targets:(targets,[])))
+    monkeypatch.setattr(create_run, "dispatch_one", AsyncMock())
+    stamp = datetime(2026, 10, 1, 9, tzinfo=timezone.utc)
+    async with audit_db.engine.begin() as conn:
+        await conn.run_sync(lambda c: Base.metadata.create_all(c, tables=[Snapshot.__table__, OutboxMessage.__table__]))
+    async with audit_db.sessions() as db:
+        db.add(Snapshot(id=1,user_id=7,captured_at=stamp,snapshot_date=stamp.date(),holdings_count=1,
+                        holdings=[{"exchange":"NSE","tradingsymbol":"ABC","quantity":2,"last_price":100}]))
+        await db.commit()
+        body = cards.Publication(sequence=42,request_key="once",snapshot_id=1,captured_at=stamp,swing_job_ids=[])
+        rev = await cards.publish("india",body,db,OWNER)
+        assert (await cards.publish("india",body,db,OWNER))["id"] == rev["id"]
+        assert rev["manifest"]["stocks"][0]["listing"] == "NSE:ABC"
+        with pytest.raises(HTTPException) as denied:
+            await cards.detail("india",rev["id"],db,SimpleNamespace(id=8))
+        assert denied.value.status_code == 404
+        target = {"provider":"test","model":"sample"}
+        start = cards.Start(sequence=42,request_key="only-once",targets=[target,target])
+        queued = await cards.start("india",rev["id"],"technical",start,db,OWNER)
+        assert (await cards.start("india",rev["id"],"technical",start,db,OWNER)) == queued
+        jobs=(await db.execute(select(Job).join(RunJob,RunJob.job_id==Job.id).where(RunJob.run_id==queued["run_id"]))).scalars().all()
+        assert len(jobs)==2 and create_run.dispatch_one.await_count==2
+        values = {"Exchange Symbol":"NSE","Stock Symbol":"ABC","Last 5 candles trend":"-3",
+                  "Technical rationale":"Five verified lower closes","Evidence source and as-of":"https://example.org/chart 2025-01-01T12:00:00Z"}
+        header=HEADERS["technical"]
+        response="\n".join("|"+"|".join(row)+"|" for row in (header,["---"]*len(header),[values.get(k,"—") for k in header]))
+        for job in jobs:
+            assert job.prompt.startswith("[INDEPENDENT_SCORECARD:india:technical:")
+            job.status=JobStatus.COMPLETED
+            job.response=response
+        await db.commit()
+        output=await cards.attempt_result("india",queued["id"],db,OWNER)
+        assert output["status"]=="completed" and output["rows"][0]["score"]==0
+        request = cards.Finalize(sequence=42,attempts={"technical":queued["id"]},weights=DEFAULT_WEIGHTS)
+        result = await cards.finalize("india",rev["id"],request,db,OWNER)
+        assert result["rows"][0]["final"] == 0
+        assert result["rows"][0]["status"] == "Provisional"
+        assert (await cards.finalize("india",rev["id"],request,db,OWNER))["id"] == result["id"]
+        from app.domains.recommendation_audit.schemas import Formula
+        preview = await cards.finalize("india",rev["id"],request.model_copy(update={"compare_with":Formula()}),db,OWNER)
+        assert preview["comparison"][0]["Selected weights /100"] == 0
+
+        assert (await cards.saved_policy("india",db,OWNER)) == result["policy"]
+        assert (await cards.latest_final("india",42,db,OWNER))["id"] == result["id"]
+        detail = await cards.detail("india",rev["id"],db,OWNER)
+        assert detail["attempts"] == [{"id":queued["id"],"card":"technical","run_id":queued["run_id"]}]
+        assert detail["finals"][0]["id"] == result["id"]
+    from sqlalchemy.orm import selectinload
+    from app.domains.runs.models import AutoRebalanceWorkflow as Workflow
+    async with audit_db.sessions() as db:
+        wf=await db.scalar(select(Workflow).where(Workflow.id==7001).options(selectinload(Workflow.stages)))
+        assert all(not stage.stage.startswith("sc1.") for stage in wf.stages)

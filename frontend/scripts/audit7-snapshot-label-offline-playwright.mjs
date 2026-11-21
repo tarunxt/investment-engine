@@ -6,7 +6,7 @@ import {chromium} from 'playwright';
 const require=createRequire(import.meta.url);
 const {build}=require(process.env.AUDIT7_ESBUILD_PATH||'esbuild');
 const workflow=await readFile('app/console/dashboard/_components/RebalanceWorkflowSections.tsx','utf8');
-for(const contract of ['loadSnapshot={readLatestIndmoneySnapshot}','readIndmoneySnapshotSource(readLatestIndmoneySnapshot, savedSnapshot)','expected_snapshot_id: workflowSnapshot.id'])assert.ok(workflow.includes(contract));
+for(const contract of ['loadSnapshot={readLatestIndmoneySnapshot}','readIndmoneySnapshotSource(readLatestIndmoneySnapshot, savedSnapshot)','snapshot_id:snapshot.id'])assert.ok(workflow.includes(contract));
 const bridge=workflow.match(/^  const handleIndMoneyContinue = useCallback\([\s\S]*?^  \);/m)?.[0];
 assert.ok(bridge, 'Snapshot fixture requires the INDmoney continuation callback');
 const fixture=`import React,{useState,useCallback}from'react';import{createRoot}from'react-dom/client';import{IndMoneySnapshotDialog}from'./app/console/dashboard/_components/IndMoneySnapshotDialog';import{readIndmoneySnapshotSource}from'./lib/indmoneySnapshotSource';

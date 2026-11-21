@@ -26,8 +26,9 @@ def scan(count=65):
 
 
 def test_all_platform_stages_and_overall_exist():
-    assert len(COMPLETION_CATALOG) == 18
-    assert len({item['key'] for item in COMPLETION_CATALOG}) == 18
+    assert len(COMPLETION_CATALOG) == 20
+    assert len({item['key'] for item in COMPLETION_CATALOG}) == 20
+    assert {'completion.zerodha.pairwise','completion.indmoney.pairwise'} <= COMPLETION_DEFAULTS.keys()
     assert COMPLETION_DEFAULTS['completion.bullpen.scan'] is True
     assert COMPLETION_DEFAULTS['completion.bullpen.llm'] is False
 

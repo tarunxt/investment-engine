@@ -46,10 +46,10 @@ test('Run checks and handles errors before resetting stages or reserving a workf
   for (const operation of ['resetPortfolio(portfolio)', 'reserveAutoRebalanceRunMetadata(portfolio', 'markRunning(portfolio, "sync")', 'apiService.createRun(']) {
     assert.ok(run.indexOf(operation) > blocked, operation);
   }
-  assert.match(run.slice(0, checked), /getSelectedStageRunIds/);
-  assert.match(run.slice(0, checked), /selectStageRunInputs/);
+  assert.match(run.slice(0, checked), /Stage 2 publication/);
+  assert.match(run.slice(0, checked), /sourceSelections/);
   assert.match(run.slice(0, checked), /unavailable selected models/);
-  assert.match(run.slice(0, checked), /resolveTechnicalPriceEvidence/);
+  assert.match(run.slice(0, checked), /read\(id\)/);
   assert.match(source, /Pre-run checks found issues/);
   assert.match(source, /preflightPortfolio === section.portfolio \? "Checking…"/);
 });

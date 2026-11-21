@@ -85,7 +85,7 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
     const lanes = [
       { title: "Sync portfolio", keys: ["sync"] },
       { title: market === "zerodha" ? "Find New Promising Stocks" : "Discover contenders", keys: ["swing"] },
-      { title: market === "zerodha" ? "Scorecards" : "Score & check threats", keys: ["threats", "rebalance", "technical"] },
+      { title: "Scorecards", keys: ["rebalance", "technical", "threats", "pairwise"] },
       { title: market === "zerodha" ? "Final Actionables" : "Build Actionables", keys: ["actionables"] },
     ];
     return <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Rebalance workflow">
@@ -129,9 +129,7 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
             {item.stage === "swing" && <div className="mt-2 rounded-lg border p-3 text-sm">
               {tileHeader("Merge contenders", [{ label: "Stock Flow", onSelect: onStockFlowClick }, { label: "History", href: historyHref }], item.info.recommendedStocks != null ? item.info : { state: "idle" })}
               <p>{item.info.recommendedStocks != null ? item.info.recommendedStocks + " unique listings" : "Awaiting scan evidence"}</p></div>}
-            {item.stage === "threats" && <div className="mt-2 rounded-lg border p-3 text-sm">
-              {tileHeader("Pairwise scorecard", [{ label: "History", href: historyHref }, ...(item.onOutputClick ? [{ label: "Saved output", onSelect: item.onOutputClick }] : [])], { state: item.info.state === "running" ? "running" : "idle", runStatus: item.info.pairStatus })}<p>{item.info.pairCoverage ?? (item.info.state === "running" ? "Assessing stock pairs" : "Comparison count unavailable in this stage summary")}</p>
-            </div>}
+
           </div>;
         })}
       </section>)}
@@ -152,7 +150,7 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
           const error = rows.find(row => row.label === "Error")!;
           const time = rows[0].value;
           const inspecting = selected.stage === item.stage;
-          const usesSyncStockCount = market === "zerodha" && (item.stage === "sync" || item.stage === "threats");
+          const usesSyncStockCount = market === "zerodha" && item.stage === "sync";
           const stockCell = usesSyncStockCount ? String(syncedStockCount ?? "n/a") : rowValue(item, "Stocks recommended");
           return <tr key={item.stage} className={`border-t border-slate-200 align-top ${getStageLedgerTone(item.info)}`}>
             <th scope="row" className={`px-3 py-2 font-normal ${inspecting ? "bg-blue-100 shadow-[inset_3px_0_0_var(--color-blue-600)] dark:bg-blue-950/65" : ""}`}>
@@ -166,7 +164,7 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
               </div>
             </th>
             <td className="px-3 py-2 whitespace-nowrap">{upcoming ? null : time}</td>
-            <td className="max-w-56 px-3 py-2">{!upcoming && <>{market && ["threats", "swing", "rebalance", "technical"].includes(item.stage) ? <button type="button" data-auto-rebalance-llm-metric="true" data-workflow-stage={item.stage} data-workflow-portfolio={market === "zerodha" ? "india" : "indmoney_us"} data-workflow-total={item.info.totalLlms ?? undefined}
+            <td className="max-w-56 px-3 py-2">{!upcoming && <>{market && ["threats", "swing", "rebalance", "technical", "pairwise"].includes(item.stage) ? <button type="button" data-auto-rebalance-llm-metric="true" data-workflow-stage={item.stage} data-workflow-portfolio={market === "zerodha" ? "india" : "indmoney_us"} data-workflow-total={item.info.totalLlms ?? undefined}
               data-workflow-run-id={item.info.activeRunId ?? item.info.lastRunId ?? undefined}
               data-workflow-job-id={item.info.jobId ?? undefined}
               data-workflow-sequence={item.info.workflowSequence ?? undefined}

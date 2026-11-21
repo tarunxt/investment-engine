@@ -568,6 +568,7 @@ function collectStageJobsFromRuns(
 
 function stageLabel(stage: LlmStage) {
   return {
+    pairwise: "Pairwise scorecard",
     threats: "Threats Scan",
     swing: "Swing Scan",
     rebalance: "Rebalance",

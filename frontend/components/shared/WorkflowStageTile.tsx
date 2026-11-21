@@ -13,6 +13,7 @@ export type WorkflowStageKey =
   | "swing"
   | "threats"
   | "rebalance"
+  | "pairwise"
   | "technical"
   | "actionables";
 
@@ -76,6 +77,7 @@ export const STAGE_ORDER: WorkflowStageKey[] = [
   "threats",
   "rebalance",
   "technical",
+  "pairwise",
   "actionables",
 ];
 
@@ -102,7 +104,7 @@ export const STAGE_METADATA: Record<
     chartLines: ["Latest holdings, cash,", "and exposure snapshot"],
   },
   swing: {
-    step: "03",
+    step: "02",
     idle: getStageTileLabel("swing"),
     running: "Running Swing Scan",
     completed: "Swing Scan Ready",
@@ -111,8 +113,9 @@ export const STAGE_METADATA: Record<
     chartTitle: "Swing",
     chartLines: ["Momentum, catalysts,", "and opportunity signals"],
   },
+  pairwise: {step:"03.4", idle:"Pairwise scorecard", running:"Running Pairwise scorecard", completed:"Pairwise scorecard ready", tileDescription:"Compare each pair of Stage 2 listings over the swing horizon.", chartTitle:"Pairwise", chartLines:["Head-to-head comparisons"]},
   threats: {
-    step: "02",
+    step: "03.3",
     idle: getStageTileLabel("threats"),
     running: "Running Threats Scan",
     completed: "Threats Scan Ready",
@@ -122,17 +125,17 @@ export const STAGE_METADATA: Record<
     chartLines: ["Macro, sector, and", "position-level guardrails"],
   },
   rebalance: {
-    step: "04",
+    step: "03.1",
     idle: getStageTileLabel("rebalance"),
     running: "Building Rebalance",
     completed: "Rebalance Ready",
     tileDescription:
-      "Merge sync, threats, and swing conviction into target weights, adds, trims, and holds.",
+      "Evaluate the Stage 2 portfolio and contenders for adds, trims and holds.",
     chartTitle: "Rebalance",
     chartLines: ["Merge signals into target", "weights, adds, trims, holds"],
   },
   technical: {
-    step: "05",
+    step: "03.2",
     idle: getStageTileLabel("technical"),
     running: "Running Technical Scan",
     completed: "Technical Scan Ready",
@@ -142,7 +145,7 @@ export const STAGE_METADATA: Record<
     chartLines: ["Validate entries, trims,", "and execution timing"],
   },
   actionables: {
-    step: "06",
+    step: "04",
     idle: getStageTileLabel("actionables"),
     running: "Preparing Actionables",
     completed: "Actionables Ready",
@@ -154,6 +157,7 @@ export const STAGE_METADATA: Record<
 };
 
 export const LLM_STAGE_TILE_KEYS = new Set<WorkflowStageKey>([
+  "pairwise",
   "threats",
   "swing",
   "rebalance",
@@ -188,6 +192,7 @@ export function getStageTileLabel(stage: WorkflowStageKey) {
   const labels: Record<WorkflowStageKey, string> = {
     sync: "Sync Portfolio",
     threats: "Threats Scan",
+    pairwise: "Pairwise scorecard",
     swing: "Swing Scan",
     rebalance: "Rebalance",
     technical: "Technical Scan",

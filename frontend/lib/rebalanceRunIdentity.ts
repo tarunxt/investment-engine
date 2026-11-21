@@ -1,6 +1,6 @@
 import type { SwingTradeMarket } from '@/lib/swingTrade';
 
-export type AnalysisRunStage = 'swing' | 'rebalance' | 'technical' | 'threats';
+export type AnalysisRunStage = 'swing' | 'rebalance' | 'technical' | 'threats' | 'pairwise';
 type RunIdentitySource = {
   prompt?: string | null;
   prompt_preview?: string | null;
@@ -28,6 +28,8 @@ export function getAnalysisRunIdentity(run: RunIdentitySource): AnalysisRunIdent
   if (metadataMarket && labelMarket && metadataMarket !== labelMarket) return unknown;
 
   const prompt = (run.prompt ?? run.prompt_preview ?? '').trimStart();
+  const independent = /^\[INDEPENDENT_SCORECARD:(india|us):(rebalance|technical|threats|pairwise):\d+\]/.exec(prompt);
+  if (independent) return metadataMarket && metadataMarket !== independent[1] ? unknown : {market:independent[1] as SwingTradeMarket,stage:independent[2] as AnalysisRunStage};
   const marker = prompt.match(/^\[REBALANCE_FLOW:(india|us)\]/i);
   const opening = prompt.split(/\n\s*\n/, 1)[0].slice(0, 1000);
   let stageFromPrompt: AnalysisRunStage | null = null;

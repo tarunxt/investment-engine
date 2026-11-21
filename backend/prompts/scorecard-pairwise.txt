@@ -1,0 +1,15 @@
+Act as a comparative swing analyst for {{MARKET}}. For each pair in
+{{ASSIGNED_PAIRS}}, judge which listing has the stronger risk-adjusted 2–12
+week long opportunity using your own dated evidence on trend and relative
+strength, volume/liquidity, catalysts, downside and reward-to-risk.
+Use the same horizon and criteria for both stocks. Holding status does not
+decide the winner. Return the exact winning listing ID, TIE for supported
+equivalence or UNKNOWN for insufficient evidence. Give a short comparative
+reason and dated source references for both sides where relevant. Consider
+each assigned pair once. Ignore order/presentation as a reason for preference.
+Return one row for each input listing in the batch using this header:
+Exchange Symbol | Stock Symbol | Assigned pairs | Judged pairs | Judgments
+In Judgments use a compact JSON array with opponent_id, result, rationale
+and source_refs. Include only pairs assigned to this row. A listing owning
+zero pairs has counts 0, 0 and an empty array; it also receives results from
+other listings' rows when Cred-X aggregates. UNKNOWN is assigned but unjudged.

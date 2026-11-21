@@ -233,7 +233,7 @@ visit(ast);
 const callbackSource = declarations.get('runWorkflow').initializer.arguments[0].getText(ast);
 const helpers = load(`${declarations.get('buildRunPayload').getText(ast)}\n${declarations.get('RecordedWorkflowStageFailure').getText(ast)}\nexport const STAGE_ORDER = ${declarations.get('STAGE_ORDER').initializer.getText(ast)};\nexport { buildRunPayload, RecordedWorkflowStageFailure };`, { recommendationAuditEnabled: false });
 
-async function executeWorkflow({ stages = ['sync', 'swing', 'threats', 'rebalance', 'technical', 'actionables'], selected = {}, runOverrides = {}, threatOverrides = {}, snapshot = portfolioSnapshot,
+async function executeWorkflow({ stages = ['sync', 'swing', 'threats', 'rebalance', 'technical', 'pairwise', 'actionables'], selected = {}, revision=0, onPublish, failCard, runOverrides = {}, threatOverrides = {}, snapshot = portfolioSnapshot,
   sourceHasher = modules['@/lib/outputSourceJobs'].buildOutputSourceJobs, cancelRequestedRef = { current: false }, rebalanceStatus = "completed" } = {}) {
   const created = [];
   const alerts = [];
@@ -274,7 +274,16 @@ async function executeWorkflow({ stages = ['sync', 'swing', 'threats', 'rebalanc
     },
     queueAutoRebalanceCompletionEmail: async () => {},
   };
+  const publications=[], results=[], cards=["rebalance","technical","threats","pairwise"];
+  const api={
+    publish:async data=>{publications.push(data);await onPublish?.(data);return {id:77};},
+    read:async id=>({id,attempts:[],finals:[],manifest:{stocks:[{}]}}),
+    start:async(id,card,body)=>{created.push({revision:id,stage:card,...body});if(failCard===card)throw Error("offline fixture failure");return {id:created.length,run_id:created.length};},
+    result:async id=>({id,status:"completed",scored:1}),savedPolicy:async()=>null,
+    finalize:async (id,seq,outputs)=>{results.push(outputs);return {id:5,rows:[],schema:"independent-scorecards-v1"};},
+  };
   const bindings = {
+    cards,scorecardApi:()=>api,migratedPolicy:()=>({}),cardPolicies:{},sourceSelections:{indmoneyUs:revision},setSourceSelections:noop,isUsableStageJob:()=>true,
     parseApiTimestamp: value => value ? new Date(value) : null, captureUsValuation: async () => ({schema:"us-valuation-v1"}),
     requireWorkflowOwner: () => ({ id: 7 }), actionablesActivityKey: () => "test", announceActionablesActivity: () => () => {},
     readLatestIndmoneySnapshot: () => apiService.indmoneyUsPortfolioOverview(),
@@ -318,7 +327,7 @@ async function executeWorkflow({ stages = ['sync', 'swing', 'threats', 'rebalanc
   };
   const { execute } = load(`export const execute = ${callbackSource};`, bindings);
   await execute('indmoneyUs');
-  return { created, completed, errors, preflightErrors, alerts, reservations, threatReads, runReads, consensusInputs, targets };
+  return { publications, results,created, completed, errors, preflightErrors, alerts, reservations, threatReads, runReads, consensusInputs, targets };
 }
 
 test('invalid saved INDmoney snapshot fails sync before any paid stage is queued', async () => {
@@ -329,79 +338,31 @@ test('invalid saved INDmoney snapshot fails sync before any paid stage is queued
   assert.match(result.preflightErrors.join(' '), /My US Stocks/);
 });
 
-test('offline full workflow keeps six stages and independent model samples while emitting each selected source once', async () => {
-  const result = await executeWorkflow();
-  assert.deepEqual(result.errors, []);
-  assert.deepEqual(result.completed, ['sync', 'swing', 'threats', 'rebalance', 'technical', 'actionables']);
-  assert.deepEqual(result.created.map((call) => [call.stage, call.targets.length]), [['swing', 2], ['threats', 1], ['rebalance', 2], ['technical', 1]]);
-  const swingPrompt = result.created.find((call) => call.stage === 'swing').prompt;
-  assert.doesNotMatch(swingPrompt, /Threat Scan #/);
-  assert.deepEqual(result.threatReads, [], 'discovery is independent of Stage 3');
-  const rebalancePrompt = result.created.find((call) => call.stage === 'rebalance').prompt;
-  for (const jobId of [501, 502, 503]) assert.equal(rebalancePrompt.match(new RegExp(`Bullish rationale ${jobId}`, 'g'))?.length, 1);
-  assert.deepEqual(keys(result.consensusInputs[2]), ['60:601', '60:602', '61:603']);
-  assert.deepEqual(result.created.find((call) => call.stage === 'swing').targets, result.targets);
+test('one Stage 2 publication feeds four independent jobs with the selected Swing evidence',async()=>{
+  const r=await executeWorkflow();
+  assert.deepEqual(r.errors,[]);
+  assert.deepEqual(r.publications[0].swing_job_ids.sort(),[501,502,503]);
+  assert.deepEqual(r.created.map(c=>c.stage),["swing","rebalance","technical","threats","pairwise"]);
+  assert.ok(r.created.slice(1).every(c=>c.revision===77 && c.targets.length===2));
+  assert.deepEqual(r.runReads,[]);
 });
 
-test('Kill during deferred source hashing prevents the next paid Rebalance call', { timeout: 5000 }, async () => {
-  const cancelRequestedRef = { current: false };
-  let releaseHashing;
-  let signalHashing;
-  const held = new Promise((resolve) => { releaseHashing = resolve; });
-  const hashingStarted = new Promise((resolve) => { signalHashing = resolve; });
-  const pending = executeWorkflow({ cancelRequestedRef, sourceHasher: async (...args) => {
-    const sources = await modules['@/lib/outputSourceJobs'].buildOutputSourceJobs(...args);
-    signalHashing();
-    await held;
-    return sources;
-  } });
-  await hashingStarted;
-  cancelRequestedRef.current = true;
-  releaseHashing();
-  const result = await pending;
-  assert.deepEqual(result.created.map((call) => call.stage), ['swing', 'threats']);
-  assert.ok(!result.completed.includes('rebalance'));
-  assert.ok(!result.completed.includes('technical'));
-  assert.ok(result.errors.some((entry) => entry.stage === 'rebalance' && /killed by user/.test(entry.error)));
+test('cancellation during Stage 2 publication prevents any subsequent paid card',async()=>{
+  const cancelRequestedRef={current:false};
+  const r=await executeWorkflow({cancelRequestedRef,onPublish:()=>{cancelRequestedRef.current=true;}});
+  assert.deepEqual(r.created.map(c=>c.stage),["swing"]);
 });
 
-test('offline workflow rejects stale/conflicting and out-of-scope sources before the next paid stage', async () => {
-  const conflict = run(); conflict.run_jobs[0].job.response += '\nConflicting version';
-  const conflictingThreat = threat(99).analysis;
-  conflictingThreat.report.raw_markdown += '\nConflicting version';
-  const conflictingRebalance = run(60, [601, 602], 'rebalance');
-  conflictingRebalance.run_jobs[0].job.response += '\nConflicting version';
-  const cases = [
-    { runOverrides: { 50: conflict }, expectedStages: ['swing', 'threats'], failed: 'rebalance' },
-    { runOverrides: { 60: conflictingRebalance }, expectedStages: ['swing', 'threats', 'rebalance'], failed: 'technical' },
-    { stages: ['rebalance'], runOverrides: { 50: run(50, [501], 'swing', 'india') }, expectedStages: [], failed: 'rebalance' },
-    { stages: ['technical'], selected: { technical: new Set(['run:60:job:601']) }, runOverrides: { 60: run(60, [601], 'swing') }, expectedStages: [], failed: 'technical' },
-    { stages: ['rebalance'], selected: { rebalance: new Set(['run:50:job:999']) }, expectedStages: [], failed: 'rebalance' },
-  ];
-  for (const { expectedStages, failed, ...options } of cases) {
-    const result = await executeWorkflow(options);
-    assert.deepEqual(result.created.map((call) => call.stage), expectedStages);
-    if (result.preflightErrors.length) {
-      assert.equal(result.reservations, 0);
-      assert.match(result.preflightErrors.join(' '), refreshError);
-    } else {
-      assert.equal(result.errors.length, 1);
-      assert.equal(result.errors[0].stage, failed);
-      assert.match(result.errors[0].error, refreshError);
-    }
-  }
+test('a rejected Stage 2 publication stops all four scorecards',async()=>{
+  const r=await executeWorkflow({onPublish:()=>{throw Error("snapshot identity mismatch");}});
+  assert.deepEqual(r.created.map(c=>c.stage),["swing"]);
+  assert.ok(r.errors.some(e=>e.error.includes("snapshot identity mismatch")));
 });
 
-test('Next uses only generated runs without historical fallback', async () => {
-  const result = await executeWorkflow({ selected: {
-    rebalance: new Set(['rebalance:next']), technical: new Set(['technical:next']),
-  } });
-  assert.deepEqual(result.errors, []);
-  assert.deepEqual(result.created.map((call) => [call.stage, call.targets.length]), [['swing', 2], ['threats', 1], ['rebalance', 2], ['technical', 1]]);
-  assert.deepEqual(keys(result.consensusInputs[1]), ['60:601', '60:602']);
-  assert.deepEqual(result.runReads, [], 'Next does not fetch any historical scan');
-  const prompt = result.created.find((call) => call.stage === 'rebalance').prompt;
-  for (const jobId of [501, 502]) assert.equal(prompt.match(new RegExp(`Bullish rationale ${jobId}`, 'g'))?.length, 1);
+test('failure of one card preserves the other three outputs for provisional calculation',async()=>{
+  const r=await executeWorkflow({failCard:"threats"});
+  assert.deepEqual(Object.keys(r.results[0]).sort(),["pairwise","rebalance","technical"]);
+  assert.equal(r.errors[0].stage,"threats");
 });
 
 test('manual rebalance shows actionable validation errors and blocks submit without breaking valid controls', () => {
@@ -456,15 +417,13 @@ test('manual rebalance shows actionable validation errors and blocks submit with
   const result = await executeWorkflow({ stages: ['rebalance'], selected: { rebalance: new Set(['rebalance:next']) } });
   assert.deepEqual(result.created, []);
   assert.equal(result.reservations, 0);
-  assert.match(result.preflightErrors.join(' '), /Next Swing/);
+  assert.match(result.preflightErrors.join(' '), /Stage 2 revision/);
 });
 
-test('snapshot drift fails before paid Rebalance', async () => {
-  const result = await executeWorkflow({ snapshot: { ...portfolioSnapshot, captured_at: '2026-10-02T21:30:00Z' } });
-  assert.deepEqual(result.created.map(call => call.stage), ['swing', 'threats']);
-  assert.match(result.errors[0].error, /different snapshots/);
+test('a saved publication pins original holdings when the account snapshot changes',async()=>{
+  const r=await executeWorkflow({stages:["rebalance"],revision:123,snapshot:{...portfolioSnapshot,captured_at:"2026-10-02T21:30:00Z"}});
+  assert.deepEqual(r.publications,[]);assert.equal(r.created[0].revision,123);
 });
-
 
 test('opening the Rebalance picker exposes saved jobs even after market close without rewriting selections', async () => {
   let candidates = [], reads = 0;
@@ -500,20 +459,13 @@ test('Reset Defaults selects only the upcoming output for every stage', () => {
   }
 });
 
-test('Technical Next without selected Rebalance is rejected before reservation, source reads or provider work',async()=>{
- const result=await executeWorkflow({stages:['technical']});assert.equal(result.reservations,0);assert.deepEqual(result.created,[]);assert.deepEqual(result.errors,[]);assert.equal(result.alerts.length,0);assert.match(result.preflightErrors.join(' '),/Next means a new result from this invocation/);assert.match(result.preflightErrors.join(' '),/saved completed\/partial/);
- const issue=inputs.technicalInputPlanIssue(true,false,new Set(['technical:next','run:60:job:601']));assert.ok(issue,'saved jobs do not silently replace a missing requested Next source');
- assert.equal(inputs.technicalInputPlanIssue(false,false,new Set(['technical:next'])),null);
+test('each card runs alone with the exact saved Stage 2 revision',async()=>{
+  for(const card of ["rebalance","technical","threats","pairwise"]){
+    const r=await executeWorkflow({stages:[card],revision:42});
+    assert.deepEqual(r.errors,[]);assert.deepEqual(r.runReads,[]);
+    assert.deepEqual(r.created.map(c=>[c.stage,c.revision]),[[card,42]]);
+  }
 });
-
-test('Technical accepts completed/partial generated or explicitly selected saved Rebalance without substituting latest',async()=>{
- for(const rebalanceStatus of ['completed','partial']){
-  const full=await executeWorkflow({rebalanceStatus});assert.deepEqual(full.alerts,[]);assert.deepEqual(full.errors,[]);assert.ok(full.created.some(call=>call.stage==='technical'));
-  const selected=await executeWorkflow({stages:['technical'],selected:{technical:new Set(['run:60:job:601','run:60:job:602'])},rebalanceStatus});assert.deepEqual(selected.alerts,[]);assert.deepEqual(selected.errors,[]);assert.deepEqual(selected.created.map(call=>call.stage),['technical']);assert.deepEqual(selected.runReads,[60,60]);assert.deepEqual(keys(selected.consensusInputs[0]),['60:601','60:602']);
- }
- const source=read('../app/console/dashboard/_components/RebalanceWorkflowSections.tsx');const preflight=source.indexOf('const inputPlanIssue =');assert.ok(preflight<source.indexOf('const zerodhaPopup =',preflight));assert.match(source,/Choose saved Rebalance inputs/);assert.match(source,/lastRunId: null, activeRunId: null, recommendedStocks: null/);assert.match(source,/errorDetails: \[\]/);
-});
-
 
 test('starting a stage clears previous run/listing/provider diagnostics without changing retained run data',()=>{
  const previous={state:'failed',lastRunId:448,recommendedStocks:22,error:'Old failure',errorDetails:[{message:'old'}],partialNotice:'old',costUsd:1,provider:'old',model:'old',frozenFinal:{rows:[1]}};const before=structuredClone(previous);let visible={...previous};

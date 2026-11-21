@@ -14,6 +14,14 @@ from app.domains.jobs.models import Job
 
 
 async def validate_frozen_final(db, payload, *, user_id, portfolio, sequence, allow_legacy=False, rebuild=False, scorecard_evidence=None, stored_record=False):
+    if isinstance(payload,dict) and payload.get("schema")=="independent-scorecards-v1":
+        from app.domains.scorecards.storage import lookup
+        if set(payload)!={"schema","final_id","workflow_sequence"} or type(payload["final_id"]) is not int or payload["workflow_sequence"]!=sequence:
+            raise HTTPException(422,"Invalid independent final reference")
+        final = await lookup(db,user_id,portfolio,"final",payload["final_id"],sequence=sequence)
+        if not final:
+            raise HTTPException(409,"Independent final source belongs to a different workflow")
+        return final
     if not isinstance(payload, dict) or payload.get('schema') not in {'workflow-final-v1', 'workflow-final-v2'}:
         raise HTTPException(422, 'Unsupported frozen final schema')
     if (payload.get('broker', portfolio) != portfolio

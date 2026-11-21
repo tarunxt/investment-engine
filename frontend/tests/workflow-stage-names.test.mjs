@@ -4,7 +4,7 @@ import test from 'node:test';
 import ts from 'typescript';
 
 const expected = {
-  sync: 'Sync Portfolio', threats: 'Threats Scan', swing: 'Swing Scan',
+  sync: 'Sync Portfolio', pairwise:'Pairwise scorecard', threats: 'Threats Scan', swing: 'Swing Scan',
   rebalance: 'Rebalance', technical: 'Technical Scan', actionables: 'Actionables',
 };
 const source = relative => readFileSync(new URL(relative, import.meta.url), 'utf8');
@@ -30,7 +30,7 @@ function evaluate(text, names, bindings = {}) {
 }
 const { STAGE_METADATA, getStageTileLabel } = evaluate(tile, ['STAGE_METADATA', 'getStageTileLabel']);
 
-test('all six stage card names and metadata have one canonical primary name', () => {
+test('all workflow card names and metadata have one canonical primary name', () => {
   assert.deepEqual(Object.keys(STAGE_METADATA).sort(), Object.keys(expected).sort());
   for (const [key, name] of Object.entries(expected)) {
     assert.equal(getStageTileLabel(key), name);

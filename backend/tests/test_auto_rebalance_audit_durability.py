@@ -386,7 +386,7 @@ async def test_email_uses_persisted_evidence_and_deduplicates(audit_db, email_qu
     for index, stage in enumerate(routes.AUTO_REBALANCE_STAGE_ORDER):
         status = "skipped" if stage == "technical" else "partial" if stage == "threats" else "completed"
         fields = {}
-        if stage in {"threats", "swing", "rebalance"}:
+        if stage in {"threats", "swing", "rebalance", "pairwise"}:
             async with audit_db.sessions() as db:
                 run = Run(id=400 + index, user_id=7, prompt="scan", prompt_preview="scan",
                           auto_rebalance_portfolio="india", auto_rebalance_sequence=42,
@@ -401,8 +401,8 @@ async def test_email_uses_persisted_evidence_and_deduplicates(audit_db, email_qu
     event_id, payload = (await overall_events(audit_db))[0]
     assert payload["portfolio"] == "india" and payload["workflow_label"] == "India Run #42"
     assert datetime.fromisoformat(payload["completed_at"]).replace(tzinfo=timezone.utc) == FINISH
-    assert len(payload["stages_completed"]) == 5
-    assert "Stage 2 · Threats and guardrails (partial)" in payload["stages_completed"]
+    assert len(payload["stages_completed"]) == len(routes.AUTO_REBALANCE_STAGE_ORDER) - 1
+    assert "Stage 3 · Threats scorecard (partial)" in payload["stages_completed"]
     assert all("Technical" not in label and "Unpersisted" not in label for label in payload["stages_completed"])
     assert email_queue.redis.calls == ["auto_rebalance_success_email_sent:7:india:42"]
     assert email_queue.redis.closed == 1
@@ -440,7 +440,7 @@ async def test_delayed_callbacks_preserve_terminal_progress_and_confirmed_links(
 async def seed_verified_workflow(audit_db, *, reference="run_id"):
     for index, stage in enumerate(routes.AUTO_REBALANCE_STAGE_ORDER):
         fields = {}
-        if stage in {"threats", "swing", "rebalance", "technical"}:
+        if stage in routes.LLM_STAGES:
             async with audit_db.sessions() as db:
                 values = dict(id=400 + index, user_id=7, prompt="scan",
                               auto_rebalance_portfolio="india", auto_rebalance_sequence=42,
@@ -485,7 +485,7 @@ async def test_email_requires_matching_execution_evidence(audit_db, email_queue,
 async def test_matching_completed_execution_evidence_permits_email(audit_db, email_queue, reference):
     await seed_verified_workflow(audit_db, reference=reference)
     assert await email(audit_db) == {"status": "queued"}
-    assert len((await overall_events(audit_db))[0][1]["stages_completed"]) == 6
+    assert len((await overall_events(audit_db))[0][1]["stages_completed"]) == len(routes.AUTO_REBALANCE_STAGE_ORDER)
 
 
 @pytest.mark.anyio
@@ -493,7 +493,7 @@ async def test_only_actionables_selected_can_email_with_explicitly_skipped_llm_s
     for stage in routes.AUTO_REBALANCE_STAGE_ORDER:
         await write(audit_db, stage, "completed" if stage == "actionables" else "skipped", completed_at=FINISH)
     assert await email(audit_db) == {"status": "queued"}
-    assert (await overall_events(audit_db))[0][1]["stages_completed"] == ["Stage 6 · Final actionables"]
+    assert (await overall_events(audit_db))[0][1]["stages_completed"] == ["Stage 4 · Final actionables"]
 
 
 async def overall_events(audit_db):
@@ -642,7 +642,7 @@ async def test_broker_failure_leaves_recoverable_outbox_and_delivery_is_idempote
         if mail_enabled:
             assert smtp.call_args.args[0] == "owner@example.test"
             assert "India Run #42 completed successfully" in smtp.call_args.args[1]
-            assert "Stage 6 · Final actionables" in smtp.call_args.args[3]
+            assert "Stage 4 · Final actionables" in smtp.call_args.args[3]
         with sessionmaker(sync_engine)() as db:
             row = db.get(ActivityLog, event_id)
             assert row.action == "completion.processed"
@@ -675,7 +675,7 @@ async def test_partial_run_uses_aggregate_outcome_with_a_terminal_linked_provide
         await db.commit()
     if expected:
         assert await email(audit_db) == {"status": expected}
-        assert "Stage 3 · Swing scan (partial)" in (await overall_events(audit_db))[0][1]["stages_completed"]
+        assert "Stage 2 · Swing scan (partial)" in (await overall_events(audit_db))[0][1]["stages_completed"]
     else:
         with pytest.raises(HTTPException) as error:
             await email(audit_db)
