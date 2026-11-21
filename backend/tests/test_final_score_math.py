@@ -278,3 +278,22 @@ def test_upstox_fallback_only_keeps_valid_completed_local_sessions():
     rows = upstox_daily_bars(data, datetime.fromisoformat("2026-11-20T14:00:00+05:30"), "https://example.org/candles")
     assert [r["as_of"][:10] for r in rows] == ["2026-11-19","2026-11-18"]
     assert all(r["close"] == 104 and r["kind"] == "daily_bar" for r in rows)
+
+
+def test_candle_url_range_is_not_an_observation_timestamp():
+    from app.domains.scorecards.scoring import dated_reference, technical
+    url = "https://api.upstox.com/v3/historical-candle/BSE_EQ%7CINE066F01020/days/1/2026-11-22/2026-10-29"
+    cutoff = "2026-11-21T20:20:00+00:00"
+    evidence = f"{url} — bars through 2026-11-20T15:30:00+05:30"
+    assert dated_reference(evidence, cutoff)
+    assert not dated_reference(url, cutoff)
+    assert not dated_reference(f"{url} 2026-11-22T15:30:00+05:30", cutoff)
+    assert not dated_reference(evidence + " and 2026-11-23", cutoff)
+    assert not dated_reference(f"{url} 2026-11-20T15:30", cutoff)
+    row = {"Evidence source and as-of": evidence, "Last 5 candles trend": "+1",
+           "Primary Setup": "Support bounce (7.8)", "Confidence Score": "7.8", "Bias": "Bullish"}
+    result = technical([row], cutoff)
+    assert result["score"] == pytest.approx(200 / 3)
+    assert result["signed_terms"]["setup"] == pytest.approx(2.34)
+    row["Primary Setup"] = "Support bounce (9.2)"
+    assert technical([row], cutoff)["signed_terms"]["setup"] is None
