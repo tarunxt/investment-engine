@@ -7263,7 +7263,7 @@ ${zerodhaExecutionMode === "direct_market"
             const previous = source.finals[0] ? await api.final(source.finals[0].id) : null;
             const config = cardPolicies[portfolio] ?? previous?.policy ?? await api.savedPolicy() ?? migratedPolicy(scoreMatrixFormulaConfig);
             const final=await api.finalize(source.id,sequence,chosen,config);
-            const frozenCoverage=portfolio==="zerodha"?await api.coverage(sequence).catch(()=>null):null;
+            const frozenCoverage = portfolio === "zerodha" ? await api.coverage?.(sequence).catch(() => null) : null;
             const finalSummary=frozenCoverage?.final_summary?.id===final.id?frozenCoverage.final_summary:undefined;
             const saved=await markCompleted(portfolio,"actionables",{runStatus: final.rows.every(row => row.status === "Complete") ? "saved calculation" : "partial",
               partialNotice: final.rows.some(row => row.status !== "Complete") ? `Final saved with ${final.rows.filter(row => row.status === "Complete").length}/${final.rows.length} complete listings.` : undefined,
