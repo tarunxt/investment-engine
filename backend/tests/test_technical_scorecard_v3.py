@@ -316,3 +316,18 @@ async def test_venue_archive_reused_when_second_run_adds_a_stock(monkeypatch):
         packet=await sources.collect({"as_of":CUT,"stocks":[{"listing":listing}],"owner_id":7},"owner")
         assert packet["listings"][listing][0]["isin"]==master[listing]["isin"]
     assert len(calls)==1
+
+
+def test_siemens_energy_uses_only_the_verified_nse_equity():
+    from app.domains.scorecards import rebalance_identity as identity
+    raw, target = identity.SIEMENS_ALIAS, identity.SIEMENS_IDENTITY[0]
+    isin = identity.SIEMENS_IDENTITY[1]
+    row = {"listing":raw, "name":"Siemens Energy India Ltd.", "origin":"contender"}
+    master = {target:{"isin":isin}}
+    assert sources.resolve_aliases([raw],master,[row]) == {raw:target}
+    assert sources.resolve_history_instruments([row],master,{}) == {raw:target}
+    assert identity.aliases([row],master) == {raw:target}
+    assert identity.aliases([{**row,"origin":"holding"}],master) == {}
+    for instrument, stocks in (({target:{"isin":"OTHER"}},[row]), (master,[{**row,"name":"Siemens Ltd."}]),
+                              ({**master,raw:{"isin":"OTHER"}},[row]), (master,[{**row,"isin":"OTHER"}])):
+        assert sources.resolve_aliases([raw],instrument,stocks) == {}

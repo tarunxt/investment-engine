@@ -15,6 +15,7 @@ from statistics import mean
 import httpx
 from redis.exceptions import RedisError
 
+from .rebalance_identity import SIEMENS_ALIAS, SIEMENS_IDENTITY, documented_alias
 from .research import INDIA, bar, download, supplement_indian_bars
 from .technical_v3 import BENCHMARK, calculate, normalise
 from .universe import digest
@@ -61,12 +62,15 @@ def session_calendar(cutoff, venue, holidays, sessions=60):
 # Legacy Swing exports used the escaped ticker M_M. The NSE filing identifies the
 # ordinary equity share class; a current, matching same-venue master is required.
 FILING = "https://nsearchives.nseindia.com/corporate/ixbrl/INTEGRATED_FILING_INDAS_180552_30072026161119_iXBRL_WEB.html"
-VERIFIED_ALIASES = {"NSE:M_M": ("NSE:M&M", "INE101A01026", FILING)}
+VERIFIED_ALIASES = {"NSE:M_M": ("NSE:M&M", "INE101A01026", FILING), SIEMENS_ALIAS: SIEMENS_IDENTITY}
 
 
-def resolve_aliases(keys, master):
+def resolve_aliases(keys, master, stocks=()):
+    identity = {s["listing"]: s for s in stocks}
     aliases={}
     for key in keys:
+        if key == SIEMENS_ALIAS and not documented_alias(identity.get(key, {"listing": key}), master):
+            continue
         if key not in VERIFIED_ALIASES:
             continue
         target,isin,_=VERIFIED_ALIASES[key]
@@ -184,6 +188,10 @@ def resolve_history_instruments(stocks, master, previous):
         known = {r["isin"] for r in previous.get("listings", {}).get(key, []) if r.get("isin")}
         known.update(i for i in (stock.get("isin"), prior.get("instrument")) if i)
         name = lambda value: re.sub(r"[^a-z0-9]", "", re.sub(r"\b(?:limited|ltd)\.?$", "", (value or "").casefold().strip()).replace("&","and"))
+        verified = documented_alias(stock, master)
+        if verified and (not known or known == {master[verified]["isin"]}):
+            aliases[key] = verified
+            continue
         matches = []
         for candidate, meta in master.items():
             if not candidate.startswith(venue + ":") or not meta.get("isin"):
@@ -257,7 +265,7 @@ async def collect(manifest, username, previous=None, requested=None, *, sessions
             except ERRORS:
                 notices.append("Instrument master unavailable")
         await asyncio.gather(calendar(),instruments())
-        aliases={} if pair_repair else resolve_aliases(ids,master)
+        aliases={} if pair_repair else resolve_aliases(ids,master,manifest["stocks"])
         original_keys=keys.copy()
         keys={aliases.get(k,k) for k in keys}
         for key in keys:

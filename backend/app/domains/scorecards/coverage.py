@@ -25,7 +25,7 @@ async def available(db, owner, portfolio, sequence):
     if not rev:
         return {"revision_id":None,"cards":{}}
     data = Stage.summary_json
-    final = (await db.execute(scoped(Stage.id,data["result"]["attempts"]).where(storage.of_kind("final"))
+    final = (await db.execute(scoped(Stage.id,data["result"]["attempts"]).where(storage.of_kind("final",rev))
                              .order_by(Stage.id.desc()).limit(1))).first()
     rows_expr = data["result"]["rows"]
     postgres = db.get_bind().dialect.name=="postgresql"
@@ -128,7 +128,8 @@ async def rebalance_summary(db, scoped, revision, postgres, owner, portfolio):
     from .rebalance_audit import coverage_counts, final_counts
     data = Stage.summary_json
     result = data["result"]
-    latest = (await db.execute(scoped(Stage.id,Stage.run_id).where(storage.of_kind("attempt",revision),
+    readiness=result["rebalance_readiness"]
+    latest = (await db.execute(scoped(Stage.id,Stage.run_id, *(readiness[k].as_integer().label(k) for k in ("ready","provisional","awaiting"))).where(storage.of_kind("attempt",revision),
               data["card"].as_string()=="rebalance", result["status"].as_string().in_(["completed","partial","unassessed"]))
               .order_by(Stage.id.desc()).limit(1))).first()
     final = (await db.execute(scoped(Stage.id,result["attempts"]["rebalance"].as_integer()).where(storage.of_kind("final",revision))
@@ -152,11 +153,17 @@ async def rebalance_summary(db, scoped, revision, postgres, owner, portfolio):
         has_output={"output_id":latest.id,"run_id":latest.run_id,"covered":counts["assessed"],"expected":len(rows),
                     "used_output_id":final[1] if final else None,"final_id":final[0] if final else None,
                     "counts":counts,"actions":dict(Counter(r.get("action") or "Unavailable" for r in rows))}
+        if latest.ready is not None:
+            has_output["readiness"]={k:getattr(latest,k) for k in ("ready","provisional","awaiting")}
     summary=None
     if final:
         used=final[1]
         inputs=(has_output["expected"] if latest and used==latest.id else
                 len(await read_rows(used,("coverage",),"attempt")) if used else None)
-        rows=await read_rows(final[0],("status","action","sizing_reason"),"final")
+        rows=await read_rows(final[0],("status","action","sizing_reason","final"),"final")
         summary={"id":final[0],"rebalance_output":used,"rebalance_inputs":inputs,**final_counts(rows)}
+        if any(r.get("final") is not None for r in rows):
+            summary["scored"]=sum(r.get("final") is not None for r in rows)
+        elif rows and all(r.get("status")=="Unassessed" for r in rows):
+            summary["scored"]=0
     return has_output,summary

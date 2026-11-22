@@ -12,6 +12,24 @@ def issuer_name(name):
     return re.sub(r"[^a-z0-9]", "", clean.replace("&", "and"))
 
 
+# NSE listing circular for Siemens Energy India Ltd. The Swing feed sometimes
+# reports the issuer under a descriptive ticker. Verify the active instrument too.
+SIEMENS_ALIAS = "NSE:SIEMENSENRGY"
+SIEMENS_IDENTITY = ("NSE:ENRIN", "INE1NPP01017", "https://nsearchives.nseindia.com/web/pressrelease/2025-06/PR_List_17062025_20250617191748.pdf")
+
+
+def documented_alias(stock, master):
+    key = stock["listing"]
+    target, isin, _ = SIEMENS_IDENTITY
+    if key != SIEMENS_ALIAS or key in master or master.get(target, {}).get("isin") != isin:
+        return None
+    if stock.get("isin") and stock["isin"] != isin:
+        return None
+    if stock.get("isin") == isin or issuer_name(stock.get("name")) == "siemensenergyindia":
+        return target
+    return None
+
+
 def aliases(stocks, master):
     candidates = defaultdict(list)
     for key, meta in master.items():
@@ -20,6 +38,10 @@ def aliases(stocks, master):
     found = {}
     for stock in stocks:
         key = stock["listing"]
+        verified = documented_alias(stock, master)
+        if verified and stock.get("origin") == "contender":
+            found[key] = verified
+            continue
         if key in master or "_" not in key:
             continue
         choices = candidates[re.sub(r"[^A-Z0-9:]", "", key)]
@@ -29,7 +51,7 @@ def aliases(stocks, master):
 
 
 async def publication_aliases(listings, evidence):
-    if not any("_" in k for k in listings):
+    if not any("_" in k or k == SIEMENS_ALIAS for k in listings):
         return {}
     try:
         async with httpx.AsyncClient(timeout=4) as client:

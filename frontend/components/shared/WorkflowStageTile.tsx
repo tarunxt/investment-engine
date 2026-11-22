@@ -306,6 +306,10 @@ export function getStageOutcome(info: StageInfo) {
   if (pair && info.published?.run_id==null && !info.activeRunId && info.published?.recovery?.phase!=="judging") {
     return pair.judged===pair.expected && pair.expected>0 && !pair.errors ? "completed" : pair.judged ? "partial" : "unassessed";
   }
+  if (info.published && info.published.run_id == null && !info.activeRunId && (info.threatCounts || info.published.counts)) {
+    if (info.threatCounts) return info.threatCounts.status==="completed" ? "completed" : info.threatCounts.scored ? "partial" : "unassessed";
+    return info.published.counts!.complete===info.published.expected && info.published.expected>0 ? "completed" : info.published.covered ? "partial" : "unassessed";
+  }
   if (info.published?.recovery?.phase==="judging") return "running";
   if (info.state === "running" || info.state === "queued") return info.state;
   if (info.state === "idle" && ["processing", "running"].includes(status)) return "running";
@@ -413,7 +417,7 @@ export function getLlmStageTileRows(info: StageInfo, now: number): StageTileRow[
   const pairs=info.published?.pair_counts;
   const tech=info.published?.technical_counts;
   const work=info.published?.technical_recovery;
-  const evidenceOnly=Boolean(info.published && (pairs || info.threatCounts) && info.published.run_id==null);
+  const evidenceOnly=Boolean(info.published && (pairs || info.threatCounts || info.published.counts) && info.published.run_id==null && !info.activeRunId);
   return [
     { label: evidenceOnly ? "Last evidence update" : "Last Scan", value: formatCompactStageTime(info.completedAt ?? info.startedAt) },
     ...(evidenceOnly ? [{ label:"Model jobs",value:"0 · evidence only" }] : [{ label: "LLMs Used", value: formatLlmCompletion(info) }]),
@@ -455,6 +459,7 @@ export function getLlmStageTileRows(info: StageInfo, now: number): StageTileRow[
       ] : []),
       {label:"Fully assessed",value:`${info.threatCounts.complete}/${info.threatCounts.expected}`},
     ] : info.published?.counts ? [
+      ...(info.published.readiness ? [{label:"Source readiness",value:info.published.readiness.ready+" full · "+info.published.readiness.provisional+" partial · "+info.published.readiness.awaiting+" awaiting evidence"}] : []),
       {label:"Listings assessed",value:String(info.published.counts.assessed)},
       {label:"Score quality",value:`${info.published.counts.complete} complete · ${info.published.counts.provisional} provisional · ${info.published.counts.unassessed} unassessed`},
       {label:"Actions",value:Object.entries(info.published.actions ?? {}).map(([k,v])=>`${k} ${v}`).join(" · ")||"—"},
@@ -463,7 +468,9 @@ export function getLlmStageTileRows(info: StageInfo, now: number): StageTileRow[
     { label: "Cost incurred", value: evidenceOnly ? "₹0.00 · evidence only" : cost === "Usage unavailable" && getStageOutcome(info) === "running" ? "Task running" : cost },
     ...(pairs && pairs.ready<pairs.listings && !getTileErrorDetail(info.error)
       ? [{label:"Coverage issue",value:"Missing market evidence",detail:"Open Scorecard controls to repair missing evidence."}]
-      : evidenceOnly ? [{label:"Assessment",value:pairs && pairs.judged<pairs.expected ? "Awaiting judgments" : pairs?.expected ? "All pairs judged" : "No pairs assigned"}] : stageErrorRows(info)),
+      : evidenceOnly && pairs ? [{label:"Assessment",value:pairs.judged<pairs.expected ? "Awaiting judgments" : pairs.expected ? "All pairs judged" : "No pairs assigned"}]
+      : evidenceOnly && info.threatCounts ? [{label:"Assessment",value:info.threatCounts.scored ? "Saved risk assessments" : "Awaiting evidence for three risk categories"}]
+      : evidenceOnly && info.published?.counts ? [{label:"Assessment",value:info.published.covered ? "Saved factor scores" : "No verified factor scores recorded"}] : stageErrorRows(info)),
   ];
 }
 
@@ -473,11 +480,13 @@ export function getActionablesStageTileRows(info: StageInfo): StageTileRow[] {
     ...(info.finalSummary ? [
       {label:"Rebalance inputs",value:info.finalSummary.rebalance_output ? `${info.finalSummary.rebalance_inputs ?? "—"} listings · Output #${info.finalSummary.rebalance_output}` : "No Rebalance output selected"},
       ...(info.finalSummary.pairwise && info.finalSummary.pairwise.judged<info.finalSummary.pairwise.expected ? [{label:"Pairwise input",value:`Pending · ${info.finalSummary.pairwise.judged}/${info.finalSummary.pairwise.expected} judged in #${info.finalSummary.pairwise.used}${info.finalSummary.pairwise.completed_output ? " · completed output #"+info.finalSummary.pairwise.completed_output+" available for recalculation" : ""}`}] : []),
+      ...(info.finalSummary.scored!=null ? [{label:"Listings with a final score",value:`${info.finalSummary.scored}/${info.finalSummary.assessed}`}] : []),
       {label:"Fully assessed",value:`${info.finalSummary.complete}/${info.finalSummary.assessed}`},
       {label:"Eligibility",value:`${info.finalSummary.eligible} trade-eligible · ${info.finalSummary.holds} Hold · ${info.finalSummary.blocked} blocked`},
     ] : [{ label: "Rebalance inputs", value: info.rebalanceInputs?.toString() ?? "n/a" }]),
     { label: "Stocks recommended", value: info.recommendedStocks?.toString() ?? "n/a" },
-    ...stageErrorRows(info),
+    ...(info.finalSummary && info.finalSummary.complete < info.finalSummary.assessed && (!getTileErrorDetail(info.error) || /partial/i.test(info.error ?? "")) ?
+      [{label:"Assessment",value:"Incomplete scorecard inputs",detail:"Open Final Actionables to inspect saved scores or update this final using recovered outputs."}] : stageErrorRows(info)),
   ];
 }
 

@@ -4365,6 +4365,8 @@ export function RebalanceWorkflowSections({
   const [preparingSwing, setPreparingSwing] = useState(false);
   const [recoveryIssue, setRecoveryIssue] = useState("");
   const [sourceSelections,setSourceSelections] = useState<Partial<Record<WorkflowPortfolio,number>>>({});
+  const [scoreSupportedFactors,setScoreSupportedFactors] = useState(true);
+  const [pairPlanningBudget,setPairPlanningBudget] = useState("");
   const [cardPolicies,setCardPolicies] = useState<Partial<Record<WorkflowPortfolio,CardPolicy>>>({});
   const [preflightPortfolio, setPreflightPortfolio] = useState<WorkflowPortfolio | null>(null);
   const [preflightErrors, setPreflightErrors] = useState<Partial<Record<WorkflowPortfolio, string[]>>>({});
@@ -6914,6 +6916,12 @@ ${zerodhaExecutionMode === "direct_market"
           if (issues.length) throw new Error(issues.join("\n"));
         } },
       ];
+      if (market === "india" && shouldRunCurrentStage("pairwise") && pairPlanningBudget !== "") {
+        checks.push({label:"Pairwise budget",run:async()=>{
+          const budget = Number(pairPlanningBudget);
+          if (!Number.isFinite(budget) || budget < 0.01 || budget > 100000) throw new Error("Enter a Pairwise planning budget between ₹0.01 and ₹100,000, or leave it blank.");
+        }});
+      }
       if (!shouldRunCurrentStage("swing") && (cards.some(shouldRunCurrentStage) || shouldRunCurrentStage("actionables"))) {
         checks.push({label:"Stage 2 publication", run:async()=>{
           const id=recovery?.revision ?? sourceSelections[portfolio];
@@ -7243,7 +7251,11 @@ ${zerodhaExecutionMode === "direct_market"
             try {
               if (cancelRequestedRef.current || !isCurrentWorkflowOwner(runtimeOwner)) return;
               if (cardModelErrors[card]) throw new Error(cardModelErrors[card]);
-              let queued=await api.start(source.id,card,{sequence, request_key:"workflow-"+sequence,targets:targets[card] ?? []});
+              const scoreSupported = broker === "india" && card === "rebalance" && scoreSupportedFactors;
+              const budget = broker === "india" && card === "pairwise" && pairPlanningBudget !== "" ? Number(pairPlanningBudget) : null;
+              let queued=await api.start(source.id,card,{sequence, request_key:"workflow-"+sequence,targets:targets[card] ?? [],
+                ...(scoreSupported ? {score_supported_factors:true} : {}),
+                ...(budget !== null ? {estimated_budget_inr:budget} : {})});
               let run=queued.run_id==null?null:await waitForRunWithStageHandling(portfolio,card,queued.run_id,queued.scoring_version===3 || card==="pairwise");
               let result=await api.result(queued.id);
               if (card==="rebalance" && portfolio==="zerodha" && result.rebalance_readiness && result.status!=="completed" &&
@@ -7257,7 +7269,7 @@ ${zerodhaExecutionMode === "direct_market"
                   if (stopIfRequested() || !isCurrentWorkflowOwner(runtimeOwner)) return;
                   if ((refreshed.rebalance_readiness?.repairable ?? 0)>0) {
                     queued=await api.start(source.id,card,{sequence,request_key:"workflow-"+sequence+"-ready-"+refreshed.id,
-                      retry_attempt_id:refreshed.id,targets:targets[card]??[]});
+                      retry_attempt_id:refreshed.id,targets:targets[card]??[],score_supported_factors:scoreSupported});
                     run=queued.run_id==null?null:await waitForRunWithStageHandling(portfolio,card,queued.run_id,true);
                     result=await api.result(queued.id);
                   }
@@ -7277,7 +7289,7 @@ ${zerodhaExecutionMode === "direct_market"
                   covered:result.scored??0,expected:result.rows.length,technical_counts:{...result.technical_counts,bullish:result.technical_bullish},
                   technical_recovery:result.recovery && "state" in result.recovery ? result.recovery : undefined,used_output_id:null,final_id:null}} : {}),
                 ...(result.pair_counts ? {published:{output_id:queued.id,run_id:queued.run_id,covered:result.pair_counts.judged,expected:result.pair_counts.expected,pair_counts:result.pair_counts,used_output_id:null,final_id:null}} : {}),
-                ...(result.rebalance_audit?{published:{output_id:result.id,run_id:run?.id??0,covered:result.rebalance_audit.coverage.assessed,
+                ...(result.rebalance_audit?{published:{output_id:result.id,run_id:run?.id??null,covered:result.rebalance_audit.coverage.assessed,
                   expected:result.rows.length,used_output_id:null,final_id:null,counts:result.rebalance_audit.coverage,actions:result.rebalance_audit.actions}}:{}),
                 finalInputs:{stage2_revision:source.id,attempt:result.id}});
             } catch (error) {
@@ -7293,7 +7305,7 @@ ${zerodhaExecutionMode === "direct_market"
             markRunning(portfolio,"actionables");
             const previous = source.finals[0] ? await api.final(source.finals[0].id) : null;
             const config = cardPolicies[portfolio] ?? previous?.policy ?? await api.savedPolicy() ?? migratedPolicy(scoreMatrixFormulaConfig);
-            const final=await api.finalize(source.id,sequence,chosen,config);
+            const final=await api.finalize(source.id,sequence,chosen,config,broker==="india");
             const frozenCoverage = portfolio === "zerodha" ? await api.coverage?.(sequence).catch(() => null) : null;
             const finalSummary=frozenCoverage?.final_summary?.id===final.id?frozenCoverage.final_summary:undefined;
             const saved=await markCompleted(portfolio,"actionables",{runStatus: final.rows.every(row => row.status === "Complete") ? "saved calculation" : "partial",
@@ -7471,7 +7483,7 @@ ${zerodhaExecutionMode === "direct_market"
       recordAutoRebalanceStage,
       resetPortfolio,
       selectedInputs,
-      selectedStages, sourceSelections, cardPolicies,
+      selectedStages, sourceSelections, cardPolicies, pairPlanningBudget, scoreSupportedFactors,
       specificMode,
       updateStage,
       usdInrRate,
@@ -7851,6 +7863,14 @@ ${zerodhaExecutionMode === "direct_market"
           </div>
         </div>
 
+        {section.portfolio === "zerodha" && <details className="mt-2 text-sm">
+          <summary className="cursor-pointer">Scorecard run settings</summary>
+          <fieldset disabled={isBusy} className="mt-2 space-y-2">
+            <label className="block"><input type="checkbox" checked={scoreSupportedFactors} onChange={e=>setScoreSupportedFactors(e.target.checked)} /> Score available Rebalance factors when a filing or price history is missing</label>
+            <label className="block">Pairwise budget for early judgments (₹) <input className="w-24 rounded border p-1" type="number" min="0.01" max="100000" step="0.01" value={pairPlanningBudget} onChange={e=>setPairPlanningBudget(e.target.value)} /></label>
+            <p>Leave the budget blank to wait for all listings. A positive budget lets Pairwise judge ready pairs within the planning estimate.</p>
+          </fieldset>
+        </details>}
         {preflightPortfolio === section.portfolio && <p role="status" className="mt-4 text-sm text-blue-800">Checking configuration, stage dependencies and saved inputs before starting…</p>}
         {Boolean(preflightErrors[section.portfolio]?.length) && (
           <div role="alert" className="my-4 rounded-xl border border-red-300 bg-red-50 p-4 text-sm text-red-950">

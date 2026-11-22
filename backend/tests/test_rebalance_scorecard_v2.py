@@ -252,3 +252,37 @@ def test_buy_plan_is_required_for_full_completion_even_with_all_factors():
     job=SimpleNamespace(id=1,model="fake",status="partial",runtime_metadata_json={"rebalance_records":{"rows":accepted}})
     result=out.project({"stocks":[{"listing":KEY}]},[(job,0,[KEY],[],{"packets":{KEY:p}})])
     assert result["rows"][0]["available_weight"]==17 and result["rows"][0]["coverage"]=="Partial"
+
+
+def test_partial_launch_requires_an_independent_source():
+    from app.domains.scorecards.rebalance_readiness import supported_listings
+    packets = {key: {"allowed": allowed} for key, allowed in {
+        "none": {}, "discovery": {"cruxx":["s1"]}, "bars": {"technical-short":["s2"]},
+        "filing": {"fundamentals-short":["s3"]}}.items()}
+    assert supported_listings({"packets":packets}) == {"bars","filing"}
+
+
+@pytest.mark.anyio
+async def test_saved_final_follows_only_non_regressing_descendants(audit_db):
+    from app.domains.scorecards.final_recovery import recovered_outputs
+    async with audit_db.sessions() as db:
+        revision = await storage.append(db,7001,"revision","frozen",{"manifest":{"stocks":[]}})
+        async def save(name, score, parent=None, mode="v3", *, rev=revision, status="partial"):
+            row = {"listing":KEY,"score":score,"coverage":"Partial","terms":{"short":score}}
+            result = {"rows":[row],"stage4_method":mode}
+            doc = await storage.append(db,7001,"attempt",name,{"card":"technical","settings":{},
+                "recovered_from":parent,"result":result},revision_id=rev.id)
+            doc.row.status = status
+            return doc
+        root = await save("root",None)
+        good = await save("zero is valid",0,root.id)
+        worse = await save("missing",None,good.id)
+        await save("independent",99)
+        await save("different validation policy",99,good.id,mode="legacy")
+        await save("still running",80,worse.id,status="processing")
+        other = await storage.append(db,7001,"revision","other",{"manifest":{"stocks":[]}})
+        await save("different revision",99,good.id,rev=other)
+        await db.commit()
+        pins = {"technical":root}
+        assert (await recovered_outputs(db,7001,revision.id,pins))["technical"].id == good.id
+        assert pins["technical"].id == root.id and root.result_json["rows"][0]["score"] is None
