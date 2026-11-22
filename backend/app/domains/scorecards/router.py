@@ -18,6 +18,7 @@ from app.infrastructure.locks.redis_lock import RedisLock
 from app.domains.runs.router import _get_redis
 from app.shared.types import UserId
 from app.shared.exceptions import AppException
+from . import technical_queue
 from . import storage, pair_evidence, pair_plan
 from .storage import Stage
 from .prompts import build_prompt, batches, CARDS, single_job_card
@@ -36,12 +37,12 @@ Card = Literal["rebalance","technical","threats","pairwise"]
 _packet_fetches = {}
 
 
-async def shared_history(revision_id, manifest, username):
+async def shared_history(revision_id, manifest, username, seed=None):
     from .technical_sources import collect
     key = (manifest["owner_id"], revision_id)
     task = _packet_fetches.get(key)
     if task is None:
-        task = asyncio.create_task(collect(manifest, username))
+        task = asyncio.create_task(collect(manifest,username,{"prior_bars":seed}) if seed else collect(manifest,username))
         _packet_fetches[key] = task
         task.add_done_callback(lambda finished: _packet_fetches.pop(key, None))
     return await asyncio.shield(task)
@@ -249,12 +250,16 @@ async def start(portfolio:Portfolio,revision_id:int,card:Card,body:Start,db:Asyn
             if not wanted:
                 raise HTTPException(422,"All Threats categories are resolved")
         history = await pair_evidence.latest_history(db,rev.id) if shared else None
+        seed=None
+        if technical_v3 and not history:
+            from .technical_history import prior_bars
+            seed=await prior_bars(db,manifest,[s["listing"] for s in manifest["stocks"]])
         await db.commit()
         if india_threats:
             from .threat_sources import collect
             research = await collect(manifest, username, wanted)
         elif shared:
-            history = history or await shared_history(revision_id,manifest,username)
+            history = history or (await shared_history(revision_id,manifest,username,seed) if seed else await shared_history(revision_id,manifest,username))
             if rebalance_v2:
                 from .rebalance_evidence import collect
                 if repair_fields:
@@ -415,6 +420,10 @@ async def start(portfolio:Portfolio,revision_id:int,card:Card,body:Start,db:Asyn
     prompts=tuple(build_prompt(rev,card,keys,pairs,research) for keys,pairs in assignments)
     if pair_v3 and body.estimated_budget_inr is not None:
         await pair_evidence.check_budget(prompts,body.targets[0],body.estimated_budget_inr)
+    if technical_v3:
+        from .technical_output import saved_rows
+        initial=saved_rows(rev.manifest,research,research.get("carried_comments",{}),[],[])
+        await technical_queue.enqueue(db,attempt,initial)
     redis=_get_redis()
     try:
         result=await CreateRunUseCase(db,RedisLock(redis)).execute(CreateRunCommand(
@@ -427,12 +436,13 @@ async def start(portfolio:Portfolio,revision_id:int,card:Card,body:Start,db:Asyn
             from .technical_output import saved_rows
             data=saved_rows(rev.manifest,research,research.get("carried_comments",{}),[],[])
             counts=data["technical_counts"]
-            status="partial" if counts["complete"]+counts["provisional"] else "unassessed"
+            status="completed" if counts["complete"]==counts["expected"] else "partial" if counts["complete"]+counts["provisional"] else "unassessed"
             out={**data,"id":attempt.id,"revision_id":rev.id,"card":card,"status":status,
-                 "jobs":0,"completed":0,"scored":counts["complete"]+counts["provisional"],"source_hashes":{},
+                 "jobs":0,"completed":0,"scored":sum(r["score"] is not None for r in data["rows"]),"source_hashes":{},
                  "stage4_method":"v3" if config["technical_validated"] else "legacy","research_notices":[*research.get("notices",[]),exc.message]}
             attempt.row.summary_json={**attempt.data,"settings":{**config,"assignments":[]},"result":out,"data_recovery":True}
             attempt.row.status=status
+            await technical_queue.enqueue(db,attempt,out)
             await db.commit()
             return {"id":attempt.id,"run_id":None,"scoring_version":3}
         raise HTTPException(exc.status_code,exc.message) from exc
@@ -472,6 +482,10 @@ async def attempt_result(portfolio:Portfolio,attempt_id:int,db:AsyncSession=Depe
     a=await owned(db,user.id,portfolio,"attempt",attempt_id,lock=True)
     from .rebalance_audit import replay
     if a.result_json:
+        if portfolio=="india" and a.result_json.get("scoring_version")==3:
+            work=await technical_queue.work_for(db,a)
+            if work:
+                return {**a.result_json,"recovery":technical_queue.summary(work)}
         if portfolio=="india" and a.data["card"]=="pairwise" and not a.result_json.get("pair_counts"):
             packet=await pair_evidence.attempt_packet(db,a)
             if packet.get("packets"):
@@ -514,27 +528,16 @@ async def attempt_result(portfolio:Portfolio,attempt_id:int,db:AsyncSession=Depe
                    "research_notices":(research or {}).get("notices",[]),"scored":scored,"source_hashes":{str(j.id):digest(j.response or "") for j,*_ in jobs}}
     if result.get("scoring_version")==3:
         out["stage4_method"] = "v3" if a.data["settings"].get("technical_validated") else "legacy"
-    retry_seconds=None
-    if out.get("scoring_version")==3 and out["technical_counts"]["complete"]<out["technical_counts"]["expected"]:
-        limits=[v["retry_after"] for v in (research or {}).get("provider_status",{}).values() if v.get("retry_after")]
-        if limits:
-            from app.core.recovery import recovery_mode
-            if not recovery_mode():
-                retry_seconds=max(limits)
-                out["recovery"]={"state":"scheduled","after_seconds":retry_seconds}
+    if result.get("scoring_version")==3:
+        counts=out["technical_counts"]
+        if counts["complete"]==counts["expected"]:
+            out["status"]="completed"
+        work=await technical_queue.enqueue(db,a,out)
+        if work:
+            out["recovery"]=technical_queue.summary(work)
     a.row.summary_json={**a.data,"result":out}
     a.row.status=out["status"]
     await db.commit()
-    if retry_seconds:
-        from .tasks import recover_technical_history
-        try:
-            await asyncio.to_thread(recover_technical_history.apply_async,args=[user.id,a.id],countdown=retry_seconds)
-        except Exception:
-            import logging
-            logging.getLogger(__name__).exception("Could not queue Technical history recovery for %s",a.id)
-            out["recovery"]={"state":"queue unavailable; manual recovery available"}
-            a.row.summary_json={**a.data,"result":out}
-            await db.commit()
     return replay(out) if portfolio=="india" else out
 
 
@@ -572,7 +575,19 @@ async def recover_pairs(portfolio:Portfolio,attempt_id:int,db:AsyncSession=Depen
         return out
     if portfolio=="india" and original.data["card"]=="technical" and original.result_json:
         from .technical_recovery import recover
-        return await recover(db, original, user.id, user.username)
+        if original.result_json.get("scoring_version")==3:
+            work=await technical_queue.enqueue(db,original,original.result_json,immediate=True)
+            if work:
+                await db.commit()
+                return await technical_queue.process(db,work.id,user.id,user.username,manual=True)
+        result=await recover(db, original, user.id, user.username)
+        if result.get("scoring_version")==3 and result["id"]!=original.id:
+            new=await owned(db,user.id,portfolio,"attempt",result["id"])
+            work=await technical_queue.enqueue(db,new,result)
+            if work:
+                result={**result,"recovery":technical_queue.summary(work)}
+            await db.commit()
+        return result
     if original.data["card"]!="pairwise" or not original.result_json:
         raise HTTPException(409,"A terminal Pairwise output is required")
     rev_id=original.data["revision_id"]

@@ -5770,13 +5770,14 @@ ${zerodhaExecutionMode === "direct_market"
     };
   }, [loadLatestIdleStageInfo]);
 
+  const technicalRecoveryActive=["scheduled","recovering"].includes(states.zerodha.technical.published?.technical_recovery?.state??"");
   useEffect(() => {
-    if (runningPortfolio || !latestIndiaWorkflow || !["pending", "queued", "processing", "running"].includes(latestIndiaWorkflow.status)) return;
+    if (runningPortfolio || !latestIndiaWorkflow || (!technicalRecoveryActive&&!["pending", "queued", "processing", "running"].includes(latestIndiaWorkflow.status))) return;
     const interval = window.setInterval(() => {
       if (document.visibilityState === "visible") void loadLatestIdleStageInfo().catch(() => {});
     }, 15000);
     return () => window.clearInterval(interval);
-  }, [runningPortfolio, latestIndiaWorkflow?.status, loadLatestIdleStageInfo]);
+  }, [runningPortfolio, latestIndiaWorkflow?.status, technicalRecoveryActive, loadLatestIdleStageInfo]);
 
   useEffect(() => {
     if (runningPortfolio !== "zerodha") return;
@@ -7251,6 +7252,9 @@ ${zerodhaExecutionMode === "direct_market"
                 ...(result.status !== "completed" ? {partialNotice:`Scorecard ${result.status}. ${result.scored ?? 0} of ${source.manifest.stocks.length} listings have verified scores.`} : {}),
                 ...(card==="threats" && result.threat_counts ? {threatCounts:{...result.threat_counts,status:result.status}} : {}),
                 recommendedStocks:result.scored ?? 0,evidenceCoverage:result.pair_counts ? `${result.pair_counts.judged}/${result.pair_counts.expected} pairs judged` : String(result.scored ?? 0)+"/"+source.manifest.stocks.length+" scored",
+                ...(card==="technical" && result.technical_counts ? {published:{output_id:result.id,run_id:queued.run_id,
+                  covered:result.scored??0,expected:result.rows.length,technical_counts:{...result.technical_counts,bullish:result.technical_bullish},
+                  technical_recovery:result.recovery,used_output_id:null,final_id:null}} : {}),
                 ...(result.pair_counts ? {published:{output_id:queued.id,run_id:queued.run_id,covered:result.pair_counts.judged,expected:result.pair_counts.expected,pair_counts:result.pair_counts,used_output_id:null,final_id:null}} : {}),
                 ...(result.rebalance_audit?{published:{output_id:result.id,run_id:run?.id??0,covered:result.rebalance_audit.coverage.assessed,
                   expected:result.rows.length,used_output_id:null,final_id:null,counts:result.rebalance_audit.coverage,actions:result.rebalance_audit.actions}}:{}),

@@ -45,12 +45,13 @@ async def available(db, owner, portfolio, sequence):
         projections=[func.jsonb_array_length(cast(rows_expr,JSONB)),data["result"]["scored"].as_integer(),valid,returned,complete]
     else:
         projections=[rows_expr]
-    items = (await db.execute(scoped(Stage.id,Stage.run_id,data["card"].as_string(),data["result"]["scoring_version"].as_integer(),data["result"]["pair_counts"],data["result"]["status"].as_string(),*projections)
+    items = (await db.execute(scoped(Stage.id,Stage.run_id,data["card"].as_string(),data["result"]["scoring_version"].as_integer(),data["result"]["pair_counts"],data["result"]["technical_counts"],data["result"]["technical_bullish"].as_integer(),data["result"]["status"].as_string(),*projections)
              .where(storage.of_kind("attempt",rev),data["card"].as_string().in_(["technical","pairwise","threats"] if portfolio=="india" else ["technical","pairwise"]))
              .order_by(Stage.id.desc()))).all()
     cards = {}
     versions={}
-    for output,run,card,version,pair_counts,status,*info in items:
+    ranks={}
+    for output,run,card,version,pair_counts,technical_counts,bullish,status,*info in items:
         if not info[0]:
             continue
         if postgres:
@@ -65,13 +66,24 @@ async def available(db, owner, portfolio, sequence):
         if pair_counts:
             got,total=pair_counts["judged"],pair_counts["expected"]
         v3=(card=="technical" and version==3) or bool(pair_counts)
-        if card in cards and (versions[card] and not v3 or versions[card]==v3 and cards[card]["covered"]>=got):
+        rank=(technical_counts["complete"],-technical_counts["insufficient"],output) if technical_counts else (got,0,output)
+        if card in cards and (versions[card] and not v3 or versions[card]==v3 and ranks[card]>=rank):
             continue
+        ranks[card]=rank
         versions[card]=v3
         cards[card] = {"output_id":output,"run_id":run,"covered":got,"expected":total,
                        "used_output_id":(final[1] or {}).get(card) if final else None,"final_id":final[0] if final else None,**({"pair_counts":pair_counts} if pair_counts else {})}
+        if technical_counts and card=="technical":
+            cards[card]["technical_counts"]={**technical_counts,"bullish":bullish}
         if card=="threats":
             cards[card].update(threat_returned=returned,threat_complete=complete,threat_status=status)
+    technical=cards.get("technical")
+    if technical and technical.get("technical_counts"):
+        root=await db.scalar(scoped(data["technical_root"].as_integer()).where(Stage.id==technical["output_id"]))
+        work=await storage.by_key(db,"technical_work",str(root or technical["output_id"]),revision_id=rev)
+        if work:
+            from .technical_queue import summary as work_summary
+            technical["technical_recovery"]=work_summary(work)
     pair=cards.get("pairwise")
     if pair and portfolio=="india" and not pair.get("pair_counts"):
         from .pair_evidence import attempt_packet

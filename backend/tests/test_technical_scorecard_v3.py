@@ -200,3 +200,119 @@ def test_realised_costs_require_matching_fills_and_keep_unfilled_counts():
     assert stats["mean_net_return"]==pytest.approx(109/101-1)
     assert stats["mean_slippage_fraction_of_entry"]==pytest.approx(3/99)
     assert stats["filled"]==stats["skipped"]==stats["without_execution_record"]==1
+
+
+def test_verified_technical_alias_keeps_source_rows_and_counts_the_venue_once():
+    raw,canonical="NSE:M_M","NSE:M&M"
+    master={canonical:{"isin":"INE101A01026"},"BSE:M&M":{"isin":"INE101A01026"}}
+    assert sources.resolve_aliases([raw,canonical,"BSE:M_M"],master)=={raw:canonical}
+    assert not sources.resolve_aliases([raw],{**master,raw:{"isin":"DIFFERENT"}})
+    assert not sources.resolve_aliases([raw],{canonical:{"isin":"DIFFERENT"}})
+    inputs=[canonical,raw,"BSE:M&M"]
+    scores={k:{**calc(),"input_hash":k,"sources":{}} for k in inputs}
+    scores[raw]["canonical_listing"]=canonical
+    result=output.saved_rows({"stocks":[{"listing":k} for k in inputs]},
+        {"technical":scores,"listings":{},"calendars":{}},{},[],[])
+    assert result["technical_counts"]["source_rows"]==3
+    assert result["technical_counts"]["expected"]==result["technical_counts"]["complete"]==2
+    assert [r["listing"] for r in result["rows"]]==inputs
+
+
+def test_work_queue_times_and_exhaustion_are_per_listing():
+    from app.domains.scorecards import technical_queue as queue
+    from datetime import datetime, timezone
+    stamp=datetime(2026,11,22,14,tzinfo=timezone.utc)
+    def row(k,wait=0):
+        return {"listing":k,"score":None,"coverage":"Insufficient data","reason":"Missing actions",
+                "technical_v3":{"provider_status":{"retry_after":wait}}}
+    result={"rows":[row("A"),row("B",1800)]}
+    items=queue.remaining(result,{},stamp)
+    assert items["A"]["due"]<items["B"]["due"]
+    updated=queue.remaining(result,items,stamp,["A"])
+    assert updated["B"]==items["B"] and updated["A"]["attempts"]==1
+    fake=storage.Document(SimpleNamespace(summary_json={},status=""))
+    updated["A"]["attempts"]=queue.LIMIT
+    queue.save(fake,{"pending":updated,"latest":123,"lease":None})
+    assert fake.row.status==queue.WAIT and queue.summary(fake)["next_retry"]==items["B"]["due"]
+    updated["B"]["attempts"]=queue.LIMIT
+    queue.save(fake,{"pending":updated,"latest":123,"lease":None})
+    assert fake.row.status=="exhausted" and queue.summary(fake)["next_retry"] is None
+
+
+@pytest.mark.anyio
+async def test_due_evidence_resumes_without_the_browser_or_a_second_model_call(audit_db,monkeypatch):
+    from app.domains.scorecards import technical_queue as queue, technical_recovery
+    from app.domains.auth.models import User
+    from datetime import datetime, timezone, timedelta
+    listing="NSE:TEST"
+    stock={"listing":listing,"units":1,"exchange":"NSE","symbol":"TEST","origin":"holding"}
+    ledger={**calc([]),"listing":listing,"input_hash":"old","sources":{}}
+    result={"id":0,"scoring_version":3,"rows":[{"listing":listing,"technical_v3":ledger,"coverage":"Insufficient data","score":None,
+             "reason":"Corporate-action history unavailable","raw_rows":[]}]}
+    async with audit_db.sessions() as db:
+        rev=await storage.append(db,7001,"revision","queue-test",{"manifest":{"market":"india","as_of":CUT,"owner_id":7,"stocks":[stock]}})
+        source=await storage.append(db,7001,"attempt","queue-source",{"card":"technical","settings":{}},revision_id=rev.id)
+        result["id"]=source.id
+        source.row.summary_json={**source.data,"result":result}
+        work=await queue.enqueue(db,source,result,immediate=True)
+        wid=work.id
+        assert (await queue.enqueue(db,source,result,immediate=True)).id==wid
+        await db.commit()
+    async def fixed(db,old,owner,username,*,only,commit):
+        assert set(only)=={listing} and not commit
+        child=await storage.append(db,7001,"attempt","queue-child",{"card":"technical","settings":{},"technical_root":old.id},revision_id=rev.id)
+        out={**result,"id":child.id,"rows":[{**result["rows"][0],"score":0,"coverage":"Complete"}]}
+        child.row.summary_json={**child.data,"result":out}
+        return out
+    monkeypatch.setattr(technical_recovery,"recover",fixed)
+    assert await queue.run_due(audit_db.sessions)
+    assert not await queue.run_due(audit_db.sessions)
+    async with audit_db.sessions() as db:
+        work=await queue.locked(db,wid)
+        assert queue.summary(work)["state"]=="completed" and not queue.summary(work)["pending"]
+        assert (await storage.lookup(db,7,"india","attempt",source.id)).result_json["rows"][0]["score"] is None
+
+
+@pytest.mark.anyio
+async def test_venue_archive_reused_when_second_run_adds_a_stock(monkeypatch):
+    import io,zipfile,json,httpx
+    from unittest.mock import AsyncMock,MagicMock
+    from datetime import datetime
+    day=DATES[-1]
+    stream=io.BytesIO()
+    with zipfile.ZipFile(stream,"w",compression=zipfile.ZIP_DEFLATED) as archive:
+        csv="TradDt,SctySrs,TckrSymb,FinInstrmId,ISIN,OpnPric,HghPric,LwPric,ClsPric,TtlTradgVol\n"
+        for i,key in enumerate(("A","B","NIFTYBEES")):
+            csv+=f"{day},EQ,{key},{i},ID{i},100,101,98,99,50\n"
+        archive.writestr("data.csv",csv)
+    calls=[]
+    def reply(req):
+        if ".zip" in str(req.url):
+            calls.append(str(req.url))
+            return httpx.Response(200,content=stream.getvalue())
+        if "/corporates-" in str(req.url):
+            return httpx.Response(200,json=[{"isin":"OTHER","exDate":"01-Nov-2026","subject":"Dividend"}])
+        return httpx.Response(200,json={"data":[]})
+    client=httpx.AsyncClient
+    monkeypatch.setattr(sources.httpx,"AsyncClient",lambda **options:client(transport=httpx.MockTransport(reply),**options))
+    data={}
+    redis=MagicMock()
+    async def get(k): return data.get(k)
+    async def put(k,v,ex): data[k]=v
+    redis.get=get
+    redis.set=put
+    redis.aclose=AsyncMock()
+    redis.hmget=AsyncMock(return_value=[])
+    pipe=MagicMock()
+    pipe.execute=AsyncMock()
+    redis.pipeline.return_value.__aenter__.return_value=pipe
+    monkeypatch.setattr(sources,"redis_client",lambda:redis)
+    monkeypatch.setattr(sources,"configured_for",lambda *args:False)
+    monkeypatch.setattr(sources,"session_calendar",lambda *args:{day:day+"T15:30:00+05:30"})
+    master={f"NSE:{k}":{"isin":f"ID{i}","tick":.05} for i,k in enumerate(("A","B","NIFTYBEES"))}
+    monkeypatch.setattr(sources,"technical_instruments",AsyncMock(return_value=master))
+    for symbol in ("A","B"):
+        listing="NSE:"+symbol
+        packet=await sources.collect({"as_of":CUT,"stocks":[{"listing":listing}],"owner_id":7},"owner")
+        assert packet["listings"][listing][0]["isin"]==master[listing]["isin"]
+    assert len(calls)==1

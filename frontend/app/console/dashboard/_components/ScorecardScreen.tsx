@@ -343,6 +343,12 @@ function Evidence({
   const scores = useRead(readResult, !!attempt && (tab === "flow" || tab === "output"));
   const readOutput = useCallback(() => client.getRun(runId!), [client, runId, refresh]);
   const output = useRead(readOutput, !!runId && tab === "output");
+  const watchingRecovery=card==="technical" && ["scheduled","recovering"].includes(published?.technical_recovery?.state??scores.data?.recovery?.state??"");
+  useEffect(()=>{
+    if(!watchingRecovery)return;
+    const timer=window.setInterval(()=>{coverage.retry();source.retry();scores.retry();},20000);
+    return ()=>window.clearInterval(timer);
+  },[watchingRecovery,sequence,attemptId]);
   if (!history.data) return <Feedback query={history} />;
   if (!stage) return <p className={panel}>This workflow has no recorded {cardNames[card]} scorecard.</p>;
   if (execution !== null && !run)
@@ -541,7 +547,7 @@ function Evidence({
               </summary>
               <Feedback query={scores} />
               {scores.data?.rebalance_audit && card==="rebalance" ? <RebalanceStockScores result={scores.data}/> : scores.data && card==="technical" && market==="zerodha" ? (
-                <TechnicalStockScores key={scores.data.id} result={scores.data} onRecover={()=>api.recover(scores.data!.id)} />
+                <TechnicalStockScores key={scores.data.id} result={scores.data} onRecover={id=>api.recover(id)} />
               ) : scores.data && card==="threats" && market==="zerodha" ? (
                 <ThreatStockScores key={scores.data.id} result={scores.data} onRecover={id=>api.recover(id)} onRetry={revision && jobs[0] ? async id=>{
                   const key=retryKeys.current.get(id)??crypto.randomUUID();

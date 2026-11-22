@@ -1,5 +1,6 @@
 """Venue-session archives and point-in-time source reconciliation for Technical v3."""
 import asyncio
+import base64
 import csv
 import io
 import json
@@ -55,6 +56,32 @@ def session_calendar(cutoff, venue, holidays):
             if end<=local:
                 schedule[day.isoformat()]=end.isoformat()
     return dict(list(schedule.items())[-60:])
+
+
+# Legacy Swing exports used the escaped ticker M_M. The NSE filing identifies the
+# ordinary equity share class; a current, matching same-venue master is required.
+FILING = "https://nsearchives.nseindia.com/corporate/ixbrl/INTEGRATED_FILING_INDAS_180552_30072026161119_iXBRL_WEB.html"
+VERIFIED_ALIASES = {"NSE:M_M": ("NSE:M&M", "INE101A01026", FILING)}
+
+
+def resolve_aliases(keys, master):
+    aliases={}
+    for key in keys:
+        if key not in VERIFIED_ALIASES:
+            continue
+        target,isin,_=VERIFIED_ALIASES[key]
+        if master.get(target,{}).get("isin")==isin and (key not in master or master[key]["isin"]==isin):
+            aliases[key]=target
+    return aliases
+
+
+def eligible_vintage(row,cutoff):
+    stamp=row.get("published_at") or row.get("received_at")
+    try:
+        observed=datetime.fromisoformat(stamp)
+        return observed.tzinfo is not None and observed<=cutoff
+    except (ValueError, TypeError):
+        return False
 
 
 def archive_url(venue, day):
@@ -204,9 +231,30 @@ async def collect(manifest, username, previous=None, requested=None):
             except ERRORS:
                 notices.append("Instrument master unavailable")
         await asyncio.gather(calendar(),instruments())
+        aliases=resolve_aliases(ids,master)
+        original_keys=keys.copy()
+        keys={aliases.get(k,k) for k in keys}
+        for key in keys:
+            records.setdefault(key,list(previous.get("listings",{}).get(key,[])))
+            per_key.setdefault(key,[])
+        for key,evidence in previous.get("prior_bars",{}).items():
+            if key not in keys or master.get(key,{}).get("isin")!=evidence["instrument"]:
+                continue
+            known={r["as_of"][:10] for r in records[key]}
+            schedule=calendars.get(key.partition(":")[0],{})
+            records[key].extend(r for r in evidence["bars"] if r.get("kind")=="daily_bar" and r["as_of"][:10] in schedule
+                                and r["as_of"][:10] not in known and eligible_vintage(r,cutoff))
+            stock=evidence["stock"]
+            if (evidence.get("as_of") and datetime.fromisoformat(evidence["as_of"]).astimezone(INDIA).date()==cutoff.astimezone(INDIA).date()
+                    and stock.get("action_url")):
+                actions[evidence["instrument"]]=stock["actions"]
+                action_urls[evidence["instrument"]]=stock["action_url"]
         semaphore=asyncio.Semaphore(8)
         async def history(venue,day,close):
             subset={k:master.get(k,{}).get("isin") for k in keys if k.startswith(venue+":")}
+            subset={k:v for k,v in subset.items() if not any(r.get("basis")=="venue-raw" and r.get("isin")==v and r["as_of"][:10]==day for r in records[k])}
+            if not subset:
+                return
             # Share each verified venue/instrument/session across overlapping universes.
             ck="tech3:bars:"+venue+":"+day
             fields={k:k+"|"+(isin or "") for k,isin in subset.items()}
@@ -219,22 +267,36 @@ async def collect(manifest, username, previous=None, requested=None):
                     pass
             subset={k:v for k,v in subset.items() if k not in found}
             if subset:
+                # Store the complete public exchange file once per venue/session. Its
+                # publication vintage follows the file even when the requested universe changes.
+                file_key=f"venue-file:v1:{venue}:{day}"
                 url=archive_url(venue,day)
                 async with semaphore:
                     try:
-                        async with client.stream("GET",url) as response:
-                            response.raise_for_status()
-                            chunks=bytearray()
-                            for_header=response.headers.get("last-modified")
-                            async for chunk in response.aiter_bytes():
-                                chunks.extend(chunk)
-                                if len(chunks)>6_000_000:
-                                    raise ValueError("Oversized archive")
-                        downloaded=await asyncio.to_thread(extract_archive,bytes(chunks),venue,day,close,subset,url)
+                        saved=await cached(file_key)
+                        if saved:
+                            compressed=base64.b64decode(saved["zip"],validate=True)
+                            stamp=saved["received_at"]
+                            published=saved.get("published_at")
+                        else:
+                            async with client.stream("GET",url) as response:
+                                response.raise_for_status()
+                                modified=response.headers.get("last-modified")
+                                chunks=bytearray()
+                                async for chunk in response.aiter_bytes():
+                                    chunks.extend(chunk)
+                                    if len(chunks)>6_000_000:
+                                        raise ValueError("Oversized archive")
+                            compressed=bytes(chunks)
+                            stamp=datetime.now(timezone.utc).isoformat()
+                            published=parsedate_to_datetime(modified).isoformat() if modified else None
+                        downloaded=await asyncio.to_thread(extract_archive,compressed,venue,day,close,subset,url)
+                        if not saved:
+                            await cache(file_key,{"zip":base64.b64encode(compressed).decode("ascii"),"received_at":stamp,
+                                            "published_at":published},86400*7)
                         for rows in downloaded.values():
                             for item in rows:
-                                published=parsedate_to_datetime(for_header) if for_header else None
-                                item.update(received_at=datetime.now(timezone.utc).isoformat(),published_at=published.isoformat() if published else None)
+                                item.update(received_at=stamp,published_at=published)
                         found.update(downloaded)
                         if downloaded and redis is not None:
                             async with redis.pipeline(transaction=True) as pipe:
@@ -281,6 +343,13 @@ async def collect(manifest, username, previous=None, requested=None):
                         return
             actions[isin]=data
             action_urls[isin]=url
+        for key in keys:
+            prior=previous.get("technical",{}).get(key,{})
+            for source in (prior.get("sources") or {}).values():
+                isin=source.get("instrument")
+                if prior.get("as_of")==manifest["as_of"] and isin in isins and isin not in actions and source.get("action_url"):
+                    actions[isin]=source["actions"]
+                    action_urls[isin]=source["action_url"]
         tasks=[asyncio.create_task(ledger(i)) for i in isins-actions.keys()]
         # Start with newest sessions. A bounded cold fetch retains all completed days.
         for days_ago in range(60):
@@ -297,7 +366,20 @@ async def collect(manifest, username, previous=None, requested=None):
             if pending or any(isinstance(v,Exception) for v in outcomes):
                 notices.append("Exchange history or actions incomplete within the retrieval window")
         if eligible_token:
-            supplement={k:[] for k in keys if len({r["as_of"][:10] for r in records[k]})<55}
+            def broker_key(k):
+                return f"broker-bars:v1:{manifest['owner_id']}:{k}:{master[k]['isin']}"
+            # Broker data is account-scoped. Reuse only exact-identity candles known at cutoff.
+            async def reuse(k):
+                if k not in master:
+                    return
+                saved=await cached(broker_key(k)) or []
+                existing={r["as_of"][:10] for r in records[k]}
+                schedule=calendars[k.partition(":")[0]]
+                records[k].extend(r for r in saved if r["as_of"][:10] in schedule
+                                  and r["as_of"][:10] not in existing and eligible_vintage(r,cutoff))
+            await asyncio.gather(*(reuse(k) for k in keys))
+            supplement={k:[] for k in sorted(keys) if set(list(calendars[k.partition(":")[0]])[-55:])-
+                         {r["as_of"][:10] for r in records[k]}}
             if supplement:
                 try:
                     await asyncio.wait_for(supplement_indian_bars(client,supplement,cutoff,notices,manifest["owner_id"],sessions=60,diagnostics=provider_status),10)
@@ -311,18 +393,29 @@ async def collect(manifest, username, previous=None, requested=None):
                         if day in dates and day not in official:
                             records[k]=[v for v in records[k] if v["as_of"][:10]!=day]
                             records[k].append({**r,"as_of":dates[day],"received_at":receipt.isoformat(),"basis":"unverified-provider"})
+                    if rows and k in master:
+                        await cache(broker_key(k),[r for r in records[k] if r.get("basis")=="unverified-provider"],86400*7)
     if redis is not None:
         await redis.aclose()
     series={}
     for k in keys:
         meta=master.get(k,{})
         isin=meta.get("isin")
+        if not isin:
+            per_key[k].append("Exact venue instrument unavailable")
         if not isin or isin not in actions:
             per_key[k].append("Corporate-action history unavailable for this instrument")
         wrong=any(r.get("isin") and r["isin"]!=isin for r in records[k])
         if wrong:
             per_key[k].append("Instrument identity changed within the lookup window")
         days=list(calendars[k.split(":")[0]])
+        # Retain a verified action ledger from the identical frozen packet on a transient outage.
+        prior=previous.get("technical",{}).get(k,{})
+        prior_stock=(prior.get("sources") or {}).get("stock",{})
+        if isin and isin not in actions and prior.get("as_of")==manifest["as_of"] and prior_stock.get("instrument")==isin and prior_stock.get("action_url"):
+            actions[isin]=prior_stock["actions"]
+            action_urls[isin]=prior_stock["action_url"]
+            per_key[k].remove("Corporate-action history unavailable for this instrument")
         events=actions.get(isin,[])
         series[k]=normalise(records[k],days,events,manifest["as_of"])
         # A large unaccounted change of share basis must be reviewed before scoring.
@@ -340,8 +433,8 @@ async def collect(manifest, username, previous=None, requested=None):
         closes=[index_prices[d][3] for d in index_dates]
         sources[BENCHMARK]["regime"]="Above SMA50" if closes[-1]>=mean(closes) else "Below SMA50"
     ledgers=dict(previous.get("technical",{}))
-    for k in ids:
-        if k not in keys:
+    for k in sorted(keys):
+        if k not in {aliases.get(raw,raw) for raw in ids}:
             continue
         dates=list(calendars[k.split(":")[0]])
         row=calculate(k,manifest["as_of"],dates,series[k],({}, {}) if per_key[BENCHMARK] else series[BENCHMARK],
@@ -361,5 +454,15 @@ async def collect(manifest, username, previous=None, requested=None):
         row["input_hash"]=digest([k,manifest["as_of"],dates,sources[k]["instrument"],sources[k]["history_hash"],sources[k]["actions"],
                                   sources[BENCHMARK]["history_hash"],sources[BENCHMARK]["actions"],row["factors"],row["reason"]])
         ledgers[k]=row
+    for raw,target in aliases.items():
+        if raw in original_keys and target in ledgers:
+            prior=previous.get("technical",{}).get(target,{})
+            verified=prior if prior.get("coverage")=="Complete" and prior.get("as_of")==manifest["as_of"] and prior.get("sources",{}).get("stock",{}).get("instrument")==VERIFIED_ALIASES[raw][1] else ledgers[target]
+            ledgers[raw]={**verified,"listing":raw,"canonical_listing":target,"identity_source":VERIFIED_ALIASES[raw][2],
+                          "input_hash":digest([verified["input_hash"],raw,target,VERIFIED_ALIASES[raw]])}
+            records[raw]=previous["listings"][target] if verified is prior else records[target]
+            if target not in original_keys and prior:
+                ledgers[target]=prior
+                records[target]=previous["listings"][target]
     return {"version":3,"technical":ledgers,"notices":sorted(set(notices)),"calendars":calendars,"provider_status":provider_status,
             "listings":{**previous.get("listings",{}),**records},"benchmark":records[BENCHMARK]}
