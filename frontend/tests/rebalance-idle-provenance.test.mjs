@@ -13,7 +13,7 @@ const start = source.indexOf('  const loadLatestIdleStageInfo = useCallback(asyn
 const code = ts.transpileModule([...functions, source.slice(start, source.indexOf('\n  useEffect(() => {', start)), 'return loadLatestIdleStageInfo;'].join('\n'), { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
 const mergeCode = readFileSync(new URL('../lib/stockFlowEvidence.ts', import.meta.url), 'utf8').split('export function mergeStageEvidence')[1];
 const mergeStageEvidence = new Function(ts.transpileModule('function mergeStageEvidence' + mergeCode + '\nreturn mergeStageEvidence;', { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText)();
-const stages = ['sync', 'threats', 'swing', 'rebalance', 'technical', 'actionables'];
+const stages = ['sync', 'threats', 'swing', 'rebalance', 'technical', 'pairwise', 'actionables'];
 const oldTime = '2026-10-30T12:00:00Z', newTime = '2026-11-01T12:00:00Z';
 const record = (status, count) => ({ portfolio: 'india', sequence: 7, created_at: newTime, updated_at: newTime, completed_at: newTime, stages: [{ stage: 'actionables', status, started_at: newTime, completed_at: newTime, run_id: 10, job_id: 20, provider_count: 2, completed_provider_count: 1, failed_provider_count: 1, partial_provider_count: 0, estimated_cost: 0, summary: { recommended_stocks: count } }] });
 async function hydrate({ runs = [], histories = [], initial, historyFailure, snapshot, runningPortfolio = null, executing = false, readBarrier, generation = {current:0}, onError = () => {} } = {}) {
@@ -22,6 +22,7 @@ async function hydrate({ runs = [], histories = [], initial, historyFailure, sna
   apiService.zerodhaPortfolioOverview = async () => ({latest: snapshot});
   apiService.getAutoRebalanceHistory = async market => { await readBarrier; if (historyFailure) throw historyFailure; return { items: market === 'india' ? histories : [] }; };
   const context = {
+    setLatestIndiaWorkflow: () => {}, scorecardApi: () => ({coverage: async () => ({cards:{}})}),
     setSavedRunCosts: () => {}, setWorkflowHistoryError: onError, normalizeError: error => error.message,
     runningPortfolio, isWorkflowExecutingRef: {current: executing},
     runtimeOwner: {}, isCurrentWorkflowOwner: () => true, savedStageReadGeneration: generation,
@@ -39,16 +40,23 @@ async function hydrate({ runs = [], histories = [], initial, historyFailure, sna
   await new Function(...Object.keys(context), code)(...Object.values(context))();
   return states;
 }
-test('failed technical timestamp and historical count sources remain explicit after repeated hydration', async () => {
-  const runs = [{id: 101, stage: 'rebalance', status: 'completed', updated_at: oldTime, stocks: 11}, {id: 102, stage: 'technical', status: 'failed', updated_at: newTime, stocks: null}];
-  const before = structuredClone(runs), result = await hydrate({runs}), summary = result.zerodha.actionables;
-  assert.equal(summary.state, 'idle');
-  assert.equal(summary.evidence.kind, 'derived');
-  assert.equal(summary.recommendedStocks, 11);
-  assert.ok(summary.evidence.references.some(value => value.includes('Timestamp source: run #102 · failed')));
-  assert.ok(summary.evidence.references.some(value => value.includes('Stock-count source: run #101 · completed')));
-  assert.deepEqual(runs, before);
-  assert.deepEqual(await hydrate({runs}), result);
+test('a new workflow shows its own Swing and never inherits older scorecards or a final', async () => {
+  const previous = record('completed', 11);
+  const current = {...previous, sequence:8, stages:[
+    {...previous.stages[0], stage:'swing', status:'completed', summary:{recommended_stocks:28}},
+    {...previous.stages[0], stage:'threats', status:'interrupted', run_id:null, job_id:null, provider_count:0, summary:{}},
+  ]};
+  const histories = [previous, current];
+  const initial = await hydrate({histories:[previous]});
+  const state = (await hydrate({histories, initial})).zerodha;
+  assert.equal(state.swing.recommendedStocks, 28);
+  assert.equal(state.threats.runStatus, 'interrupted before launch');
+  for (const stage of ['technical','rebalance','pairwise','actionables']) {
+    assert.equal(state[stage].workflowSequence, 8);
+    assert.equal(state[stage].runStatus, 'not started');
+    assert.equal(state[stage].lastRunId, undefined);
+    assert.equal(state[stage].recommendedStocks, undefined);
+  }
 });
 test('saved final record preserves its own workflow, job, zero, partial and terminal status', async () => {
   for (const [status, count] of [['completed', 0], ['partial', 3], ['failed', null], ['interrupted', null]]) {
@@ -90,20 +98,19 @@ test('history read failure is unavailable and cannot replace saved evidence with
   assert.equal(error, null);
 });
 
-test('a newer successful stage replaces old errors, but stale evidence does not', async () => {
-  const initial = await hydrate();
-  initial.zerodha.technical = {state:'failed', completedAt:oldTime, runStatus:'failed', partialNotice:'old partial', error:'old failure', errorDetails:[{ message:'old failure' }], lastRunId:15};
-  const run = {id:16, stage:'technical', status:'completed', updated_at:newTime};
-  const result = await hydrate({initial, runs:[run], snapshot:{holdings_count:0, captured_at:newTime}});
+test('a new workflow replaces an older failed stage and rejects a stale history response', async () => {
+  const previous = record('failed', null);
+  previous.stages[0] = {...previous.stages[0], stage:'technical', run_id:15, error_message:'Old error'};
+  const current = {...previous, sequence:8, stages:[{
+    ...previous.stages[0], status:'completed', run_id:16, error_message:null,
+  }]};
+  const initial = await hydrate({histories:[previous]});
+  const result = await hydrate({initial, histories:[current,previous]});
   assert.equal(result.zerodha.technical.lastRunId, 16);
-  assert.equal(result.zerodha.technical.error, undefined);
-  assert.equal(result.zerodha.technical.errorDetails, undefined);
-  assert.equal(result.zerodha.technical.partialNotice, undefined);
-  assert.equal(result.zerodha.sync.portfolioStockCount, 0);
-  const stale = await hydrate({initial: result, runs:[{...run, id:15, status:'failed', updated_at:oldTime}]});
-  assert.deepEqual(stale.zerodha.technical, result.zerodha.technical);
+  assert.equal(result.zerodha.technical.error, null);
+  const stale = await hydrate({initial:result, histories:[previous]});
+  assert.deepEqual(stale.zerodha, result.zerodha);
 });
-
 
 test('history cannot refill upcoming or failed stages while local or restored execution is active', async () => {
   for (const active of [{executing:true}, {runningPortfolio:'zerodha'}]) {
