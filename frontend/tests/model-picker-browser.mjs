@@ -38,6 +38,7 @@ import {InputEvidenceRows,InputEvidenceSummary} from '${root}/app/console/dashbo
 import {threatInputRationale} from '${root}/app/console/dashboard/_components/threatInputRationale';
 import {Button} from '${root}/components/ui/button';
 import {cn} from '${root}/lib/utils';
+import {isCard} from '${root}/lib/independentScorecards';
 const inventory=${JSON.stringify(inventory)};
 const catalog=Object.entries(inventory).map(([name,models])=>({name,models,configured:true,model_estimated_cost_inr:Object.fromEntries(models.map(model=>[model,0])),model_compatibility:Object.fromEntries(models.map((model,index)=>[model,{compatible:name!=='anthropic'||index<2,reason:'Unavailable with current API access.'}])),model_last_run_web_search_used:{'gpt-4o-mini':true,'deepseek-v4-flash':true}}));
 const MODEL_MIX_STORAGE_KEY='offline-fixture-mixes';
@@ -72,7 +73,7 @@ function App(){
  const [inputOpen,setInputOpen]=useState(false),[ids,setIds]=useState(new Set(['fixture-0']));
  const [open,setOpen]=useState(false),[state,setState]=useState('loaded'),[selected,setSelected]=useState(new Set(['openai::gpt-4o-mini']));
  const providers=state==='empty'||state==='failed'||state==='loading'?[]:catalog;
- return <><main><select aria-label="Portfolio fixture" value={portfolio} onChange={e=>setPortfolio(e.target.value)}>{['zerodha','indmoneyUs'].map(x=><option key={x}>{x}</option>)}</select><select aria-label="Model stage fixture" value={stage} onChange={e=>setStage(e.target.value)}>{['threats','swing','rebalance','technical'].map(x=><option key={x}>{x}</option>)}</select><select aria-label="Input stage fixture" value={inputStage} onChange={e=>setInputStage(e.target.value)}>{['threats','swing','rebalance','technical','actionables'].map(x=><option key={x}>{x}</option>)}</select><output id="selection">{Array.from(selected).join(',')}</output><button id="prompt-open" onClick={()=>setPromptOpen(true)}>Open prompt</button><button id="input-open" onClick={()=>setInputOpen(true)}>Open inputs</button><button id="open" onClick={()=>setOpen(true)}>Open picker</button><select aria-label="Fixture state" value={state} onChange={e=>setState(e.target.value)}>{['loaded','loading','empty','failed','partial'].map(value=><option key={value}>{value}</option>)}</select><p>Offline fixtures only</p></main>
+ return <><main><select aria-label="Portfolio fixture" value={portfolio} onChange={e=>setPortfolio(e.target.value)}>{['zerodha','indmoneyUs'].map(x=><option key={x}>{x}</option>)}</select><select aria-label="Model stage fixture" value={stage} onChange={e=>setStage(e.target.value)}>{['threats','swing','rebalance','technical','pairwise'].map(x=><option key={x}>{x}</option>)}</select><select aria-label="Input stage fixture" value={inputStage} onChange={e=>setInputStage(e.target.value)}>{['threats','swing','rebalance','technical','actionables'].map(x=><option key={x}>{x}</option>)}</select><output id="selection">{Array.from(selected).join(',')}</output><button id="prompt-open" onClick={()=>setPromptOpen(true)}>Open prompt</button><button id="input-open" onClick={()=>setInputOpen(true)}>Open inputs</button><button id="open" onClick={()=>setOpen(true)}>Open picker</button><select aria-label="Fixture state" value={state} onChange={e=>setState(e.target.value)}>{['loaded','loading','empty','failed','partial'].map(value=><option key={value}>{value}</option>)}</select><p>Offline fixtures only</p></main>
  {promptOpen&&<PromptTemplateDialog title={(portfolio==='zerodha'?'Zerodha':'INDmoney US')+' '+STAGE_METADATA[stage].idle+' prompt'} body="FIXTURE_ONLY" onClose={()=>setPromptOpen(false)} onReviewInputs={()=>{setPromptOpen(false);setInputOpen(true)}}/>}
  <InputSelectionDialog open={inputOpen} stage={inputStage} candidates={state==='empty'||state==='failed'||state==='loading'?[]:Array.from({length:40},(_,i)=>({id:'fixture-'+i,jobNo:'Fixture '+i,label:'Saved input '+i,status:i%2?'partial':'completed',source:'saved',timestamp:null}))} selectedIds={ids} usdInrRate={0} loading={state==='loading'} error={state==='failed'?'Fixture input read failed':state==='partial'?'Fixture partial input read':null} onToggle={id=>setIds(old=>{const next=new Set(old);next.has(id)?next.delete(id):next.add(id);return next;})} onToggleAll={()=>{}} onResetDefaults={()=>{}} onClose={()=>setInputOpen(false)}/>
  <StageLlmSelectorDialog open={open} stage={stage} portfolio={portfolio} providers={providers} selectedKeys={selected} selectedMultipliers={{}} onMultiplierChange={()=>{}} onToggle={key=>setSelected(new Set([key]))} onSelectAll={()=>{}} onClear={()=>setSelected(new Set())} onReplaceSelection={setSelected} onResetDefaults={()=>setSelected(new Set(['openai::gpt-4o-mini']))} onClose={()=>setOpen(false)} loading={state==='loading'} error={state==='failed'?'Fixture provider read failed':state==='partial'?'Some provider data is stale; previous catalog retained.':null} onRetry={()=>setState('loaded')}/></>;
@@ -258,6 +259,21 @@ try {
  assert.equal(await page.locator('main').evaluate(el=>!el.closest('[inert]')),true);checks++;
  await page.locator('#input-open').click();await page.keyboard.press('Escape');
  assert.equal(await page.locator('#input-open').evaluate(el=>el===document.activeElement),true);checks++;
+ for (const portfolio of ['zerodha', 'indmoneyUs']) {
+  await page.getByLabel('Portfolio fixture', {exact: true}).selectOption(portfolio);
+  for (const card of ['rebalance', 'technical', 'threats', 'pairwise']) {
+   await page.getByLabel('Model stage fixture', {exact: true}).selectOption(card);
+   await open();
+   const tabs = page.getByRole('dialog').getByRole('tab');
+   assert.deepEqual(await tabs.allTextContents(), [
+    'Selection summary', 'Anthropic choices', 'Gemini choices', 'OpenAI choices', 'DeepSeek choices', 'Model mix templates',
+   ]);
+   await page.getByRole('tab', {name: 'DeepSeek choices'}).click();
+   await page.getByText('deepseek-v4-flash', {exact: true}).waitFor();
+   await page.getByRole('button', {name: 'Done', exact: true}).click();
+   checks++;
+  }
+ }
  const canonical={threats:'Threats Scan',swing:'Swing Scan',rebalance:'Rebalance',technical:'Technical Scan',actionables:'Actionables'};
  for(const width of [1180,390]){
   await page.setViewportSize({width,height:844});
