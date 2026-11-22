@@ -45,13 +45,13 @@ async def available(db, owner, portfolio, sequence):
         projections=[func.jsonb_array_length(cast(rows_expr,JSONB)),data["result"]["scored"].as_integer(),valid,returned,complete]
     else:
         projections=[rows_expr]
-    items = (await db.execute(scoped(Stage.id,Stage.run_id,data["card"].as_string(),data["result"]["scoring_version"].as_integer(),data["result"]["pair_counts"],data["result"]["technical_counts"],data["result"]["technical_bullish"].as_integer(),data["result"]["status"].as_string(),*projections)
+    items = (await db.execute(scoped(Stage.id,Stage.run_id,data["card"].as_string(),data["result"]["scoring_version"].as_integer(),data["result"]["pair_counts"],data["result"]["technical_counts"],data["result"]["technical_bullish"].as_integer(),data["result"]["status"].as_string(),data["result"]["threat_diagnostics"],*projections)
              .where(storage.of_kind("attempt",rev),data["card"].as_string().in_(["technical","pairwise","threats"] if portfolio=="india" else ["technical","pairwise"]))
              .order_by(Stage.id.desc()))).all()
     cards = {}
     versions={}
     ranks={}
-    for output,run,card,version,pair_counts,technical_counts,bullish,status,*info in items:
+    for output,run,card,version,pair_counts,technical_counts,bullish,status,threat_diagnostics,*info in items:
         if not info[0]:
             continue
         if postgres:
@@ -77,6 +77,13 @@ async def available(db, owner, portfolio, sequence):
             cards[card]["technical_counts"]={**technical_counts,"bullish":bullish}
         if card=="threats":
             cards[card].update(threat_returned=returned,threat_complete=complete,threat_status=status)
+            if threat_diagnostics:
+                cards[card]["threat_diagnostics"] = threat_diagnostics
+    threats = cards.get("threats")
+    if threats and "threat_diagnostics" not in threats:
+        from .threat_coverage import diagnostics
+        source = await storage.lookup(db,owner,portfolio,"attempt",threats["output_id"])
+        threats["threat_diagnostics"] = diagnostics(source.result_json["rows"])
     technical=cards.get("technical")
     if technical and technical.get("technical_counts"):
         root=await db.scalar(scoped(data["technical_root"].as_integer()).where(Stage.id==technical["output_id"]))
