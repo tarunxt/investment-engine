@@ -1,6 +1,6 @@
 "use client";
 
-import { RebalanceStockScores } from "./RebalanceStockScores";
+import { RebalanceSourceCheck, RebalanceStockScores } from "./RebalanceStockScores";
 import { TechnicalValidation } from "./TechnicalValidation";
 import { PairwiseCoverage } from "./PairwiseCoverage";
 import { ThreatStockScores } from "./ThreatStockScores";
@@ -322,15 +322,18 @@ function Evidence({
   const { runs, standalone } =
     history.data && stage ? stageExecutions(history.data, stage) : { runs: [], standalone: [] };
   const readCoverage = useCallback(()=>api.coverage(sequence),[api,sequence,refresh]);
-  const coverage = useRead(readCoverage,card==="technical" || card==="pairwise" || (card==="threats" && market==="zerodha"));
-  const published = card==="technical" || card==="pairwise" || (card==="threats" && market==="zerodha") ? coverage.data?.cards[card] : undefined;
+  const coverage = useRead(readCoverage,card==="technical" || card==="pairwise" || ((card==="threats" || card==="rebalance") && market==="zerodha"));
+  const published = card==="technical" || card==="pairwise" || ((card==="threats" || card==="rebalance") && market==="zerodha") ? coverage.data?.cards[card] : undefined;
   const run =
     published && execution===null && !published.run_id ? undefined : execution !== null
       ? runs.find((r) => r.id === execution)
       : (runs.find((r) => r.id === (published?.run_id ?? stage?.run_id)) ?? runs[0]);
   const jobs = run?.jobs ?? (execution === null && !(published && !published.run_id) ? standalone : []);
   const runId = run?.id;
-  const revision = inputRevision(run?.prompt, card, market) ?? ((card==="technical" || card==="pairwise" || card==="threats") && !runId ? coverage.data?.revision_id : null);
+  const revision = inputRevision(run?.prompt, card, market) ?? ((card==="technical" || card==="pairwise" || card==="threats" || card==="rebalance") && !runId ? coverage.data?.revision_id : null);
+  const [showReadiness,setShowReadiness]=useState(false);
+  const readReadiness=useCallback(()=>api.rebalanceReadiness(revision!),[api,revision]);
+  const readiness=useRead(readReadiness,!!revision && showReadiness && card==="rebalance" && tab==="inputs");
   const readTemplate = useCallback(() => api.prompt(revision!, card), [api, revision, card]);
   const template = useRead(readTemplate, !!revision && tab === "prompts" && templateOpen);
   const readSource = useCallback(() => api.read(revision!), [api, revision, refresh]);
@@ -423,6 +426,10 @@ function Evidence({
       {tab === "inputs" && (
         <section className={panel}>
           <h2 className="mb-4 text-lg font-semibold">Saved inputs</h2>
+          {card==="rebalance" && market==="zerodha" && revision && <div className="mb-3">
+            <button className="rounded border px-3 py-1" onClick={()=>setShowReadiness(true)}>Check source readiness before scoring</button>
+            {showReadiness && <><Feedback query={readiness}/>{readiness.data && <RebalanceSourceCheck data={readiness.data}/>}</>}
+          </div>}
           <Feedback query={source} />
           {manifest ? (
             <>
@@ -540,7 +547,7 @@ function Evidence({
                 Saved stock scores · Output #{attempt.id}
               </summary>
               <Feedback query={scores} />
-              {scores.data?.rebalance_audit && card==="rebalance" ? <RebalanceStockScores result={scores.data}/> : scores.data && card==="technical" && market==="zerodha" ? (
+              {scores.data?.rebalance_audit && card==="rebalance" ? <RebalanceStockScores key={scores.data.id} result={scores.data} onRecover={id=>api.recover(id)}/> : scores.data && card==="technical" && market==="zerodha" ? (
                 <TechnicalStockScores key={scores.data.id} result={scores.data} onRecover={()=>api.recover(scores.data!.id)} />
               ) : scores.data && card==="threats" && market==="zerodha" ? (
                 <ThreatStockScores key={scores.data.id} result={scores.data} onRecover={id=>api.recover(id)} onRetry={revision && jobs[0] ? async id=>{
