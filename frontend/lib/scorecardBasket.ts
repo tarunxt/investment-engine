@@ -2,6 +2,19 @@ import type { DashboardActionRow, ScoreMatrixFormulaConfig } from "@/app/console
 import type { CardFinal } from "./independentScorecards";
 import { parseActionLabel } from "./actionColorScheme";
 
+export function basketSourceRunIds(final: CardFinal): number[] {
+  const ids = new Set<number>();
+  for (const [card, id] of Object.entries(final.source_runs)) {
+    // Evidence-only scorecards have a saved output but no model run.
+    if (id == null) continue;
+    if (!Number.isSafeInteger(id) || id <= 0) {
+      throw new Error(`The saved ${card} scorecard has an invalid source run ID.`);
+    }
+    ids.add(id);
+  }
+  return [...ids];
+}
+
 export function bindIndependentBasket(rows:DashboardActionRow[], final:CardFinal, formula:ScoreMatrixFormulaConfig) {
   const evidence=new Map(final.rows.map(row=>[row.listing,row]));
   const saved=new Map<string,{score:number}>();
