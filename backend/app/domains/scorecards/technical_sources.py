@@ -207,10 +207,18 @@ async def collect(manifest, username, previous=None, requested=None):
         semaphore=asyncio.Semaphore(8)
         async def history(venue,day,close):
             subset={k:master.get(k,{}).get("isin") for k in keys if k.startswith(venue+":")}
-            # Cache only public rows for the exact identities and session; a miss can add another listing.
-            ck="archive:"+day+":"+digest(sorted(subset.items()))
-            found=await cached(ck)
-            if found is None:
+            # Share each verified venue/instrument/session across overlapping universes.
+            ck="tech3:bars:"+venue+":"+day
+            fields={k:k+"|"+(isin or "") for k,isin in subset.items()}
+            found={}
+            if redis is not None and fields:
+                try:
+                    values=await redis.hmget(ck,list(fields.values()))
+                    found={k:json.loads(v) for k,v in zip(fields,values) if v}
+                except (RedisError,ValueError):
+                    pass
+            subset={k:v for k,v in subset.items() if k not in found}
+            if subset:
                 url=archive_url(venue,day)
                 async with semaphore:
                     try:
@@ -222,15 +230,19 @@ async def collect(manifest, username, previous=None, requested=None):
                                 chunks.extend(chunk)
                                 if len(chunks)>6_000_000:
                                     raise ValueError("Oversized archive")
-                        found=await asyncio.to_thread(extract_archive,bytes(chunks),venue,day,close,subset,url)
-                        for rows in found.values():
+                        downloaded=await asyncio.to_thread(extract_archive,bytes(chunks),venue,day,close,subset,url)
+                        for rows in downloaded.values():
                             for item in rows:
                                 published=parsedate_to_datetime(for_header) if for_header else None
                                 item.update(received_at=datetime.now(timezone.utc).isoformat(),published_at=published.isoformat() if published else None)
-                        if found:
-                            await cache(ck,found,86400*5)
+                        found.update(downloaded)
+                        if downloaded and redis is not None:
+                            async with redis.pipeline(transaction=True) as pipe:
+                                pipe.hset(ck,mapping={fields[k]:json.dumps(rows) for k,rows in downloaded.items()})
+                                pipe.expire(ck,86400*7)
+                                await pipe.execute()
                     except ERRORS:
-                        return
+                        pass
             for key,rows in found.items():
                 rows=[r for r in rows if not r.get("published_at") or datetime.fromisoformat(r["published_at"])<=cutoff]
                 by_day={r["as_of"][:10] for r in rows}

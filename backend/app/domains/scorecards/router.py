@@ -18,7 +18,7 @@ from app.infrastructure.locks.redis_lock import RedisLock
 from app.domains.runs.router import _get_redis
 from app.shared.types import UserId
 from app.shared.exceptions import AppException
-from . import storage
+from . import storage, pair_evidence, pair_plan
 from .storage import Stage
 from .prompts import build_prompt, batches, CARDS, single_job_card
 from .scoring import project
@@ -36,14 +36,14 @@ Card = Literal["rebalance","technical","threats","pairwise"]
 _packet_fetches = {}
 
 
-async def shared_research(revision_id, manifest, username):
-    # Workflow launches Technical and Pairwise concurrently. Share the in-flight fetch.
-    key = (manifest["owner_id"],revision_id)
+async def shared_history(revision_id, manifest, username):
+    from .technical_sources import collect
+    key = (manifest["owner_id"], revision_id)
     task = _packet_fetches.get(key)
     if task is None:
-        task = asyncio.create_task(collect_research(manifest,"pairwise",username=username))
+        task = asyncio.create_task(collect(manifest, username))
         _packet_fetches[key] = task
-        task.add_done_callback(lambda finished: _packet_fetches.pop(key,None))
+        task.add_done_callback(lambda finished: _packet_fetches.pop(key, None))
     return await asyncio.shield(task)
 
 
@@ -74,6 +74,8 @@ class Start(Request):
     targets: list[Target] = Field(min_length=1,max_length=8)
     retry_attempt_id: int | None = Field(default=None,gt=0)
     check_pair_order: bool = False
+    pair_mode: Literal['full','balanced'] = 'full'
+    estimated_budget_inr: float | None = Field(default=None,gt=0,le=100000,allow_inf_nan=False)
 
 
 class Finalize(Request):
@@ -104,6 +106,12 @@ async def research_performance(portfolio:Portfolio, top:int=Query(5,ge=1,le=30),
                                db:AsyncSession=Depends(get_async_db),user:User=Depends(get_current_user)):
     from .evaluation import evaluate
     return await evaluate(db,user.id,portfolio,top,cost_bps)
+
+
+@router.get("/india/pairwise-trials")
+async def pairwise_trials(db:AsyncSession=Depends(get_async_db),user:User=Depends(get_current_user)):
+    from .pair_trial import saved_trials
+    return await saved_trials(db,user.id)
 
 
 @router.get("/india/technical-validation")
@@ -196,8 +204,11 @@ async def start(portfolio:Portfolio,revision_id:int,card:Card,body:Start,db:Asyn
     if not rev.manifest["stocks"]:
         raise HTTPException(422,"Resolve the flagged Stage 2 listing identities before scoring")
     identity = card + "/" + body.request_key
+    if portfolio=="india" and card=="pairwise" and body.retry_attempt_id:
+        identity=f"pairwise/resume/{body.sequence}/{body.retry_attempt_id}/{body.pair_mode}"
     technical_v3 = portfolio == "india" and card == "technical"
-    packet_key = "technical-v3" if technical_v3 else "market-v2"
+    pair_v3 = portfolio == "india" and card == "pairwise"
+    packet_key = "pairwise-v3" if pair_v3 else "technical-v3" if technical_v3 else "market-v2"
     shared = portfolio=="india" and card in ("technical","pairwise")
     packet = await storage.by_key(db,"packet",packet_key,revision_id=rev.id) if shared else None
     already_started = await storage.by_key(db,"attempt",identity,revision_id=rev.id)
@@ -207,25 +218,33 @@ async def start(portfolio:Portfolio,revision_id:int,card:Card,body:Start,db:Asyn
         if body.check_pair_order:
             raise HTTPException(422, "Pairwise runs use one model job. Extra reversed-order jobs are disabled.")
     research = packet.data["research"] if packet else {}
-    if not already_started and not packet:
+    history = None
+    if not already_started and not packet and not (pair_v3 and body.retry_attempt_id):
         manifest = rev.manifest
         username = user.username
+        history = await pair_evidence.latest_history(db,rev.id) if shared else None
         await db.commit()
-        if technical_v3:
-            from .technical_sources import collect
-            research = await collect(manifest, username)
+        if shared:
+            history = history or await shared_history(revision_id,manifest,username)
+            if pair_v3:
+                research = pair_evidence.reconcile(manifest,history,await pair_evidence.news(manifest))
+            else:
+                research = history
         else:
-            research = await shared_research(revision_id,manifest,username) if shared else await collect_research(manifest,card,username=username)
+            research = await collect_research(manifest,card,username=username)
     w=await workflow(db,owner,portfolio,body.sequence)
     rev=await owned(db,owner,portfolio,"revision",revision_id,lock=True)
     config={"targets":[t.model_dump() for t in body.targets],"parent":body.retry_attempt_id}
+    if pair_v3:
+        config.update(pair_mode=body.pair_mode,estimated_budget_inr=body.estimated_budget_inr)
     existing=await storage.by_key(db,"attempt",identity,revision_id=rev.id)
     if existing:
-        if bool(existing.data["settings"].get("check_pair_order"))!=body.check_pair_order or existing.row.workflow_id!=w.id or any(existing.data["settings"].get(k)!=v for k,v in config.items()):
+        if bool(existing.data["settings"].get("check_pair_order"))!=body.check_pair_order or existing.row.workflow_id!=w.id or any(existing.data["settings"].get(k, "full" if k=="pair_mode" else None)!=v for k,v in config.items()):
             raise HTTPException(409,"Attempt key already names different inputs")
         return {"id":existing.id,"run_id":existing.row.run_id,**({"scoring_version":3} if technical_v3 else {})}
     if body.check_pair_order:
         raise HTTPException(422, "Extra reversed-order jobs are disabled.")
+    parent=None
     missing=None
     if body.retry_attempt_id:
         parent=await owned(db,user.id,portfolio,"attempt",body.retry_attempt_id)
@@ -252,7 +271,14 @@ async def start(portfolio:Portfolio,revision_id:int,card:Card,body:Start,db:Asyn
                 research=parent.data["settings"].get("research",{})
             missing=[(r["listing"],v["opponent"]) for r in parent.result_json["rows"] for v in r["comparisons"]
                      if v["verdict"]=="UNKNOWN" and r["listing"]<v["opponent"]]
-            if not missing:
+            if pair_v3:
+                if body.pair_mode != parent.data["settings"].get("pair_mode","full"):
+                    raise HTTPException(422,"Resume the original Pairwise schedule")
+                research=await pair_evidence.attempt_packet(db,parent)
+                if not research.get("packets"):
+                    raise HTTPException(422,"Repair missing evidence before judging legacy comparisons")
+                config["packet_id"]=parent.data["settings"].get("packet_id")
+            if not missing and not pair_v3:
                 raise HTTPException(422,"All pair assignments have been resolved")
     assignments=list(batches(rev.manifest["stocks"],card,pairs=missing,portfolio=portfolio))
     if technical_v3 and body.retry_attempt_id:
@@ -272,11 +298,30 @@ async def start(portfolio:Portfolio,revision_id:int,card:Card,body:Start,db:Asyn
                 raise HTTPException(422,"No listings have sufficient verified candles. Check the historical data sources and retry.")
     else:
         config["research"]=research
+    if pair_v3:
+        if history is not None:
+            await pair_evidence.save_history(db,rev,w.id,history)
+        keys=[s["listing"] for s in rev.manifest["stocks"]]
+        previous=research["packets"] if parent else None
+        selected,carried=pair_plan.plan(keys,research,body.pair_mode,parent.result_json if parent else None,previous)
+        complete_inputs=all(pair_plan.ready(research["packets"].get(k,{})) for k in keys)
+        assignments=list(pair_plan.assigned_batches(selected)) if complete_inputs or parent else []
+        config["pair_protocol"]=3
+        if parent and not selected:
+            raise HTTPException(422,"No new eligible pairs. Repair the remaining evidence first.")
     if technical_v3:
         from .technical_validation import stage4_validated
         config["technical_validated"] = await stage4_validated(db, owner, rev.manifest["as_of"])
     config["assignments"]=assignments
     attempt=await storage.append(db,w.id,"attempt",identity,{"card":card,"settings":config},revision_id=rev.id)
+    if pair_v3 and not assignments:
+        data=pair_plan.project_plan(rev.manifest,research,body.pair_mode,{"errors":[]})
+        pair_evidence.finish(data,attempt,research,rev.id)
+        attempt.row.summary_json={**attempt.data,"data_recovery":True}
+        await db.commit()
+        if len(keys)>1 and not complete_inputs:
+            await pair_evidence.queue_repair(owner,attempt.id)
+        return {"id":attempt.id,"run_id":None}
     absent = {r["listing"] for r in rev.manifest["stocks"] if r["origin"] == "contender" and r["units"] == 0}
     batch_contexts = tuple({
         "kind": SOURCE_CONTEXT_KIND,
@@ -292,6 +337,8 @@ async def start(portfolio:Portfolio,revision_id:int,card:Card,body:Start,db:Asyn
         },
     } for keys, pairs in assignments)
     prompts=tuple(build_prompt(rev,card,keys,pairs,research) for keys,pairs in assignments)
+    if pair_v3 and body.estimated_budget_inr is not None:
+        await pair_evidence.check_budget(prompts,body.targets[0],body.estimated_budget_inr)
     redis=_get_redis()
     try:
         result=await CreateRunUseCase(db,RedisLock(redis)).execute(CreateRunCommand(
@@ -322,7 +369,7 @@ async def observations(db, attempt, uid, portfolio):
     chain=[]
     while attempt:
         chain.append(attempt)
-        parent=attempt.data["settings"].get("parent")
+        parent=None if attempt.data["settings"].get("pair_protocol")==3 else attempt.data["settings"].get("parent")
         attempt=await owned(db,uid,portfolio,"attempt",parent) if parent else None
     evidence=[]
     for a in reversed(chain):
@@ -348,6 +395,12 @@ async def observations(db, attempt, uid, portfolio):
 async def attempt_result(portfolio:Portfolio,attempt_id:int,db:AsyncSession=Depends(get_async_db),user:User=Depends(get_current_user)):
     a=await owned(db,user.id,portfolio,"attempt",attempt_id,lock=True)
     if a.result_json:
+        if portfolio=="india" and a.data["card"]=="pairwise" and not a.result_json.get("pair_counts"):
+            packet=await pair_evidence.attempt_packet(db,a)
+            if packet.get("packets"):
+                out=a.result_json
+                counts=pair_plan.summarize(out["rows"],packet["packets"],"full",calls=out["jobs"],errors=len(out.get("errors",[])))
+                return {**out,"pair_counts":counts,"evidence_readiness":pair_plan.evidence_detail(packet["packets"])}
         return a.result_json
     jobs=await observations(db,a,user.id,portfolio)
     done=sum(j.status in ("partial","completed","failed","cancelled") for j,*_ in jobs)
@@ -356,6 +409,24 @@ async def attempt_result(portfolio:Portfolio,attempt_id:int,db:AsyncSession=Depe
         return {**base,"status":"processing","rows":[]}
     rev=await owned(db,user.id,portfolio,"revision",a.data["revision_id"])
     result=project(a.data["card"],rev.manifest,jobs)
+    if a.data["settings"].get("pair_protocol")==3:
+        settings=a.data["settings"]
+        packet=await pair_evidence.attempt_packet(db,a)
+        parent=await owned(db,user.id,portfolio,"attempt",settings["parent"]) if settings.get("parent") else None
+        previous=await pair_evidence.attempt_packet(db,parent) if parent else {}
+        result=pair_plan.project_plan(rev.manifest,packet,settings["pair_mode"],result,
+                   parent.result_json if parent else None,previous.get("packets"),jobs=len(jobs))
+        result["source_hashes"]={str(j.id):digest(j.response or "") for j,*_ in jobs}
+        costs=[j.estimated_cost for j,*_ in jobs]
+        if costs and all(v is not None for v in costs):
+            from app.domains.fx_rates.service import load_persisted_usd_inr_rate
+            fx=await load_persisted_usd_inr_rate()
+            result["attempt_cost_inr"]=round(sum(costs)*fx.value,2) if fx.value else None
+        if jobs and all(j.created_at and j.updated_at for j,*_ in jobs):
+            result["attempt_elapsed_seconds"]=max(0,(max(j.updated_at for j,*_ in jobs)-min(j.created_at for j,*_ in jobs)).total_seconds())
+        out=pair_evidence.finish(result,a,packet,rev.id)
+        await db.commit()
+        return out
     scored=sum(r["score"] is not None for r in result["rows"])
     research = jobs[-1][-1] if jobs else None
     out={**base,**result,"status":"completed" if all(r["coverage"]=="Complete" for r in result["rows"]) and not result["errors"] else "partial" if scored else "unassessed",
@@ -384,6 +455,14 @@ async def attempt_result(portfolio:Portfolio,attempt_id:int,db:AsyncSession=Depe
             a.row.summary_json={**a.data,"result":out}
             await db.commit()
     return out
+
+
+@router.post("/india/attempts/{attempt_id}/repair-pair-evidence")
+async def repair_pair_evidence(attempt_id:int, db:AsyncSession=Depends(get_async_db),user:User=Depends(get_current_user)):
+    original=await owned(db,user.id,"india","attempt",attempt_id)
+    if original.data["card"]!="pairwise" or not original.result_json:
+        raise HTTPException(409,"Select a saved Pairwise output")
+    return await pair_evidence.repair(db,original,user.id,user.username)
 
 
 @router.post("/{portfolio}/attempts/{attempt_id}/recover")
@@ -459,13 +538,19 @@ async def finalize(portfolio:Portfolio,revision_id:int,body:Finalize,db:AsyncSes
 async def prompt_preview(portfolio:Portfolio,revision_id:int,card:Card,db:AsyncSession=Depends(get_async_db),user:User=Depends(get_current_user)):
     rev=await owned(db,user.id,portfolio,"revision",revision_id)
     first=next(batches(rev.manifest["stocks"],card,portfolio=portfolio),([],[]))
-    packet_key = "technical-v3" if portfolio=="india" and card=="technical" else "market-v2"
+    packet_key = {"technical":"technical-v3","pairwise":"pairwise-v3"}.get(card,"market-v2") if portfolio=="india" else "market-v2"
     packet = await storage.by_key(db,"packet",packet_key,revision_id=rev.id) if card in ("technical","pairwise") else None
     research = packet.data["research"] if packet else None
     if research is None and portfolio=="india" and card=="technical":
         research={"version":3,"technical":{},"listings":{}}
     if research is None and portfolio=="india" and card=="pairwise":
         research = {"version":2,"packets":{k:{"sources":{},"features":{}} for k in first[0]}}
+    if portfolio=="india" and card=="pairwise" and research and research.get("pair_protocol")==3:
+        keys=[s["listing"] for s in rev.manifest["stocks"]]
+        selected,_=pair_plan.plan(keys,research,"full")
+        first=next(pair_plan.assigned_batches(selected),([],[]))
+        if not first[1]:
+            return {"prompt":"Awaiting evidence for both sides of an assigned pair."}
     return {"prompt":build_prompt(rev,card,*first,research)}
 
 
