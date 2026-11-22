@@ -86,3 +86,31 @@ def warm_rebalance_sources(owner, revision_id):
         finally:
             await async_engine.dispose()
     return asyncio.run(run())
+
+
+async def _refresh_threat_archive():
+    """Collect public releases for the current Indian listing universe between runs."""
+    from datetime import datetime, timezone
+    from app.infrastructure.database.session import AsyncSessionLocal, async_engine
+    from app.domains.runs.models import AutoRebalanceWorkflow as Workflow
+    from . import storage, threat_sources
+    stage = storage.Stage
+    try:
+        async with AsyncSessionLocal() as db:
+            latest = (select(Workflow.user_id, stage.id).join(stage, stage.workflow_id == Workflow.id)
+                      .where(Workflow.portfolio == "india", storage.of_kind("revision"))
+                      .distinct(Workflow.user_id).order_by(Workflow.user_id,stage.id.desc()).subquery())
+            manifests = (await db.scalars(select(stage.summary_json["manifest"]).join(latest, stage.id==latest.c.id))).all()
+        stocks = {s["listing"]:s for manifest in manifests for s in manifest.get("stocks", [])}
+        if stocks:
+            packet = await threat_sources.collect({"stocks":list(stocks.values()), "as_of":datetime.now(timezone.utc).isoformat()},
+                                                  None,{k:list(threat_sources.CATEGORIES[:-1]) for k in stocks})
+            return len(packet["sources"])
+        return 0
+    finally:
+        await async_engine.dispose()
+
+
+@celery.task(soft_time_limit=90,time_limit=110)
+def refresh_threat_archive():
+    return asyncio.run(_refresh_threat_archive())

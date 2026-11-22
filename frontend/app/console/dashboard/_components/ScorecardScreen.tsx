@@ -346,6 +346,7 @@ function Evidence({
   const scores = useRead(readResult, !!attempt && (tab === "flow" || tab === "output"));
   const readOutput = useCallback(() => client.getRun(runId!), [client, runId, refresh]);
   const output = useRead(readOutput, !!runId && tab === "output");
+  const threatTarget=scores.data?.threat_target ?? jobs[0];
   if (!history.data) return <Feedback query={history} />;
   if (!stage) return <p className={panel}>This workflow has no recorded {cardNames[card]} scorecard.</p>;
   if (execution !== null && !run)
@@ -550,11 +551,11 @@ function Evidence({
               {scores.data?.rebalance_audit && card==="rebalance" ? <RebalanceStockScores key={scores.data.id} result={scores.data} onRecover={id=>api.recover(id)}/> : scores.data && card==="technical" && market==="zerodha" ? (
                 <TechnicalStockScores key={scores.data.id} result={scores.data} onRecover={()=>api.recover(scores.data!.id)} />
               ) : scores.data && card==="threats" && market==="zerodha" ? (
-                <ThreatStockScores key={scores.data.id} result={scores.data} onRecover={id=>api.recover(id)} onRetry={revision && jobs[0] ? async id=>{
+                <ThreatStockScores onRefresh={id=>api.repairThreats(id)} key={scores.data.id} result={scores.data} onRecover={id=>api.recover(id)} onRetry={revision && threatTarget ? async id=>{
                   const key=retryKeys.current.get(id)??crypto.randomUUID();
                   retryKeys.current.set(id,key);
                   await api.start(revision,"threats",{sequence,request_key:key,retry_attempt_id:id,
-                    targets:[{provider:jobs[0].provider,model:jobs[0].model}]});
+                    targets:[{provider:threatTarget.provider,model:threatTarget.model}]});
                 }:undefined} />
               ) : scores.data && (
                 <Table

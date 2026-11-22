@@ -110,10 +110,20 @@ def build_prompt(revision, card, keys, pairs, research=None, *, reverse_order=Fa
             "as_of":manifest["as_of"],"packets":{k:research["packets"][k] for k in keys},
             "assigned_pairs":assigned}, ensure_ascii=False,separators=(",",":"))
     if card == "threats" and research and research.get("threat_version") == 2:
+        from .threat_coverage import CONFIDENCE_CONTRACT
         targets = {k:research["targets"][k] for k in keys}
         matrix = {k:{c:research["matrix"][k][c] for c in targets[k]} for k in keys}
         ids = {sid for cells in matrix.values() for sources in cells.values() for sid in sources}
+        anchors = {k:research.get("issuer_sources",{}).get(k,[]) for k in keys}
+        ids.update(sid for refs in anchors.values() for sid in refs)
+        bundle["issuer_sources"] = anchors
+        if research.get("exposure_required"):
+            template += (" For an official release provide exposure_source_id from this listing's issuer_sources "
+                         "and exposure_quote copied from that issuer document, showing the affected business, market or facility. "
+                         "Explain the causal link. For a physical alert match the location. For CLEAR include clear_quote copied from the assigned source explicitly establishing zero exposure "
+                         "for the whole category. An empty search is unknown.")
         bundle.update(category_sources=matrix, sources={sid:research["sources"][sid] for sid in sorted(ids)})
+        template += "\n"+CONFIDENCE_CONTRACT+"\n"
         template += ("\nUse only the supplied frozen sources for the assigned categories. Cite source_id in each Evidence "
                      "JSON object. Source IDs point to documents and prices, never to an assumed exposure. Give each "
                      "shared scenario one stable ID, category and likelihood. Define its trigger and likelihood once; other listings may reference that ID with their own impact, downside, confidence and source. Explain the causal exposure for each "

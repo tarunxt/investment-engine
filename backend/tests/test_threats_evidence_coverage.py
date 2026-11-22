@@ -90,3 +90,82 @@ def test_collects_dated_official_release_and_scopes_issuer_documents(monkeypatch
     assert all(v["C3"] for v in packet["matrix"].values())
     assert packet["matrix"]["BSE:ABC"]["C6"]==packet["matrix"]["NSE:ABC"]["C6"]
     assert packet["matrix"]["BSE:ABC"]["C6"] and not packet["matrix"]["NSE:DD"]["C6"]
+
+
+def test_run_247_recovers_twenty_cells_and_still_blocks_paid_scoring():
+    from app.domains.scorecards.threat_coverage import plan, confidence_label
+    mappings = {f"NSE:S{i}": ["C8"] if i < 20 else [] for i in range(34)}
+    job = batch(mappings)
+    job[0].response = job[0].response.replace('"confidence": "medium"', '"confidence": 0.80')
+    saved = project({"stocks":[{"listing":k} for k in mappings],"as_of":CUTOFF},[job])
+    assert saved["threat_diagnostics"] == dict(without_sources=14,scoreable=0,confidence_rejected=0,confidence_recovered=20)
+    assert saved["threat_counts"]["verified_cells"] == 20 and saved["threat_counts"]["scored"] == 0
+    assert plan(job[-1]) == {}
+    assert all(confidence_label(x)=="" for x in (None,False,1.01,-1,"nan","inf","80%"))
+    assert [confidence_label(x) for x in (0,.49,.50,.74,.75,1)] == ["low","low","medium","medium","high","high"]
+    good = batch({"NSE:S0":["C1","C5"]})[-1]
+    assert plan(good, saved["rows"]) == {"NSE:S0":["C1","C5"]}
+
+
+def test_official_source_requires_issuer_exposure_and_exact_excerpt():
+    from app.domains.scorecards.threat_coverage import plan
+    run=batch({"NSE:S":["C1","C2","C8"]})
+    packet=run[-1]
+    macro=packet["sources"][packet["matrix"]["NSE:S"]["C2"][0]]
+    macro["kind"]="official_release"
+    packet.update(exposure_required=True,issuer_sources={})
+    manifest={"stocks":[{"listing":"NSE:S"}],"as_of":CUTOFF}
+    assert plan(packet)=={} and project(manifest,[run])["threat_counts"]["scored"]==0
+    anchor=packet["matrix"]["NSE:S"]["C1"][0]
+    packet["sources"][anchor]["excerpt"]="Issuer revenues come from exports to the affected market."
+    packet["issuer_sources"]["NSE:S"]=[anchor]
+    assert plan(packet)=={"NSE:S":["C1","C2","C8"]}
+    assert project(manifest,[run])["threat_counts"]["scored"]==0
+    run[0].response=run[0].response.replace('"category": "C2"', '"exposure_source_id":"'+anchor+'","exposure_quote":"exports to the affected market","category":"C2"')
+    assert project(manifest,[run])["threat_counts"]["scored"]==1
+
+
+def test_fx_snapshot_filters_future_dates():
+    from app.domains.scorecards.threat_sources import fx_observation
+    data=b'<root><Cube time="2026-11-20"><Cube currency="USD" rate="1.2"/><Cube currency="INR" rate="108"/></Cube><Cube time="2026-11-22"><Cube currency="USD" rate="1"/><Cube currency="INR" rate="500"/></Cube></root>'
+    doc=fx_observation(data,datetime.fromisoformat(CUTOFF))
+    assert "90.0000" in doc["excerpt"] and "500" not in doc["excerpt"]
+
+
+from unittest.mock import AsyncMock
+import pytest
+from test_auto_rebalance_audit_durability import audit_db, anyio_backend
+
+
+@pytest.mark.anyio
+async def test_start_and_repair_only_charge_when_new_sources_can_score(audit_db, monkeypatch):
+    from app.domains.scorecards import router, storage, threat_sources
+    keys=["NSE:A","NSE:B"]
+    manifest={"market":"india","as_of":CUTOFF,"owner_id":7,"stocks":[
+        {"listing":k,"exchange":"NSE","symbol":k[-1],"units":1,"origin":"holding","name":k} for k in keys]}
+    owner=SimpleNamespace(id=7,username="owner")
+    req=router.Start(request_key="coverage1",sequence=42,targets=[{"provider":"deepseek","model":"deepseek-v4-flash"}])
+    def packet(mapping):
+        return {**batch(mapping)[-1],"history_gaps":{},"notices":[]}
+    sparse=packet({keys[0]:["C8"],keys[1]:[]})
+    ready=packet({keys[0]:["C8","C1","C2"],keys[1]:[]})
+    collector=AsyncMock(return_value=sparse)
+    launch=AsyncMock(return_value=SimpleNamespace(id=50))
+    monkeypatch.setattr(threat_sources,"collect",collector)
+    monkeypatch.setattr(router,"_get_redis",lambda:AsyncMock())
+    monkeypatch.setattr(router.CreateRunUseCase,"execute",launch)
+    async with audit_db.sessions() as db:
+        rev=await storage.append(db,7001,"revision","threats-plan",{"manifest":manifest,"digest":"s"})
+        await db.commit()
+        first=await router.start("india",rev.id,"threats",req,db,owner)
+        assert first["run_id"] is None
+        initial=await router.attempt_result("india",first["id"],db,owner)
+        assert initial["threat_diagnostics"]["without_sources"]==1
+        collector.return_value=ready
+        recovered=await router.repair_threat_evidence(first["id"],db,owner)
+        assert recovered["id"]!=first["id"] and recovered["threat_diagnostics"]["scoreable"]==1
+        assert (await router.repair_threat_evidence(first["id"],db,owner))["id"]==recovered["id"]
+        launch.assert_not_awaited()
+        paid=await router.start("india",rev.id,"threats",req.model_copy(update={"retry_attempt_id":recovered["id"],"request_key":"resume"}),db,owner)
+        assert paid["run_id"]==50 and launch.await_count==1
+        assert launch.await_args.args[0].scorecard_batches[0]["scorecard_batch"]["listings"]==["NSE:A"]

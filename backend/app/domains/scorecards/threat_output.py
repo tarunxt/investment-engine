@@ -3,6 +3,7 @@ import json
 from collections import defaultdict
 from urllib.parse import urlsplit
 
+from .threat_coverage import annotate
 from .prompts import CATEGORIES
 from .scoring import json_items, parse_rows, threats, threats_by_slot
 
@@ -44,6 +45,7 @@ def project(manifest, jobs):
                     shared.setdefault(identifier,{k:event[k] for k in ("category","trigger","likelihood","source_id") if k in event})
         supported = {}
         source_refs = {}
+        exposures = {}
         for key,row in parsed.items():
             returned.add(key)
             rows_seen[key].append({k:v for k,v in row.items() if k!="Evidence"})
@@ -62,8 +64,21 @@ def project(manifest, jobs):
                         reason = "Source is outside the assigned listing/category evidence"
                     elif sid in packet["sources"]:
                         doc = packet["sources"][sid]
+                        if packet.get("exposure_required") and scenario=="clear":
+                            quote = " ".join(str(item.get("clear_quote") or "").split())
+                            if len(quote)<12 or quote not in " ".join(doc.get("excerpt","").split()):
+                                reason = "CLEAR lacks quoted evidence of zero exposure"
+                        if packet.get("exposure_required") and doc.get("kind") == "official_release":
+                            anchor = item.get("exposure_source_id")
+                            quote = " ".join(str(item.get("exposure_quote") or "").split())
+                            supporting = packet["sources"].get(anchor, {}) if isinstance(anchor,str) else {}
+                            excerpt = " ".join(supporting.get("excerpt", "").split())
+                            if anchor not in packet.get("issuer_sources", {}).get(key, []) or len(quote)<12 or quote not in excerpt:
+                                reason = "Issuer exposure lacks a quoted, assigned source"
                         item = {**item,"source_url":doc["url"],"published_at":doc["as_of"]}
                         source_refs[key,cat,scenario] = sid
+                        if not reason and doc.get("kind") == "official_release" and packet.get("exposure_required"):
+                            exposures[key,cat,scenario] = {"exposure_quote":quote,"exposure_url":supporting["url"],"exposure_source_id":anchor}
                     else:
                         reason = "Frozen source is missing"
                 elif packet and item.get("source_url") not in allowed:
@@ -81,13 +96,14 @@ def project(manifest, jobs):
                 else:
                     items.append({**item,"category":cat})
             supported[key] = {"Evidence":json.dumps(items)}
-        _, records = threats_by_slot(supported,manifest["as_of"])
+        _, records = threats_by_slot(supported,manifest["as_of"],typed_confidence=True)
         accepted = defaultdict(list)
         for record in records:
             key = record["Exchange"]+":"+record["Symbol"]
             cat = "C"+record.get("Category ID",record["Category"])
             scenario = record["Scenario"].strip().lower()
             entry = {**record,"job_id":job.id,"source_id":source_refs.get((key,cat,scenario))}
+            entry.update(exposures.get((key,cat,scenario), {}))
             if entry.get("source_id") in packet.get("sources",{}):
                 doc=packet["sources"][entry["source_id"]]
                 entry.update(source_title=doc.get("title"),excerpt=doc.get("excerpt"),document_hash=doc.get("document_hash"))
@@ -117,4 +133,8 @@ def project(manifest, jobs):
     counts = {"expected":len(keys),"returned":len(returned),"scored":sum(r["score"] is not None for r in result),
               "complete":sum(r["coverage"]=="Complete" for r in result),
               "verified_cells":sum(r["assessed"] for r in result),"jobs_passed":sum(j.status=="completed" for j,*_ in jobs)}
-    return {"threat_version":2,"scenarios":list(catalogue.values()),"rows":result,"threat_counts":counts,"errors":errors,"job_ids":[j.id for j,*_ in jobs]}
+    result = {"threat_version":2,"assessment_version":3,"scenarios":list(catalogue.values()),"rows":result,"threat_counts":counts,"errors":errors,"job_ids":[j.id for j,*_ in jobs]}
+    for job in jobs:
+        if len(job) > 4 and isinstance(job[4], dict):
+            annotate(result, job[4])
+    return annotate(result, {})
