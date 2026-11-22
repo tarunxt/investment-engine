@@ -75,12 +75,14 @@ class Start(Request):
     targets: list[Target] = Field(min_length=1,max_length=8)
     retry_attempt_id: int | None = Field(default=None,gt=0)
     check_pair_order: bool = False
+    score_supported_factors: bool = False
     evidence_only: bool = False
     pair_mode: Literal['full','balanced'] = 'full'
     estimated_budget_inr: float | None = Field(default=None,gt=0,le=100000,allow_inf_nan=False)
 
 
 class Finalize(Request):
+    include_recoveries: bool = False
     sequence: int = Field(gt=0)
     attempts: dict[Card,int]
     weights: dict[Card,float]
@@ -305,6 +307,8 @@ async def start_scorecard(portfolio,revision_id,card,body,db,user,*,managed=Fals
     w=await workflow(db,owner,portfolio,body.sequence)
     rev=await owned(db,owner,portfolio,"revision",revision_id,lock=True)
     config={"targets":[t.model_dump() for t in body.targets],"parent":body.retry_attempt_id}
+    if rebalance_v2 and body.score_supported_factors:
+        config["score_supported_factors"] = True
     if rebalance_v2 and packet:
         config["packet_id"]=packet.id
     if pair_v3:
@@ -396,6 +400,9 @@ async def start_scorecard(portfolio,revision_id,card,body,db,user,*,managed=Fals
         from .rebalance_readiness import checklist
         readiness=checklist(research)
         eligible={r["listing"] for r in readiness["rows"] if r["state"]=="ready"}
+        if body.score_supported_factors:
+            from .rebalance_readiness import supported_listings
+            eligible.update(supported_listings(research))
         if repair_fields:
             repair_fields={k:v for k,v in repair_fields.items() if k in eligible}
             config["repair_fields"]=repair_fields
@@ -777,24 +784,32 @@ async def finalize(portfolio:Portfolio,revision_id:int,body:Finalize,db:AsyncSes
         cfg=policy(body.weights,body.factors,body.actions)
     except ValueError as exc:
         raise HTTPException(422,str(exc)) from exc
-    outputs={}
-    run_ids={}
+    selected={}
     for card,i in body.attempts.items():
         a=await owned(db,user.id,portfolio,"attempt",i)
         if a.data["card"]!=card or a.data["revision_id"]!=rev.id or not a.result_json:
             raise HTTPException(409,"All selected scorecard outputs must be terminal and use this Stage 2 revision")
-        outputs[card]=a.result_json
-        run_ids[card]=a.row.run_id
+        selected[card]=a
+    if body.include_recoveries:
+        from .final_recovery import recovered_outputs
+        selected=await recovered_outputs(db,w.id,rev.id,selected)
+    attempts={card:doc.id for card,doc in selected.items()}
+    outputs={card:doc.result_json for card,doc in selected.items()}
+    run_ids={card:doc.row.run_id for card,doc in selected.items()}
     if not outputs:
         raise HTTPException(422,"Select at least one saved output")
     rows=calculate_final(rev.manifest,outputs,cfg)
     if body.compare_with is not None:
         return {"comparison":compare_formula(rows,outputs,body.compare_with)}
-    key=digest([rev.digest,body.attempts,cfg])
+    key=digest([rev.digest,attempts,cfg])
     item=await storage.by_key(db,"final",key,workflow_id=w.id,revision_id=rev.id)
+    if item and body.include_recoveries and item.result_json["rows"] != rows:
+        # A corrected calculation is a separate immutable final even when source IDs match.
+        key=digest([key,rows])
+        item=await storage.by_key(db,"final",key,workflow_id=w.id,revision_id=rev.id)
     if not item:
         result={"schema":"independent-scorecards-v1","portfolio":portfolio,"sequence":w.sequence,"revision_id":rev.id,
-                "manifest_hash":rev.digest,"attempts":body.attempts,"source_runs":run_ids,"policy":cfg,
+                "manifest_hash":rev.digest,"attempts":attempts,"source_runs":run_ids,"policy":cfg,
                 "rows":rows}
         item=await storage.append(db,w.id,"final",key,{"digest":key,"result":result},revision_id=rev.id)
     out={"id":item.id,**item.result_json}

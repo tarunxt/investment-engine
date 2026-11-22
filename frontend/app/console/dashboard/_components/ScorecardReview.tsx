@@ -41,6 +41,7 @@ export function ScorecardReview({portfolio,stage:initial,revisionId,initialAttem
   const [policy,setPolicy]=useState<CardPolicy>(fallbackPolicy),[models,setModels]=useState<StageModelPreferences>({});
   const [providers,setProviders]=useState<ProviderModelTarget[]>([]),[swings,setSwings]=useState<RunListItem[]>([]),[jobs,setJobs]=useState<number[]>([]);
   const [prompt,setPrompt]=useState(""),[error,setError]=useState(""),[busy,setBusy]=useState(false);
+  const [scoreSupportedFactors,setScoreSupportedFactors]=useState(true);
   const card=stage==="source"||stage==="actionables"?null:stage;
   const [confirmation,setConfirmation]=useState<VerifiedListing>({symbol:"",venue:"NASDAQ",security_id:"",share_class:"",source_url:""});
 
@@ -82,10 +83,11 @@ export function ScorecardReview({portfolio,stage:initial,revisionId,initialAttem
     await client.saveWorkflowModels(c,keys(c));
     const pairOptions=c==="pairwise" && broker==="india" ? {pair_mode:retry ? result?.pair_counts?.mode ?? "full" : pairMode,
       ...(pairBudget ? {estimated_budget_inr:Number(pairBudget)} : {evidence_only:true})} : {};
-    const identity=JSON.stringify([detail.id,c,targets,retry,pairOptions]);
+    const scoringOptions = c==="rebalance" && broker==="india" && scoreSupportedFactors ? {score_supported_factors:true} : {};
+    const identity=JSON.stringify([detail.id,c,targets,retry,pairOptions,scoringOptions]);
     const token=pendingStarts.current.get(identity)??crypto.randomUUID();
     pendingStarts.current.set(identity,token);
-    const queued=await api.start(detail.id,c,{sequence:detail.manifest.sequence,request_key:token,targets,retry_attempt_id:retry,...pairOptions});
+    const queued=await api.start(detail.id,c,{sequence:detail.manifest.sequence,request_key:token,targets,retry_attempt_id:retry,...pairOptions,...scoringOptions});
     selectedOutput.current=queued.id;
     pendingStarts.current.delete(identity);
     return queued.id;
@@ -97,6 +99,13 @@ export function ScorecardReview({portfolio,stage:initial,revisionId,initialAttem
     if(preview){setComparison((await api.compare(detail.id,detail.manifest.sequence,refs,policy,previousFormula)).comparison);return;}
     const f=await api.finalize(detail.id,detail.manifest.sequence,refs,policy);
     setFinal(f);setFinalId(f.id);onPolicy(policy);setVersion(n=>n+1);
+  }
+  async function refreshSavedFinal(){
+    if(!detail || !final || final.revision_id!==detail.id) return;
+    const next=await api.finalize(detail.id,final.sequence,final.attempts,final.policy,true);
+    const updated=await api.read(detail.id);
+    setDetail(updated);setFinal(next);setFinalId(next.id);setChosen(next.attempts);setPolicy(next.policy);
+    window.dispatchEvent(new CustomEvent("final-actionables-refresh"));
   }
   const sourceChanged=(n:number)=>{setId(n);onRevision(n);};
   const resultRows=(result?.rows??[]).map((r):Record<string,unknown>=>{
@@ -135,6 +144,7 @@ export function ScorecardReview({portfolio,stage:initial,revisionId,initialAttem
       {!singleJob && <><button className={button} disabled={keys(card).length>=8} onClick={()=>setModels(old=>({...old,[card]:[...keys(card),keys(card)[0]??providers.map(t=>t.provider+"::"+t.model)[0]]}))}>Add model slot</button>
       <button className={button} disabled={keys(card).length<2} onClick={()=>setModels(old=>({...old,[card]:keys(card).slice(0,-1)}))}>Remove last slot</button></>}
       <button className={button} disabled={busy || (singleJob && !keys(card).length)} onClick={()=>void perform(async()=>{await client.saveWorkflowModels(card,keys(card));})}>Save models</button></div>
+      {card==="rebalance"&&broker==="india"&&<label className="block"><input type="checkbox" checked={scoreSupportedFactors} onChange={e=>setScoreSupportedFactors(e.target.checked)}/> Score independently supported factors when evidence is incomplete</label>}
       {card==="pairwise"&&broker==="india"&&<div className="flex flex-wrap items-center gap-3"><label>Schedule <select className={input} value={pairMode} onChange={e=>setPairMode(e.target.value as "full"|"balanced")}><option value="full">Full round robin</option><option value="balanced">Balanced trial · up to 8 opponents per listing</option></select></label><label>Judgment planning budget (₹) <input className={input+" w-24"} type="number" min="0.01" step="0.01" value={pairBudget} onChange={e=>setPairBudget(e.target.value)} placeholder="₹0"/></label><span>{pairBudget ? "Ready pairs run automatically within the estimated budget." : "Evidence only · no model charges"}</span></div>}
       <div className="flex flex-wrap gap-2"><button disabled={busy||!detail} className={button} onClick={()=>void perform(async()=>{await launch(card);setVersion(n=>n+1);})}>Run {titles[card]}</button>
       {card==="rebalance" && broker==="india" && id>0 && <>
@@ -168,13 +178,14 @@ export function ScorecardReview({portfolio,stage:initial,revisionId,initialAttem
         {!!result.errors?.length&&<details><summary>Job diagnostics</summary><Grid rows={result.errors}/></details>}</>}</section>}
     {stage==="actionables"&&<section className="space-y-3 py-3">
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{cards.map(c=><fieldset key={c} className="rounded-lg border p-2"><legend>{titles[c]}</legend>
-        <label className="block">Output <select className={input} value={chosen[c]??0} onChange={e=>setChosen(p=>({...p,[c]:Number(e.target.value)}))}><option value={0}>Unassessed</option>{detail?.attempts.filter(a=>a.card===c).map(a=><option key={a.id} value={a.id}>#{a.id} · Run {a.run_id}</option>)}</select></label>
+        <label className="block">Output <select className={input} value={chosen[c]??0} onChange={e=>setChosen(p=>({...p,[c]:Number(e.target.value)}))}><option value={0}>Unassessed</option>{detail?.attempts.filter(a=>a.card===c).map(a=><option key={a.id} value={a.id}>#{a.id} · {a.run_id ? "Run "+a.run_id : "Evidence only"}</option>)}</select></label>
         <label>Weight % <input className={input+" w-24"} type="number" step="any" min={0} max={100} value={policy.weights[c]} onChange={e=>setPolicy(p=>({...p,weights:{...p.weights,[c]:Number(e.target.value)}}))}/></label>
         <label className="block text-sm"><input type="checkbox" checked={!!policy.factors[c]} onChange={e=>setPolicy(p=>{const f={...p.factors};if(e.target.checked)f[c]=Object.fromEntries(factors[c].map(k=>[k,1]));else delete f[c];return {...p,factors:f};})}/> Weight subsections</label>
         {policy.factors[c]&&factors[c].map(k=><label className="flex justify-between gap-1 text-xs" key={k}>{k}<input className="w-14 border" type="number" min={0} step="any" value={policy.factors[c]?.[k]??0} onChange={e=>setPolicy(p=>({...p,factors:{...p.factors,[c]:{...p.factors[c],[k]:Number(e.target.value)}}}))}/></label>)}</fieldset>)}</div>
       <button className={button} disabled={busy||!detail} onClick={()=>void perform(()=>compute(true))}>Compare formulas on selected outputs</button>
       {comparison.length>0&&<details open><summary>Formula preview · same observed inputs</summary><Grid rows={comparison}/></details>}
       <button className={button} disabled={busy||!detail} onClick={()=>void perform(()=>compute())}>Recalculate and save</button>
+      {final && broker==="india" && <button className={button} disabled={busy || !detail} onClick={()=>void perform(refreshSavedFinal)}>Update final #{final.id} from saved recoveries · ₹0</button>}
       <select aria-label="Final revision" className={input} value={finalId} onChange={e=>setFinalId(Number(e.target.value))}><option value={0}>Select final</option>{detail?.finals.map(f=><option value={f.id} key={f.id}>Final #{f.id}</option>)}</select>
       {final&&<>{cards.some(c=>chosen[c] && final.attempts[c]!==chosen[c])&&<p>Selected scorecard outputs have changed. Recalculate to save a new final.</p>}<p>Final #{final.id} · Stage 2 #{final.revision_id} · {cards.map(c=>titles[c]+" "+fmt(final.policy.weights[c])+"%").join(" · ")}</p>
       <Grid rows={final.rows.map(r=>({"Rank":r.rank,"Listing":r.listing,"Name":r.name,"Origin":r.origin,"Current units":r.units,...r.scores,"Weighted contributions":r.contributions,"Available weight %":r.available_weight,"Final /100":r.final,"Coverage":r.status,"Action":r.action,"Suggested units":r.suggested_units,"Sizing / eligibility":r.sizing_reason}))}/>

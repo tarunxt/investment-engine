@@ -23,6 +23,12 @@ def checklist(research):
     return {"rows":rows, **{s:sum(r["state"]==s for r in rows) for s in ("ready","provisional","awaiting")}}
 
 
+def supported_listings(research):
+    # Each scored factor must still cite its own allowed, dated source in the output contract.
+    return {key for key, packet in research["packets"].items()
+            if any(packet["allowed"].get(factor) for factor in FACTORS if factor != "cruxx")}
+
+
 def merge_sources(previous, current):
     """Retain dated evidence on intermittent upstream failures without mixing reference IDs."""
     for key, old in previous.get("packets",{}).items():

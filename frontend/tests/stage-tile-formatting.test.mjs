@@ -214,3 +214,12 @@ test('Pairwise workflow 247 distinguishes blocked inputs and eligible unjudged p
     used:494,judged:0,expected:561,completed_output:510}}});
   assert.match(final.find(r=>r.label==='Pairwise input').value,/Pending.*0\/561.*#494.*#510/);
 });
+
+test('an evidence-only Threats attempt explains its own threshold and a saved final reports numeric coverage',()=>{
+  const published={output_id:533,run_id:null,covered:0,expected:34};
+  const rows=ui.getLlmStageTileRows({state:'idle',published,threatCounts:{expected:34,returned:0,scored:0,complete:0,status:'unassessed'}},0);
+  assert.equal(rows.find(r=>r.label==='Assessment').value,'Awaiting evidence for three risk categories');
+  const final=ui.getActionablesStageTileRows({state:'completed',finalSummary:{assessed:34,complete:0,scored:32,blocked:34}});
+  assert.equal(final.find(r=>r.label==='Listings with a final score').value,'32/34');
+  assert.equal(final.find(r=>r.label==='Fully assessed').value,'0/34');
+});

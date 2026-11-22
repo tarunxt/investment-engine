@@ -252,8 +252,6 @@ async def collect(manifest, username, wanted=None, *, previous=None, venue_histo
                     archived["official:C2"].append({"doc":doc,"categories":["C2"]})
                     add(doc,targets,["C2"])
         async def official():
-            groups = await asyncio.gather(*(feed(url, cats) for url, cats in FEEDS.items()))
-            unique = {item["url"]:item for group in groups for item in group if any(set(item["categories"]).intersection(req) for req in targets.values())}
             async def open_item(item):
                 data = await fetch(item["url"], 1_500_000)
                 body = await asyncio.to_thread(excerpt,data,item["title"])
@@ -265,9 +263,13 @@ async def collect(manifest, username, wanted=None, *, previous=None, venue_histo
                     add(doc, targets, item["categories"])
                 else:
                     notices.add("Underlying release unavailable: " + item["url"])
-            await asyncio.gather(*(open_item(item) for item in unique.values()))
+            async def process_feed(url, cats):
+                items = await feed(url, cats)
+                unique = {item["url"]:item for item in items if any(set(item["categories"]).intersection(req) for req in targets.values())}
+                await asyncio.gather(*(open_item(item) for item in unique.values()))
+            await asyncio.gather(*(process_feed(url, cats) for url, cats in FEEDS.items()))
         async def listed():
-            candidates = {}
+            attachments = {}
             stock_map = {s["listing"]:s for s in stocks}
             async def announcements(venue, url):
                 relevant = [s for s in stocks if s["exchange"]==venue and set(targets[s["listing"]])-{"C8"}]
@@ -278,21 +280,28 @@ async def collect(manifest, username, wanted=None, *, previous=None, venue_histo
                 except ERRORS:
                     notices.add("Announcement feed unavailable: "+venue)
                     return
+                candidates = {}
                 for key,record in records:
                     if public_document(record["url"]) and cutoff-timedelta(days=90) <= datetime.fromisoformat(record["as_of"]) <= cutoff:
                         entry = candidates.setdefault(record["url"],(record,set()))
                         entry[1].add(key)
-            await asyncio.gather(announcements("NSE",NSE_NEWS),announcements("BSE",BSE_NEWS))
+                await asyncio.gather(*(filing(rec,keys) for rec,keys in list(candidates.values())[:48]))
             # The latest announcement stream can omit an issuer altogether on a quiet day.
             async def lookup(stock):
                 params = {"index":"equities","symbol":stock["symbol"],
                           "from_date":(cutoff-timedelta(days=90)).strftime("%d-%m-%Y"),"to_date":cutoff.strftime("%d-%m-%Y")}
                 url = "https://www.nseindia.com/api/corporate-announcements?"+urlencode(params)
+                # Consume each issuer as soon as its index returns, before slower issuers time out.
                 for key, rec in filings(await fetch(url, 2_000_000), stock, cutoff):
-                    candidates.setdefault(rec["url"],(rec,set()))[1].add(key)
-            async def filing(record,keys):
+                    await filing(rec,{key})
+            async def read_attachment(record):
                 data = await fetch(record["url"],2_500_000)
-                body = await asyncio.to_thread(excerpt,data,record["title"])
+                return await asyncio.to_thread(excerpt,data,record["title"]), hashlib.sha256(data).hexdigest()
+            async def filing(record,keys):
+                key = (record["url"], record["title"])
+                if key not in attachments:
+                    attachments[key] = asyncio.create_task(read_attachment(record))
+                body, fingerprint = await attachments[key]
                 if not body:
                     notices.add("Underlying issuer document unavailable: "+record["url"])
                     return
@@ -303,17 +312,15 @@ async def collect(manifest, username, wanted=None, *, previous=None, venue_histo
                     peers.update(s["listing"] for s in stocks if name and name != stock["symbol"].casefold()
                                  and s.get("name","").strip().casefold()==name and s["symbol"]==stock["symbol"])
                 cats = ["C6"] + [c for c,p in KEYWORDS.items() if re.search(p,record["title"]+" "+body,re.I)]
-                doc = {**record,"excerpt":body,"document_hash":hashlib.sha256(data).hexdigest()}
+                doc = {**record,"excerpt":body,"document_hash":fingerprint}
                 for k in peers:
                     archived[threat_archive.scope_for(by_key[k])].append({"doc":doc,"categories":cats})
                 add(doc,peers,cats)
             async def recent():
-                await asyncio.gather(*(filing(rec,keys) for rec,keys in list(candidates.values())[:48]))
-            feed_urls = set(candidates)
+                await asyncio.gather(announcements("NSE",NSE_NEWS),announcements("BSE",BSE_NEWS))
             async def dated():
                 await asyncio.gather(*(lookup(s) for s in stocks if s["exchange"]=="NSE"
                                        and set(targets[s["listing"]])-{"C8"} and not issuer_ids[s["listing"]]))
-                await asyncio.gather(*(filing(rec,keys) for url,(rec,keys) in candidates.items() if url not in feed_urls))
             await asyncio.gather(recent(), dated())
         async def bars():
             found = history
