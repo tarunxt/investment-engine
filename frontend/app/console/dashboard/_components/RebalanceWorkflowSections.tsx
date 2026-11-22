@@ -5697,7 +5697,11 @@ ${zerodhaExecutionMode === "direct_market"
       if (portfolio === "zerodha" && saved?.revision_id) {
         Object.assign(nextByPortfolio.zerodha.swing, {sourceRevision:saved.revision_id, sourceListingCount:saved.listing_count});
       }
-      for(const card of ["technical","pairwise","threats"] as const){
+      if(portfolio==="zerodha" && saved?.final_summary){
+        const f=saved.final_summary;
+        Object.assign(nextByPortfolio.zerodha.actionables,{finalSummary:f,rebalanceInputs:f.rebalance_inputs,recommendedStocks:f.eligible});
+      }
+      for(const card of ["technical","pairwise","rebalance","threats"] as const){
         const output=saved?.cards[card];
         if(!output) continue;
         const stage=nextByPortfolio[portfolio][card];
@@ -7242,6 +7246,8 @@ ${zerodhaExecutionMode === "direct_market"
                 ...(card==="threats" && result.threat_counts ? {threatCounts:{...result.threat_counts,status:result.status}} : {}),
                 recommendedStocks:result.scored ?? 0,evidenceCoverage:result.pair_counts ? `${result.pair_counts.judged}/${result.pair_counts.expected} pairs judged` : String(result.scored ?? 0)+"/"+source.manifest.stocks.length+" scored",
                 ...(result.pair_counts ? {published:{output_id:queued.id,run_id:queued.run_id,covered:result.pair_counts.judged,expected:result.pair_counts.expected,pair_counts:result.pair_counts,used_output_id:null,final_id:null}} : {}),
+                ...(result.rebalance_audit?{published:{output_id:result.id,run_id:run?.id??0,covered:result.rebalance_audit.coverage.assessed,
+                  expected:result.rows.length,used_output_id:null,final_id:null,counts:result.rebalance_audit.coverage,actions:result.rebalance_audit.actions}}:{}),
                 finalInputs:{stage2_revision:source.id,attempt:queued.id}});
             } catch (error) {
               if (cancelRequestedRef.current) throw error;
@@ -7257,9 +7263,12 @@ ${zerodhaExecutionMode === "direct_market"
             const previous = source.finals[0] ? await api.final(source.finals[0].id) : null;
             const config = cardPolicies[portfolio] ?? previous?.policy ?? await api.savedPolicy() ?? migratedPolicy(scoreMatrixFormulaConfig);
             const final=await api.finalize(source.id,sequence,chosen,config);
+            const frozenCoverage = portfolio === "zerodha" ? await api.coverage?.(sequence).catch(() => null) : null;
+            const finalSummary=frozenCoverage?.final_summary?.id===final.id?frozenCoverage.final_summary:undefined;
             const saved=await markCompleted(portfolio,"actionables",{runStatus: final.rows.every(row => row.status === "Complete") ? "saved calculation" : "partial",
               partialNotice: final.rows.some(row => row.status !== "Complete") ? `Final saved with ${final.rows.filter(row => row.status === "Complete").length}/${final.rows.length} complete listings.` : undefined,
               recommendedStocks:final.rows.filter(row=>row.status==="Complete" && row.action!==null && row.action!=="Hold" && (row.suggested_units??0)>0).length,
+              ...(finalSummary?{finalSummary,rebalanceInputs:finalSummary.rebalance_inputs,recommendedStocks:finalSummary.eligible}:{}),
               frozenFinal:{schema:final.schema,final_id:final.id,workflow_sequence:sequence}});
             if (saved?.saved===false && /Final calculation could not be verified/i.test(saved.error)) throw new Error(saved.error);
             window.dispatchEvent(new CustomEvent("final-actionables-refresh",{detail:{market,completedAt:new Date().toISOString()}}));

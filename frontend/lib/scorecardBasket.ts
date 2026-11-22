@@ -18,7 +18,7 @@ export function bindIndependentBasket(rows:DashboardActionRow[], final:CardFinal
     const estimate={currentUnits:source.settled,currentInvestmentAmount:source.value,
       units,amount:units!=null&&price!=null&&Number.isFinite(price)&&price>0?units*price:null};
     return [{...row,formulaScore:source.signed,formulaAction:action,formulaEstimate:estimate,
-      independentEligible:source.status==="Complete" && source.signed!=null && source.settled!=null && source.action!=null,
+      independentEligible:(source.trade_eligible ?? (source.sizing_reason == null || source.sizing_reason === "Subject to broker order checks" || source.sizing_reason === "Hold")) && source.status==="Complete" && source.signed!=null && source.settled!=null && source.action!=null,
       detail:{...row.detail,calculationPolicy:final.schema,calculatedScore:source.signed,detailedRationaleFinalScore:source.signed,
         calculatedAction:action,calculatedUnitsChange:units==null?null:action==="Sell All"||action==="Trim"?-units:units,
         technicalScanSourceRunId:final.source_runs.technical??null}}];

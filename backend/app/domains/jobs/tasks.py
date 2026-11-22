@@ -1425,8 +1425,22 @@ def execute_ai_job(self, job_id: int) -> None:
             technical_identity_instructions, validate_technical_prices, normalize_technical_rows,
         )
         prompt_to_execute += technical_identity_instructions(job.prompt)
-        with provider_usage_phase("initial_generation"):
-            result = provider.generate(prompt=prompt_to_execute, model=job.model)
+        batch = scorecard_batch_for_job(job)
+        rebalance_records = None
+        if batch and batch.get("rebalance_v2"):
+            from app.domains.scorecards.rebalance_worker import execute as execute_rebalance
+            from app.domains.jobs.execution_claim import require_owner
+            def save_rebalance(checkpoint):
+                with SyncSessionLocal() as session:
+                    current, _ = require_owner(session, job_id, execution_token)
+                    current.runtime_metadata_json = {**(current.runtime_metadata_json or {}), "rebalance_records":checkpoint}
+                    session.commit()
+            result,rebalance_records = execute_rebalance(provider,job.model,job.prompt,batch,save_rebalance,
+                (job.runtime_metadata_json or {}).get("rebalance_records"))
+            runtime_metadata_json = {**(runtime_metadata_json or {}),"rebalance_records":rebalance_records}
+        else:
+            with provider_usage_phase("initial_generation"):
+                result = provider.generate(prompt=prompt_to_execute, model=job.model)
         if _job_was_cancelled(repo, job_id):
             return
         tokens_in = result.tokens_in
@@ -1488,8 +1502,11 @@ def execute_ai_job(self, job_id: int) -> None:
             except MissingTechnicalListings:
                 pass  # A partial supplement can still contribute validated rows.
             content = merge_technical_rows(content, supplement)
-        batch = scorecard_batch_for_job(job)
-        if batch and batch.get("technical_v3"):
+        if rebalance_records is not None:
+            missing=rebalance_records["missing"]
+            if missing:
+                partial_price_notice=f"{len(missing)}/{len(batch['listings'])} listings have unavailable research or trade fields"
+        elif batch and batch.get("technical_v3"):
             from app.domains.scorecards.technical_output import annotations
             accepted, issue = annotations(content, batch["technical_v3"])
             if issue or len(accepted) != len(batch["listings"]):

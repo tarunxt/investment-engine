@@ -60,6 +60,7 @@ export type StageInfo = StageCost & {
   totalLlms?: number | null;
   recommendedStocks?: number | null;
   commonStocks?: number | null;
+  finalSummary?: import("@/lib/independentScorecards").FinalCounts;
   rebalanceInputs?: number | null;
   sourceRevision?: number;
   sourceListingCount?: number;
@@ -307,6 +308,10 @@ export function getStageOutcome(info: StageInfo) {
     return status==="completed" ? "completed" : status==="unassessed" ? "unassessed" : "partial";
   }
   if (info.published) {
+    if (info.published.counts) {
+      const c=info.published.counts;
+      return !c.assessed ? "unassessed" : c.complete===info.published.expected ? "completed" : "partial";
+    }
     if (!info.published.covered) return "unassessed";
     if (info.published.pair_counts?.errors) return "partial";
     return info.published.covered === info.published.expected ? "completed" : "partial";
@@ -408,6 +413,10 @@ export function getLlmStageTileRows(info: StageInfo, now: number): StageTileRow[
       {label:"Listings in scope",value:String(info.threatCounts.expected)},
       {label:"Listings returned",value:`${info.threatCounts.returned}/${info.threatCounts.expected}`},
       {label:"Fully assessed",value:`${info.threatCounts.complete}/${info.threatCounts.expected}`},
+    ] : info.published?.counts ? [
+      {label:"Listings assessed",value:String(info.published.counts.assessed)},
+      {label:"Score quality",value:`${info.published.counts.complete} complete · ${info.published.counts.provisional} provisional · ${info.published.counts.unassessed} unassessed`},
+      {label:"Actions",value:Object.entries(info.published.actions ?? {}).map(([k,v])=>`${k} ${v}`).join(" · ")||"—"},
     ] : [{ label: "Stocks recommended", value: formatRecommendedStockProgress(info) }]),
     ...(!evidenceOnly ? [{ label: "Duration", value: formatDuration(info.startedAt, info.endedAt, now) ?? "n/a" }] : []),
     { label: "Cost incurred", value: evidenceOnly ? "₹0.00 · evidence only" : cost === "Usage unavailable" && getStageOutcome(info) === "running" ? "Task running" : cost },
@@ -420,7 +429,11 @@ export function getLlmStageTileRows(info: StageInfo, now: number): StageTileRow[
 export function getActionablesStageTileRows(info: StageInfo): StageTileRow[] {
   return [
     { label: "Last update", value: formatCompactStageTime(info.completedAt ?? info.startedAt) },
-    { label: "Rebalance inputs", value: info.rebalanceInputs?.toString() ?? "n/a" },
+    ...(info.finalSummary ? [
+      {label:"Rebalance inputs",value:info.finalSummary.rebalance_output ? `${info.finalSummary.rebalance_inputs ?? "—"} listings · Output #${info.finalSummary.rebalance_output}` : "No Rebalance output selected"},
+      {label:"Fully assessed",value:`${info.finalSummary.complete}/${info.finalSummary.assessed}`},
+      {label:"Eligibility",value:`${info.finalSummary.eligible} trade-eligible · ${info.finalSummary.holds} Hold · ${info.finalSummary.blocked} blocked`},
+    ] : [{ label: "Rebalance inputs", value: info.rebalanceInputs?.toString() ?? "n/a" }]),
     { label: "Stocks recommended", value: info.recommendedStocks?.toString() ?? "n/a" },
     ...stageErrorRows(info),
   ];

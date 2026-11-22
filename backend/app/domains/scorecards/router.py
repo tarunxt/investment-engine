@@ -209,8 +209,20 @@ async def start(portfolio:Portfolio,revision_id:int,card:Card,body:Start,db:Asyn
     technical_v3 = portfolio == "india" and card == "technical"
     india_threats = portfolio == "india" and card == "threats"
     pair_v3 = portfolio == "india" and card == "pairwise"
-    packet_key = "pairwise-v3" if pair_v3 else "technical-v3" if technical_v3 else "market-v2"
-    shared = portfolio=="india" and card in ("technical","pairwise")
+    rebalance_v2 = portfolio == "india" and card == "rebalance"
+    packet_key = "rebalance-v2" if rebalance_v2 else "pairwise-v3" if pair_v3 else "technical-v3" if technical_v3 else "market-v2"
+    shared = portfolio=="india" and card in ("technical","pairwise","rebalance")
+    repair_fields={}
+    if rebalance_v2 and body.retry_attempt_id:
+        from .rebalance_recovery import gaps
+        original=await owned(db,owner,portfolio,"attempt",body.retry_attempt_id)
+        if original.data.get("revision_id")!=rev.id or original.data.get("card")!=card or not original.result_json:
+            raise HTTPException(422,"Select a finished Rebalance output from this Stage 2 revision")
+        repair_fields=gaps(original.result_json)
+        if not repair_fields:
+            raise HTTPException(422,"All applicable Rebalance factors and sizing fields are present")
+        identity=f"rebalance/repair/{body.retry_attempt_id}/{body.request_key}"
+        packet_key="rebalance/repair/"+str(body.retry_attempt_id)+"/"+body.request_key
     packet = await storage.by_key(db,"packet",packet_key,revision_id=rev.id) if shared else None
     if india_threats and not body.retry_attempt_id:
         packet = await storage.by_key(db,"packet","threats-v2",revision_id=rev.id)
@@ -243,7 +255,12 @@ async def start(portfolio:Portfolio,revision_id:int,card:Card,body:Start,db:Asyn
             research = await collect(manifest, username, wanted)
         elif shared:
             history = history or await shared_history(revision_id,manifest,username)
-            if pair_v3:
+            if rebalance_v2:
+                from .rebalance_evidence import collect
+                if repair_fields:
+                    manifest={**manifest,"stocks":[s for s in manifest["stocks"] if s["listing"] in repair_fields]}
+                research = await collect(manifest,username,history)
+            elif pair_v3:
                 research = pair_evidence.reconcile(manifest,history,await pair_evidence.news(manifest))
             else:
                 research = history
@@ -271,6 +288,12 @@ async def start(portfolio:Portfolio,revision_id:int,card:Card,body:Start,db:Asyn
             research["targets"] = new_evidence_targets(research, previous)
             if not research["targets"]:
                 raise HTTPException(422,"No new dated evidence for unresolved categories. No model job was started.")
+        elif rebalance_v2:
+            from .rebalance_recovery import with_evidence
+            repair_fields=with_evidence(repair_fields,research["packets"])
+            if not repair_fields:
+                raise HTTPException(422,"No new source evidence for the missing fields. No model jobs were queued.")
+            config["repair_fields"]=repair_fields
         elif technical_v3:
             if parent.data["revision_id"]!=rev.id or parent.data["card"]!=card or not parent.result_json or parent.result_json.get("scoring_version")!=3:
                 raise HTTPException(422,"Select a finished Technical v3 attempt from this revision")
@@ -309,6 +332,8 @@ async def start(portfolio:Portfolio,revision_id:int,card:Card,body:Start,db:Asyn
             assignments = [(sorted(research["targets"]),[])]
         elif not research["sources"]:
             assignments = []
+    if rebalance_v2 and repair_fields:
+        assignments=[(sorted(repair_fields),[])]
     if technical_v3 and body.retry_attempt_id:
         # Commentary recovery reuses the exact packet, including its factor calculations.
         assignments=[([k for k in keys if k in retry_keys],[]) for keys,_ in assignments if any(k in retry_keys for k in keys)]
@@ -319,7 +344,7 @@ async def start(portfolio:Portfolio,revision_id:int,card:Card,body:Start,db:Asyn
         research = packet.data["research"]
         config["packet_id"] = packet.id
         assignments = list(batches(rev.manifest["stocks"],card,portfolio=portfolio)) if research["sources"] else []
-    elif shared and research.get("version") in (2,3):
+    elif shared and research.get("version") in (2,3,4):
         packet = (await owned(db,owner,portfolio,"packet",config["packet_id"]) if config.get("packet_id") else
                   await storage.by_key(db,"packet",packet_key,revision_id=rev.id))
         if not packet:
@@ -379,6 +404,7 @@ async def start(portfolio:Portfolio,revision_id:int,card:Card,body:Start,db:Asyn
         "scorecard_batch": {
             "kind": "equity_scorecard_batch_v1", "card": card, "listings": keys,
             "absent_contenders": sorted(absent.intersection(keys)),
+            **({"rebalance_v2":rev.id,"repair_fields":repair_fields} if rebalance_v2 else {}),
             **({"technical_v3":{k:technical_evidence_ids(research["technical"][k]) for k in keys}}
                if technical_v3 else {}),
             **({"pairs_v2":pairs,"as_of":rev.manifest["as_of"],"packet_sources":{
@@ -419,7 +445,7 @@ async def observations(db, attempt, uid, portfolio):
     chain=[]
     while attempt:
         chain.append(attempt)
-        parent=None if attempt.data["settings"].get("pair_protocol")==3 else attempt.data["settings"].get("parent")
+        parent=None if attempt.data["settings"].get("pair_protocol")==3 or attempt.data["settings"].get("repair_fields") else attempt.data["settings"].get("parent")
         attempt=await owned(db,uid,portfolio,"attempt",parent) if parent else None
     evidence=[]
     for a in reversed(chain):
@@ -444,6 +470,7 @@ async def observations(db, attempt, uid, portfolio):
 @router.get("/{portfolio}/attempts/{attempt_id}")
 async def attempt_result(portfolio:Portfolio,attempt_id:int,db:AsyncSession=Depends(get_async_db),user:User=Depends(get_current_user)):
     a=await owned(db,user.id,portfolio,"attempt",attempt_id,lock=True)
+    from .rebalance_audit import replay
     if a.result_json:
         if portfolio=="india" and a.data["card"]=="pairwise" and not a.result_json.get("pair_counts"):
             packet=await pair_evidence.attempt_packet(db,a)
@@ -451,7 +478,7 @@ async def attempt_result(portfolio:Portfolio,attempt_id:int,db:AsyncSession=Depe
                 out=a.result_json
                 counts=pair_plan.summarize(out["rows"],packet["packets"],"full",calls=out["jobs"],errors=len(out.get("errors",[])))
                 return {**out,"pair_counts":counts,"evidence_readiness":pair_plan.evidence_detail(packet["packets"])}
-        return a.result_json
+        return replay(a.result_json) if portfolio=="india" else a.result_json
     jobs=await observations(db,a,user.id,portfolio)
     done=sum(j.status in ("partial","completed","failed","cancelled") for j,*_ in jobs)
     base={"id":a.id,"revision_id":a.data["revision_id"],"card":a.data["card"],"jobs":len(jobs),"completed":done}
@@ -477,6 +504,10 @@ async def attempt_result(portfolio:Portfolio,attempt_id:int,db:AsyncSession=Depe
         out=pair_evidence.finish(result,a,packet,rev.id)
         await db.commit()
         return out
+    if a.data["settings"].get("repair_fields"):
+        from .rebalance_recovery import combine
+        parent=await owned(db,user.id,portfolio,"attempt",a.data["settings"]["parent"])
+        result=combine(parent.result_json,result,a.data["settings"]["repair_fields"])
     scored=sum(r["score"] is not None for r in result["rows"])
     research = jobs[-1][-1] if jobs else None
     out={**base,**result,"status":"completed" if all(r["coverage"]=="Complete" for r in result["rows"]) and not result["errors"] else "partial" if scored else "unassessed",
@@ -504,7 +535,7 @@ async def attempt_result(portfolio:Portfolio,attempt_id:int,db:AsyncSession=Depe
             out["recovery"]={"state":"queue unavailable; manual recovery available"}
             a.row.summary_json={**a.data,"result":out}
             await db.commit()
-    return out
+    return replay(out) if portfolio=="india" else out
 
 
 @router.post("/india/attempts/{attempt_id}/repair-pair-evidence")
@@ -609,8 +640,8 @@ async def finalize(portfolio:Portfolio,revision_id:int,body:Finalize,db:AsyncSes
 async def prompt_preview(portfolio:Portfolio,revision_id:int,card:Card,db:AsyncSession=Depends(get_async_db),user:User=Depends(get_current_user)):
     rev=await owned(db,user.id,portfolio,"revision",revision_id)
     first=next(batches(rev.manifest["stocks"],card,portfolio=portfolio),([],[]))
-    packet_key = {"technical":"technical-v3","pairwise":"pairwise-v3","threats":"threats-v2"}.get(card,"market-v2") if portfolio=="india" else "market-v2"
-    packet = await storage.by_key(db,"packet",packet_key,revision_id=rev.id) if card in ("technical","pairwise") or (portfolio=="india" and card=="threats") else None
+    packet_key = {"technical":"technical-v3","pairwise":"pairwise-v3","threats":"threats-v2","rebalance":"rebalance-v2"}.get(card,"market-v2") if portfolio=="india" else "market-v2"
+    packet = await storage.by_key(db,"packet",packet_key,revision_id=rev.id) if card in ("technical","pairwise","rebalance") or (portfolio=="india" and card=="threats") else None
     research = packet.data["research"] if packet else None
     if research is None and portfolio=="india" and card=="technical":
         research={"version":3,"technical":{},"listings":{}}

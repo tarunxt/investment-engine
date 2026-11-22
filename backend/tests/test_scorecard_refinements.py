@@ -120,6 +120,10 @@ async def exercise_single_job_start(monkeypatch, card):
     rev = SimpleNamespace(id=1, digest="fixture", manifest=dict(stocks=stocks, market="india",
                           as_of="2026-11-21T12:00:00Z", evidence=[]))
     evidence = {"version":2, "packets":{k:{"features":{}, "sources":{}} for k in keys}}
+    if card=="rebalance":
+        from app.domains.scorecards import rebalance_evidence
+        evidence={"version":4,"packets":{k:{"refs":{},"allowed":{}} for k in keys}}
+        monkeypatch.setattr(rebalance_evidence, "collect", AsyncMock(return_value=evidence))
     monkeypatch.setattr(router, "owned", AsyncMock(return_value=rev))
     monkeypatch.setattr(router.storage, "by_key", AsyncMock(return_value=None))
     history={"technical":{}}
