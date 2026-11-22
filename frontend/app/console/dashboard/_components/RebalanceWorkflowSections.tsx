@@ -7230,13 +7230,14 @@ ${zerodhaExecutionMode === "direct_market"
               if (cancelRequestedRef.current || !isCurrentWorkflowOwner(runtimeOwner)) return;
               if (cardModelErrors[card]) throw new Error(cardModelErrors[card]);
               const queued=await api.start(source.id,card,{sequence, request_key:"workflow-"+sequence,targets:targets[card] ?? []});
-              const run=queued.run_id==null?null:await waitForRunWithStageHandling(portfolio,card,queued.run_id,queued.scoring_version===3);
+              const run=queued.run_id==null?null:await waitForRunWithStageHandling(portfolio,card,queued.run_id,queued.scoring_version===3 || card==="pairwise");
               const result=await api.result(queued.id);
               if (result.status === "processing") throw new Error("Scorecard jobs are still settling. Open its saved output to refresh.");
               chosen[card]=queued.id;
               await markCompleted(portfolio,card,{...(run?{...summarizeRun(run),...getRunProgress(run),lastRunId:run.id}:{totalLlms:0,completedLlms:0}),
                 ...(result.status !== "completed" ? {partialNotice:`Scorecard ${result.status}. ${result.scored ?? 0} of ${source.manifest.stocks.length} listings have verified scores.`} : {}),
-                recommendedStocks:result.scored ?? 0,evidenceCoverage:String(result.scored ?? 0)+"/"+source.manifest.stocks.length+" scored",
+                recommendedStocks:result.scored ?? 0,evidenceCoverage:result.pair_counts ? `${result.pair_counts.judged}/${result.pair_counts.expected} pairs judged` : String(result.scored ?? 0)+"/"+source.manifest.stocks.length+" scored",
+                ...(result.pair_counts ? {published:{output_id:queued.id,run_id:queued.run_id,covered:result.pair_counts.judged,expected:result.pair_counts.expected,pair_counts:result.pair_counts,used_output_id:null,final_id:null}} : {}),
                 finalInputs:{stage2_revision:source.id,attempt:queued.id}});
             } catch (error) {
               if (cancelRequestedRef.current) throw error;

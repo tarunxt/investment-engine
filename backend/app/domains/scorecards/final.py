@@ -46,6 +46,8 @@ def calculate_final(manifest, attempts, config):
                 score,divisor=weighted(terms,factors)
                 if divisor < sum(factors.values()):
                     status="Partial"
+            if card=="pairwise" and (attempts.get(card,{}).get("pair_counts") or {}).get("mode")=="balanced":
+                status="Balanced trial"
             scores[card]=score
             coverage[card]=status
             contributions[card]=None if score is None else score*config["weights"][card]/100

@@ -303,6 +303,7 @@ export function getStageOutcome(info: StageInfo) {
   if (info.state === "idle" && ["processing", "running"].includes(status)) return "running";
   if (info.published) {
     if (!info.published.covered) return "unassessed";
+    if (info.published.pair_counts?.errors) return "partial";
     return info.published.covered === info.published.expected ? "completed" : "partial";
   }
   if (info.state === "failed" || ["failed", "verification failed", "error", "canceled", "cancelled", "interrupted", "killed", "start failed", "auth expired"].includes(status)) return "failed";
@@ -369,20 +370,29 @@ function stageErrorRows(info: StageInfo): StageTileRow[] {
 
 export function getLlmStageTileRows(info: StageInfo, now: number): StageTileRow[] {
   const cost = formatRebalanceCost(info);
+  const pairs=info.published?.pair_counts;
   return [
     { label: "Last Scan", value: formatCompactStageTime(info.completedAt ?? info.startedAt) },
     { label: "LLMs Used", value: formatLlmCompletion(info) },
     ...(info.published ? [
-      {label:"Available output",value:`#${info.published.output_id} · run #${info.published.run_id}`},
+      {label:"Available output",value:`#${info.published.output_id} · ${info.published.run_id ? "run #"+info.published.run_id : "evidence only"}`},
       {label:"Recorded execution",value:`${info.lastRunId ? "#"+info.lastRunId+" · " : ""}${info.runStatus || info.state}`},
       {label:"Stage 4 used",value:info.published.used_output_id ? `Output #${info.published.used_output_id} · final #${info.published.final_id}` : "No saved reference"},
     ] : []),
     ...(info.evidenceCoverage ? [{label: "Score coverage", value: info.evidenceCoverage}] : []),
     ...(info.distinctModels != null ? [{label: "Model coverage", value: `${info.totalLlms ?? "?"} jobs · ${info.distinctModels} distinct model${info.distinctModels === 1 ? "" : "s"}`}] : []),
-    { label: "Stocks recommended", value: formatRecommendedStockProgress(info) },
+    ...(pairs ? [
+      {label:"Listings in scope",value:String(pairs.listings)},
+      {label:"Evidence ready",value:`${pairs.ready}/${pairs.listings} listings`},
+      {label:"Results recorded",value:`${pairs.returned}/${pairs.expected} · ${pairs.jobs} model jobs`},
+      {label:"Missing evidence",value:`${pairs.one_missing} pairs on one side · ${pairs.both_missing} on both`},
+      {label:"Fully compared",value:`${pairs.complete_stocks}/${pairs.listings} listings · ${pairs.mode}`},
+    ] : [{ label: "Stocks recommended", value: formatRecommendedStockProgress(info) }]),
     { label: "Duration", value: formatDuration(info.startedAt, info.endedAt, now) ?? "n/a" },
     { label: "Cost incurred", value: cost === "Usage unavailable" && getStageOutcome(info) === "running" ? "Task running" : cost },
-    ...stageErrorRows(info),
+    ...(pairs && pairs.ready<pairs.listings && !getTileErrorDetail(info.error)
+      ? [{label:"Coverage issue",value:"Missing market evidence",detail:"Open Scorecard controls to repair missing evidence."}]
+      : stageErrorRows(info)),
   ];
 }
 

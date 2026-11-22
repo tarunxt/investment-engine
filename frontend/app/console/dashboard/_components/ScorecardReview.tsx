@@ -1,4 +1,5 @@
 "use client";
+import { PairwiseCoverage } from "./PairwiseCoverage";
 import { Grid } from "./ScorecardResultGrid";
 import { TechnicalValidation } from "./TechnicalValidation";
 import { TechnicalStockScores } from "./TechnicalStockScores";
@@ -22,6 +23,9 @@ export function ScorecardReview({portfolio,stage:initial,revisionId,initialAttem
   portfolio:"zerodha"|"indmoneyUs";stage:CardKey|"source"|"actionables";revisionId?:number;initialAttempt?:number;fallbackPolicy:CardPolicy;previousFormula:ScoreMatrixFormulaConfig;
   onRevision:(id:number)=>void;onPolicy:(p:CardPolicy)=>void;onClose:()=>void;
 }) {
+  const [pairMode,setPairMode]=useState<"full"|"balanced">("full");
+  const [pairTrials,setPairTrials]=useState<Record<string,unknown>[]|null>(null);
+  const [pairBudget,setPairBudget]=useState("");
   const broker=portfolio==="zerodha"?"india":"indmoney_us";
   const [owner]=useState(captureWorkflowOwner);
   const client=useMemo(()=>workflowOwnedApi(apiService,owner),[owner]);
@@ -73,10 +77,13 @@ export function ScorecardReview({portfolio,stage:initial,revisionId,initialAttem
     const targets=keys(c).map(key=>{const target=providers.find(t=>t.provider+"::"+t.model===key);if(!target)throw Error("Choose available models for "+titles[c]);return target;});
     if (!targets.length) throw Error("Choose a model for "+titles[c]);
     await client.saveWorkflowModels(c,keys(c));
-    const identity=JSON.stringify([detail.id,c,targets,retry]);
+    const pairOptions=c==="pairwise" && broker==="india" ? {pair_mode:retry ? result?.pair_counts?.mode ?? "full" : pairMode,
+      ...(pairBudget ? {estimated_budget_inr:Number(pairBudget)} : {})} : {};
+    const identity=JSON.stringify([detail.id,c,targets,retry,pairOptions]);
     const token=pendingStarts.current.get(identity)??crypto.randomUUID();
     pendingStarts.current.set(identity,token);
-    const queued=await api.start(detail.id,c,{sequence:detail.manifest.sequence,request_key:token,targets,retry_attempt_id:retry});
+    const queued=await api.start(detail.id,c,{sequence:detail.manifest.sequence,request_key:token,targets,retry_attempt_id:retry,...pairOptions});
+    selectedOutput.current=queued.id;
     pendingStarts.current.delete(identity);
     return queued.id;
   }
@@ -125,9 +132,17 @@ export function ScorecardReview({portfolio,stage:initial,revisionId,initialAttem
       {!singleJob && <><button className={button} disabled={keys(card).length>=8} onClick={()=>setModels(old=>({...old,[card]:[...keys(card),keys(card)[0]??providers.map(t=>t.provider+"::"+t.model)[0]]}))}>Add model slot</button>
       <button className={button} disabled={keys(card).length<2} onClick={()=>setModels(old=>({...old,[card]:keys(card).slice(0,-1)}))}>Remove last slot</button></>}
       <button className={button} disabled={busy || (singleJob && !keys(card).length)} onClick={()=>void perform(async()=>{await client.saveWorkflowModels(card,keys(card));})}>Save models</button></div>
+      {card==="pairwise"&&broker==="india"&&<div className="flex flex-wrap items-center gap-3"><label>Schedule <select className={input} value={pairMode} onChange={e=>setPairMode(e.target.value as "full"|"balanced")}><option value="full">Full round robin</option><option value="balanced">Balanced trial · up to 8 opponents per listing</option></select></label><label>Estimated spend limit (₹) <input className={input+" w-24"} type="number" min="0.01" step="0.01" value={pairBudget} onChange={e=>setPairBudget(e.target.value)} placeholder="Optional"/></label></div>}
       <div className="flex flex-wrap gap-2"><button disabled={busy||!detail} className={button} onClick={()=>void perform(async()=>{await launch(card);setVersion(n=>n+1);})}>Run {titles[card]}</button>
-      {card==="pairwise"&&result&&result.rows.some(r=>Number(r.valid)<Number(r.expected))&&<button className={button} disabled={busy} onClick={()=>void perform(async()=>{const replay=await api.recover(attempt);if(replay.rows.some(r=>Number(r.valid)<Number(r.expected)))await launch(card,replay.id);setVersion(n=>n+1);})}>Retry unresolved pairs</button>}
+      {card==="pairwise"&&broker!=="india"&&result&&result.rows.some(r=>Number(r.valid)<Number(r.expected))&&<button className={button} disabled={busy} onClick={()=>void perform(async()=>{const replay=await api.recover(attempt);if(replay.rows.some(r=>Number(r.valid)<Number(r.expected)))await launch(card,replay.id);setVersion(n=>n+1);})}>Retry unresolved pairs</button>}
       <select aria-label="Scorecard output revision" className={input} value={attempt} onChange={e=>setAttempt(Number(e.target.value))}><option value={0}>Select output</option>{detail?.attempts.filter(a=>a.card===card).map(a=><option key={a.id} value={a.id}>Output #{a.id} · Run {a.run_id}</option>)}</select></div>
+      {card==="pairwise"&&broker==="india"&&result&&<>
+        <PairwiseCoverage result={result}/>
+        <details><summary>Compare Balanced with Full on saved finals</summary><button className={button} disabled={busy} onClick={()=>void perform(async()=>setPairTrials(await api.pairTrials()))}>Compare top five and basket actions</button>
+        {pairTrials && (pairTrials.length ? <Grid rows={pairTrials}/> : <p>No saved final has a complete full round robin for this comparison.</p>)}</details>
+        <button className={button} disabled={busy} onClick={()=>void perform(async()=>{const repaired=await api.repairPairs(attempt);selectedOutput.current=repaired.id;setAttempt(repaired.id);setResult(repaired);setVersion(n=>n+1);})}>Repair missing evidence · no model charge</button>
+        <button className={button} disabled={busy||!result.pair_counts||result.pair_counts.eligible<=result.pair_counts.judged} onClick={()=>void perform(async()=>{await launch("pairwise",attempt);setVersion(n=>n+1);})}>Judge eligible unresolved pairs</button>
+      </>}
       {card==="pairwise"&&attempt>0&&<button className={button} disabled={busy} onClick={()=>void perform(async()=>{const r=await api.recover(attempt);selectedOutput.current=r.id;setVersion(n=>n+1);})}>Recheck saved responses · no model call</button>}
       {attempt>0&&<button className={button} disabled={busy} onClick={()=>void perform(async()=>{setResult(await api.result(attempt));})}>Refresh output</button>}
       {prompt&&<details><summary>LLM prompt · first batch</summary><pre className="max-h-80 overflow-auto whitespace-pre-wrap text-xs">{prompt}</pre></details>}

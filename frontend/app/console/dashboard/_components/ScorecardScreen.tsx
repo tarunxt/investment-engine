@@ -1,6 +1,7 @@
 "use client";
 
 import { TechnicalValidation } from "./TechnicalValidation";
+import { PairwiseCoverage } from "./PairwiseCoverage";
 import { TechnicalStockScores } from "./TechnicalStockScores";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -321,12 +322,12 @@ function Evidence({
   const coverage = useRead(readCoverage,card==="technical" || card==="pairwise");
   const published = card==="technical" || card==="pairwise" ? coverage.data?.cards[card] : undefined;
   const run =
-    published && card==="technical" && execution===null && !published.run_id ? undefined : execution !== null
+    published && execution===null && !published.run_id ? undefined : execution !== null
       ? runs.find((r) => r.id === execution)
       : (runs.find((r) => r.id === (published?.run_id ?? stage?.run_id)) ?? runs[0]);
-  const jobs = run?.jobs ?? (execution === null ? standalone : []);
+  const jobs = run?.jobs ?? (execution === null && !(published && !published.run_id) ? standalone : []);
   const runId = run?.id;
-  const revision = inputRevision(run?.prompt, card, market) ?? (card==="technical" && !runId ? coverage.data?.revision_id : null);
+  const revision = inputRevision(run?.prompt, card, market) ?? ((card==="technical" || card==="pairwise") && !runId ? coverage.data?.revision_id : null);
   const readTemplate = useCallback(() => api.prompt(revision!, card), [api, revision, card]);
   const template = useRead(readTemplate, !!revision && tab === "prompts" && templateOpen);
   const readSource = useCallback(() => api.read(revision!), [api, revision, refresh]);
@@ -529,6 +530,7 @@ function Evidence({
               ))}
             </>
           )}
+          {card==="pairwise" && scores.data && <PairwiseCoverage result={scores.data}/>}
           {attempt && (
             <details className={panel} open={card==="technical"&&market==="zerodha"?true:undefined}>
               <summary className="cursor-pointer font-semibold">

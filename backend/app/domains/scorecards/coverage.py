@@ -39,12 +39,12 @@ async def available(db, owner, portfolio, sequence):
         projections=[func.jsonb_array_length(cast(rows_expr,JSONB)),data["result"]["scored"].as_integer(),valid]
     else:
         projections=[rows_expr]
-    items = (await db.execute(scoped(Stage.id,Stage.run_id,data["card"].as_string(),data["result"]["scoring_version"].as_integer(),*projections)
+    items = (await db.execute(scoped(Stage.id,Stage.run_id,data["card"].as_string(),data["result"]["scoring_version"].as_integer(),data["result"]["pair_counts"],*projections)
              .where(storage.of_kind("attempt",rev),data["card"].as_string().in_(["technical","pairwise"]))
              .order_by(Stage.id.desc()))).all()
     cards = {}
     versions={}
-    for output,run,card,version,*info in items:
+    for output,run,card,version,pair_counts,*info in items:
         if not info[0]:
             continue
         if postgres:
@@ -52,10 +52,21 @@ async def available(db, owner, portfolio, sequence):
             got,total=(scored or 0,n) if card=="technical" else ((judgments or 0)//2,n*(n-1)//2)
         else:
             got,total=summary(card,info[0])
-        v3=card=="technical" and version==3
+        if pair_counts:
+            got,total=pair_counts["judged"],pair_counts["expected"]
+        v3=(card=="technical" and version==3) or bool(pair_counts)
         if card in cards and (versions[card] and not v3 or versions[card]==v3 and cards[card]["covered"]>=got):
             continue
         versions[card]=v3
         cards[card] = {"output_id":output,"run_id":run,"covered":got,"expected":total,
-                       "used_output_id":(final[1] or {}).get(card) if final else None,"final_id":final[0] if final else None}
+                       "used_output_id":(final[1] or {}).get(card) if final else None,"final_id":final[0] if final else None,**({"pair_counts":pair_counts} if pair_counts else {})}
+    pair=cards.get("pairwise")
+    if pair and portfolio=="india" and not pair.get("pair_counts"):
+        from .pair_evidence import attempt_packet
+        from .pair_plan import summarize
+        source=await storage.lookup(db,owner,portfolio,"attempt",pair["output_id"])
+        packet=await attempt_packet(db,source)
+        result=source.result_json
+        if packet.get("packets"):
+            pair["pair_counts"]=summarize(result["rows"],packet["packets"],"full",calls=result["jobs"],errors=len(result.get("errors",[])))
     return {"revision_id":rev,"listing_count":listing_count,"cards":cards}
