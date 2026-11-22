@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Menu, X, ArrowLeft } from "lucide-react";
+import { BasketResizeHandles } from "./BasketResizeHandles";
 import styles from "./BasketMetricPopup.module.css";
 export type BasketMetricSummary = {
   label: string; value: string; subtitle: string;
@@ -43,6 +44,7 @@ function ModalLayer({ title, eyebrow, onClose, children, footer, footerExtra, to
           <div className={styles.actions}>{tools}<button type="button" className={styles.iconButton} aria-label={details ? "Close calculation details" : "Close metric summary"} onClick={onClose}><X size={19} aria-hidden="true" /></button></div>
         </header>
         <div className={styles.body}>{children}</div>
+        <BasketResizeHandles panelRef={panel} label={title} />
         <footer className={`${styles.footer} ${footerExtra ? styles.footerWithExtra : ""}`}>
           <div className={styles.footerMain}><span>Display only · Orders unchanged</span>{footer}</div>
           {footerExtra ? <div className={styles.footerExtra}>{footerExtra}</div> : null}

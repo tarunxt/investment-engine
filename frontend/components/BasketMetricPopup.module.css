@@ -13,9 +13,9 @@
   background: rgb(6 10 20 / 65%);
 }
 .secondary { z-index: 110; padding-top: 3.75rem; background: rgb(10 20 25 / 38%); }
-.panel { width: 100%; max-width: 36.25rem; max-height: min(90dvh, 53.125rem); display: flex; flex-direction: column; overflow: hidden; background: var(--metric-panel); color: var(--metric-ink); border: 1px solid var(--metric-line); border-radius: 1.625rem; box-shadow: 0 1.75rem 5.625rem rgb(0 0 0 / 24%); outline: none; }
-.detailPanel { max-width: 46.25rem; border-left: 0.3125rem solid var(--metric-accent); max-height: 84dvh; }
-.widePanel { max-width: 48.4375rem; }
+.panel { position: relative; width: var(--popup-width, 36.25rem); max-width: 100%; height: var(--popup-height, auto); max-height: min(100%, var(--popup-height, min(90dvh, 53.125rem))); display: flex; flex-direction: column; background: var(--metric-panel); color: var(--metric-ink); border: 1px solid var(--metric-line); border-radius: 1.625rem; box-shadow: 0 1.75rem 5.625rem rgb(0 0 0 / 24%); outline: none; }
+.detailPanel { width: var(--popup-width, 46.25rem); border-left: 0.3125rem solid var(--metric-accent); max-height: min(100%, var(--popup-height, 84dvh)); }
+.widePanel { width: var(--popup-width, 48.4375rem); }
 .header { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; padding: 1.625rem 1.625rem 1.25rem; flex-shrink: 0; }
 .header h2 { margin: 0.4375rem 0 0; font-size: clamp(1.125rem, 3vw, 1.4375rem); font-weight: 700; line-height: 1.3; overflow-wrap: anywhere; }
 .eyebrow { margin: 0; font-size: 0.625rem; font-weight: 700; letter-spacing: .11em; text-transform: uppercase; color: var(--metric-muted); }
@@ -24,7 +24,7 @@
 .menuButton { background: var(--metric-soft); color: var(--metric-accent); }
 .iconButton:hover, .button:hover { filter: brightness(.94); }
 .panel button:focus-visible { outline: 2px solid var(--metric-accent); outline-offset: 3px; }
-.body { overflow-y: auto; overscroll-behavior: contain; padding: 0.25rem 1.625rem 1.5rem; min-height: 0; }
+.body { flex: 1 1 auto; overflow: auto; overscroll-behavior: contain; padding: 0.25rem 1.625rem 1.5rem; min-height: 0; }
 .hero { padding: 1.5rem; border-radius: 1.25rem; background: var(--metric-soft); }
 .label { margin: 0; color: var(--metric-accent); font-size: 0.6875rem; text-transform: uppercase; letter-spacing: .06em; font-weight: 700; }
 .value { margin: 0.625rem 0; font-size: clamp(1.875rem, 6vw, 3.25rem); line-height: 1.15; font-weight: 750; letter-spacing: -.035em; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }

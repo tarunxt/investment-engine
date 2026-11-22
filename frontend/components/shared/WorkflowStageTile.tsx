@@ -339,7 +339,7 @@ export function StageStatusIcon({ info }: { info: StageInfo }) {
     <LoaderCircle aria-hidden="true" className="size-4 animate-spin" /> (Running)
   </span>;
   const symbols = {
-    completed: "✅", failed: "❌", partial: "⚠️", stale: "⚠️", unconfirmed: "⚠️", unassessed: "○", queued: "⏳",
+    completed: "✅", failed: "❌", partial: "⚠️✅", stale: "⚠️", unconfirmed: "⚠️", unassessed: "○", queued: "⏳",
     derived: "ℹ️", skipped: "⏭️", paused: "⏸️", idle: "○",
   };
   const description = info.published ? `Output #${info.published.output_id} · ${info.published.covered}/${info.published.expected} covered` : info.runStatus || outcome;

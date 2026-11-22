@@ -107,7 +107,7 @@ import { Button } from "@/components/ui/button";
 import { TradingViewSymbolLink } from "@/components/shared/TradingViewSymbolLink";
 import { TradingViewUrlListButton } from "@/components/shared/TradingViewUrlListButton";
 import { LlmModelMixControls } from "@/components/shared/LlmModelMixControls";
-import MarkdownRenderer from "@/components/shared/MarkdownRenderer";
+import { StandardLlmOutputRenderer } from "@/components/shared/StandardLlmOutputRenderer";
 import {
   INDMONEY_DASHBOARD_SYNC_NOW_EVENT,
   ZERODHA_DASHBOARD_SYNC_NOW_EVENT,
@@ -2458,130 +2458,7 @@ function getRunOutputStatusLabel(status: RunOutputJobStatus) {
   return "Other";
 }
 
-type ParsedLlmTable = {
-  intro: string;
-  headers: string[];
-  rows: string[][];
-  outro: string;
-};
-
-function splitPipeTableRow(line: string) {
-  return line
-    .trim()
-    .replace(/^\|/, "")
-    .replace(/\|$/, "")
-    .split("|")
-    .map((cell) => cell.trim());
-}
-
-function isPipeTableDivider(line: string) {
-  return /^\|?[\s:-|]+\|?$/.test(line.trim());
-}
-
-function parseLlmPipeTable(content: string): ParsedLlmTable | null {
-  const lines = content.split(/\r?\n/);
-  const tableStart = lines.findIndex((line, index) => {
-    const trimmed = line.trim();
-    if (!trimmed.startsWith("|") || splitPipeTableRow(trimmed).length < 3) return false;
-    const nextLine = lines[index + 1]?.trim() ?? "";
-    return isPipeTableDivider(nextLine) || nextLine.startsWith("|");
-  });
-
-  if (tableStart < 0) return null;
-
-  const headers = splitPipeTableRow(lines[tableStart]);
-  let rowStart = tableStart + 1;
-  if (isPipeTableDivider(lines[rowStart] ?? "")) rowStart += 1;
-
-  const rows: string[][] = [];
-  let tableEnd = rowStart;
-  while (tableEnd < lines.length && lines[tableEnd].trim().startsWith("|")) {
-    const cells = splitPipeTableRow(lines[tableEnd]);
-    if (cells.length >= 2 && !isPipeTableDivider(lines[tableEnd])) {
-      rows.push(headers.map((_, index) => cells[index] ?? ""));
-    }
-    tableEnd += 1;
-  }
-
-  if (rows.length === 0) return null;
-  return {
-    intro: lines.slice(0, tableStart).join("\n").trim(),
-    headers,
-    rows,
-    outro: lines.slice(tableEnd).join("\n").trim(),
-  };
-}
-
-function StandardLlmOutputRenderer({ content }: { content: string }) {
-  const parsed = parseLlmPipeTable(content);
-
-  if (!parsed) {
-    return (
-      <MarkdownRenderer
-        content={content}
-        enableValidation={false}
-        className="text-xs leading-6 text-slate-700 [&_.prose]:max-w-none [&_table]:min-w-max [&_td]:align-top [&_td]:text-xs [&_th]:whitespace-nowrap [&_th]:text-[11px]"
-      />
-    );
-  }
-
-  return (
-    <div className="space-y-5">
-      <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-semibold text-amber-800">
-        Detected pipe-delimited markdown table output and converted it to the standard readable LLM table format.
-      </div>
-      {parsed.intro ? (
-        <MarkdownRenderer
-          content={parsed.intro}
-          enableValidation={false}
-          className="text-sm leading-6 text-slate-700 [&_.prose]:max-w-none"
-        />
-      ) : null}
-      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div className="max-h-[62vh] w-full max-w-full overflow-auto overscroll-contain">
-          <table className="min-w-max border-separate border-spacing-0 text-left text-xs text-slate-700">
-            <thead className="sticky top-0 z-10 bg-slate-900 text-[11px] uppercase tracking-[0.08em] text-white">
-              <tr>
-                {parsed.headers.map((header, index) => (
-                  <th
-                    key={`${header}-${index}`}
-                    scope="col"
-                    className="max-w-[18rem] border-r border-slate-700 px-3 py-3 align-top font-bold last:border-r-0"
-                  >
-                    {header || `Column ${index + 1}`}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {parsed.rows.map((row, rowIndex) => (
-                <tr key={`llm-row-${rowIndex}`} className="odd:bg-white even:bg-slate-50 hover:bg-blue-50/70">
-                  {row.map((cell, cellIndex) => (
-                    <td
-                      key={`llm-cell-${rowIndex}-${cellIndex}`}
-                      className="min-w-36 max-w-[22rem] border-r border-t border-slate-100 px-3 py-3 align-top leading-5 last:border-r-0"
-                    >
-                      {cell || "—"}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-      {parsed.outro ? (
-        <MarkdownRenderer
-          content={parsed.outro}
-          enableValidation={false}
-          className="text-sm leading-6 text-slate-700 [&_.prose]:max-w-none"
-        />
-      ) : null}
-    </div>
-  );
-}
-
-function RunOutputDetails({ run }: { run: RunResponse }) {
+function RunOutputDetails({ run, pairwise = false }: { run: RunResponse; pairwise?: boolean }) {
   const { rate: usdInrRate } = useRebalanceCostQuote();
   const [highlightedJobId, setHighlightedJobId] = useState<number | null>(null);
   const jobs = run.run_jobs?.map((link) => link.job).filter((job): job is JobResponse => Boolean(job)) ?? [];
@@ -2716,7 +2593,7 @@ function RunOutputDetails({ run }: { run: RunResponse }) {
             ) : null}
             {job.response?.trim() ? (
               <div className="m-5 max-w-full overflow-x-auto rounded-2xl bg-slate-50 p-5">
-                <StandardLlmOutputRenderer content={job.response.trim()} />
+                <StandardLlmOutputRenderer content={job.response.trim()} pairwisePrompt={pairwise ? job.prompt || run.prompt : undefined} />
               </div>
             ) : (
               <div className="m-5 rounded-2xl bg-slate-50 p-5 text-xs leading-6 text-slate-700">
@@ -2978,12 +2855,14 @@ function ScopedZerodhaBasketPreviewDialog({
   const displayCalculations = useBasketDisplayCalculations(open, tradingViewMarket, [...calculationStocks, ...finalOnlyStocks], portfolioAssets.totalAssets, detailsData.portfolioSnapshot?.captured_at ?? null, basketBrokerLabel, { portfolioValue: portfolioAssets.portfolioValue, availableMargin: portfolioAssets.availableMargin }, tradingViewMarket === "india" ? "issuer-v2" : "listing-v1");
   const legacyDisplayOnlyRows = allocationUniverse.filter(row => row.independentEligible !== false && !orders.some(order => order.symbol === row.stock.symbol && order.exchange === row.stock.exchange));
   const visibleScore = (_score: number | null) => true;
+  const zerodhaSections = new Map<string, string>();
   const buildEditableRow = (existing: ZerodhaBasketPreviewOrder | undefined, row?: DashboardActionRow): ZerodhaBasketPreviewOrder => {
     const stock = existing ? { symbol: existing.symbol, exchange: existing.exchange, score: existing.detail.calculatedScore, ...displayQuote(existing.symbol, existing.exchange) } : displayStock(row!);
     const metrics = displayCalculations.metrics?.(stock);
     const action = metrics?.comparison.action ?? null, direction = draftDirection(action);
     const suggested = suggestedDraftUnits(metrics?.actionSizing.stocks);
     const id = existing?.id ?? `basket:${stockIdentity(stock.symbol, stock.exchange)}`;
+    if (tradingViewMarket === "india") zerodhaSections.set(id, basketActionGroup(action, metrics?.comparison.current, metrics?.target));
     const units = Object.hasOwn(manualDraftUnits, id) ? manualDraftUnits[id] : suggested;
     const price = metrics?.actionSizing.price ?? null;
     const holding = tradingViewMarket === "india" ? kiteHoldingQuantity(detailsData.portfolioSnapshot as ZerodhaPortfolioSnapshotDetail | null, stock.symbol, stock.exchange) : (() => { if (metrics?.sourceStock.identityIssue) return null; const found = indmoneyHolding(detailsData.portfolioSnapshot as IndMoneyUsPortfolioSnapshotDetail | null, stock.symbol, stock.exchange, allocationUniverse.map(item => item.stock)); return found?.quantity == null ? null : { quantity: found.quantity }; })();
@@ -3058,7 +2937,7 @@ function ScopedZerodhaBasketPreviewDialog({
   const orderCalculation = (order: ZerodhaBasketPreviewOrder) => displayCalculations.metrics?.({ symbol: order.symbol, exchange: order.exchange, score: order.detail.calculatedScore, ...displayQuote(order.symbol, order.exchange) });
   const groupForOrder = (order: ZerodhaBasketPreviewOrder) => {
     const saved = scoreRevision?.finalRows?.get(stockIdentity(order.symbol, order.exchange));
-    if (isZerodhaPreview) return basketActionGroup(order.draftContext?.action);
+    if (isZerodhaPreview) return zerodhaSections.get(order.id);
     if (saved) return parseActionLabel(saved.action ?? "") ?? "Unavailable";
     return typeof displayCalculations.metrics === "function" ? basketActionGroup(orderCalculation(order)?.comparison.action) : getZerodhaBasketActionForPercent(order);
   };
@@ -3115,10 +2994,10 @@ function ScopedZerodhaBasketPreviewDialog({
     const action = metrics?.comparison.action ?? null;
     const units = manualDraftUnits[row.listing] ?? suggestedDraftUnits(metrics?.actionSizing.stocks);
     const amount = editableDraftAmount(units, metrics?.actionSizing.price ?? null);
-    const group = isZerodhaPreview ? basketActionGroup(action) : parseActionLabel(row.action ?? "") ?? "Unavailable";
+    const group = isZerodhaPreview ? basketActionGroup(action, metrics?.comparison.current, metrics?.target) : parseActionLabel(row.action ?? "") ?? "Unavailable";
     return { row, stock, action, units, amount, group };
   });
-  const sectionGroups = [...STANDARD_ACTION_ORDER, "Unavailable"].map((action) => ({
+  const sectionGroups = [...STANDARD_ACTION_ORDER, "No Action", "Unavailable"].map((action) => ({
     action,
     label: isZerodhaPreview && action === "Add more" ? "Add More" : ZERODHA_BASKET_SECTION_LABELS[action as ActionCategory] ?? action,
     review: savedReview.filter(item => item.group === action),
@@ -8107,13 +7986,13 @@ ${zerodhaExecutionMode === "direct_market"
         onClose={()=>setCardReview(null)} />}
       {cardEvidence && <ScorecardEvidenceDialog key={cardEvidence.market+cardEvidence.card+cardEvidence.sequence}
         {...cardEvidence} client={apiService} onClose={() => setCardEvidence(null)}
-        renderOutput={run => <RunOutputDetails run={run} />}
+        renderOutput={(run, card) => <RunOutputDetails run={run} pairwise={card === "pairwise"} />}
         onInputs={() => { const {market,card}=cardEvidence; setCardEvidence(null); if (card === "pairwise") setCardReview({portfolio:market,stage:"source"}); else openInputSelection(market,card); }}
         onTemplate={cardEvidence.card === "pairwise" ? undefined : () => { const {market,card}=cardEvidence; setCardEvidence(null); if (card !== "pairwise") showStagePrompt(market,card); }} />}
       {surface?.scorecards ? <ScorecardScreen key={[surface.market,surface.scorecards.card,surface.scorecards.sequence].join("/")}
         market={surface.market} screen={surface.scorecards} client={apiService}
         account={basketOwner?.full_name || basketOwner?.username || "Account"}
-        renderOutput={run => <RunOutputDetails run={run} />}
+        renderOutput={(run, card) => <RunOutputDetails run={run} pairwise={card === "pairwise"} />}
         onModels={card => void showStageLlmInfo(surface.market,card)}
         onInputs={card => card === "pairwise" ? setCardReview({portfolio:surface.market,stage:"source"}) : openInputSelection(surface.market,card)}
         onTemplate={card => showStagePrompt(surface.market,card)}
@@ -8360,7 +8239,7 @@ ${zerodhaExecutionMode === "direct_market"
                   />
                 </div>
               ) : outputDialog.run ? (
-                <RunOutputDetails run={outputDialog.run} />
+                <RunOutputDetails run={outputDialog.run} pairwise={outputDialog.stage === "pairwise"} />
               ) : (
                 <pre className="m-5 whitespace-pre-wrap break-words rounded-2xl bg-slate-950 p-5 text-xs leading-6 text-slate-100">
                   {outputDialog.body}

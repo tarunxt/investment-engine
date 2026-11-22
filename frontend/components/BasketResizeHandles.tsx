@@ -13,7 +13,8 @@ type Axis = "width" | "height";
 const minimum = { width: 320, height: 280 };
 const axes = ["width", "height"] as const;
 
-export function BasketResizeHandles({ panelRef, owner }: { owner?: number | null; panelRef: RefObject<HTMLDivElement | null> }) {
+export function BasketResizeHandles({ panelRef, owner, label = "basket" }: { owner?: number | null; label?: string; panelRef: RefObject<HTMLElement | null> }) {
+  const variablePrefix = label === "basket" ? "--basket-" : "--popup-";
   const drag = useRef<{ pointerId: number; start: number; size: number } | null>(null);
   const [sizes, setSizes] = useState({ width: 0, height: 0, availableWidth: 0, availableHeight: 0 });
 
@@ -22,11 +23,11 @@ export function BasketResizeHandles({ panelRef, owner }: { owner?: number | null
     const backdrop = panel?.parentElement;
     if (!panel || !backdrop) return;
     for (const axis of axes) {
-      panel.style.removeProperty("--basket-" + axis);
+      panel.style.removeProperty(variablePrefix + axis);
       if (!owner) continue;
       try {
         const saved = Number(localStorage.getItem(`basket-${axis}:user:${owner}`));
-        if (Number.isFinite(saved) && saved >= minimum[axis]) panel.style.setProperty("--basket-" + axis, saved + "px");
+        if (Number.isFinite(saved) && saved >= minimum[axis]) panel.style.setProperty(variablePrefix + axis, saved + "px");
       } catch { /* Storage can be disabled. */ }
     }
     const measure = () => {
@@ -41,13 +42,13 @@ export function BasketResizeHandles({ panelRef, owner }: { owner?: number | null
     observer.observe(panel);
     observer.observe(backdrop);
     return () => observer.disconnect();
-  }, [panelRef, owner]);
+  }, [panelRef, owner, variablePrefix]);
 
   function resize(axis: Axis, size: number, persist: boolean) {
     const available = axis === "width" ? sizes.availableWidth : sizes.availableHeight;
     if (available <= 0) return;
     const clamped = Math.min(available, Math.max(minimum[axis], size));
-    panelRef.current?.style.setProperty("--basket-" + axis, clamped + "px");
+    panelRef.current?.style.setProperty(variablePrefix + axis, clamped + "px");
     if (persist && owner) {
       try { localStorage.setItem(`basket-${axis}:user:${owner}`, String(clamped)); } catch { /* Keep the in-session size. */ }
     }
@@ -78,7 +79,7 @@ export function BasketResizeHandles({ panelRef, owner }: { owner?: number | null
       event.preventDefault();
     }
     return <div key={side} data-side={side} role="separator" tabIndex={0}
-      aria-label={`Resize basket from ${side} edge`} aria-orientation={horizontal ? "vertical" : "horizontal"}
+      aria-label={`Resize ${label} from ${side} edge`} aria-orientation={horizontal ? "vertical" : "horizontal"}
       aria-valuemin={Math.min(minimum[axis], available)} aria-valuemax={available} aria-valuenow={sizes[axis]}
       aria-valuetext={`${sizes[axis]} pixels ${horizontal ? "wide" : "high"}`}
       className={`absolute z-30 touch-none select-none rounded-full focus-visible:outline-2 focus-visible:outline-blue-600 ${horizontal ? "inset-y-3 w-[12px] cursor-ew-resize" : "inset-x-3 h-[12px] cursor-ns-resize"} ${position}`}

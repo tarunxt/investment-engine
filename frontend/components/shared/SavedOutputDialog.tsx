@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, type ReactNode } from "react";
+import { BasketResizeHandles } from "../BasketResizeHandles";
 import { createPortal } from "react-dom";
 
 export function SavedOutputDialog({ title, savedAt, provenance, sectionLabel, routeUrl, onClose, onRetry, loading, children }: {
@@ -46,7 +47,9 @@ export function SavedOutputDialog({ title, savedAt, provenance, sectionLabel, ro
           if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
           else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
         }}
-        className="max-h-[85vh] w-full max-w-[calc(100vw-2rem)] overflow-auto rounded-3xl bg-white text-slate-900 shadow-2xl xl:max-w-[95vw]">
+        className="relative flex h-[var(--popup-height,auto)] max-h-[min(100%,var(--popup-height,85vh))] w-[var(--popup-width,100%)] max-w-full flex-col rounded-3xl bg-white text-slate-900 shadow-2xl xl:w-[var(--popup-width,95vw)]">
+        <BasketResizeHandles panelRef={ref} label="saved output" />
+        <div className="min-h-0 flex-1 overflow-auto rounded-[inherit]">
         <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-5">
           <div>
             <h3 id={titleId} className="text-lg font-semibold">{title}</h3>
@@ -61,6 +64,7 @@ export function SavedOutputDialog({ title, savedAt, provenance, sectionLabel, ro
           <button ref={closeRef} type="button" onClick={onClose} aria-label="Close output view" className="rounded-full px-3 py-1 hover:bg-slate-100">Close</button>
         </div>
         {children}
+        </div>
       </div>
     </div>, document.body,
   );

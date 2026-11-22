@@ -467,7 +467,7 @@ test('stacked Units summary supports detail/back, Done, Escape and focus contain
  const h=hooks(),styles=new Proxy({}, {get:(_target,key)=>String(key)}),icon=()=>null;
  let closed=0,restored=0,firstFocus=0,lastFocus=0,prevented=0;
  const opener={isConnected:true,focus(){restored++;}},document={body:{},activeElement:opener};
- const component=load('../components/BasketMetricPopup.tsx',{...h.bindings,styles,createPortal:node=>node,document,Menu:icon,X:icon,ArrowLeft:icon});
+ const component=load('../components/BasketMetricPopup.tsx',{...h.bindings,styles,BasketResizeHandles:()=>null,createPortal:node=>node,document,Menu:icon,X:icon,ArrowLeft:icon});
  const props={title:'Units calculation',eyebrow:'NSE:HCLTECH / Zerodha',wide:true,summary:{label:'Executable basket units',value:'7',subtitle:'8.5 → 8 → capped to 7',metrics:[],notice:'Display only'},children:'Actual captured calculation',onClose:()=>{closed++;}};
  const render=()=>{h.start();return component.BasketMetricPopup(props);};let tree=render();const summary=React.Children.toArray(tree.props.children)[0];assert.equal(summary.props.wide,true);assert.equal(summary.props.covered,false);
  const summaryLayer=summary.type(summary.props),section=find(summaryLayer,node=>node.type==='section');
@@ -619,6 +619,9 @@ test('zero targets remain zero with holdings/missing price while Units share sig
 });
 
 test('Action New group identity is independent of original Side/action and mismatched executable drafts fail closed',()=>{
+ assert.equal(math.basketActionGroup('Hold',0,0),'No Action');
+ assert.equal(math.basketActionGroup('Hold',.2,.2),'Hold');
+ assert.equal(math.basketActionGroup(null,0,null),'Unavailable');
  assert.equal(math.basketActionGroup('Add More'),'Add more');assert.equal(math.basketActionGroup(null),'Unavailable');
  for(const [current,target,group]of[[500,0,'Sell All'],[500,.1,'Trim'],[0,.1,'Buy New'],[10,.1,'Add more'],[100,.1,'Hold']])assert.equal(math.basketActionGroup(math.weightComparison(current,1000,target).action),group);
  assert.equal(math.actionQuantityMatchesDraft(-5,'SELL',5),true);assert.equal(math.actionQuantityMatchesDraft(25,'BUY',25),true);for(const args of [[-5,'BUY',5],[25,'BUY',7],[null,'SELL',5],[0,'BUY',0],[-5,'SELL',2]])assert.equal(math.actionQuantityMatchesDraft(...args),false);
@@ -1003,6 +1006,7 @@ test('Zerodha issuer target, sizing and popup use the unshifted mean of saved wo
  assert.deepEqual(state.renderPopup().props.summary.metrics[0],{label:'5-day mean of Workflow final score (/100)',value:'70'});
  const {renderToStaticMarkup} = require('react-dom/server');
  const allocationHtml = renderToStaticMarkup(state.renderPopup().props.calculation);
+ assert.match(allocationHtml,/#1 · 60/); assert.match(allocationHtml,/#2 · 80/);
  assert.match(allocationHtml,/70 ÷ 100/);
  assert.match(allocationHtml,/Last selected/);
  find(state.cells(stocks[0]), n=>n.props?.['aria-label']==='HAL Historical Weighted Score calculation').props.onClick();
@@ -1020,4 +1024,20 @@ test('Zerodha issuer target, sizing and popup use the unshifted mean of saved wo
  assert.equal(state.metrics(stocks[0]).target,null);
  assert.equal(math.workflowFinalMean({...data,truncated:true},'HAL','NSE').score,null);
  assert.equal(math.workflowFinalMean({...data,workflow_finals:finals('HAL',[0])},'HAL','NSE').score,0);
+});
+
+test('Pairwise saved output keeps assignment identities, evidence order, unknowns and unparsed text', () => {
+  const {parsePairwiseOutput} = load('../components/shared/StandardLlmOutputRenderer.tsx');
+  const prompt = JSON.stringify({assigned_pairs:[{n:1,pair_id:'BSE:A~NSE:B',listings:['NSE:B','BSE:A']}]});
+  const parsed = parsePairwiseOutput([
+    JSON.stringify([1,'BSE:A','Stronger close',['1'],['2']]),
+    JSON.stringify([2,'UNKNOWN','Missing evidence',['1'],[]]),
+    JSON.stringify({pair_id:'NSE:C~NSE:D',result:'TIE',rationale:'Equal',evidence:{'NSE:C':['3'],'NSE:D':['4']}}),
+    'incomplete record',
+  ].join('\n'), prompt);
+  assert.deepEqual(parsed.rows[0],['1','BSE:A','NSE:B','BSE:A','Stronger close','1','2']);
+  assert.deepEqual(parsed.rows[1],['2','—','—','UNKNOWN','Missing evidence','1','']);
+  assert.deepEqual(parsed.rows[2],['—','NSE:C','NSE:D','TIE','Equal','3','4']);
+  assert.equal(parsed.outro,'incomplete record');
+  assert.equal(parsePairwiseOutput('| Pair | Winner | Reason |', prompt),null);
 });
