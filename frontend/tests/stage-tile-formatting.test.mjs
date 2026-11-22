@@ -15,6 +15,31 @@ const date=load('../lib/datetime.ts');
 const workflowPath='../components/shared/WorkflowStageTile.tsx';
 const ui=load(workflowPath,['formatLlmCompletion','formatRecommendedStockProgress','getLlmStageTileRows','getActionablesStageTileRows','getIdleStageRows','LLM_STAGE_TILE_KEYS','formatBriefTileError','getStageTileError','getTileErrorDetail','isSheetExportError','isInsufficientBalanceError'],{formatCompactStageTime:date.formatCompactStageTime,formatDuration:()=>null,formatRebalanceCost:load('../lib/rebalanceCost.ts').formatRebalanceCost});
 
+test('Kite board shows synced holdings and the shared Rebalance count alongside independent score coverage', () => {
+  const cards = load('../lib/independentScorecards.ts', ['cards','isCard']);
+  const { kiteBoardRows } = load('../components/shared/WorkflowStageLedger.tsx', ['kiteBoardRows'], {
+    isCard: cards.isCard, getIdleStageRows: ui.getIdleStageRows,
+  });
+  const rebalance = {state:'completed', workflowSequence:244, recommendedStocks:16};
+  const values = (stage, info, source = rebalance) => Object.fromEntries(
+    kiteBoardRows({stage, info, now:0}, source).map(row => [row.label, row.value]),
+  );
+  for (const count of [29, 0, null]) {
+    assert.equal(values('sync', {portfolioStockCount:count})['Stocks synced'], String(count ?? 'n/a'));
+  }
+  for (const stage of cards.cards) {
+    const info = {state:'failed', workflowSequence:244, recommendedStocks:0, evidenceCoverage:'0/16 scored', error:'Provider timeout'};
+    const rows = values(stage, info);
+    assert.equal(rows['Stocks recommended'], '16');
+    assert.equal(rows['Score coverage'], '0/16 scored');
+    assert.equal(rows.Error, 'Request timed out');
+    assert.equal(values(stage, info, {...rebalance, recommendedStocks:0})['Stocks recommended'], '0');
+    assert.equal(values(stage, info, {...rebalance, workflowSequence:243})['Stocks recommended'], 'n/a');
+    assert.equal(values(stage, info, {...rebalance, recommendedStocks:null})['Stocks recommended'], 'n/a');
+  }
+  assert.equal(values('swing', {recommendedStocks:9})['Stocks recommended'], '9');
+});
+
 test('stage timestamp matches requested IST 24-hour examples and preserves offset/naive-UTC parsing',()=>{
   assert.equal(date.formatCompactStageTime('2026-10-30T14:07:01Z'),'30 Oct 19:37');
   assert.equal(date.formatCompactStageTime('2026-10-30T14:13:52Z'),'30 Oct 19:43');
