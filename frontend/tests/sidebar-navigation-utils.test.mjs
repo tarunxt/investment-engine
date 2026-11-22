@@ -11,6 +11,7 @@ import {
   isRouteActive,
   orderNavigationSections,
   reconcileSidebarOrder,
+  visibleNavigationSections,
 } from "../app/console/_components/sidebarNavigationUtils.ts";
 
 const SAMPLE_SECTIONS = [
@@ -254,4 +255,16 @@ test("V2 sidebar order reconciliation ignores malformed data, duplicates, unknow
     reconcileSidebarOrder("bad-json-shape", DEFAULT_ORDER, ENTRY_SECTION_BY_ID),
     DEFAULT_ORDER,
   );
+});
+
+test("owner visibility applies to sorted and renamed destinations and removes empty groups", () => {
+  const order = createDefaultSidebarOrder(SAMPLE_SECTIONS);
+  order.investing.reverse();
+  const filtered = orderNavigationSections(
+    visibleNavigationSections(SAMPLE_SECTIONS, new Set(["us-portfolio", "market-scanner"])), order,
+  );
+  assert.deepEqual(filtered.map(section => section.id), ["investing"]);
+  assert.deepEqual(collectLeafEntries(filtered).map(leaf => leaf.id), ["market-scanner", "us-portfolio"]);
+  assert.deepEqual(visibleNavigationSections(SAMPLE_SECTIONS, new Set()), []);
+  assert.equal(visibleNavigationSections(SAMPLE_SECTIONS, null), SAMPLE_SECTIONS);
 });

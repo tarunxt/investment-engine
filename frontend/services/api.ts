@@ -1,3 +1,4 @@
+import type { SidebarAccount, SidebarMode, SidebarSettingsRecord } from "@/lib/sidebarVisibility";
 import { recoverIndmoneyWallet } from "@/lib/indmoneyWallet";
 import type { VerifiedUsListing } from "@/lib/usSecurityIdentity";
 import type { UsVendorDisplayQuotes, ZerodhaDisplayQuoteResponse } from "@/types/api";
@@ -902,6 +903,22 @@ class apiServiceClass implements IApiService {
   /**
    * Get user profile
    */
+  getSidebarPolicy() {
+    return this.get<import("@/lib/sidebarVisibility").SidebarPolicy>(URLs.auth.sidebarVisibility(), { cache: "no-store" });
+  }
+
+  findSidebarAccounts(query: string) {
+    return this.get<SidebarAccount[]>(`${URLs.auth.sidebarVisibility()}/users?q=${encodeURIComponent(query)}`, { cache: "no-store" });
+  }
+
+  getSidebarSettings(userId: number | null) {
+    return this.get<SidebarSettingsRecord>(URLs.auth.sidebarSettings(userId), { cache: "no-store" });
+  }
+
+  saveSidebarSettings(userId: number | null, mode: SidebarMode, visible_ids: string[], revision: number) {
+    return this.put<SidebarSettingsRecord>(URLs.auth.sidebarSettings(userId), { mode, visible_ids, revision });
+  }
+
   getWorkflowModels() {
     return this.get<import("@/lib/workflowStageModels").StageModelPreferences>(URLs.auth.workflowModels(), { cache: "no-store" });
   }

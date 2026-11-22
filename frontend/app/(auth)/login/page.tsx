@@ -18,15 +18,15 @@ export default function LoginPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { login, loading, error, errorDetails, clearError } = useAuth();
-  const [email, setEmail] = useState("");
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [validationError, setValidationError] = useState<string | null>(null);
   const redirectTo = resolveAuthRedirectTarget(searchParams.get("redirectTo"));
   const signOutWarning = logoutWarning(searchParams.get("logout"));
 
   const validateForm = () => {
-    if (!email) {
-      setValidationError("Email is required");
+    if (!identifier.trim()) {
+      setValidationError("Email or username is required");
       return false;
     }
     if (!password) {
@@ -44,7 +44,7 @@ export default function LoginPage() {
 
     try {
       clearError();
-      await login(email, password, redirectTo);
+      await login(identifier.trim(), password, redirectTo);
       // router will redirect automatically after login
     } catch (err) {
       console.error("Login error:", err);
@@ -86,24 +86,26 @@ export default function LoginPage() {
                 </Button>
               )}
 
-              {/* Email Field */}
+              {/* Account identifier */}
               <div className="space-y-2">
                 <label htmlFor="email" className="text-sm font-medium">
-                  Email Address
+                  Email or username
                 </label>
                 <Input
                   id="email"
-                  type="email"
-                  placeholder="you@example.com"
-                  value={email}
+                  type="text"
+                  placeholder="Email or username"
+                  value={identifier}
                   onChange={(e) => {
-                    setEmail(e.target.value);
+                    setIdentifier(e.target.value);
                     setValidationError(null);
                     clearError();
                   }}
                   disabled={loading}
                   className="w-full"
-                  autoComplete="email"
+                  autoComplete="username"
+                  autoCapitalize="none"
+                  spellCheck={false}
                   autoFocus
                 />
               </div>

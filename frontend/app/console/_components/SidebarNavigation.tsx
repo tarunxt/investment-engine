@@ -27,6 +27,7 @@ import {
     RotateCcw,
 } from 'lucide-react';
 
+import type { SidebarPolicy } from '@/lib/sidebarVisibility';
 import type { User } from '@/hooks/useAuth';
 import { cn } from '@/lib/utils';
 
@@ -35,6 +36,7 @@ import {
     ACCOUNT_ACTIONS,
     ACCOUNT_NAVIGATION,
     SIDEBAR_SECTIONS,
+    type AccountNavigationItem,
     type NavigationBadge as NavigationBadgeType,
     type NavigationEntry,
     type NavigationGroup,
@@ -52,6 +54,7 @@ import {
     reconcileSidebarOrder,
     type SidebarOrder,
     orderNavigationSections,
+    visibleNavigationSections,
 } from './sidebarNavigationUtils';
 import {
     DEFAULT_NAVIGATION_NAMES,
@@ -96,6 +99,7 @@ function arrayMove<T>(array: T[], from: number, to: number) {
 const NavigationDirectory = lazy(() => import('./NavigationDirectory'));
 
 type SidebarNavigationProps = {
+    policy: SidebarPolicy;
     pathname: string;
     user?: User | null;
     userId?: number | null;
@@ -162,6 +166,9 @@ type SidebarSectionProps = {
 };
 
 type AccountFooterProps = {
+    items: readonly AccountNavigationItem[];
+    showAppearance: boolean;
+    canManage: boolean;
     onLogout?: () => Promise<void>;
     onNavigate: () => void;
     pathname: string;
@@ -703,6 +710,7 @@ function SidebarSection({
 }
 
 function AccountFooter({
+    items, showAppearance, canManage,
     onLogout,
     onNavigate,
     pathname,
@@ -712,7 +720,7 @@ function AccountFooter({
     const LogoutIcon = ACCOUNT_ACTIONS.logout.icon;
     const detailsRef = useRef<HTMLDetailsElement>(null);
     const [appearanceOpen, setAppearanceOpen] = useState(false);
-    const accountActive = ACCOUNT_NAVIGATION.some((item) => isLeafActive(pathname, item));
+    const accountActive = items.some((item) => isLeafActive(pathname, item));
 
     useEffect(() => {
         const details = detailsRef.current;
@@ -761,7 +769,7 @@ function AccountFooter({
                     <p className="truncate text-xs text-muted-foreground">{user?.email}</p>
 
                     <div className="mt-3 grid grid-cols-2 gap-2">
-                        {ACCOUNT_NAVIGATION.map((item) => (
+                        {items.map((item) => (
                             <div
                                 key={item.id}
                                 className={item.id === 'usage-costs' ? 'col-span-2' : undefined}
@@ -776,10 +784,11 @@ function AccountFooter({
                     </div>
                 </div>
 
-                <details onToggle={(event) => setAppearanceOpen(event.currentTarget.open)} className="mx-3 mt-3 rounded-xl border border-sidebar-border">
+                {canManage && <Link href="/admin" onClick={navigateFromAccount} className="mx-3 mt-3 block rounded-xl border border-sidebar-border px-3 py-2 text-sm font-semibold">Admin panel</Link>}
+                {showAppearance && <details onToggle={(event) => setAppearanceOpen(event.currentTarget.open)} className="mx-3 mt-3 rounded-xl border border-sidebar-border">
                     <summary className={cn('cursor-pointer rounded-xl px-3 py-2 text-sm font-semibold', NAVIGATION_FOCUS)}>Appearance</summary>
                     {appearanceOpen ? <Suspense fallback={null}><SidebarThemeToggle /></Suspense> : null}
-                </details>
+                </details>}
 
                 {onLogout ? (
                     <div className="px-3 pt-3">
@@ -802,6 +811,7 @@ function AccountFooter({
 }
 
 export function SidebarNavigation({
+    policy,
     pathname,
     user,
     userId,
@@ -865,8 +875,10 @@ export function SidebarNavigation({
         () => readNavigationOrder(storageKey, defaultOrder, entrySectionById),
         () => cloneSidebarOrder(defaultOrder),
     );
+    const visibleIds = useMemo(() => policy.visible_ids === null ? null : new Set(policy.visible_ids), [policy.visible_ids]);
+    const accountItems = ACCOUNT_NAVIGATION.filter((item) => visibleIds === null || visibleIds.has(item.id));
     const sections = useMemo(() => (
-        orderNavigationSections(SIDEBAR_SECTIONS, navigationOrder).map((section) => ({
+        orderNavigationSections(visibleNavigationSections(SIDEBAR_SECTIONS, visibleIds), navigationOrder).map((section) => ({
             ...section,
             label: nameOverrides[`section:${section.id}`] ?? section.label,
             entries: section.entries.map((entry) => {
@@ -894,7 +906,7 @@ export function SidebarNavigation({
                 };
             }),
         }))
-    ), [childOrder, defaultChildOrder, nameOverrides, navigationOrder]);
+    ), [childOrder, defaultChildOrder, nameOverrides, navigationOrder, visibleIds]);
     const activeGroupId = useMemo(
         () => findActiveGroupIds(pathname, sections)[0] ?? null,
         [pathname, sections],
@@ -1152,6 +1164,9 @@ export function SidebarNavigation({
 
             <div className="shrink-0 pb-2">
                 <AccountFooter
+                    items={accountItems}
+                    showAppearance={visibleIds === null || visibleIds.has('appearance')}
+                    canManage={policy.can_manage}
                     onLogout={onLogout}
                     onNavigate={onNavigate}
                     pathname={pathname}
@@ -1161,7 +1176,7 @@ export function SidebarNavigation({
 
             {directoryOpen !== null ? (
                 <Suspense fallback={<span role="status" className="sr-only">Opening destinations…</span>}>
-                    <NavigationDirectory open={directoryOpen} pathname={pathname} sections={sections} onClose={() => setDirectoryOpen(false)} onNavigate={onNavigate} />
+                    <NavigationDirectory accountItems={accountItems} open={directoryOpen} pathname={pathname} sections={sections} onClose={() => setDirectoryOpen(false)} onNavigate={onNavigate} />
                 </Suspense>
             ) : null}
 

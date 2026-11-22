@@ -36,6 +36,7 @@ from app.domains.auth.websocket_tickets import (
     issue_websocket_ticket,
 )
 from app.domains.auth.workflow_models import StageModelSelection, read_stage_models, save_stage_models
+from app.domains.auth.sidebar_visibility import OWNER_EMAIL
 from app.domains.auth.tasks import send_reset_password_email_task
 from app.infrastructure.database.session import get_async_db
 from app.shared.exceptions import NotFoundException, ValidationException
@@ -73,6 +74,10 @@ async def google_login(request: GoogleSignInRequest, db: AsyncSession = Depends(
 
 @router.post("/register", response_model=RegisterResponse, status_code=status.HTTP_201_CREATED)
 async def register(request: UserRegisterRequest, db: AsyncSession = Depends(get_async_db)):
+    # This address belongs to the existing owner. Public registration cannot
+    # provision a password for it or create a case variant that breaks Google linking.
+    if request.email.lower() == OWNER_EMAIL:
+        raise ValidationException("Email or username already registered", {"field": "email"})
     result = await db.execute(
         select(User).where((User.email == request.email) | (User.username == request.username))
     )
