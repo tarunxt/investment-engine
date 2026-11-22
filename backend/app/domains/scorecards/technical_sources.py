@@ -66,6 +66,12 @@ def archive_url(venue, day):
 
 def extract_archive(data, venue, day, close, wanted, url):
     found={}
+    by_isin={}
+    if isinstance(wanted,dict):
+        for listing,isin in wanted.items():
+            if isin:
+                by_isin.setdefault(isin,[]).append(listing)
+    wanted_keys=set(wanted)
     with zipfile.ZipFile(io.BytesIO(data)) as archive:
         files=[f for f in archive.infolist() if f.filename.lower().endswith(".csv") and f.file_size<=16_000_000]
         if len(files)!=1:
@@ -74,10 +80,11 @@ def extract_archive(data, venue, day, close, wanted, url):
             for row in csv.DictReader(io.TextIOWrapper(stream,encoding="utf-8-sig")):
                 if row.get("TradDt")!=day or (venue=="NSE" and row.get("SctySrs")!="EQ"):
                     continue
-                for symbol in {row.get("TckrSymb"),row.get("FinInstrmId")}:
-                    key=f"{venue}:{symbol}"
-                    if key not in wanted:
-                        continue
+                matches={f"{venue}:{symbol}" for symbol in (row.get("TckrSymb"),row.get("FinInstrmId"))} & wanted_keys
+                aliases=by_isin.get(row.get("ISIN"),[])
+                if len(aliases)==1:
+                    matches.add(aliases[0])
+                for key in matches:
                     values=[row.get(k) for k in ("OpnPric","HghPric","LwPric","ClsPric","TtlTradgVol")]
                     item=bar(date.fromisoformat(day),INDIA,values,url,datetime.max.replace(tzinfo=timezone.utc))
                     if item:
@@ -113,7 +120,7 @@ def action_ledger(rows, start, end):
 
 
 def nse_actions(raw, wanted):
-    if not isinstance(raw,list) or not raw or not all(isinstance(r,dict) and "exDate" in r and "subject" in r for r in raw):
+    if not isinstance(raw,list) or not raw or not all(isinstance(r,dict) and "exDate" in r and "subject" in r and r.get("isin") for r in raw):
         raise ValueError("Incomplete NSE action ledger")
     result={isin:[] for isin in wanted}
     for r in raw:
@@ -199,9 +206,9 @@ async def collect(manifest, username, previous=None, requested=None):
         await asyncio.gather(calendar(),instruments())
         semaphore=asyncio.Semaphore(8)
         async def history(venue,day,close):
-            subset={k for k in keys if k.startswith(venue+":")}
+            subset={k:master.get(k,{}).get("isin") for k in keys if k.startswith(venue+":")}
             # Cache only public rows for the exact identities and session; a miss can add another listing.
-            ck="archive:"+day+":"+digest(sorted(subset))
+            ck="archive:"+day+":"+digest(sorted(subset.items()))
             found=await cached(ck)
             if found is None:
                 url=archive_url(venue,day)

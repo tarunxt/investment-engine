@@ -36,6 +36,7 @@ export function TechnicalStockScores({result,revision,onRecover,onRetryCommentar
   const current=recovered?.from===result.id?recovered.data:result;
   const counts=current.technical_counts;
   const data=selection&&lines(selection);
+  const annotation=(selection?.raw_rows as Record<string,string>[]|undefined)?.[0];
   const rank={Complete:0,Provisional:1};
   const ordered=counts?[...current.rows].sort((a,b)=>(rank[a.coverage as keyof typeof rank]??2)-(rank[b.coverage as keyof typeof rank]??2)
     || (b.score??-1)-(a.score??-1)):current.rows;
@@ -72,9 +73,11 @@ export function TechnicalStockScores({result,revision,onRecover,onRetryCommentar
         <p>{Object.entries(data.readiness).filter(([,v])=>v!=null).map(([k,v])=>k+" "+v).join(" · ")}</p>
         {data.reason&&<p>{data.reason}</p>}{data.flags.length>0&&<p>{data.flags.join(" · ")}</p>}
         <p>Legacy comparison {fmt(selection.legacy_score)} /100 · model annotation {selection.commentary_job?"job #"+selection.commentary_job:"unavailable"}{selection.model_disagreement?" · model value disagreed with the backend":""}</p>
+        {annotation&&<dl>{["Strongest driver","Contrary evidence or missing input","Trigger / invalidation","Evidence IDs"].map(k=><div key={k}><dt className="font-semibold">{k}</dt><dd>{annotation[k]??"—"}</dd></div>)}</dl>}
         <Evidence name="Stock" source={data.sources.stock}/><Evidence name="Benchmark" source={data.sources.benchmark}/>
         <p className="break-all text-xs">Calculation input hash {data.input_hash}</p></>:
         <><p>Score = (mean accepted last-five-candle trend + 3) × 100 ÷ 6.</p><p>Mean trend {fmt((selection.signed_terms as {candles?:number}|undefined)?.candles,2)} · saved score {fmt(selection.score)}. Catalogue ratings have zero weight in this saved score.</p>
+        {selection.features!=null&&<details><summary>Saved technical indicators</summary><dl>{Object.entries(selection.features).map(([key,value])=><div key={key}><dt className="font-semibold">{key.replaceAll("_"," ")}</dt><dd>{typeof value==="number"?fmt(value,3):JSON.stringify(value)??"—"}</dd></div>)}</dl></details>}
         {selection.reason!=null&&<p>{String(selection.reason)}</p>}</>}
       </div></dialog>}
   </div>;

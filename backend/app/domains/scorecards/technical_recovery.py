@@ -23,7 +23,13 @@ async def recover(db, original, owner, username):
     original_id=original.id
     settings=dict(original.data["settings"])
     await db.commit()
-    updated=await collect(manifest,username,previous if already_v3 else None,requested)
+    if previous and not already_v3:
+        # Earlier packets hold raw exchange bars and provider bars of unknown adjustment basis.
+        def frozen_bars(rows):
+            return [{**bar,"basis":"venue-raw" if "nseindia.com/" in bar.get("url","") or "bseindia.com/" in bar.get("url","") else "unverified-provider"}
+                    for bar in rows if bar.get("kind")=="daily_bar"]
+        previous={"listings":{key:frozen_bars(rows) for key,rows in previous.get("listings",{}).items()}}
+    updated=await collect(manifest,username,previous,requested)
     refs={}
     baselines={}
     for r in old["rows"]:

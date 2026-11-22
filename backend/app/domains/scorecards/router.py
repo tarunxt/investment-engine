@@ -112,6 +112,31 @@ async def technical_validation(db:AsyncSession=Depends(get_async_db),user:User=D
     return await evaluate(db,user.id,datetime.now(timezone.utc).date())
 
 
+class ExecutionObservation(Request):
+    decision: date
+    listing: str = Field(pattern=r"^(NSE|BSE):[A-Z0-9&. -]{1,40}$")
+    status: Literal["filled","skipped","unfilled"]
+    entry_session: date | None = None
+    exit_session: date | None = None
+    entry_fill: float | None = Field(default=None,gt=0,allow_inf_nan=False)
+    exit_fill: float | None = Field(default=None,gt=0,allow_inf_nan=False)
+    entry_reference: float | None = Field(default=None,gt=0,allow_inf_nan=False)
+    exit_reference: float | None = Field(default=None,gt=0,allow_inf_nan=False)
+    entry_fees_per_share: float | None = Field(default=None,ge=0,allow_inf_nan=False)
+    exit_fees_per_share: float | None = Field(default=None,ge=0,allow_inf_nan=False)
+
+
+@router.post("/india/technical-execution-review")
+async def technical_execution_review(observations:list[ExecutionObservation],db:AsyncSession=Depends(get_async_db),
+                                     user:User=Depends(get_current_user)):
+    if len(observations)>5000:
+        raise HTTPException(422,"At most 5,000 dated observations per evaluation")
+    if len({(r.decision,r.listing) for r in observations})!=len(observations):
+        raise HTTPException(422,"Duplicate decision and listing in execution observations")
+    from .technical_validation import evaluate
+    return await evaluate(db,user.id,datetime.now(timezone.utc).date(),executions=observations)
+
+
 @router.get("/{portfolio}/workflows/{sequence}/coverage")
 async def workflow_coverage(portfolio:Portfolio, sequence:int, db:AsyncSession=Depends(get_async_db),user:User=Depends(get_current_user)):
     from .coverage import available

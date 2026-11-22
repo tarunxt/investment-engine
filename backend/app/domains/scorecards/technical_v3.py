@@ -16,9 +16,9 @@ def clip(value):
     return min(1., max(-1., value))
 
 
-def scale(values):
+def robust_scale(values):
     center = median(values)
-    return max(.005, 1.4826 * median(abs(v-center) for v in values))
+    return 1.4826 * median(abs(v-center) for v in values)
 
 
 def summarize(factors, hard_issue=None):
@@ -77,6 +77,7 @@ def calculate(listing, cutoff, sessions, series, benchmark, *, tick, sources, is
     bars, faults = series
     index, _ = benchmark
     factors = {key: {"weight": w, "value": None, "points": None, "inputs": {}, "reason": None} for key,w in WEIGHTS.items()}
+    variants = {}
     flags = []
     entry = {"setup": "20-session range", "entry": "Unassessed"}
     def window(key, count, data):
@@ -99,9 +100,10 @@ def calculate(listing, cutoff, sessions, series, benchmark, *, tick, sources, is
         factors["Trend"]["reason"]="Verified listing tick unavailable"
     mom=window("Momentum",26,bars)
     if mom:
-        noise=scale([math.log(b[3]/a[3]) for a,b in zip(mom[:20],mom[1:21])])
+        raw_noise=robust_scale([math.log(b[3]/a[3]) for a,b in zip(mom[:20],mom[1:21])])
+        noise=max(.005,raw_noise)
         move=math.log(mom[-1][3]/mom[-6][3])
-        record("Momentum",50+50*clip(move/(2*noise*math.sqrt(5))),log_return_5=move,daily_scale=noise)
+        record("Momentum",50+50*clip(move/(2*noise*math.sqrt(5))),log_return_5=move,daily_scale=noise,raw_scale=raw_noise)
     rs=window("Relative strength",41,bars)
     reference=window("Relative strength",41,index)
     if rs and reference:
@@ -111,9 +113,10 @@ def calculate(listing, cutoff, sessions, series, benchmark, *, tick, sources, is
             factors["Relative strength"]["reason"]="Benchmark has a no-trade session"
         else:
             excess=[math.log(b[3]/a[3])-math.log(y[3]/x[3]) for a,b,x,y in zip(rs,rs[1:],reference,reference[1:])]
-            tracking=scale(excess[:20])
+            raw_tracking=robust_scale(excess[:20])
+            tracking=max(.005,raw_tracking)
             move=sum(excess[-20:])
-            record("Relative strength",50+50*clip(move/(2*tracking*math.sqrt(20))),excess_log_return_20=move,tracking_scale=tracking)
+            record("Relative strength",50+50*clip(move/(2*tracking*math.sqrt(20))),excess_log_return_20=move,tracking_scale=tracking,raw_scale=raw_tracking)
     volume=window("Volume",25,bars)
     if volume:
         volumes=[b[4] for b in volume]
@@ -122,6 +125,11 @@ def calculate(listing, cutoff, sessions, series, benchmark, *, tick, sources, is
             capped=[min(v,2*baseline) for v in volumes[-5:]]
             signed=sum(v*((b[3]>a[3])-(b[3]<a[3])) for v,a,b in zip(capped,volume[-6:-1],volume[-5:]))
             divisor=max(5*baseline,sum(capped))
+            signs=[(b[3]>a[3])-(b[3]<a[3]) for a,b in zip(volume[-6:-1],volume[-5:])]
+            for cap,label in ((1,"half"),(4,"double")):
+                sizes=[min(v,cap*baseline) for v in volumes[-5:]]
+                adjusted=50+50*sum(v*sign for v,sign in zip(sizes,signs))/max(5*baseline,sum(sizes))
+                variants["volume cap "+label]={"Volume":adjusted}
             record("Volume",50+50*signed/divisor,median_volume=baseline,signed_volume=signed,capped_total=sum(capped),divisor=divisor)
         else:
             factors["Volume"]["reason"]="Missing volume or no usable trading-volume baseline"
@@ -147,8 +155,23 @@ def calculate(listing, cutoff, sessions, series, benchmark, *, tick, sources, is
           faults.get(day,"Decision-session candle missing") if day not in bars else
           "Decision-session trading volume unverified" if bars[day][4] is None else "No trade on decision session" if bars[day][4]==0 else None)
     summary=summarize(factors,hard)
+    sensitivities={}
+    if summary["score"] is not None:
+        for floor,label in ((.0025,"half"),(.01,"double")):
+            alternate={}
+            for key,field,horizon in (("Momentum","log_return_5",5),("Relative strength","excess_log_return_20",20)):
+                inputs=factors[key]["inputs"]
+                if field in inputs:
+                    alternate[key]=50+50*clip(inputs[field]/(2*max(floor,inputs["raw_scale"])*math.sqrt(horizon)))
+            variants["daily floor "+label]=alternate
+        for key in WEIGHTS:
+            variants["omit "+key]={key:50}
+        for label,overrides in variants.items():
+            sensitivities[label]=display(50+sum(WEIGHTS[key]*(overrides.get(key,f["value"])-50)
+                for key,f in factors.items() if f["value"] is not None))
     missing=[f'{k}: {v["reason"]}' for k,v in factors.items() if v["reason"]]
     return {**summary,"version":3,"listing":listing,"as_of":cutoff,"session":day,"horizon":20,"benchmark":BENCHMARK,
             "factors":factors,"readiness":entry,"sources":sources,"flags":flags,"reason":" · ".join(dict.fromkeys(([hard] if hard else [])+issues+missing)),
+            "sensitivities":sensitivities,
             "turnover":median(b[3]*b[4] for b in recent) if len(recent)==20 and all(b and b[4] is not None for b in recent) else None,
             "momentum_baseline":math.expm1(factors["Momentum"]["inputs"]["log_return_5"]) if factors["Momentum"]["value"] is not None else None}

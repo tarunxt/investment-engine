@@ -1,4 +1,6 @@
 "use client";
+import { Grid } from "./ScorecardResultGrid";
+import { TechnicalValidation } from "./TechnicalValidation";
 import { TechnicalStockScores } from "./TechnicalStockScores";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ScoreMatrixFormulaConfig } from "@/app/console/_components/FinalActionablesConsole";
@@ -16,10 +18,6 @@ const input="rounded-md border border-slate-300 bg-white p-2 text-sm";
 const factors:Record<CardKey,string[]>={rebalance:["cruxx","technical-short","technical-medium","technical-long","fundamentals-short","fundamentals-medium-long","action"],technical:["candles","premarket","setup"],threats:["Geopolitics/trade","Global financial conditions","Domestic economy","Domestic policy","Sector/technology","Company/governance","Physical/operational","Liquidity/positioning"],pairwise:["pairwise"]};
 const fmt=(n:number|null|undefined)=>n==null?"—":Number(n.toFixed(2)).toString();
 
-function Grid({rows}:{rows:Record<string,unknown>[]}) {
-  const columns=[...new Set(rows.flatMap(row=>Object.keys(row)))];
-  return <div className="max-h-[52vh] overflow-auto"><table className="w-full border-collapse text-left text-xs"><thead className="sticky top-0 bg-slate-100"><tr>{columns.map(k=><th className="whitespace-nowrap p-2" key={k}>{k}</th>)}</tr></thead><tbody>{rows.map((r,i)=><tr className="border-b" key={i}>{columns.map(k=><td className="max-w-96 p-2 align-top" key={k}>{r[k]==null?"—":typeof r[k]==="number"?fmt(r[k] as number):typeof r[k]==="object"?<details><summary>Details</summary><pre className="max-h-60 w-72 overflow-auto whitespace-pre-wrap">{JSON.stringify(r[k],null,2)}</pre></details>:String(r[k])}</td>)}</tr>)}</tbody></table></div>;
-}
 export function ScorecardReview({portfolio,stage:initial,revisionId,initialAttempt,fallbackPolicy,previousFormula,onRevision,onPolicy,onClose}:{
   portfolio:"zerodha"|"indmoneyUs";stage:CardKey|"source"|"actionables";revisionId?:number;initialAttempt?:number;fallbackPolicy:CardPolicy;previousFormula:ScoreMatrixFormulaConfig;
   onRevision:(id:number)=>void;onPolicy:(p:CardPolicy)=>void;onClose:()=>void;
@@ -39,7 +37,7 @@ export function ScorecardReview({portfolio,stage:initial,revisionId,initialAttem
   const [prompt,setPrompt]=useState(""),[error,setError]=useState(""),[busy,setBusy]=useState(false);
   const card=stage==="source"||stage==="actionables"?null:stage;
   const [confirmation,setConfirmation]=useState<VerifiedListing>({symbol:"",venue:"NASDAQ",security_id:"",share_class:"",source_url:""});
-  const [validation,setValidation]=useState<Awaited<ReturnType<typeof api.technicalValidation>>|null>(null);
+
   const [performance,setPerformance]=useState<Awaited<ReturnType<typeof api.performance>>|null>(null);
   const singleJob = usesSingleScorecardJob(card ?? "", portfolio);
   const requestGuard=useRef(false);
@@ -135,8 +133,7 @@ export function ScorecardReview({portfolio,stage:initial,revisionId,initialAttem
       {prompt&&<details><summary>LLM prompt · first batch</summary><pre className="max-h-80 overflow-auto whitespace-pre-wrap text-xs">{prompt}</pre></details>}
       {(card==="technical"||card==="pairwise")&&broker==="india"&&<details><summary>Historical performance</summary><button className={button} disabled={busy} onClick={()=>void perform(async()=>setPerformance(await api.performance()))}>Evaluate saved decisions</button>
       {performance&&<><p>Top {performance.top_n} · {performance.benchmark} · {performance.one_way_cost_bps} basis points per side · {performance.eligible_workflows} saved workflows with both outputs. Returns require complete forward prices.</p><Grid rows={performance.rows}/></>}</details>}
-      {card==="technical"&&broker==="india"&&<details><summary>20-session accuracy test</summary><button className={button} disabled={busy} onClick={()=>void perform(async()=>setValidation(await api.technicalValidation()))}>Evaluate frozen Technical scores</button>
-        {validation&&<><p>{validation.status} · {validation.monitoring.dates} decision dates · {validation.monitoring.qualifying_dates} qualified for rank comparison · {validation.monitoring.unknown_outcomes} missing outcomes.</p><p>Reserved test window {validation.holdout_start} to {validation.holdout_end_exclusive} (exclusive).</p><Grid rows={[validation.monitoring]}/>{validation.holdout_open&&<Grid rows={[validation.holdout]}/>}</>}</details>}
+      {card==="technical"&&broker==="india"&&<TechnicalValidation key={id} read={api.technicalValidation} executions={api.technicalExecutions}/>}
       {result&&<><p>{result.status} · {result.completed}/{result.jobs} model jobs · {result.scored??0} stocks scored</p>{card==="technical"&&broker==="india"?<TechnicalStockScores key={result.id} revision={id} result={result}
           onRecover={async()=>{const updated=await api.recover(result.id);selectedOutput.current=updated.id;setVersion(n=>n+1);return updated;}}
           onRetryCommentary={async()=>{await launch("technical",result.id);setVersion(n=>n+1);}}/>:card!=="rebalance"&&<Grid rows={resultRows}/>}

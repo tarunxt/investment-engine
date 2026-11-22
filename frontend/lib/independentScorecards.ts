@@ -33,7 +33,8 @@ export function scorecardApi(client: Pick<typeof apiService,"get"|"post">, marke
   return {
     prepareSwingSource:(sequence:number)=>client.post<{id:number;sequence:number;listings:number;snapshot_id:number;swing_job_ids:number[]}>(base+"/workflows/"+sequence+"/prepare-swing-source",{}),
     coverage:(sequence:number)=>client.get<WorkflowCoverage>(base+"/workflows/"+sequence+"/coverage"),
-    technicalValidation:()=>client.get<{status:string;holdout_start:string;holdout_end_exclusive:string;monitoring:{dates:number;qualifying_dates:number;expected:number;scored:number;unknown_outcomes:number};holdout_open:boolean;holdout:Record<string,unknown>}>(base+"/technical-validation"),
+    technicalExecutions:(rows:Record<string,unknown>[])=>client.post<Record<string,unknown>>(base+"/technical-execution-review",rows),
+    technicalValidation:()=>client.get<{status:string;holdout_start:string;holdout_end_exclusive:string;monitoring:{dates:number;qualifying_dates:number;expected:number;scored:number;unknown_outcomes:number};holdout_open:boolean;holdout:Record<string,unknown>;development_sensitivities:Record<string,{paired_dates:number;mean_change:number}>;calibration:{status:string;training_rows:number;test_rows:number;brier?:number;baseline_brier?:number;bins:{decile:number;n:number;predicted:number;observed:number;wilson_95:number[]}[]}}>(base+"/technical-validation"),
     performance:()=>client.get<{eligible_workflows:number;rows:Record<string,unknown>[];top_n:number;one_way_cost_bps:number;benchmark:string}>(base+"/research-performance"),
     savedPolicy:()=>client.get<CardPolicy|null>(base+"/saved-policy"),
     latestFinal:(seq?:number)=>client.get<CardFinal|null>(base+"/latest-final"+(seq?"?sequence="+seq:"")),

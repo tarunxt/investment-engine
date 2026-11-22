@@ -174,3 +174,29 @@ def test_final_archive_identity_dates_and_split_ledger():
     actions=sources.action_ledger([{"name":"Bonus","expiry_date":"03 Nov 2026","ratio":"1:2"},
                                    {"name":"Rights","expiry_date":"05 Nov 2026"}],"2026-10-01","2026-11-20")
     assert [a["multiplier"] for a in actions]==[1.5,None]
+
+
+def test_sensitivities_and_reserved_calibration():
+    from app.domains.scorecards.technical_validation import calibration
+    values=calc()
+    assert len(values["sensitivities"])==9
+    assert values["sensitivities"]["omit Trend"]==pytest.approx(values["score"]-values["factors"]["Trend"]["points"],abs=.1)
+    def month(year):
+        return {f"{year}-01-{day:02d}":[{"listing":"A","issuer":"A","candidate":10,"outcome":-1},
+                                        {"listing":"B","issuer":"B","candidate":90,"outcome":1}] for day in range(1,32)}
+    assert calibration(month(2025),{})["bins"]==[]
+    calibrated=calibration(month(2025),month(2026))
+    assert calibrated["brier"]==0 and calibrated["baseline_brier"]==.25
+    assert sum(b["n"] for b in calibrated["bins"])==62
+
+def test_realised_costs_require_matching_fills_and_keep_unfilled_counts():
+    from app.domains.scorecards.technical_validation import execution_review
+    entry,exit=date(2026,2,2),date(2026,2,27)
+    signal={"candidate":70,"entry_session":str(entry),"label_end":str(exit),"share_multiplier":2}
+    cohorts={"2026-01-30":[{**signal,"listing":"NSE:"+k} for k in ("A","B","C")]}
+    observed=router.ExecutionObservation(decision="2026-01-30",listing="NSE:A",status="filled",entry_session=entry,
+        exit_session=exit,entry_fill=100,exit_fill=55,entry_reference=99,exit_reference=56,entry_fees_per_share=1,exit_fees_per_share=.5)
+    stats=execution_review(cohorts,[observed,observed.model_copy(update={"listing":"NSE:B","status":"skipped"})])
+    assert stats["mean_net_return"]==pytest.approx(109/101-1)
+    assert stats["mean_slippage_fraction_of_entry"]==pytest.approx(3/99)
+    assert stats["filled"]==stats["skipped"]==stats["without_execution_record"]==1
