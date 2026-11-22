@@ -38,6 +38,8 @@ export function ScorecardReview({portfolio,stage:initial,revisionId,initialAttem
   const [prompt,setPrompt]=useState(""),[error,setError]=useState(""),[busy,setBusy]=useState(false);
   const card=stage==="source"||stage==="actionables"?null:stage;
   const [confirmation,setConfirmation]=useState<VerifiedListing>({symbol:"",venue:"NASDAQ",security_id:"",share_class:"",source_url:""});
+  const [performance,setPerformance]=useState<Awaited<ReturnType<typeof api.performance>>|null>(null);
+  const [checkOrder,setCheckOrder]=useState(false);
   const requestGuard=useRef(false);
   const pendingStarts=useRef(new Map<string,string>());
   const selectedOutput=useRef<number|null>(initialAttempt ?? null);
@@ -70,10 +72,10 @@ export function ScorecardReview({portfolio,stage:initial,revisionId,initialAttem
     if(!detail)throw Error("Select a Stage 2 revision first.");
     const targets=keys(c).map(key=>{const target=providers.find(t=>t.provider+"::"+t.model===key);if(!target)throw Error("Choose available models for "+titles[c]);return target;});
     await client.saveWorkflowModels(c,keys(c));
-    const identity=JSON.stringify([detail.id,c,targets,retry]);
+    const identity=JSON.stringify([detail.id,c,targets,retry,checkOrder]);
     const token=pendingStarts.current.get(identity)??crypto.randomUUID();
     pendingStarts.current.set(identity,token);
-    const queued=await api.start(detail.id,c,{sequence:detail.manifest.sequence,request_key:token,targets,retry_attempt_id:retry});
+    const queued=await api.start(detail.id,c,{sequence:detail.manifest.sequence,request_key:token,targets,retry_attempt_id:retry,check_pair_order:broker==="india"&&c==="pairwise"&&!retry&&checkOrder});
     pendingStarts.current.delete(identity);
     return queued.id;
   }
@@ -123,13 +125,21 @@ export function ScorecardReview({portfolio,stage:initial,revisionId,initialAttem
       <button className={button} disabled={keys(card).length<2} onClick={()=>setModels(old=>({...old,[card]:keys(card).slice(0,-1)}))}>Remove last slot</button>
       <button className={button} disabled={busy} onClick={()=>void perform(async()=>{await client.saveWorkflowModels(card,keys(card));})}>Save models</button></div>
       <div className="flex flex-wrap gap-2"><button disabled={busy||!detail} className={button} onClick={()=>void perform(async()=>{await launch(card);setVersion(n=>n+1);})}>Run {titles[card]}</button>
-      {card==="pairwise"&&result&&result.rows.some(r=>Number(r.valid)<Number(r.expected))&&<button className={button} disabled={busy} onClick={()=>void perform(async()=>{await launch(card,attempt);setVersion(n=>n+1);})}>Retry unresolved pairs</button>}
+      {card==="pairwise"&&broker==="india"&&<label className="text-sm"><input type="checkbox" checked={checkOrder} onChange={e=>setCheckOrder(e.target.checked)}/> Check reversed order for up to 12 pairs (extra model batch)</label>}
+      {card==="pairwise"&&result&&result.rows.some(r=>Number(r.valid)<Number(r.expected))&&<button className={button} disabled={busy} onClick={()=>void perform(async()=>{const replay=await api.recover(attempt);if(replay.rows.some(r=>Number(r.valid)<Number(r.expected)))await launch(card,replay.id);setVersion(n=>n+1);})}>Retry unresolved pairs</button>}
       <select aria-label="Scorecard output revision" className={input} value={attempt} onChange={e=>setAttempt(Number(e.target.value))}><option value={0}>Select output</option>{detail?.attempts.filter(a=>a.card===card).map(a=><option key={a.id} value={a.id}>Output #{a.id} · Run {a.run_id}</option>)}</select></div>
+      {card==="pairwise"&&attempt>0&&<button className={button} disabled={busy} onClick={()=>void perform(async()=>{const r=await api.recover(attempt);selectedOutput.current=r.id;setVersion(n=>n+1);})}>Recheck saved responses · no model call</button>}
       {attempt>0&&<button className={button} disabled={busy} onClick={()=>void perform(async()=>{setResult(await api.result(attempt));})}>Refresh output</button>}
       {prompt&&<details><summary>LLM prompt · first batch</summary><pre className="max-h-80 overflow-auto whitespace-pre-wrap text-xs">{prompt}</pre></details>}
+      {(card==="technical"||card==="pairwise")&&broker==="india"&&<details><summary>Historical performance</summary><button className={button} disabled={busy} onClick={()=>void perform(async()=>setPerformance(await api.performance()))}>Evaluate saved decisions</button>
+      {performance&&<><p>Top {performance.top_n} · {performance.benchmark} · {performance.one_way_cost_bps} basis points per side · {performance.eligible_workflows} saved workflows with both outputs. Returns require complete forward prices.</p><Grid rows={performance.rows}/></>}</details>}
       {result&&<><p>{result.status} · {result.completed}/{result.jobs} model jobs · {result.scored??0} stocks scored</p>{card!=="rebalance"&&<Grid rows={resultRows}/>}
         {card==="rebalance"&&<><h3>Rebalance output</h3>{result.model_tables?.map(t=><section key={t.job_id}><h4>Slot {t.slot} · {t.model} · Job {t.job_id}</h4><Grid rows={t.rows}/></section>)}<h3>Scores for Stage 4</h3><Grid rows={resultRows}/></>}
         {!!result.research_notices?.length&&<details><summary>Research source availability</summary><ul>{result.research_notices.map(n=><li key={n}>{n}</li>)}</ul></details>}
+        {result.balanced_schedule&&<details><summary>Balanced schedule comparison</summary><Grid rows={[result.balanced_schedule]}/></details>}
+        {result.cost_per_judgment_usd!=null&&<p>Estimated cost per judged pair: US${result.cost_per_judgment_usd.toFixed(5)}</p>}
+        {!!result.order_checks?.length&&<details><summary>Reversed-order comparison results</summary><Grid rows={result.order_checks}/></details>}
+        {!!result.recovered_pairs?.length&&<details><summary>Recovered comparisons</summary><Grid rows={result.recovered_pairs}/></details>}
         {!!result.errors?.length&&<details><summary>Job diagnostics</summary><Grid rows={result.errors}/></details>}</>}</section>}
     {stage==="actionables"&&<section className="space-y-3 py-3">
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{cards.map(c=><fieldset key={c} className="rounded-lg border p-2"><legend>{titles[c]}</legend>

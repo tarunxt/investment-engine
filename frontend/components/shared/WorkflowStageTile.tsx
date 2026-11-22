@@ -61,6 +61,7 @@ export type StageInfo = StageCost & {
   recommendedStocks?: number | null;
   rebalanceInputs?: number | null;
   finalInputs?: Record<string, unknown>;
+  published?: import("@/lib/independentScorecards").AvailableOutput;
   evidenceCoverage?: string;
   distinctModels?: number;
   pairCoverage?: string;
@@ -296,6 +297,10 @@ export function getTileErrorDetail(error?: string | null) {
 export function getStageOutcome(info: StageInfo) {
   const status = info.runStatus?.trim().toLowerCase() ?? "";
   if (info.state === "running" || info.state === "queued") return info.state;
+  if (info.published) {
+    if (!info.published.covered) return "unassessed";
+    return info.published.covered === info.published.expected ? "completed" : "partial";
+  }
   if (info.state === "failed" || ["failed", "verification failed", "error", "canceled", "cancelled", "interrupted", "killed", "start failed", "auth expired"].includes(status)) return "failed";
   if (status === "completion unconfirmed" && info.error?.startsWith("Final calculation could not be verified:")) return "failed";
   if (status === "completion unconfirmed") return "unconfirmed";
@@ -312,7 +317,7 @@ export function getStageOutcome(info: StageInfo) {
 
 export function getStageLedgerTone(info: StageInfo) {
   const outcome = getStageOutcome(info);
-  if (outcome === "partial" || outcome === "unconfirmed" || outcome === "stale") return "bg-amber-50";
+  if (outcome === "partial" || outcome === "unassessed" || outcome === "unconfirmed" || outcome === "stale") return "bg-amber-50";
   if (outcome === "derived" || outcome === "paused" || outcome === "skipped") return getStageBackgroundClass("idle");
   return getStageBackgroundClass(outcome);
 }
@@ -320,10 +325,10 @@ export function getStageLedgerTone(info: StageInfo) {
 export function StageStatusIcon({ info }: { info: StageInfo }) {
   const outcome = getStageOutcome(info);
   const symbols = {
-    completed: "✅", failed: "❌", partial: "⚠️", stale: "⚠️", unconfirmed: "⚠️", queued: "⏳",
+    completed: "✅", failed: "❌", partial: "⚠️", stale: "⚠️", unconfirmed: "⚠️", unassessed: "○", queued: "⏳",
     running: "🔄", derived: "ℹ️", skipped: "⏭️", paused: "⏸️", idle: "○",
   };
-  const description = info.runStatus || outcome;
+  const description = info.published ? `Output #${info.published.output_id} · ${info.published.covered}/${info.published.expected} covered` : info.runStatus || outcome;
   return <span role="img" aria-label={outcome} title={description} className="ml-1 inline-block align-middle text-xs">{symbols[outcome]}</span>;
 }
 
@@ -347,6 +352,11 @@ export function getLlmStageTileRows(info: StageInfo, now: number): StageTileRow[
   return [
     { label: "Last Scan", value: formatCompactStageTime(info.completedAt ?? info.startedAt) },
     { label: "LLMs completed", value: formatLlmCompletion(info) },
+    ...(info.published ? [
+      {label:"Available output",value:`#${info.published.output_id} · run #${info.published.run_id}`},
+      {label:"Recorded execution",value:`${info.lastRunId ? "#"+info.lastRunId+" · " : ""}${info.runStatus || info.state}`},
+      {label:"Stage 4 used",value:info.published.used_output_id ? `Output #${info.published.used_output_id} · final #${info.published.final_id}` : "No saved reference"},
+    ] : []),
     ...(info.evidenceCoverage ? [{label: "Score coverage", value: info.evidenceCoverage}] : []),
     ...(info.distinctModels != null ? [{label: "Model coverage", value: `${info.totalLlms ?? "?"} jobs · ${info.distinctModels} distinct model${info.distinctModels === 1 ? "" : "s"}`}] : []),
     { label: "Stocks recommended", value: formatRecommendedStockProgress(info) },
