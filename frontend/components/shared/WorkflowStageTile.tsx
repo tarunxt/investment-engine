@@ -67,7 +67,7 @@ export type StageInfo = StageCost & {
   finalInputs?: Record<string, unknown>;
   published?: import("@/lib/independentScorecards").AvailableOutput;
   evidenceCoverage?: string;
-  threatCounts?: {expected:number;returned:number;scored:number;complete:number;status:string};
+  threatCounts?: {diagnostics?:import("@/lib/independentScorecards").ThreatDiagnostics;expected:number;returned:number;scored:number;complete:number;status:string};
   distinctModels?: number;
   pairCoverage?: string;
   pairStatus?: "completed" | "partial";
@@ -392,7 +392,7 @@ function stageErrorRows(info: StageInfo): StageTileRow[] {
 export function getLlmStageTileRows(info: StageInfo, now: number): StageTileRow[] {
   const cost = formatRebalanceCost(info);
   const pairs=info.published?.pair_counts;
-  const evidenceOnly=Boolean(pairs && info.published?.run_id==null);
+  const evidenceOnly=Boolean(info.published && (pairs || info.threatCounts) && info.published.run_id==null);
   return [
     { label: evidenceOnly ? "Last model scan" : "Last Scan", value: formatCompactStageTime(info.completedAt ?? info.startedAt) },
     ...(evidenceOnly ? [{ label:"Model jobs",value:"0 · evidence only" }] : [{ label: "LLMs Used", value: formatLlmCompletion(info) }]),
@@ -412,6 +412,12 @@ export function getLlmStageTileRows(info: StageInfo, now: number): StageTileRow[
     ] : info.threatCounts ? [
       {label:"Listings in scope",value:String(info.threatCounts.expected)},
       {label:"Listings returned",value:`${info.threatCounts.returned}/${info.threatCounts.expected}`},
+      ...(info.threatCounts.diagnostics ? [
+        {label:"Sources for ≥3 categories",value:`${info.threatCounts.diagnostics.scoreable}/${info.threatCounts.expected} listings`},
+        {label:"No assigned sources",value:String(info.threatCounts.diagnostics.without_sources)},
+        ...(info.threatCounts.diagnostics.confidence_rejected ? [{label:"Confidence format rejected",value:`${info.threatCounts.diagnostics.confidence_rejected} assessments · recheck saved evidence`}] : []),
+        ...(info.threatCounts.diagnostics.confidence_recovered ? [{label:"Confidence format recovered",value:`${info.threatCounts.diagnostics.confidence_recovered} assessments`}] : []),
+      ] : []),
       {label:"Fully assessed",value:`${info.threatCounts.complete}/${info.threatCounts.expected}`},
     ] : info.published?.counts ? [
       {label:"Listings assessed",value:String(info.published.counts.assessed)},

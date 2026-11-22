@@ -45,12 +45,12 @@ async def available(db, owner, portfolio, sequence):
         projections=[func.jsonb_array_length(cast(rows_expr,JSONB)),data["result"]["scored"].as_integer(),valid,returned,complete]
     else:
         projections=[rows_expr]
-    items = (await db.execute(scoped(Stage.id,Stage.run_id,data["card"].as_string(),data["result"]["scoring_version"].as_integer(),data["result"]["pair_counts"],data["result"]["status"].as_string(),*projections)
+    items = (await db.execute(scoped(Stage.id,Stage.run_id,data["card"].as_string(),data["result"]["scoring_version"].as_integer(),data["result"]["pair_counts"],data["result"]["status"].as_string(),data["result"]["threat_diagnostics"],*projections)
              .where(storage.of_kind("attempt",rev),data["card"].as_string().in_(["technical","pairwise","threats"] if portfolio=="india" else ["technical","pairwise"]))
              .order_by(Stage.id.desc()))).all()
     cards = {}
     versions={}
-    for output,run,card,version,pair_counts,status,*info in items:
+    for output,run,card,version,pair_counts,status,threat_diagnostics,*info in items:
         if not info[0]:
             continue
         if postgres:
@@ -72,6 +72,13 @@ async def available(db, owner, portfolio, sequence):
                        "used_output_id":(final[1] or {}).get(card) if final else None,"final_id":final[0] if final else None,**({"pair_counts":pair_counts} if pair_counts else {})}
         if card=="threats":
             cards[card].update(threat_returned=returned,threat_complete=complete,threat_status=status)
+            if threat_diagnostics:
+                cards[card]["threat_diagnostics"] = threat_diagnostics
+    threats = cards.get("threats")
+    if threats and "threat_diagnostics" not in threats:
+        from .threat_coverage import diagnostics
+        source = await storage.lookup(db,owner,portfolio,"attempt",threats["output_id"])
+        threats["threat_diagnostics"] = diagnostics(source.result_json["rows"])
     pair=cards.get("pairwise")
     if pair and portfolio=="india" and not pair.get("pair_counts"):
         from .pair_evidence import attempt_packet

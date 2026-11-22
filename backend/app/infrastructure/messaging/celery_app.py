@@ -96,6 +96,11 @@ celery.conf.update(
     enable_utc=True
 )
 celery.conf.beat_schedule = {
+    "india-threats-public-releases": {
+        "task": "app.domains.scorecards.tasks.refresh_threat_archive",
+        "schedule": crontab(minute=17,hour="*/4"),
+        "options": {"queue":"beat","expires":3600},
+    },
     "cricket-rankings-daily-reconciliation": {
         "task": "app.domains.sports_rankings.tasks.reconcile_cricket",
         "schedule": crontab(minute=10, hour=3),
