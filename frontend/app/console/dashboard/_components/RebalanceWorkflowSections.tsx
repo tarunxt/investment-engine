@@ -2972,7 +2972,7 @@ function ScopedZerodhaBasketPreviewDialog({
       holdingQuantity:row.units, action:row.action, ...displayQuote(row.symbol, row.exchange)};
     if (tradingViewMarket !== "india") return stock;
     const {holding, upstox, isin} = venueEvidence(row.symbol, row.exchange);
-    return {...stock, isin, holdingQuantity:holding?.quantity ?? null, upstoxLtp:upstox?.price ?? null,
+    return {...stock, isin, currentValue: currentWeights.valid ? currentWeights.values.get(row.listing) ?? 0 : null, holdingQuantity:holding?.quantity ?? null, upstoxLtp:upstox?.price ?? null,
       upstoxAsOf:upstox?.asOf, upstoxSource:upstox?.source};
   });
   const displayCalculations = useBasketDisplayCalculations(open, tradingViewMarket, [...calculationStocks, ...finalOnlyStocks], portfolioAssets.totalAssets, detailsData.portfolioSnapshot?.captured_at ?? null, basketBrokerLabel, { portfolioValue: portfolioAssets.portfolioValue, availableMargin: portfolioAssets.availableMargin }, tradingViewMarket === "india" ? "issuer-v2" : "listing-v1");
@@ -2995,7 +2995,7 @@ function ScopedZerodhaBasketPreviewDialog({
       percent: direction === 'SELL' && holding?.quantity ? (units ?? 0) / holding.quantity * 100 : 100,
       orderKind: 'Market', wholeShareReview: tradingViewMarket === 'india' ? existing?.wholeShareReview : undefined, stock: existing?.stock ?? row!.stock, detail: existing?.detail ?? row!.detail,
       technicalScan: existing?.technicalScan ?? null,
-      draftContext: { action, originalAction: (existing ? existing.detail.calculatedAction : row!.formulaAction) ?? undefined, suggestedUnits: suggested, source: tradingViewMarket === "india" ? upstox?.source : displayQuote(stock.symbol, stock.exchange).ltpSource, asOf: tradingViewMarket === "india" ? upstox?.asOf : displayQuote(stock.symbol, stock.exchange).ltpAsOf },
+      draftContext: { action, directionConflict: metrics && "directionConflict" in metrics.actionSizing ? metrics.actionSizing.directionConflict : false, originalAction: (existing ? existing.detail.calculatedAction : row!.formulaAction) ?? undefined, suggestedUnits: suggested, source: tradingViewMarket === "india" ? upstox?.source : displayQuote(stock.symbol, stock.exchange).ltpSource, asOf: tradingViewMarket === "india" ? upstox?.asOf : displayQuote(stock.symbol, stock.exchange).ltpAsOf },
     };
   };
   const basketRows = [
@@ -3058,6 +3058,7 @@ function ScopedZerodhaBasketPreviewDialog({
   const orderCalculation = (order: ZerodhaBasketPreviewOrder) => displayCalculations.metrics?.({ symbol: order.symbol, exchange: order.exchange, score: order.detail.calculatedScore, ...displayQuote(order.symbol, order.exchange) });
   const groupForOrder = (order: ZerodhaBasketPreviewOrder) => {
     const saved = scoreRevision?.finalRows?.get(stockIdentity(order.symbol, order.exchange));
+    if (isZerodhaPreview) return basketActionGroup(order.draftContext?.action);
     if (saved) return parseActionLabel(saved.action ?? "") ?? "Unavailable";
     return typeof displayCalculations.metrics === "function" ? basketActionGroup(orderCalculation(order)?.comparison.action) : getZerodhaBasketActionForPercent(order);
   };
@@ -3108,10 +3109,19 @@ function ScopedZerodhaBasketPreviewDialog({
     }
   }
   const selectedDraftIssues = Array.from(issuesByReason.keys());
+  const savedReview = reviewRows.map(row => {
+    const stock = { symbol: row.symbol, exchange: row.exchange, score: row.signed, ...displayQuote(row.symbol, row.exchange) };
+    const metrics = isZerodhaPreview ? displayCalculations.metrics?.(stock) : undefined;
+    const action = metrics?.comparison.action ?? null;
+    const units = manualDraftUnits[row.listing] ?? suggestedDraftUnits(metrics?.actionSizing.stocks);
+    const amount = editableDraftAmount(units, metrics?.actionSizing.price ?? null);
+    const group = isZerodhaPreview ? basketActionGroup(action) : parseActionLabel(row.action ?? "") ?? "Unavailable";
+    return { row, stock, action, units, amount, group };
+  });
   const sectionGroups = [...STANDARD_ACTION_ORDER, "Unavailable"].map((action) => ({
     action,
-    label: ZERODHA_BASKET_SECTION_LABELS[action as ActionCategory] ?? action,
-    review: reviewRows.filter(row => (parseActionLabel(row.action ?? "") ?? "Unavailable") === action),
+    label: isZerodhaPreview && action === "Add more" ? "Add More" : ZERODHA_BASKET_SECTION_LABELS[action as ActionCategory] ?? action,
+    review: savedReview.filter(item => item.group === action),
     orders: basketRows
       .filter((order) => groupForOrder(order) === action && visibleScore(order.detail.calculatedScore))
       .sort(compareZerodhaBasketOrdersByScore),
@@ -3349,20 +3359,21 @@ function ScopedZerodhaBasketPreviewDialog({
                                   <div className="inline-flex items-center gap-1.5">
                                     <StockDetailsButton
                                       stock={order.stock}
+                                      savedFinal={isZerodhaPreview ? savedRow : undefined}
                                       formulaConfig={formulaConfig}
                                       market={tradingViewMarket}
                                       technicalScan={order.technicalScan}
                                       detailsData={detailsData}
                                       historicalRows={historicalRows}
                                     />
-                                    <span className="text-xs font-semibold text-slate-500">{order.exchange}</span>
+                                    {!isZerodhaPreview && <span className="text-xs font-semibold text-slate-500">{order.exchange}</span>}
                                     <TradingViewSymbolLink
                                       symbol={order.symbol}
                                       market={tradingViewMarket}
                                       exchange={order.exchange}
                                       className="underline-offset-4 transition hover:text-blue-700 hover:underline"
                                     >
-                                      {order.symbol}
+                                      {isZerodhaPreview ? stockIdentity(order.symbol, order.exchange) : order.symbol}
                                     </TradingViewSymbolLink>
                                   </div>
                                 </td>
@@ -3428,25 +3439,32 @@ function ScopedZerodhaBasketPreviewDialog({
                               </Fragment>
                               );
                             })}
-                            {group.review.map(row => {
-                              const stock = {symbol:row.symbol, exchange:row.exchange, score:row.signed, ...displayQuote(row.symbol, row.exchange)};
-                              const metrics = isZerodhaPreview ? displayCalculations.metrics?.(stock) : undefined;
-                              const units = suggestedDraftUnits(metrics?.actionSizing.stocks);
+                            {group.review.map(({ row, stock, action, units, amount }) => {
+                              const fullStock = allocationUniverse.find(item => stockIdentity(item.stock.symbol, item.stock.exchange) === row.listing)?.stock;
                               return <tr key={row.listing} data-display-only="true">
                                 <td className="px-4"><input type="checkbox" disabled aria-label={row.listing + " review only"} /></td>
-                                <td className="whitespace-nowrap px-4 py-3"><strong>{row.listing}</strong><small className="block">{row.name}</small></td>
+                                <td className="whitespace-nowrap px-4 py-3"><div className="inline-flex items-center">
+                                  {isZerodhaPreview && <StockDetailsButton stock={fullStock ?? {
+                                    key: row.listing, symbol: row.symbol, exchange: row.exchange, rows: [], swingScanEntries: [],
+                                    representative: {"Stock Symbol":row.symbol, "Stock Name":row.name, "Exchange Symbol":row.exchange},
+                                  }} savedFinal={row} formulaConfig={formulaConfig} market={tradingViewMarket} technicalScan={null}
+                                    detailsData={detailsData} historicalRows={historicalRows} />}
+                                  <div><strong>{row.listing}</strong><small className="block">{row.name}</small></div></div></td>
                                 <td className="whitespace-nowrap px-4 py-3">{renderSavedScore(row)}</td>
-                                <td>—</td><td>{row.action ?? "Unavailable"}</td><td>—</td>
+                                <td>—</td><td>{row.action ?? "Unavailable"}</td><td>{draftDirection(action) ?? (action === "Hold" ? "Hold" : "—")}</td>
                                 {displayCalculations.cells(stock)}
                                 <td className="whitespace-nowrap px-4 py-3 text-slate-700">
                                   {isZerodhaPreview ? (
-                                    <BasketDraftUnits symbol={row.symbol} action={metrics?.comparison.action ?? null} units={units}>
+                                    <BasketDraftUnits symbol={row.symbol} action={action} units={units}
+                                      onChange={value => setManualDraftUnits(current => ({ ...current, [row.listing]: value }))}>
                                       {displayCalculations.units(stock, "Units action", units)}
                                     </BasketDraftUnits>
                                   ) : "—"}
                                 </td>
                                 <td>—</td>{providerPriceCell(row.symbol, row.exchange)}
-                                <td>—</td><td>—</td><td>—</td><td>—</td>
+                                <td>—</td><td>—</td>
+                                <td className="whitespace-nowrap px-4 py-3">{isZerodhaPreview ? formatBasketCurrency(amount, basketCurrency) : "—"}</td>
+                                <td className="px-4 py-3">{isZerodhaPreview ? "Market" : "—"}</td>
                                 <td className="px-4 text-xs">{row.sizing_reason ?? "Review only"}</td>
                               </tr>;
                             })}

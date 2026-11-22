@@ -361,6 +361,8 @@ export type StockConsensus = {
   swingScanEntries: SwingScanBreakupEntry[];
 };
 
+type StockDetailListing = Pick<StockConsensus, "key" | "symbol" | "exchange" | "representative" | "rows" | "swingScanEntries" | "usIdentity">;
+
 export type TechnicalScanResult = {
   scorecardUniverse?: Map<string, SupplementalInputs>;
   scorecardSources?: number[];
@@ -417,7 +419,7 @@ function isZerodhaPortfolioSnapshot(
 
 function getZerodhaHoldingForStock(
   snapshot: ZerodhaPortfolioSnapshotDetail | IndMoneyUsPortfolioSnapshotDetail | null,
-  stock: StockConsensus,
+  stock: StockDetailListing,
 ) {
   if (!isZerodhaPortfolioSnapshot(snapshot)) return null;
   const symbol = stock.symbol.trim().toUpperCase();
@@ -425,7 +427,7 @@ function getZerodhaHoldingForStock(
     && holding.exchange.trim().toUpperCase() === stock.exchange.trim().toUpperCase()) ?? null;
 }
 
-function getZerodhaBuyTransactionsForStock(orders: ZerodhaOrder[], stock: StockConsensus): ZerodhaBuyTransaction[] {
+function getZerodhaBuyTransactionsForStock(orders: ZerodhaOrder[], stock: StockDetailListing): ZerodhaBuyTransaction[] {
   const symbol = stock.symbol.trim().toUpperCase();
   return orders
     .filter((order) => {
@@ -3736,7 +3738,7 @@ function summarizeRationales(rows: LlmBreakupRow[]) {
     .join(" | ");
 }
 
-function stockSymbolMatches(value: string | null | undefined, stock: StockConsensus) {
+function stockSymbolMatches(value: string | null | undefined, stock: StockDetailListing) {
   const normalized = normalizeStockSymbol(value || "");
   return normalized !== "UNKNOWN" && normalized === normalizeStockSymbol(stock.symbol);
 }
@@ -3762,7 +3764,7 @@ function addNormalizedStockAlias(aliases: Set<string>, value?: string | null) {
     .forEach((candidate) => aliases.add(candidate));
 }
 
-function getStockMatchAliases(stock: StockConsensus) {
+function getStockMatchAliases(stock: StockDetailListing) {
   const aliases = new Set<string>();
   [
     stock.key,
@@ -3779,7 +3781,7 @@ function getStockMatchAliases(stock: StockConsensus) {
   return aliases;
 }
 
-function stockConsensusMatches(left: StockConsensus, right: StockConsensus) {
+function stockConsensusMatches(left: StockDetailListing, right: StockDetailListing) {
   const leftAliases = getStockMatchAliases(left);
   const rightAliases = getStockMatchAliases(right);
   if (!leftAliases.size || !rightAliases.size) return false;
@@ -3789,7 +3791,7 @@ function stockConsensusMatches(left: StockConsensus, right: StockConsensus) {
 
 function getAnalysisTableRowsForStock(
   tables: Array<{ title: string; columns: string[]; rows: Record<string, string>[] }> | undefined,
-  stock: StockConsensus,
+  stock: StockDetailListing,
 ) {
   return (tables ?? []).flatMap((table) =>
     table.rows
@@ -4365,6 +4367,7 @@ const EMPTY_STOCK_DETAIL_HISTORY: HistoricalDashboardActionRow[] = [];
 
 function ScopedStockDetailsButton({
   stock,
+  savedFinal,
   market,
   technicalScan,
   detailsData,
@@ -4373,7 +4376,8 @@ function ScopedStockDetailsButton({
   formulaConfig = DEFAULT_SCORE_MATRIX_FORMULA_CONFIG,
   onMatrixDetailOpen,
 }: {
-  stock: StockConsensus;
+  stock: StockConsensus | StockDetailListing;
+  savedFinal?: { final: number | null; scores: Record<string, number | null> };
   market: SwingTradeMarket;
   technicalScan: TechnicalScanResult | null;
   detailsData: StockDetailsData;
@@ -4408,7 +4412,8 @@ function ScopedStockDetailsButton({
     () => (zerodhaHolding ? getZerodhaBuyTransactionsForStock(zerodhaOrders, stock) : []),
     [stock, zerodhaHolding, zerodhaOrders],
   );
-  const auditDetail = useMemo(() => open ? buildScoreMatrixDetail(stock, technicalScan, formulaConfig) : null, [open, stock, technicalScan, formulaConfig]);
+  const consensus = "consensusAction" in stock ? stock : null;
+  const auditDetail = useMemo(() => open && consensus ? buildScoreMatrixDetail(consensus, technicalScan, formulaConfig) : null, [open, consensus, technicalScan, formulaConfig]);
   const auditRunCount = useMemo(() => open ? new Set(stock.rows.map(row => row.meta.runId)).size : 0, [open, stock.rows]);
   const eventRows = open ? getAnalysisTableRowsForStock(
     effectiveDetailsData.eventsAnalysis?.table ? [{ title: "Events Calendar", ...effectiveDetailsData.eventsAnalysis.table }] : [],
@@ -4600,7 +4605,7 @@ function ScopedStockDetailsButton({
         <Info className="h-[18px] w-[18px]" />
       </button>
 
-      {open && auditDetail ? (
+      {open ? (
         <div
           className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 px-4 py-10"
           ref={detailPanelRef}
@@ -4622,7 +4627,7 @@ function ScopedStockDetailsButton({
           onClick={(event) => { event.stopPropagation(); if (!historicalMatrix) closeDetails(); }}
         >
           <div
-            className="min-w-0 w-full max-w-5xl rounded-2xl bg-white shadow-2xl [overflow-wrap:anywhere]"
+            className="min-w-0 w-full max-w-5xl whitespace-normal rounded-2xl bg-white shadow-2xl [overflow-wrap:anywhere]"
             style={draggableStyle}
             onClick={(event) => event.stopPropagation()}
           >
@@ -4679,7 +4684,12 @@ function ScopedStockDetailsButton({
                 />
               ) : null}
 
-              <RecommendationAuditPanel
+              {savedFinal && <section aria-label="Saved workflow scorecards">
+                <h3 className="mb-2 font-semibold">Workflow final score</h3>
+                <KeyValueGrid values={[["Final score", savedFinal.final == null ? "Unavailable" : savedFinal.final.toFixed(2) + " / 100"],
+                  ...Object.entries(savedFinal.scores).map(([card, score]): [string, ReactNode] => [card, score == null ? "Unavailable" : score.toFixed(2)])]} />
+              </section>}
+              {auditDetail && <RecommendationAuditPanel
                 key={`${market}:${stock.exchange}:${stock.symbol}:${auditDetail.rebalanceSourceRunId}`}
                 runId={auditDetail.rebalanceSourceRunId}
                 runIds={[...new Set(stock.rows.map(row => row.meta.runId))]}
@@ -4695,14 +4705,14 @@ function ScopedStockDetailsButton({
                   ...matchingHistoricalRows.map(item => ({ run_id: item.runId, timestamp: item.coveredAt, action: item.formulaAction, score: item.formulaScore, coverage: "reconstructed", origin: "current_reconstruction" as const })),
                 ]}
                 legacyHistoryHasMore={historyHasMore} legacyHistoryError={historyError}
-              />
+              />}
 
               <CollapsedSection key={`${market}:${stock.key}:consensus`} title="Provider consensus & technical scan" className="rounded-xl border border-blue-100 bg-blue-50/70 p-4" headingClassName="font-semibold text-blue-950">
                 <KeyValueGrid
                   itemClassName="border-blue-100 bg-white/75"
                   values={[
-                    ["Consensus action", <FinalActionTag key="consensus-action" action={stock.consensusAction} />],
-                    ["Consensus", `${stock.actionCounts[stock.consensusAction]}/${stock.totalSuggestions}`],
+                    ["Consensus action", consensus ? <FinalActionTag key="consensus-action" action={consensus.consensusAction} /> : "Unavailable"],
+                    ["Consensus", consensus ? `${consensus.actionCounts[consensus.consensusAction]}/${consensus.totalSuggestions}` : "Unavailable"],
                     ["Technical setup", formatTechnicalSetup(technicalScan, stock.representative)],
                     ["Confidence score", formatTechnicalConfidence(technicalScan, stock.representative)],
                     ...(zerodhaHolding

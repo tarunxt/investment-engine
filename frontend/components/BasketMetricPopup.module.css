@@ -77,3 +77,11 @@
   .details table { font-size: max(0.75rem, 11px); }
   .details th { font-size: max(0.6875rem, 11px); }
 }
+
+.calculation { margin-top: 1rem; font-size: .875rem; line-height: 1.55; overflow-wrap: anywhere; }
+.calculation h3 { font-weight: 700; margin-bottom: .5rem; }
+.calculation p { margin-top: .5rem; }
+.calculation table { width: 100%; border-collapse: collapse; font-size: .8125rem; }
+.calculation th, .calculation td { padding: .45rem .5rem; text-align: left; border-bottom: 1px solid var(--metric-line); }
+.calculation th { color: var(--metric-muted); }
+.calculation td:last-child { font-variant-numeric: tabular-nums; }

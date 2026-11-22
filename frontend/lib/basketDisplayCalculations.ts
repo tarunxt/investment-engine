@@ -21,7 +21,7 @@ export function workflowFinalMean(history: BasketScoreHistory, symbol: string, e
     Date.parse(row.covered_at) > start && Date.parse(row.covered_at) <= end);
   const sum = rows.reduce((total, row) => total + row.score, 0);
   const complete = !history.truncated && rows.length > 0 && new Set(rows.map(row => row.sequence)).size === rows.length;
-  return { rows, score: complete ? sum / rows.length : null };
+  return { rows, sum, score: complete ? sum / rows.length : null };
 }
 export function historicalMean(history: BasketScoreHistory, symbol: string, exchange: string, current?: CurrentScoreCalculation, verifiedIdentity?: {securityId:string;exchangeAliases:readonly string[]}) {
   const start = Date.parse(history.window_start), end = Date.parse(history.as_of);
@@ -80,13 +80,14 @@ export function scoreSourceIssues(history: BasketScoreHistory, sources: CurrentS
   });
 }
 export function allocateDisplayScores(stocks: { key: string; score: number | null }[], parameters: DisplayParameters) {
-  const selected = parameters.valid && Number.isSafeInteger(parameters.maximumStocks) && parameters.maximumStocks > 0 ?  stocks.filter(row => typeof row.score === 'number' && Number.isFinite(row.score) && row.score > 0).sort((a, b) => b.score! - a.score! || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0)).slice(0, parameters.maximumStocks) : [];
+  const ranked = parameters.valid && Number.isSafeInteger(parameters.maximumStocks) && parameters.maximumStocks > 0 ?  stocks.filter(row => typeof row.score === 'number' && Number.isFinite(row.score) && row.score > 0).sort((a, b) => b.score! - a.score! || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0)) : [];
+  const selected = ranked.slice(0, parameters.maximumStocks);
   const denominator = selected.reduce((sum, row) => sum + row.score!, 0);
   const weights = new Map<string, number>();
   if (Number.isFinite(denominator) && denominator > 0 && parameters.cash >= 0 && parameters.cash <= 100 && parameters.normalised >= 0 && parameters.normalised <= 100) {
     for (const row of selected) weights.set(row.key, Math.min(row.score! * (1 - parameters.cash / 100) / denominator, parameters.normalised / 100));
   }
-  return { denominator, selected, weights };
+  return { denominator, selected, ranked, weights };
 }
 // Excel ROUND(x, 0): halfway values round away from zero. Display allocations are nonnegative.
 export const excelRound = (value: number) => Math.sign(value) * Math.floor(Math.abs(value) + 0.5);
@@ -265,7 +266,7 @@ export type IndiaAllocationListing = {
 };
 type IndiaVenueTarget = {
   issuer: string; issuerScore: number | null; issuerWeight: number; weight: number;
-  shares: number | null; price: number | null; reason: string;
+  shares: number | null; price: number | null; reason: string; budgetPaise: number | null;
 };
 
 // Rank the equity once. Keep existing positions first and route new shares to one venue.
@@ -313,8 +314,12 @@ export function allocateIndiaEquities(listings: IndiaAllocationListing[], parame
       const shares = candidateShares != null && Number.isSafeInteger(candidateShares) && candidateShares >= 0 ? candidateShares : null;
       const venueWeight = members.length === 1 ? weight : budget && assets ? amounts[i] / (assets * 100) : 0;
       venues.set(row.key, {issuer, issuerScore: score, issuerWeight: weight, weight: venueWeight, shares,
-        price: row.price, reason: weight > 0 && shares === null ? "Verified prices and quantities required at each venue" : reason});
+        price: row.price, budgetPaise: budget === null ? null : amounts[i], reason: weight > 0 && shares === null ? "Verified prices and quantities required at each venue" : reason});
     });
   }
-  return {venues, denominator: allocation.denominator};
+  return {
+    venues, denominator: allocation.denominator,
+    ranks: new Map(allocation.ranked.map((row, i) => [row.key, i + 1])),
+    cutoff: allocation.selected.at(-1) ?? null,
+  };
 }

@@ -1,4 +1,4 @@
-export type BasketDraftContext = { action: string | null; originalAction?: string; suggestedUnits: number | null; source?: string; asOf?: string };
+export type BasketDraftContext = { action: string | null; directionConflict?: boolean; originalAction?: string; suggestedUnits: number | null; source?: string; asOf?: string };
 export function draftDirection(action: string | null | undefined): 'BUY' | 'SELL' | null {
   if (['Sell All','Trim','Sell'].includes(action ?? '')) return 'SELL';
   if (['Buy New','Add More','Add more','Buy'].includes(action ?? '')) return 'BUY';
@@ -19,6 +19,7 @@ export function editableDraftIssues(input: { units: number | null; price: number
   if (!['NSE','BSE'].includes(input.exchange)) issues.push('Unsupported exact exchange.');
   if (input.side !== undefined && input.side !== direction) issues.push('Order side does not match Action New direction.');
   if (input.orderKind !== undefined && input.orderKind !== 'Market') issues.push('This draft must remain Market; no silent LIMIT fallback.');
+  if (context?.directionConflict) issues.push("Whole-share sizing conflicts with the snapshot weight difference. Review holdings and prices.");
   if (!context || !direction) issues.push('Action New has no executable buy/sell direction.');
   if (input.units === null || !Number.isSafeInteger(input.units) || input.units <= 0) issues.push('Enter a positive whole-share quantity.');
   if (input.price === null || !Number.isFinite(input.price) || input.price <= 0 || !context?.source?.startsWith('Upstox ')) issues.push('Genuine Upstox LTP unavailable; no substitute price is used.');
