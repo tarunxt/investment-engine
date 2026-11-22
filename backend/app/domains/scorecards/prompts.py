@@ -56,6 +56,18 @@ def batches(stocks, card, *, pairs=None, portfolio=None):
 
 def build_prompt(revision, card, keys, pairs, research=None, *, reverse_order=False):
     manifest = revision.manifest
+    if card == "rebalance" and research and research.get("version") == 4:
+        from .rebalance_output import instructions
+        context={k:manifest.get(k) for k in ("funds","research_horizon_weeks","currency")}
+        context["portfolio_value"]=sum(s.get("value") or 0 for s in manifest["stocks"])
+        listings={}
+        for stock in manifest["stocks"]:
+            k=stock["listing"]
+            if k in keys:
+                listings[k]={**research["packets"][k],"holding":{f:stock.get(f) for f in ("origin","value","weight","average_cost")},
+                    "swing":[{"job":e.get("job_id"),"model":e.get("model"),"thesis":str(e.get("original_row",{}).get("Rationale Cruxx",""))[:300]}
+                             for e in manifest.get("evidence",[]) if e["listing"]==k]}
+        return instructions(revision.id, {"as_of":manifest["as_of"],"context":context,"listings":listings})
     if card == "technical" and research and research.get("version") == 3:
         from .technical_output import prompt
         return prompt(revision, keys, research)

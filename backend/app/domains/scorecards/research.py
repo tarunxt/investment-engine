@@ -148,7 +148,7 @@ async def supplement_indian_bars(client, result, cutoff, notices, owner, *, sess
             if diagnostics is not None:
                 diagnostics[key]={"reason":"Exact venue instrument unavailable"}
             return
-        url = f"https://api.upstox.com/v3/historical-candle/{quote(instrument, safe='')}/days/1/{end}/{end-timedelta(days=100 if sessions>5 else 24)}"
+        url = f"https://api.upstox.com/v3/historical-candle/{quote(instrument, safe='')}/days/1/{end}/{end-timedelta(days=330 if sessions>60 else 100 if sessions>5 else 24)}"
         async with semaphore:
             try:
                 if not await guard.admit():

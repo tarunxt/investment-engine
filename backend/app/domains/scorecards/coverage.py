@@ -1,5 +1,6 @@
 """Read only saved outputs from one workflow and Stage 2 revision."""
-from sqlalchemy import Integer, cast, func, select
+from collections import Counter
+from sqlalchemy import Integer, cast, func, select, true
 from sqlalchemy.dialects.postgresql import JSONB
 from app.domains.runs.models import AutoRebalanceWorkflow as Workflow
 from . import storage
@@ -69,4 +70,49 @@ async def available(db, owner, portfolio, sequence):
         result=source.result_json
         if packet.get("packets"):
             pair["pair_counts"]=summarize(result["rows"],packet["packets"],"full",calls=result["jobs"],errors=len(result.get("errors",[])))
-    return {"revision_id":rev,"listing_count":listing_count,"cards":cards}
+    out={"revision_id":rev,"listing_count":listing_count,"cards":cards}
+    if portfolio=="india":
+        rebalance, final_summary = await rebalance_summary(db,scoped,rev,postgres,owner,portfolio)
+        if rebalance:
+            cards["rebalance"]=rebalance
+        if final_summary:
+            out["final_summary"]=final_summary
+    return out
+
+
+async def rebalance_summary(db, scoped, revision, postgres, owner, portfolio):
+    from .rebalance_audit import coverage_counts, final_counts
+    data = Stage.summary_json
+    result = data["result"]
+    latest = (await db.execute(scoped(Stage.id,Stage.run_id).where(storage.of_kind("attempt",revision),
+              data["card"].as_string()=="rebalance", result["status"].as_string().in_(["completed","partial","unassessed"]))
+              .order_by(Stage.id.desc()).limit(1))).first()
+    final = (await db.execute(scoped(Stage.id,result["attempts"]["rebalance"].as_integer()).where(storage.of_kind("final",revision))
+              .order_by(Stage.id.desc()).limit(1))).first()
+    async def read_rows(record,fields, kind):
+        def specific(*columns):
+            return select(*columns).select_from(Stage).join(Workflow).where(Stage.id==record,
+                storage.of_kind(kind,revision),Workflow.user_id==owner,Workflow.portfolio==portfolio)
+        query = specific(result["rows"])
+        if not postgres:
+            return (await db.scalar(query)) or []
+        # Transfer only small scalar columns from the selected snapshot.
+        arr=func.jsonb_array_elements(cast(result["rows"],JSONB)).table_valued("value").lateral()
+        obj=cast(arr.c.value,JSONB)
+        q=specific(*(obj[name].as_string().label(name) for name in fields)).join(arr, true())
+        return (await db.execute(q)).mappings().all()
+    has_output=None
+    if latest:
+        rows=await read_rows(latest.id,("score","coverage","action"),"attempt")
+        counts=coverage_counts(rows)
+        has_output={"output_id":latest.id,"run_id":latest.run_id,"covered":counts["assessed"],"expected":len(rows),
+                    "used_output_id":final[1] if final else None,"final_id":final[0] if final else None,
+                    "counts":counts,"actions":dict(Counter(r.get("action") or "Unavailable" for r in rows))}
+    summary=None
+    if final:
+        used=final[1]
+        inputs=(has_output["expected"] if latest and used==latest.id else
+                len(await read_rows(used,("coverage",),"attempt")) if used else None)
+        rows=await read_rows(final[0],("status","action","sizing_reason"),"final")
+        summary={"id":final[0],"rebalance_output":used,"rebalance_inputs":inputs,**final_counts(rows)}
+    return has_output,summary

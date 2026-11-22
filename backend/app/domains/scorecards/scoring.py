@@ -265,6 +265,9 @@ def supported_row(row, card, key, research, job):
 
 
 def project(card, manifest, jobs):
+    if card=="rebalance" and jobs and jobs[-1][-1] and jobs[-1][-1].get("version")==4:
+        from .rebalance_output import project as project_records
+        return project_records(manifest,jobs)
     if card == "technical" and jobs and jobs[-1][-1] and isinstance(jobs[-1][-1], dict) and jobs[-1][-1].get("version") == 3:
         from .technical_output import project as project_technical
         return project_technical(manifest, jobs)

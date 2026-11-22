@@ -1,5 +1,6 @@
 "use client";
 
+import { RebalanceStockScores } from "./RebalanceStockScores";
 import { TechnicalValidation } from "./TechnicalValidation";
 import { PairwiseCoverage } from "./PairwiseCoverage";
 import { TechnicalStockScores } from "./TechnicalStockScores";
@@ -532,12 +533,12 @@ function Evidence({
           )}
           {card==="pairwise" && scores.data && <PairwiseCoverage result={scores.data}/>}
           {attempt && (
-            <details className={panel} open={card==="technical"&&market==="zerodha"?true:undefined}>
+            <details className={panel} open={(card==="technical"||card==="rebalance")&&market==="zerodha"?true:undefined}>
               <summary className="cursor-pointer font-semibold">
                 Saved stock scores · Output #{attempt.id}
               </summary>
               <Feedback query={scores} />
-              {scores.data && card==="technical" && market==="zerodha" ? (
+              {scores.data?.rebalance_audit && card==="rebalance" ? <RebalanceStockScores result={scores.data}/> : scores.data && card==="technical" && market==="zerodha" ? (
                 <TechnicalStockScores key={scores.data.id} result={scores.data} onRecover={()=>api.recover(scores.data!.id)} />
               ) : scores.data && (
                 <Table
