@@ -27,6 +27,7 @@ function kiteBoardRows(item: Stage, rebalance: Stage["info"] | undefined) {
 }
 
 function evidenceLabel(item: Stage) {
+  if (item.info.runStatus === "not started") return null;
   if (item.info.evidence?.kind === "derived") return "Derived summary · saved final execution not established";
   if (item.info.evidence?.kind === "saved") return null;
   return item.info.state === "idle" ? "Source unavailable" : null;
@@ -158,8 +159,11 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
               {item.placeOrderLabel ?? "Place Order"}
             </button>}
             {item.stage === "swing" && <div className="mt-2 rounded-lg border p-3 text-sm">
-              {tileHeader("Merge contenders", [...(onManageSource ? [{label:"Manage Stage 2 inputs",onSelect:onManageSource}] : []), { label: "Stock Flow", onSelect: onStockFlowClick }, { label: "History", href: historyHref }], item.info.recommendedStocks != null ? item.info : { state: "idle" })}
-              <p>{item.info.recommendedStocks != null ? item.info.recommendedStocks + " unique listings" : "Awaiting scan evidence"}</p></div>}
+              {tileHeader("Merge contenders", [...(onManageSource ? [{label:"Manage Stage 2 inputs",onSelect:onManageSource}] : []), { label: "Stock Flow", onSelect: onStockFlowClick }, { label: "History", href: historyHref }], (market === "zerodha" ? item.info.sourceRevision != null : item.info.recommendedStocks != null) ? {state:"completed"} : { state: "idle" })}
+              <p>{market === "zerodha"
+                ? item.info.sourceRevision ? `Revision #${item.info.sourceRevision}${item.info.sourceListingCount != null ? " · " + item.info.sourceListingCount + " merged listings" : ""}`
+                  : item.info.recommendedStocks != null ? `${item.info.recommendedStocks} Swing listings · Stage 2 inputs pending` : "Awaiting scan evidence"
+                : item.info.recommendedStocks != null ? item.info.recommendedStocks + " unique listings" : "Awaiting scan evidence"}</p></div>}
 
           </div>;
         })}

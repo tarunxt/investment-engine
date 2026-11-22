@@ -60,6 +60,8 @@ export type StageInfo = StageCost & {
   totalLlms?: number | null;
   recommendedStocks?: number | null;
   rebalanceInputs?: number | null;
+  sourceRevision?: number;
+  sourceListingCount?: number;
   finalInputs?: Record<string, unknown>;
   published?: import("@/lib/independentScorecards").AvailableOutput;
   evidenceCoverage?: string;
@@ -308,6 +310,7 @@ export function getStageOutcome(info: StageInfo) {
   if (hasStagePartialOutput(info)) return "partial";
   if (info.evidence?.kind === "derived") return "derived";
   if (status.startsWith("using ") || status === "skipped") return "skipped";
+  if (status === "interrupted before launch") return "paused";
   if (status.startsWith("paused")) return "paused";
   if (["pending", "queued"].includes(status)) return "queued";
   if (["processing", "running"].includes(status)) return "running";
@@ -376,6 +379,12 @@ export function getActionablesStageTileRows(info: StageInfo): StageTileRow[] {
 }
 
 export function getIdleStageRows(stage: WorkflowStageKey, info: StageInfo, now: number): StageTileRow[] {
+  if (info.runStatus === "not started" || info.runStatus === "interrupted before launch") {
+    const interrupted = info.runStatus === "interrupted before launch";
+    const rows = [{ label: "Workflow", value: `#${info.workflowSequence} · ${interrupted ? "Interrupted before launch" : "Not started"}` }];
+    if (interrupted) rows.push({ label: "Model jobs launched", value: "0" });
+    return rows;
+  }
   if (stage === "sync") {
     const rows: StageTileRow[] = [
       { label: "Latest sync", value: formatCompactStageTime(info.completedAt) },

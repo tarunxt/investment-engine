@@ -4462,6 +4462,10 @@ export function RebalanceWorkflowSections({
   const router = useRouter();
   const [cardEvidence, setCardEvidence] = useState<{market:WorkflowPortfolio; card:CardKey; sequence:number; tab:ScorecardTab}|null>(null);
   const [cardReview, setCardReview] = useState<{portfolio:WorkflowPortfolio;stage:CardKey|"actionables"|"source"; revision?: number; attempt?: number}|null>(null);
+  const [latestIndiaWorkflow, setLatestIndiaWorkflow] = useState<AutoRebalanceHistoryItemResponse | null>(null);
+  const [preparedSwing, setPreparedSwing] = useState<{ id: number; sequence: number; listings: number; snapshot_id: number; swing_job_ids: number[] } | null>(null);
+  const [preparingSwing, setPreparingSwing] = useState(false);
+  const [recoveryIssue, setRecoveryIssue] = useState("");
   const [sourceSelections,setSourceSelections] = useState<Partial<Record<WorkflowPortfolio,number>>>({});
   const [cardPolicies,setCardPolicies] = useState<Partial<Record<WorkflowPortfolio,CardPolicy>>>({});
   const [preflightPortfolio, setPreflightPortfolio] = useState<WorkflowPortfolio | null>(null);
@@ -4480,7 +4484,10 @@ export function RebalanceWorkflowSections({
     readPersistedWorkflow(),
   );
   const initialRunningPortfolio = useMemo(
-    () => getRestorableRunningPortfolio(initialPersisted),
+    (): WorkflowPortfolio | null => {
+      const portfolio = getRestorableRunningPortfolio(initialPersisted);
+      return portfolio === "zerodha" ? null : portfolio;
+    },
     [initialPersisted],
   );
   const [states, setStates] = useState<
@@ -4608,6 +4615,7 @@ export function RebalanceWorkflowSections({
     const restored: Partial<Record<WorkflowPortfolio, AutoRebalanceRunMetadata>> = {};
     if (!initialRunningPortfolio) return restored;
     for (const portfolio of ["zerodha", "indmoneyUs"] as const) {
+      if (portfolio !== initialRunningPortfolio) continue;
       const metadata = initialPersisted?.activeAutoRebalanceMetadata?.[portfolio];
       try {
         assertAutoRebalanceRunMetadata(metadata, portfolio === "zerodha" ? "india" : "indmoney_us");
@@ -5594,6 +5602,9 @@ ${zerodhaExecutionMode === "direct_market"
           : [],
     };
 
+    const latestIndia = historyByPortfolio.zerodha.reduce<AutoRebalanceHistoryItemResponse | null>(
+      (latest, item) => !latest || item.sequence > latest.sequence ? item : latest, null);
+    if (zerodhaHistoryResult.status === "fulfilled") setLatestIndiaWorkflow(latestIndia);
     setSavedRunCosts(current => {
       const next = { ...current };
       for (const portfolio of ["zerodha", "indmoneyUs"] as const) {
@@ -5615,6 +5626,31 @@ ${zerodhaExecutionMode === "direct_market"
       ["zerodha", "indmoneyUs"] as WorkflowPortfolio[]
     ).reduce(
       (acc, portfolio) => {
+        if (portfolio === "zerodha" && latestIndia) {
+          acc.zerodha = {} as Record<WorkflowStageKey, Partial<StageInfo>>;
+          for (const stage of STAGE_ORDER) {
+            const row = latestIndia.stages.find(entry => entry.stage === stage);
+            const info: Partial<StageInfo> = row ? summarizeAutoRebalanceHistoryStage(latestIndia, stage, usdInrRate)
+              : { workflowSequence: latestIndia.sequence, runStatus: "not started" };
+            if (row?.status === "interrupted" && !row.run_id && !row.job_id && !row.provider_count) info.runStatus = "interrupted before launch";
+            if (row?.run_id && stage === "swing") {
+              const run = runs.find(run => run.id === row.run_id && run.auto_rebalance_sequence === latestIndia.sequence && run.auto_rebalance_portfolio === "india");
+              if (run && run.run_jobs?.length) {
+                info.recommendedStocks ??= countUniqueStocksFromRun(run);
+                info.distinctModels ??= summarizeRun(run).distinctModels;
+              }
+            }
+            if (row && stage === "sync") {
+              const captured = zerodhaOverview?.latest;
+              const time = parseTimestampMs(captured?.captured_at);
+              const swingStart = latestIndia.stages.find(entry => entry.stage === "swing")?.started_at;
+              info.portfolioStockCount = getAutoRebalanceSummaryNumber(row.summary ?? {}, "portfolio_stock_count")
+                ?? (captured && time >= parseTimestampMs(latestIndia.created_at) && time <= parseTimestampMs(swingStart ?? row.completed_at) ? captured.holdings_count : null);
+            }
+            acc.zerodha[stage] = info;
+          }
+          return acc;
+        }
         const market: SwingTradeMarket =
           portfolio === "zerodha" ? "india" : "us";
         const latestSwingRun = getLatestStageRun(runs, "swing", market);
@@ -5762,6 +5798,9 @@ ${zerodhaExecutionMode === "direct_market"
       const sequence = Math.max(0,...historyByPortfolio[portfolio].map(item=>item.sequence));
       if (!sequence) return;
       const saved = await scorecardApi(apiService,portfolio==="zerodha"?"india":"indmoney_us").coverage(sequence).catch(()=>null);
+      if (portfolio === "zerodha" && saved?.revision_id) {
+        Object.assign(nextByPortfolio.zerodha.swing, {sourceRevision:saved.revision_id, sourceListingCount:saved.listing_count});
+      }
       for(const card of ["technical","pairwise"] as const){
         const output=saved?.cards[card];
         if(!output) continue;
@@ -5781,6 +5820,12 @@ ${zerodhaExecutionMode === "direct_market"
           const existing = current[portfolio][stage];
           const incoming = nextByPortfolio[portfolio][stage];
           if (isWorkflowExecutingRef.current || runningPortfolio === portfolio) return;
+          if (portfolio === "zerodha") {
+            if (latestIndia && (existing.workflowSequence ?? 0) <= latestIndia.sequence) {
+              next[portfolio][stage] = { ...incoming, state: "idle" };
+            }
+            return;
+          }
           if (existing.state === "running" || existing.state === "queued") return;
           const existingAt = parseTimestampMs(existing.completedAt ?? existing.endedAt);
           const incomingAt = parseTimestampMs(incoming.completedAt);
@@ -5790,7 +5835,7 @@ ${zerodhaExecutionMode === "direct_market"
             : {};
           // Replace one run's evidence atomically: spreading the prior stage leaks
           // old errors and partial counts into a new successful result.
-          const historyAvailable = (portfolio === "zerodha" ? zerodhaHistoryResult : indmoneyHistoryResult).status === "fulfilled";
+          const historyAvailable = indmoneyHistoryResult.status === "fulfilled";
           next[portfolio][stage] = historyAvailable && incoming.evidence && incomingAt > 0 && incomingAt >= existingAt
             ? { ...incoming, ...snapshotCount, state: "idle" }
             : { ...existing, ...snapshotCount };
@@ -5815,6 +5860,23 @@ ${zerodhaExecutionMode === "direct_market"
       window.removeEventListener("focus", refreshSavedEvidence);
     };
   }, [loadLatestIdleStageInfo]);
+
+  useEffect(() => {
+    if (runningPortfolio || !latestIndiaWorkflow || !["pending", "queued", "processing", "running"].includes(latestIndiaWorkflow.status)) return;
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === "visible") void loadLatestIdleStageInfo().catch(() => {});
+    }, 15000);
+    return () => window.clearInterval(interval);
+  }, [runningPortfolio, latestIndiaWorkflow?.status, loadLatestIdleStageInfo]);
+
+  useEffect(() => {
+    if (runningPortfolio !== "zerodha") return;
+    const warn = (event: BeforeUnloadEvent) => {
+      if (isWorkflowExecutingRef.current) { event.preventDefault(); event.returnValue = ""; }
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [runningPortfolio]);
 
   const updateStage = useCallback(
     (
@@ -5915,6 +5977,7 @@ ${zerodhaExecutionMode === "direct_market"
           failed_llms: info.failedLlms ?? null,
           recommended_stocks: info.recommendedStocks ?? null,
           rebalance_inputs: info.rebalanceInputs ?? null,
+          ...(info.portfolioStockCount != null ? { portfolio_stock_count: info.portfolioStockCount } : {}),
           ...(info.finalInputs ? { final_inputs: info.finalInputs } : {}),
           ...(info.evidenceCoverage ? { evidence_coverage: info.evidenceCoverage } : {}),
           ...(info.distinctModels != null ? { distinct_models: info.distinctModels } : {}),
@@ -6893,14 +6956,15 @@ ${zerodhaExecutionMode === "direct_market"
       portfolio: WorkflowPortfolio,
       indmoneyPayload?: IndMoneyUsPortfolioSnapshotCreateRequest,
       savedSnapshot?: IndMoneyUsPortfolioSnapshotDetail,
+      recovery?: { sequence: number; revision: number; analysisOnly: boolean },
     ) => {
       if (!isCurrentWorkflowOwner(runtimeOwner)) return;
       // Kill may clear the visible running portfolio before its asynchronous
       // work has unwound. Do not let a new run steal that work's identity.
       if (isWorkflowExecutingRef.current) return;
       const market: SwingTradeMarket = portfolio === "zerodha" ? "india" : "us";
-      const runSpecificMode = specificMode[portfolio];
-      const stagesToRun = new Set(selectedStages[portfolio]);
+      const runSpecificMode = Boolean(recovery) || specificMode[portfolio];
+      const stagesToRun = new Set<WorkflowStageKey>(recovery ? [...cards, "actionables"] : selectedStages[portfolio]);
       if (runSpecificMode && stagesToRun.size === 0) {
         window.alert("Select at least one stage to run.");
         return;
@@ -6948,7 +7012,7 @@ ${zerodhaExecutionMode === "direct_market"
       ];
       if (!shouldRunCurrentStage("swing") && (cards.some(shouldRunCurrentStage) || shouldRunCurrentStage("actionables"))) {
         checks.push({label:"Stage 2 publication", run:async()=>{
-          const id=sourceSelections[portfolio];
+          const id=recovery?.revision ?? sourceSelections[portfolio];
           if (id) { await scorecardApi(apiService, portfolio==="zerodha"?"india":"indmoney_us").read(id); return; }
           if (![...selectedInputs[portfolio].rebalance].some(key=>/^run:[1-9]\d*:job:[1-9]\d*$/.test(key))) throw new Error("Select a Stage 2 revision or choose Swing to publish one.");
         }});
@@ -7005,7 +7069,7 @@ ${zerodhaExecutionMode === "direct_market"
       let runMetadata: AutoRebalanceRunMetadata;
       let auditSession: AutoRebalanceAuditSession;
       try {
-        runMetadata = await reserveAutoRebalanceRunMetadata(portfolio, analysisOnlyRuns[portfolio]);
+        runMetadata = await reserveAutoRebalanceRunMetadata(portfolio, recovery?.analysisOnly || analysisOnlyRuns[portfolio]);
         assertAutoRebalanceRunMetadata(runMetadata, portfolio === "zerodha" ? "india" : "indmoney_us");
         auditSession = getAuditSession(portfolio, runMetadata);
       } catch (error) {
@@ -7143,6 +7207,7 @@ ${zerodhaExecutionMode === "direct_market"
             await markCompleted(portfolio, "sync", {
               completedAt: overview.latest?.captured_at,
               portfolioStockCount: overview.latest?.holdings_count ?? null,
+              finalInputs: { snapshot_at: overview.latest?.captured_at },
               runStatus: "synced",
             });
           } else if (indmoneyPayload) {
@@ -7172,7 +7237,7 @@ ${zerodhaExecutionMode === "direct_market"
           completeSkippedStage(
             portfolio,
             "sync",
-            "Using last synced portfolio",
+            recovery ? `Using holdings from workflow #${recovery.sequence}` : "Using last synced portfolio",
           );
         }
 
@@ -7230,7 +7295,7 @@ ${zerodhaExecutionMode === "direct_market"
           completeSkippedStage(
             portfolio,
             "swing",
-            "Using latest completed swing scan",
+            recovery ? `Using Swing from workflow #${recovery.sequence}` : "Using latest completed swing scan",
           );
         }
 
@@ -7242,7 +7307,9 @@ ${zerodhaExecutionMode === "direct_market"
         const api = scorecardApi(apiService, broker);
         const selectedCards = cards.filter(shouldRunCurrentStage);
         if (generatedSwingRun || selectedCards.length || shouldRunCurrentStage("actionables")) {
-          let revision = sourceSelections[portfolio];
+          if (selectedCards.length) currentStage = selectedCards[0];
+          else if (shouldRunCurrentStage("actionables")) currentStage = "actionables";
+          let revision = recovery?.revision ?? sourceSelections[portfolio];
           const swingSelection = selectedInputs[portfolio].rebalance;
           const explicitJobs = [...swingSelection].flatMap(key => {
             const match = /^run:[1-9]\d*:job:([1-9]\d*)$/.exec(key);
@@ -7261,6 +7328,7 @@ ${zerodhaExecutionMode === "direct_market"
           if (stopIfRequested()) return;
           const source = await api.read(revision);
           if (stopIfRequested()) return;
+          updateStage(portfolio, "swing", {sourceRevision: source.id, sourceListingCount: source.manifest.stocks.length});
           const chosen: Partial<Record<CardKey,number>> = {};
           for (const item of source.attempts) if (!chosen[item.card]) chosen[item.card]=item.id;
           const runCard = async (card:CardKey) => {
@@ -7308,7 +7376,7 @@ ${zerodhaExecutionMode === "direct_market"
         // must wait for every metadata write and matching durable server truth.
         const historySaved = await auditSession.verifyCompletion(STAGE_ORDER);
         if (!historySaved || cancelRequestedRef.current) return;
-        if (shouldRunCurrentStage("actionables")) {
+        if (shouldRunCurrentStage("actionables") && !recovery?.analysisOnly && !analysisOnlyRuns[portfolio]) {
           try {
             await apiService.queueAutoRebalanceCompletionEmail({
               portfolio: runMetadata.auto_rebalance_portfolio,
@@ -7637,8 +7705,16 @@ ${zerodhaExecutionMode === "direct_market"
       typeof sequence === "number" && Number.isSafeInteger(sequence) && sequence > 0,
     );
     const displayedWorkflowSequence =
-      activeAutoRebalanceMetadata[section.portfolio]?.auto_rebalance_sequence ??
+      (runningPortfolio === section.portfolio ? activeAutoRebalanceMetadata[section.portfolio]?.auto_rebalance_sequence : null) ??
       (savedWorkflowSequences.length ? Math.max(...savedWorkflowSequences) : null);
+    const recoverable = section.portfolio === "zerodha" && latestIndiaWorkflow?.sequence === displayedWorkflowSequence &&
+      ["interrupted", "failed"].includes(latestIndiaWorkflow.status) &&
+      latestIndiaWorkflow.stages.some(row => row.stage === "sync" && row.status === "completed") &&
+      latestIndiaWorkflow.stages.some(row => row.stage === "swing" && (["completed", "partial"].includes(row.status) ||
+        (row.provider_count > 0 && row.completed_provider_count === row.provider_count))) &&
+      !latestIndiaWorkflow.stages.some(row => row.stage !== "sync" && row.stage !== "swing" &&
+        (row.run_id || row.job_id || row.provider_count || ["completed", "partial"].includes(row.status)));
+    const prepared = preparedSwing?.sequence === displayedWorkflowSequence ? preparedSwing : null;
     const openCard = (card: CardKey, tab?: ScorecardTab) => {
       const sequence = states[section.portfolio][card].workflowSequence ?? displayedWorkflowSequence;
       if (tab && sequence) setCardEvidence({market:section.portfolio, card, sequence, tab});
@@ -7712,6 +7788,25 @@ ${zerodhaExecutionMode === "direct_market"
               Last/Current run{displayedWorkflowSequence !== null ? ` #${displayedWorkflowSequence}` : ""}:{" "}
               {formatCompactStageTime(lastRunByPortfolio[section.portfolio])}
             </p>
+            {recoverable && latestIndiaWorkflow && !isBusy && <div className="mt-3 space-y-1 text-sm">
+              {prepared ? <>
+                <p role="status">Stage 2 revision #{prepared.id} · {prepared.listings} merged listings · holdings snapshot #{prepared.snapshot_id} · Swing jobs {prepared.swing_job_ids.map(id => "#"+id).join(", ")}</p>
+                <Button type="button" onClick={() => void runWorkflow("zerodha", undefined, undefined, {
+                  revision: prepared.id, sequence: prepared.sequence, analysisOnly: latestIndiaWorkflow.side_effect_policy?.mode === "analysis_only",
+                })}>Run scorecards from these inputs</Button>
+              </> : <Button type="button" disabled={preparingSwing} onClick={async () => {
+                setPreparingSwing(true); setRecoveryIssue("");
+                try {
+                  const saved = await scorecardApi(apiService, "india").prepareSwingSource(latestIndiaWorkflow.sequence);
+                  setPreparedSwing(saved);
+                  setSourceSelections(prev => ({...prev, zerodha: saved.id}));
+                  await loadLatestIdleStageInfo();
+                } catch (error) { setRecoveryIssue(normalizeError(error)); }
+                finally { setPreparingSwing(false); }
+              }}>{preparingSwing ? "Preparing…" : "Prepare saved Swing inputs"}</Button>}
+              {!prepared && <p>Uses this workflow’s saved holdings and Swing results. No model charge.</p>}
+              {recoveryIssue && <p role="alert" className="text-red-700">{recoveryIssue}</p>}
+            </div>}
             {stageLedger && !surface ? <WorkflowRunBoundary historyHref={URLs.routes.console.autoRebalanceRuns(section.portfolio)} /> : null}
 
           </div>
@@ -7883,7 +7978,7 @@ ${zerodhaExecutionMode === "direct_market"
                   : undefined
               }
               onPlaceOrderClick={
-                stage === "actionables"
+                stage === "actionables" && !(section.portfolio === "zerodha" && finalStage.runStatus === "not started")
                   ? section.portfolio === "zerodha"
                     ? () => void openZerodhaBasketPreview(displayedWorkflowSequence ? {sequence:displayedWorkflowSequence, formula:scoreMatrixFormulaConfig} : undefined)
                     : () => void openIndmoneyBasketPreview(displayedWorkflowSequence ? {sequence:displayedWorkflowSequence, formula:scoreMatrixFormulaConfig} : undefined)

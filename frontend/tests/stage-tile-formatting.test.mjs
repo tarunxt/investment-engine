@@ -141,3 +141,13 @@ test('zero published coverage is unassessed even when a model job completed', ()
   const {getStageOutcome}=load(workflowPath,['getStageOutcome','hasStagePartialOutput']);
   assert.equal(getStageOutcome({state:'idle',runStatus:'completed',published:{covered:0,expected:16}}),'unassessed');
 });
+
+test('unlaunched stages show only the current workflow and a verified zero worker count', () => {
+  for (const stage of ['technical', 'threats', 'pairwise', 'actionables']) {
+    const info = {state:'idle', workflowSequence:245, runStatus:'not started'};
+    assert.deepEqual(ui.getIdleStageRows(stage, info, 0), [{label:'Workflow', value:'#245 · Not started'}]);
+    assert.deepEqual(ui.getIdleStageRows(stage, {...info, runStatus:'interrupted before launch'}, 0), [
+      {label:'Workflow',value:'#245 · Interrupted before launch'}, {label:'Model jobs launched',value:'0'},
+    ]);
+  }
+});
