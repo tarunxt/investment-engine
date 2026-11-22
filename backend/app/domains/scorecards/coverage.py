@@ -7,7 +7,7 @@ from .storage import Stage
 
 
 def summary(card, rows):
-    if card == "technical":
+    if card in ("technical","threats"):
         return sum(r.get("score") is not None for r in rows),len(rows)
     # Each verdict appears once on each side of its pair.
     return sum(r.get("valid",0) for r in rows)//2, len(rows)*(len(rows)-1)//2
@@ -36,22 +36,31 @@ async def available(db, owner, portfolio, sequence):
         # Aggregate historical JSON on the server. The dashboard never needs raw responses.
         arr=func.jsonb_array_elements(cast(rows_expr,JSONB)).table_valued("value").alias("stock")
         valid=select(func.sum(cast(cast(arr.c.value,JSONB)["valid"].as_string(),Integer))).select_from(arr).correlate(Stage).scalar_subquery()
-        projections=[func.jsonb_array_length(cast(rows_expr,JSONB)),data["result"]["scored"].as_integer(),valid]
+        stock=cast(arr.c.value,JSONB)
+        def count_rows(condition):
+            return select(func.count()).select_from(arr).where(condition).correlate(Stage).scalar_subquery()
+        returned=count_rows(func.jsonb_array_length(stock["raw_rows"])>0)
+        complete=count_rows(stock["coverage"].as_string()=="Complete")
+        projections=[func.jsonb_array_length(cast(rows_expr,JSONB)),data["result"]["scored"].as_integer(),valid,returned,complete]
     else:
         projections=[rows_expr]
-    items = (await db.execute(scoped(Stage.id,Stage.run_id,data["card"].as_string(),data["result"]["scoring_version"].as_integer(),data["result"]["pair_counts"],*projections)
-             .where(storage.of_kind("attempt",rev),data["card"].as_string().in_(["technical","pairwise"]))
+    items = (await db.execute(scoped(Stage.id,Stage.run_id,data["card"].as_string(),data["result"]["scoring_version"].as_integer(),data["result"]["pair_counts"],data["result"]["status"].as_string(),*projections)
+             .where(storage.of_kind("attempt",rev),data["card"].as_string().in_(["technical","pairwise","threats"] if portfolio=="india" else ["technical","pairwise"]))
              .order_by(Stage.id.desc()))).all()
     cards = {}
     versions={}
-    for output,run,card,version,pair_counts,*info in items:
+    for output,run,card,version,pair_counts,status,*info in items:
         if not info[0]:
             continue
         if postgres:
-            n,scored,judgments=info
-            got,total=(scored or 0,n) if card=="technical" else ((judgments or 0)//2,n*(n-1)//2)
+            n,scored,judgments,returned,complete=info
+            got,total=(scored or 0,n) if card in ("technical","threats") else ((judgments or 0)//2,n*(n-1)//2)
         else:
             got,total=summary(card,info[0])
+            returned=sum(bool(r.get("raw_rows")) for r in info[0])
+            complete=sum(r.get("coverage")=="Complete" for r in info[0])
+        if card=="threats" and card in cards:
+            continue
         if pair_counts:
             got,total=pair_counts["judged"],pair_counts["expected"]
         v3=(card=="technical" and version==3) or bool(pair_counts)
@@ -60,6 +69,8 @@ async def available(db, owner, portfolio, sequence):
         versions[card]=v3
         cards[card] = {"output_id":output,"run_id":run,"covered":got,"expected":total,
                        "used_output_id":(final[1] or {}).get(card) if final else None,"final_id":final[0] if final else None,**({"pair_counts":pair_counts} if pair_counts else {})}
+        if card=="threats":
+            cards[card].update(threat_returned=returned,threat_complete=complete,threat_status=status)
     pair=cards.get("pairwise")
     if pair and portfolio=="india" and not pair.get("pair_counts"):
         from .pair_evidence import attempt_packet

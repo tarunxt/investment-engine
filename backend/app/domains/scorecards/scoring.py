@@ -265,6 +265,9 @@ def supported_row(row, card, key, research, job):
 
 
 def project(card, manifest, jobs):
+    if card == "threats" and any(isinstance(j[-1],dict) and j[-1].get("threat_version")==2 for j in jobs):
+        from .threat_output import project as project_threats
+        return project_threats(manifest, jobs)
     if card == "technical" and jobs and jobs[-1][-1] and isinstance(jobs[-1][-1], dict) and jobs[-1][-1].get("version") == 3:
         from .technical_output import project as project_technical
         return project_technical(manifest, jobs)

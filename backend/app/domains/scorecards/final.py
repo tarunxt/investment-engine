@@ -42,7 +42,7 @@ def calculate_final(manifest, attempts, config):
                     score=data.get("legacy_score")
                     status="Complete" if score is not None else "Unassessed"
                     terms={"candles":score}
-            if factors:
+            if factors and (card != "threats" or manifest.get("market") != "india" or score is not None):
                 score,divisor=weighted(terms,factors)
                 if divisor < sum(factors.values()):
                     status="Partial"

@@ -97,7 +97,18 @@ def build_prompt(revision, card, keys, pairs, research=None, *, reverse_order=Fa
         return marker+"\n[PAIR_RECORDS_V2]\n[STAGE2_SHARED_EVIDENCE_ONLY]\n"+instructions+"\n"+json.dumps({
             "as_of":manifest["as_of"],"packets":{k:research["packets"][k] for k in keys},
             "assigned_pairs":assigned}, ensure_ascii=False,separators=(",",":"))
-    if research is not None:
+    if card == "threats" and research and research.get("threat_version") == 2:
+        targets = {k:research["targets"][k] for k in keys}
+        matrix = {k:{c:research["matrix"][k][c] for c in targets[k]} for k in keys}
+        ids = {sid for cells in matrix.values() for sources in cells.values() for sid in sources}
+        bundle.update(category_sources=matrix, sources={sid:research["sources"][sid] for sid in sorted(ids)})
+        template += ("\nUse only the supplied frozen sources for the assigned categories. Cite source_id in each Evidence "
+                     "JSON object. Source IDs point to documents and prices, never to an assumed exposure. Give each "
+                     "shared scenario one stable ID, category and likelihood. Define its trigger and likelihood once; other listings may reference that ID with their own impact, downside, confidence and source. Explain the causal exposure for each "
+                     "listing in rationale. Use only the excerpt or observations provided. A release mentioning "
+                     "another issuer alone cannot justify exposure. For every unsupported category return a dash. "
+                     "Leave unassigned categories empty. The server computes all scores.\n")
+    elif research is not None:
         bundle["fresh_research"] = {k:research.get("listings",{}).get(k,[]) for k in keys}
         bundle["research_notices"] = research.get("notices",[])
         template += "\nCite an exact retrieved URL and its observation time. A filing index establishes filing identity and date only. Use the underlying document or exchange notice for substantive claims. A five-candle trend requires five supported completed sessions on a consistent price scale. Report any missing or unverified signal.\n"
@@ -123,5 +134,6 @@ def build_prompt(revision, card, keys, pairs, research=None, *, reverse_order=Fa
         template += "\n## 1. Latest Portfolio Snapshot\n| Exchange | Stock Symbol | Current Units |\n|---|---|---|\n"
         template += "\n".join(f"| {r['exchange']} | {r['symbol']} | {r['units']} |" for r in rows if r["origin"] in ("holding","both"))
         template += "\n## 2. Stage 2 evidence\n"
-    return marker + "\n[ENABLE_WEB_SEARCH]\n" + template + "\n" + json.dumps(bundle, ensure_ascii=False, separators=(",", ":"))
+    web_marker = "\n" if card=="threats" and research and research.get("threat_version")==2 else "\n[ENABLE_WEB_SEARCH]\n"
+    return marker + web_marker + template + "\n" + json.dumps(bundle, ensure_ascii=False, separators=(",", ":"))
 
