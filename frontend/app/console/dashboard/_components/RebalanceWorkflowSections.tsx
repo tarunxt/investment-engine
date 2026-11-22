@@ -3428,13 +3428,22 @@ function ScopedZerodhaBasketPreviewDialog({
                             })}
                             {group.review.map(row => {
                               const stock = {symbol:row.symbol, exchange:row.exchange, score:row.signed, ...displayQuote(row.symbol, row.exchange)};
+                              const metrics = isZerodhaPreview ? displayCalculations.metrics?.(stock) : undefined;
+                              const units = suggestedDraftUnits(metrics?.actionSizing.stocks);
                               return <tr key={row.listing} data-display-only="true">
                                 <td className="px-4"><input type="checkbox" disabled aria-label={row.listing + " review only"} /></td>
                                 <td className="whitespace-nowrap px-4 py-3"><strong>{row.listing}</strong><small className="block">{row.name}</small></td>
                                 <td className="whitespace-nowrap px-4 py-3">{renderSavedScore(row)}</td>
                                 <td>—</td><td>{row.action ?? "Unavailable"}</td><td>—</td>
                                 {displayCalculations.cells(stock)}
-                                <td>—</td><td>—</td>{providerPriceCell(row.symbol, row.exchange)}
+                                <td className="whitespace-nowrap px-4 py-3 text-slate-700">
+                                  {isZerodhaPreview ? (
+                                    <BasketDraftUnits symbol={row.symbol} action={metrics?.comparison.action ?? null} units={units}>
+                                      {displayCalculations.units(stock, "Units action", units)}
+                                    </BasketDraftUnits>
+                                  ) : "—"}
+                                </td>
+                                <td>—</td>{providerPriceCell(row.symbol, row.exchange)}
                                 <td>—</td><td>—</td><td>—</td><td>—</td>
                                 <td className="px-4 text-xs">{row.sizing_reason ?? "Review only"}</td>
                               </tr>;
