@@ -36,7 +36,7 @@ class Document:
 
 
 def prefix(kind, revision_id=None):
-    code = {"revision": "r", "attempt": "a", "final": "f"}[kind]
+    code = {"revision": "r", "attempt": "a", "final": "f", "packet": "p"}[kind]
     return "sc1." + code + "." + (f"{revision_id:x}." if revision_id is not None else "")
 
 

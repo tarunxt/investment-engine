@@ -5743,6 +5743,20 @@ ${zerodhaExecutionMode === "direct_market"
       >,
     );
 
+    await Promise.all((["zerodha","indmoneyUs"] as const).map(async portfolio => {
+      const sequence = Math.max(0,...historyByPortfolio[portfolio].map(item=>item.sequence));
+      if (!sequence) return;
+      const saved = await scorecardApi(apiService,portfolio==="zerodha"?"india":"indmoney_us").coverage(sequence).catch(()=>null);
+      for(const card of ["technical","pairwise"] as const){
+        const output=saved?.cards[card];
+        if(!output) continue;
+        const stage=nextByPortfolio[portfolio][card];
+        if(stage.workflowSequence && stage.workflowSequence!==sequence) continue;
+        stage.published=output;
+        stage.evidenceCoverage=`${output.covered}/${output.expected} ${card==="pairwise"?"pairs judged":"stocks scored"}`;
+        stage.workflowSequence=sequence;
+      }
+    }));
     setStates((current) => {
       if (!isCurrentWorkflowOwner(runtimeOwner) || generation !== savedStageReadGeneration.current) return current;
       const next = { ...current };
@@ -7831,7 +7845,7 @@ ${zerodhaExecutionMode === "direct_market"
                       )
               }
               onInfoClick={stage !== "sync" && stage !== "actionables"
-                  ? () => void showStageLlmInfo(section.portfolio, stage)
+                  ? () => (stage==="technical" || stage==="pairwise") ? openCard(stage,"output") : void showStageLlmInfo(section.portfolio, stage)
                   : undefined
               }
               onInputClick={stage === "pairwise" ? () => openCard(stage,"inputs") : isCard(stage) ? () => openInputSelection(section.portfolio,stage) : stage==="actionables" ? ()=>setCardReview({portfolio:section.portfolio,stage}) :

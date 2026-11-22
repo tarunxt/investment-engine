@@ -1484,7 +1484,14 @@ def execute_ai_job(self, job_id: int) -> None:
                 pass  # A partial supplement can still contribute validated rows.
             content = merge_technical_rows(content, supplement)
         batch = scorecard_batch_for_job(job)
-        if batch and batch.get("card") in {"pairwise", "technical", "threats"}:
+        if batch and batch.get("pairs_v2"):
+            from app.domains.scorecards.pair_records import records
+            accepted = records(content,batch["pairs_v2"],batch["packet_sources"],batch["as_of"])
+            if not accepted:
+                raise RuntimeError("Pairwise output contained no valid assigned pair records")
+            if len(accepted) < len(batch["pairs_v2"]):
+                partial_price_notice = f"Pairwise received {len(accepted)}/{len(batch['pairs_v2'])} assigned pair records"
+        elif batch and batch.get("card") in {"pairwise", "technical", "threats"}:
             # Swing evidence embedded in a card can contain an entire stock-recommendation header.
             # Validate the actual assignment before any legacy prompt-text heuristics run.
             from app.domains.scorecards.scoring import parse_rows

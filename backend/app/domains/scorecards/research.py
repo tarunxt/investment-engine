@@ -114,7 +114,7 @@ def indian_news(data, venue, stocks, cutoff):
     return matches
 
 
-def upstox_daily_bars(payload, cutoff, url):
+def upstox_daily_bars(payload, cutoff, url, limit=10):
     sessions = {}
     for row in (payload.get("data") or {}).get("candles") or []:
         if not isinstance(row, list) or len(row) < 6:
@@ -129,13 +129,13 @@ def upstox_daily_bars(payload, cutoff, url):
         item = bar(day, INDIA, row[1:6], url, cutoff)
         if item:
             sessions[day] = item
-    return [sessions[day] for day in sorted(sessions, reverse=True)[:10]]
+    return [sessions[day] for day in sorted(sessions, reverse=True)[:limit]]
 
 
-async def supplement_indian_bars(client, result, cutoff, notices, owner):
+async def supplement_indian_bars(client, result, cutoff, notices, owner, *, sessions=5):
     from app.domains.zerodha.upstox_quote_guard import QuoteGuard, redis_client
     from app.domains.zerodha.upstox_quotes import load_instruments
-    missing = [key for key, items in result.items() if len({r["as_of"][:10] for r in items if r["kind"] == "daily_bar"}) < 5]
+    missing = [key for key, items in result.items() if len({r["as_of"][:10] for r in items if r["kind"] == "daily_bar"}) < sessions]
     if not missing:
         return
     mapping = await load_instruments(client)
@@ -146,7 +146,7 @@ async def supplement_indian_bars(client, result, cutoff, notices, owner):
         instrument = mapping.get(key)
         if not instrument:
             return
-        url = f"https://api.upstox.com/v3/historical-candle/{quote(instrument, safe='')}/days/1/{end}/{end-timedelta(days=24)}"
+        url = f"https://api.upstox.com/v3/historical-candle/{quote(instrument, safe='')}/days/1/{end}/{end-timedelta(days=100 if sessions>5 else 24)}"
         async with semaphore:
             try:
                 if not await guard.admit():
@@ -156,8 +156,8 @@ async def supplement_indian_bars(client, result, cutoff, notices, owner):
                 if response.status_code == 429:
                     await guard.backoff(response.headers.get("Retry-After"))
                 response.raise_for_status()
-                bars = upstox_daily_bars(response.json(), cutoff, url)
-                if len(bars) >= 5:
+                bars = upstox_daily_bars(response.json(), cutoff, url, limit=max(10,sessions))
+                if len(bars) >= max(5, len({r["as_of"][:10] for r in result[key] if r["kind"]=="daily_bar"})):
                     result[key] = [r for r in result[key] if r["kind"] != "daily_bar"] + bars
             except (ValueError, TypeError, AttributeError, httpx.HTTPError):
                 notices.append("Historical candles unavailable: " + key)
@@ -169,7 +169,13 @@ async def supplement_indian_bars(client, result, cutoff, notices, owner):
 async def collect(manifest, card, *, username=None):
     stocks, cutoff = manifest["stocks"], datetime.fromisoformat(manifest["as_of"])
     result = {s["listing"]:[] for s in stocks}
+    extended = manifest["market"]=="india" and card in ("technical","pairwise")
+    benchmark_key = "NSE:NIFTYBEES"
+    if extended:
+        result.setdefault(benchmark_key, [])
     lookup = {(s["exchange"],s["symbol"]):s["listing"] for s in stocks}
+    if extended:
+        lookup[("NSE","NIFTYBEES")] = benchmark_key
     semaphore = asyncio.Semaphore(5)
     notices = []
     async with httpx.AsyncClient(timeout=4.5, follow_redirects=False, headers={"User-Agent":"Cred-X market research (https://cred-x.in)",
@@ -186,6 +192,8 @@ async def collect(manifest, card, *, username=None):
         requests = []
         if manifest["market"] == "india":
             venues = {s["exchange"] for s in stocks}
+            if extended:
+                venues.add("NSE")
             for offset in range(12):
                 day = cutoff.astimezone(INDIA).date()-timedelta(days=offset)
                 if day.weekday()>=5:
@@ -242,7 +250,7 @@ async def collect(manifest, card, *, username=None):
             from app.domains.zerodha.upstox_quotes import configured_for
             if configured_for(manifest["owner_id"], username):
                 try:
-                    await asyncio.wait_for(supplement_indian_bars(client, result, cutoff, notices, manifest["owner_id"]), timeout=17)
+                    await asyncio.wait_for(supplement_indian_bars(client, result, cutoff, notices, manifest["owner_id"], sessions=60) if extended else supplement_indian_bars(client, result, cutoff, notices, manifest["owner_id"]), timeout=17)
                 except (TimeoutError, httpx.HTTPError, ValueError, OSError, KeyError, EOFError, RuntimeError, RedisError):
                     notices.append("Upstox historical candles unavailable")
         if manifest["market"]=="us" and card!="technical":
@@ -270,5 +278,13 @@ async def collect(manifest, card, *, username=None):
                 notices.append("Filing retrieval time limit reached")
     for key,items in result.items():
         ordered=sorted(items,key=lambda i:i["as_of"],reverse=True)
-        result[key]=[i for i in ordered if i["kind"]=="daily_bar"][:10]+[i for i in ordered if i["kind"]!="daily_bar"][:6]
-    return {"listings":result, "notices":sorted(set(notices))}
+        result[key]=[i for i in ordered if i["kind"]=="daily_bar"][:60 if extended else 10]+[i for i in ordered if i["kind"]!="daily_bar"][:6]
+    payload = {"listings":result, "notices":sorted(set(notices))}
+    if extended:
+        payload["version"] = 2
+        payload["benchmark"] = list(result.get(benchmark_key, []))
+        if benchmark_key not in {s["listing"] for s in stocks}:
+            result.pop(benchmark_key, None)
+        from .pair_records import evidence_packets
+        payload["packets"] = evidence_packets(payload, manifest["as_of"])
+    return payload

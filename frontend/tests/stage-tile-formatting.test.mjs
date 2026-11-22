@@ -127,3 +127,12 @@ test('stage and run costs use rupees with the reference rate when FX is unavaila
   assert.equal(formatRebalanceCost(sumRebalanceCosts([{costUsd: 1, costInr: 80}, {costUsd: 0.1}, {}], 90)), '₹89.00 (partial estimate)');
   assert.equal(formatRebalanceCost(sumRebalanceCosts([{}], 0)), 'Usage unavailable');
 });
+
+test('complete saved evidence can coexist with a historical execution error and different Stage 4 source', () => {
+  const info={state:'idle',runStatus:'failed',lastRunId:537,error:'Cancelled by user',
+    published:{output_id:447,run_id:539,covered:16,expected:16,used_output_id:433,final_id:450},evidenceCoverage:'16/16 stocks scored'};
+  const rows=Object.fromEntries(ui.getLlmStageTileRows(info,0).map(r=>[r.label,r.value]));
+  assert.equal(rows['Available output'],'#447 · run #539');
+  assert.equal(rows['Recorded execution'],'#537 · failed');
+  assert.equal(rows['Stage 4 used'],'Output #433 · final #450');
+});

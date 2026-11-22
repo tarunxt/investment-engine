@@ -314,10 +314,13 @@ function Evidence({
   const stage = history.data?.stages.find((s) => s.stage === card);
   const { runs, standalone } =
     history.data && stage ? stageExecutions(history.data, stage) : { runs: [], standalone: [] };
+  const readCoverage = useCallback(()=>api.coverage(sequence),[api,sequence,refresh]);
+  const coverage = useRead(readCoverage,card==="technical" || card==="pairwise");
+  const published = card==="technical" || card==="pairwise" ? coverage.data?.cards[card] : undefined;
   const run =
     execution !== null
       ? runs.find((r) => r.id === execution)
-      : (runs.find((r) => r.id === stage?.run_id) ?? runs[0]);
+      : (runs.find((r) => r.id === (published?.run_id ?? stage?.run_id)) ?? runs[0]);
   const jobs = run?.jobs ?? (execution === null ? standalone : []);
   const runId = run?.id;
   const revision = inputRevision(run?.prompt, card, market);
@@ -401,7 +404,9 @@ function Evidence({
           </button>
         )}
       </div>
-      {stage.error_message && (
+      {published && <p className="text-sm">Available output #{published.output_id} · {published.covered}/{published.expected} {card==="pairwise"?"pairs judged":"stocks scored"} · Stage 4 {published.used_output_id ? `used output #${published.used_output_id} in final #${published.final_id}` : "has no saved reference"}</p>}
+      {run && ["failed","partial","cancelled","canceled"].includes(run.status) && jobs.some(j=>j.error_message) && <details className={panel}><summary>Execution #{run.id} diagnostics</summary>{jobs.filter(j=>j.error_message).map(j=><p key={j.id}>Job #{j.id} · {j.error_message}</p>)}</details>}
+      {stage.error_message && (!run || (stage.run_id===run.id && !jobs.length)) && (
         <p role="status" className="rounded-xl bg-amber-50 p-3 text-sm text-amber-950">
           Workflow stage · {stage.error_message}
         </p>
@@ -525,10 +530,14 @@ function Evidence({
               <Feedback query={scores} />
               {scores.data && (
                 <Table
-                  columns={["Listing", "Score /100", "Coverage"]}
+                  columns={["Listing", "Score /100", "Coverage", ...(card==="pairwise"?["W / T / L", "Judged / assigned","Unknown"]:card==="technical"?["Setup","Entry at close","Catalogue rating","5-session return %","20-session relative %","Relative volume","20-session volatility %","Distance to SMA50 %","Research score /100"]:[])]}
                   rows={scores.data.rows.map((r) => ({
                     key: r.listing,
-                    cells: [r.listing, r.score ?? "—", r.coverage],
+                    cells: [r.listing, r.score == null ? "—" : Number(r.score.toFixed(1)), r.coverage,
+                      ...(card==="pairwise"?[`${r.wins??"—"} / ${r.ties??"—"} / ${r.losses??"—"}`,`${r.valid??"—"} / ${r.expected??"—"}`,typeof r.valid==="number"&&typeof r.expected==="number"?r.expected-r.valid:"—"]:card==="technical"?[
+                        ...["setup","entry","catalogue_rating"].map(k=>String((r.readiness as Record<string,unknown>)?.[k]??"—")),
+                        ...["return_5_pct","relative_20_pct","relative_volume_20","volatility_20_pct","distance_sma50_pct","shadow_score"].map(k=>{const v=(r.features as Record<string,unknown>)?.[k];return typeof v==="number"?v.toFixed(2):"—";})
+                      ]:[])],
                   }))}
                   empty="No scores recorded."
                 />

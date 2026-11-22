@@ -269,6 +269,9 @@ def project(card, manifest, jobs):
     keys = [s["listing"] for s in stocks]
     slots, raw, votes, errors = defaultdict(dict),defaultdict(list),defaultdict(dict),[]
     model_tables = []
+    recovered = []
+    order_checks = []
+    market_packet = {}
     for job, slot, assigned, pairs, *packet in jobs:
         rows, error = {}, str(getattr(job, "error_message", None) or job.status)
         # A prior worker may have rejected a valid scorecard accompanied by
@@ -276,8 +279,21 @@ def project(card, manifest, jobs):
         old_table_rejection = (job.status == "failed" and card in {"technical", "threats", "pairwise"}
                                and error.endswith(("returned invalid output contract (Response requires one well-formed table)",
                                                    "returned invalid output contract (no assigned listings)")))
-        if job.status in ("partial", "completed") or old_table_rejection:
+        research = packet[0] if packet else None
+        if research and research.get("version")==2:
+            market_packet = research
+        pair_records = {}
+        structured = card=="pairwise" and pairs and research and research.get("version")==2 and "[PAIR_RECORDS_V2]" in (getattr(job,"prompt",None) or "")[:150]
+        old_count_rejection = card=="pairwise" and job.status=="failed" and re.search(r"returned insufficient recommendations \(expected \d+, got 0\)$", error)
+        if structured and job.status in ("partial","completed"):
+            from .pair_records import records
+            pair_records = records(job.response,pairs,research["packets"],manifest["as_of"])
+            error = None if pair_records else "No valid assigned pair records"
+        elif job.status in ("partial", "completed") or old_table_rejection or old_count_rejection:
             rows, error = parse_rows(job.response, card, set(assigned))
+        if research and research.get("order_check"):
+            order_checks.extend((tuple(pair),slot,pair_records.get(tuple(pair))) for pair in pairs)
+            continue
         if error:
             errors.append({"job_id":job.id,"reason":error})
         if card == "rebalance":
@@ -296,6 +312,18 @@ def project(card, manifest, jobs):
                 if not isinstance(refs, list) or not any(isinstance(ref, dict) and dated_reference(
                     f"{ref.get('url', '')} {ref.get('as_of', '')}", manifest["as_of"]) for ref in refs):
                     v = None
+            if old_count_rejection and v and v["result"]!="UNKNOWN":
+                # Historical recommendation errors have never passed pair validation.
+                # Require the archived packet to support each listing's side.
+                accepted_urls={ref["url"] for ref in v["source_refs"] if isinstance(ref,dict) and "url" in ref and dated_reference(
+                    f"{ref['url']} {ref.get('as_of','')}",manifest["as_of"])}
+                if any(not accepted_urls.intersection(r.get("url") for r in (research or {}).get("listings",{}).get(side,[])
+                       if r.get("kind")!="filing_index") for side in (left,right)):
+                    v=None
+            if structured:
+                v = pair_records.get((left,right))
+            if (old_table_rejection or old_count_rejection) and v and v["result"]!="UNKNOWN":
+                recovered.append({"job_id":job.id,"pair":[left,right]})
             earlier = votes[(left,right)].get(slot)
             if v and v["result"]!="UNKNOWN" or not earlier or earlier["result"]=="UNKNOWN":
                 votes[(left,right)][slot]={**v,"job_id":job.id,"slot":slot+1} if v else None
@@ -308,6 +336,10 @@ def project(card, manifest, jobs):
             row = rebalance(raw[key],stock,manifest["as_of"])
         elif card=="technical":
             row = technical(raw[key],manifest["as_of"])
+            if market_packet:
+                from .signals import features, setup_state
+                signal = features(market_packet["listings"].get(key,[]), manifest["as_of"], market_packet.get("benchmark",[]))
+                row.update(features=signal, readiness=setup_state(raw[key],signal))
         elif card=="threats":
             row = threats(key,threat_slots,raw[key])
         else:
@@ -315,5 +347,18 @@ def project(card, manifest, jobs):
         if row["score"] is None:
             row.update(coverage="Unassessed",reason="Insufficient verified observations")
         result.append({"listing":key,**row})
-    return {"rows":result,"errors":errors,"model_tables":model_tables,"job_ids":[j.id for j,*_ in jobs]}
+    extra = {}
+    if card=="pairwise":
+        known_costs = [float(job.estimated_cost) for job,*_ in jobs if getattr(job,"estimated_cost",None) is not None]
+        cost = sum(known_costs)
+        judged = sum(r["valid"] for r in result)//2
+        comparisons = []
+        for pair,slot,record in order_checks:
+            original = (votes.get(pair,{}).get(slot) or {}).get("result")
+            reversed_result = (record or {}).get("result")
+            comparisons.append({"pair":pair,"original":original,"reversed":reversed_result,
+                                "agreed":original==reversed_result if original not in (None,"UNKNOWN") and reversed_result not in (None,"UNKNOWN") else None})
+        from .evaluation import sparse_agreement
+        extra = {"balanced_schedule":sparse_agreement(result),"order_checks":comparisons,"cost_per_judgment_usd":cost/judged if judged and known_costs else None}
+    return {**extra,"rows":result,"errors":errors,"model_tables":model_tables,"recovered_pairs":recovered,"job_ids":[j.id for j,*_ in jobs]}
 

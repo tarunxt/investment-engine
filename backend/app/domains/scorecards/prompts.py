@@ -33,7 +33,7 @@ def batches(stocks, card, *, pairs=None):
             yield keys[start:start + size], []
 
 
-def build_prompt(revision, card, keys, pairs, research=None):
+def build_prompt(revision, card, keys, pairs, research=None, *, reverse_order=False):
     manifest = revision.manifest
     context = {k: v for k, v in manifest.items() if k not in ("stocks", "evidence", "unresolved")}
     context.pop("owner_id", None)
@@ -54,6 +54,23 @@ def build_prompt(revision, card, keys, pairs, research=None):
         template = template.replace("{{" + key + "}}", value)
     marker = f"[INDEPENDENT_SCORECARD:{manifest['market']}:{card}:{revision.id}]"
     bundle = {"context": context, "listings": rows}
+    if card == "pairwise" and pairs and research and research.get("version") == 2:
+        # A pair ID is invariant under reversal of the presentation order.
+        from hashlib import sha256
+        assigned = []
+        for left, right in pairs:
+            identity = "~".join(sorted((left,right)))
+            reverse = sha256((revision.digest+identity).encode()).digest()[0] % 2
+            assigned.append({"pair_id": identity, "listings":[right,left] if bool(reverse) != reverse_order else [left,right]})
+        instructions = ("Compare each assigned pair independently over 2–12 weeks using only its frozen listing evidence. "
+            "Consider trend, relative strength, liquidity, volatility, and dated catalysts symmetrically. "
+            "Return one JSON object per line, with pair_id, result (winning listing ID, TIE, or UNKNOWN), "
+            "rationale, and evidence (object keyed by each listing ID, with arrays of source IDs from that listing). "
+            "TIE requires evidence of equivalence. Use UNKNOWN when evidence is inadequate. "
+            "Return no table, surrounding text, or other pairs. Features use NIFTYBEES as the benchmark proxy.")
+        return marker+"\n[PAIR_RECORDS_V2]\n"+instructions+"\n"+json.dumps({
+            "as_of":manifest["as_of"],"packets":{k:research["packets"][k] for k in keys},
+            "assigned_pairs":assigned}, ensure_ascii=False,separators=(",",":"))
     if research is not None:
         bundle["fresh_research"] = {k:research.get("listings",{}).get(k,[]) for k in keys}
         bundle["research_notices"] = research.get("notices",[])
@@ -62,6 +79,10 @@ def build_prompt(revision, card, keys, pairs, research=None):
         bundle["swing_evidence"] = evidence
     if card == "technical":
         bundle["setup_catalogue"] = CATALOGUE
+        if research and research.get("version")==2:
+            bundle["computed_features"] = {k:research["packets"][k]["features"] for k in keys}
+            bundle["fresh_research"] = {k:[r for r in v if r["kind"]=="daily_bar"][:10] for k,v in bundle["fresh_research"].items()}
+            template += "\nUse frozen features; the 20-session relative return uses NIFTYBEES. Report missing observations. The setup rating comes from the catalogue."
     if card == "pairwise":
         bundle["assigned_pairs"] = pairs
     if card != "rebalance":
