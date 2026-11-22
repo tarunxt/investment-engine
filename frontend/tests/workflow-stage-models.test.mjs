@@ -21,3 +21,12 @@ test("a saved stage replaces its default and keeps repeated calls and explicit c
   assert.deepEqual(resolveStageModelKeys("technical", saved), []);
   assert.deepEqual(resolveStageModelKeys("rebalance", saved), Array(2).fill("deepseek::deepseek-v4-flash"));
 });
+
+test("Zerodha Threats and Pairwise keep one saved selection across duplicate or mixed slots", () => {
+  const keys = ["chosen::first", "chosen::first", "other::second"];
+  for (const stage of ["threats", "pairwise"]) {
+    assert.deepEqual(resolveStageModelKeys(stage, { [stage]: keys }, "zerodha"), keys.slice(0, 1));
+    assert.deepEqual(resolveStageModelKeys(stage, {}, "zerodha"), ["deepseek::deepseek-v4-flash"]);
+    assert.deepEqual(resolveStageModelKeys(stage, { [stage]: keys }, "indmoneyUs"), keys);
+  }
+});

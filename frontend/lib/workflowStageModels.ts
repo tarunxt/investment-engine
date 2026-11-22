@@ -12,8 +12,13 @@ export function defaultStageModelKeys(stage: ModelStage): string[] {
   return Array<string>(count).fill("deepseek::deepseek-v4-flash");
 }
 
-export function resolveStageModelKeys(stage: ModelStage, saved: StageModelPreferences) {
-  return saved[stage] ?? defaultStageModelKeys(stage);
+export function usesSingleScorecardJob(stage: string, portfolio?: string | null) {
+  return portfolio === "zerodha" && (stage === "threats" || stage === "pairwise");
+}
+
+export function resolveStageModelKeys(stage: ModelStage, saved: StageModelPreferences, portfolio?: string | null) {
+  const keys = saved[stage] ?? defaultStageModelKeys(stage);
+  return usesSingleScorecardJob(stage, portfolio) ? keys.slice(0, 1) : keys;
 }
 
 export function getCompatibleTargets(providers: ProviderInfo[]): ProviderModelTarget[] {

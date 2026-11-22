@@ -4,7 +4,7 @@ import { cards, isCard, migratedPolicy, scorecardApi, type FinalRow, type CardKe
 import { ScorecardReview } from "./ScorecardReview";
 import { useReviewDialog } from "@/hooks/useReviewDialog";
 import { ZerodhaRunGate } from "@/components/shared/ZerodhaRunGate";
-import { defaultStageModelKeys, getCompatibleTargets, isModelStage, previousBrowserSelection, resolveStageModelKeys, type ModelStage } from "@/lib/workflowStageModels";
+import { defaultStageModelKeys, getCompatibleTargets, isModelStage, usesSingleScorecardJob, previousBrowserSelection, resolveStageModelKeys, type ModelStage } from "@/lib/workflowStageModels";
 import { acquireZerodhaLogin } from "@/lib/zerodhaLoginArbitration";
 import { captureWorkflowOwner, isCurrentWorkflowOwner, onWorkflowOwnerInvalidated, requireWorkflowOwner, type WorkflowOwner } from "@/lib/workflowOwnerLifetime";
 import { workflowOwnedApi } from "@/lib/workflowOwnedApi";
@@ -4173,7 +4173,8 @@ function StageLlmSelectorDialog({
   if (!open || !stage) return null;
 
   const organizedPicker = isCard(stage);
-  const singleSelect = stage === "threats" || stage === "technical";
+  const singleJob = usesSingleScorecardJob(stage, portfolio);
+  const singleSelect = singleJob || stage === "threats" || stage === "technical";
   const compatibleTargets = new Set(
     providers.flatMap((provider) =>
       provider.models
@@ -4280,7 +4281,7 @@ function StageLlmSelectorDialog({
             </h3>
             {stage === "threats" ? <p className="mt-2 text-sm text-slate-600">{STAGE_METADATA[stage].tileDescription}</p> : null}
             <p className="mt-1 text-sm text-slate-500">
-              Choose the provider/model targets this dashboard stage should use.
+              {singleJob ? "Choose one model. All assignments for this scorecard run in one job." : "Choose the provider/model targets this dashboard stage should use."}
             </p>
             {hasLastRunCost ? (
               <p className="mt-2 inline-flex rounded-full bg-emerald-50 px-3 py-1 text-sm font-semibold text-emerald-700 ring-1 ring-emerald-100">
@@ -4401,9 +4402,9 @@ function StageLlmSelectorDialog({
               getEstimatedCostInr={getEstimatedCostInr}
               onToggle={onToggle}
               onSelectAll={singleSelect ? undefined : onSelectAll}
-              onClear={onClear}
+              onClear={singleJob ? undefined : onClear}
               costSummaryLabel="Estimated selected run"
-              onToggleProvider={(providerName, models) => {
+              onToggleProvider={singleJob ? undefined : (providerName, models) => {
                 const providerModelKeys = models.map(
                   (model) => `${providerName}::${model}`,
                 );
@@ -6515,7 +6516,7 @@ ${zerodhaExecutionMode === "direct_market"
 
       const saved = await loadModelPreferences();
       if (requestId !== llmDialogRequestRef.current) return;
-      const targetKeys = resolveStageModelKeys(stage, saved);
+      const targetKeys = resolveStageModelKeys(stage, saved, portfolio);
       const previous = saved[stage] === undefined ? previousBrowserSelection(stage) : null;
       const compatible = new Set(getCompatibleTargets(providers).map(targetKey));
       if (previous && previous.every(key => compatible.has(key)) && JSON.stringify(previous) !== JSON.stringify(targetKeys)) {
@@ -6671,6 +6672,10 @@ ${zerodhaExecutionMode === "direct_market"
 
   function saveModelKeys(keys: string[]) {
     if (!llmDialogStage || llmDialogLoading || llmDialogError || pendingModelSave.current) return;
+    if (usesSingleScorecardJob(llmDialogStage, llmDialogPortfolio) && keys.length !== 1) {
+      setModelSaveError("Choose exactly one model for this scorecard.");
+      return;
+    }
     if (keys.length > 8) {
       setModelSaveError("A stage can run up to eight model calls, including repeats. Reduce the selection and try again.");
       return;
@@ -6699,7 +6704,7 @@ ${zerodhaExecutionMode === "direct_market"
   }
 
   function toggleLlmTarget(key: string) {
-    if (llmDialogStage === "threats" || llmDialogStage === "technical") {
+    if (llmDialogStage === "threats" || llmDialogStage === "technical" || usesSingleScorecardJob(llmDialogStage ?? "", llmDialogPortfolio)) {
       saveModelKeys([key]);
       return;
     }
@@ -6928,7 +6933,7 @@ ${zerodhaExecutionMode === "direct_market"
           const issues: string[] = [];
           const compatible = new Map(getCompatibleTargets(providers).map(target => [targetKey(target), target]));
           for (const stage of modelStages) {
-            const keys = resolveStageModelKeys(stage, saved);
+            const keys = resolveStageModelKeys(stage, saved, portfolio);
             targets[stage] = keys.flatMap(key => compatible.get(key) ?? []);
             const unavailable = [...new Set(keys.filter(key => !compatible.has(key)))];
             const modelIssue = unavailable.length ? `${stage} has unavailable selected models (${unavailable.join(", ")}). Open its LLM selector and update the selection.`
@@ -7851,7 +7856,7 @@ ${zerodhaExecutionMode === "direct_market"
                       )
               }
               onInfoClick={stage !== "sync" && stage !== "actionables"
-                  ? () => (stage==="technical" || stage==="pairwise") ? openCard(stage,"output") : void showStageLlmInfo(section.portfolio, stage)
+                  ? () => void showStageLlmInfo(section.portfolio, stage)
                   : undefined
               }
               onInputClick={stage === "pairwise" ? () => openCard(stage,"inputs") : isCard(stage) ? () => openInputSelection(section.portfolio,stage) : stage==="actionables" ? ()=>setCardReview({portfolio:section.portfolio,stage}) :

@@ -20,6 +20,13 @@ def records(text, pairs, packets, cutoff):
             row = json.loads(line.strip())
         except ValueError:
             continue
+        if isinstance(row, list) and len(row) == 5:
+            number, winner, reason, first_sources, second_sources = row
+            if type(number) is not int or not 1 <= number <= len(pairs):
+                continue
+            first, second = sorted(pairs[number - 1])
+            row = {"pair_id": first + "~" + second, "result": winner, "rationale": reason,
+                   "evidence": {first: first_sources, second: second_sources}}
         if not isinstance(row, dict) or not isinstance(row.get("pair_id"), str):
             continue
         key = row["pair_id"]
