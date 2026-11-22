@@ -3,10 +3,11 @@
 import { useEffect, useId, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
-export function SavedOutputDialog({ title, savedAt, provenance, routeUrl, onClose, onRetry, loading, children }: {
+export function SavedOutputDialog({ title, savedAt, provenance, sectionLabel, routeUrl, onClose, onRetry, loading, children }: {
   title: string;
   savedAt?: string | null;
   provenance?: string | null;
+  sectionLabel?: string;
   routeUrl: string;
   onClose: () => void;
   onRetry: () => void;
@@ -49,11 +50,11 @@ export function SavedOutputDialog({ title, savedAt, provenance, routeUrl, onClos
         <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-5">
           <div>
             <h3 id={titleId} className="text-lg font-semibold">{title}</h3>
-            <p className="mt-1 text-sm text-slate-500">Latest saved stage output for the selected portfolio.</p>
-            <p className="mt-1 text-sm text-slate-500">Saved output timestamp: {savedAt ? <time dateTime={savedAt}>{savedAt}</time> : "Unavailable"}</p>
+            <p className="mt-1 text-sm text-slate-500">{sectionLabel ? null : "Latest saved stage output for the selected portfolio."}</p>
+            {(!sectionLabel || savedAt) && <p className="mt-1 text-sm text-slate-500">Saved output timestamp: {savedAt ? <time dateTime={savedAt}>{savedAt}</time> : "Unavailable"}</p>}
             {provenance ? <p className="mt-1 text-xs text-slate-500">{provenance}</p> : null}
             <div className="mt-3 flex flex-wrap gap-4 text-sm">
-              <button type="button" onClick={onRetry} disabled={loading} className="underline disabled:opacity-50">Retry saved output</button>
+              <button type="button" onClick={onRetry} disabled={loading} className="underline disabled:opacity-50">{!sectionLabel || sectionLabel === "Saved output" ? "Retry saved output" : "Refresh " + sectionLabel.toLowerCase()}</button>
               <a href={routeUrl} target="_blank" rel="noopener noreferrer" className="underline">Open stage page in new tab</a>
             </div>
           </div>

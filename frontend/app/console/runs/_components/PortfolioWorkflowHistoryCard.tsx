@@ -1,6 +1,8 @@
 'use client';
 
 import Link from 'next/link';
+import { isCard } from '@/lib/independentScorecards';
+import { scorecardHref } from '@/lib/scorecardNavigation';
 import { recordedStageRunLabel, RUN_HIERARCHY_HELP } from '@/lib/runHierarchy';
 import { useEffect, useId, useState } from 'react';
 import { getStageTileLabel, STAGE_ORDER } from '@/components/shared/WorkflowStageTile';
@@ -47,9 +49,10 @@ export function PortfolioWorkflowHistoryCard({ group, runs, onOpen, runLinksAvai
   const renderStage = (key: typeof STAGE_ORDER[number], additional = false) => {
     const stage = group.stages.find(item => item.stage === key);
     const source = children.find(run => run.id === stage?.run_id);
-    const path = stage?.run_id ? getRunDetailPathFromPrompt(stage.run_id, source?.prompt_preview) : detailPath;
+    const cardPath = isCard(key) ? scorecardHref(group.portfolio === "india" ? "zerodha" : "indmoneyUs", key, group.sequence) : null;
+    const path = cardPath ?? (stage?.run_id ? getRunDetailPathFromPrompt(stage.run_id, source?.prompt_preview) : detailPath);
     return <HistoricalStageLedgerRow key={key} stage={key} info={historicalStageInfo(stage)} now={Date.parse(group.updated_at)} additional={additional} stageRunAvailable={Boolean(stage?.run_id)}
-      onClick={stage ? () => onOpen(path) : undefined} onOutputClick={stage ? () => onOpen(path) : undefined} onPromptClick={stage?.run_id ? () => onOpen(path) : undefined} />;
+      onClick={stage ? () => onOpen(path) : undefined} onOutputClick={stage ? () => onOpen(cardPath ? cardPath+"?tab=output" : path) : undefined} onPromptClick={stage?.run_id ? () => onOpen(cardPath ? cardPath+"?tab=prompts" : path) : undefined} />;
   };
   return (
     <section className="min-w-0 rounded-2xl border border-gray-200 bg-slate-50 p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100" aria-label={group.label}>

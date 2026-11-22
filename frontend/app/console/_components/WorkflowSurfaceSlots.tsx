@@ -1,8 +1,9 @@
 "use client";
 import { LazyMount } from "@/components/shared/LazyMount";
 import { createContext, useContext, useEffect, useState } from "react";
+import type { ScorecardPath } from "@/lib/scorecardNavigation";
 export type WorkflowMarket = "zerodha" | "indmoneyUs";
-export type WorkflowSurface = { target: HTMLElement; market: WorkflowMarket };
+export type WorkflowSurface = { target: HTMLElement; market: WorkflowMarket; scorecards?: ScorecardPath };
 export const SurfaceContext = createContext<{
   registerWorkflow: (surface: WorkflowSurface | null) => void;
   registerStockFlow: (target: HTMLElement | null) => void;
@@ -29,16 +30,16 @@ function useWorkflowAnchor(target: HTMLElement | null) {
   }, [target]);
 }
 
-export function PortfolioWorkflowSlot({ market }: { market: WorkflowMarket }) {
+export function PortfolioWorkflowSlot({ market, scorecards }: { market: WorkflowMarket; scorecards?: ScorecardPath }) {
   const host = useContext(SurfaceContext);
   const [target, setTarget] = useState<HTMLElement | null>(null);
   const register = host?.registerWorkflow;
   useWorkflowAnchor(target);
   useEffect(() => {
     if (!target || !register) return;
-    register({ target, market });
+    register({ target, market, scorecards });
     return () => register(null);
-  }, [market, target, register]);
+  }, [market, target, register, scorecards]);
   return <section id={market === "zerodha" ? "india-workflow" : "us-workflow"} tabIndex={-1} className="min-w-0 scroll-mt-16" ref={setTarget} aria-label={market === "zerodha" ? "India portfolio workflow" : "US portfolio workflow"} />;
 }
 

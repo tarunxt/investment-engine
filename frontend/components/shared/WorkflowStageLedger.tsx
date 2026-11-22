@@ -7,6 +7,10 @@ import { WorkflowTileMenu, type TileAction } from "./WorkflowTileMenu";
 import { StageErrorDetails } from "./StageErrorDetails";
 import { StageStatusIcon, getStageLedgerTone, getIdleStageRows, getStageTileLabel, STAGE_METADATA, type WorkflowStageTile } from "./WorkflowStageTile";
 
+import Link from "next/link";
+import { isCard, type CardKey } from "@/lib/independentScorecards";
+import { scorecardHref } from "@/lib/scorecardNavigation";
+
 type Stage = ComponentProps<typeof WorkflowStageTile>;
 function evidenceLabel(item: Stage) {
   if (item.info.evidence?.kind === "derived") return "Derived summary · saved final execution not established";
@@ -40,7 +44,7 @@ export function WorkflowStageLedgerViews({ market, view, onChange, portfolioOnly
 const control = "inline-flex min-h-9 items-center rounded-lg border border-indigo-200 bg-white px-3 py-1.5 text-sm font-medium text-indigo-800 hover:bg-indigo-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600 focus-visible:ring-offset-2";
 
 /** Presentation adapter: the workflow continues to own every value and callback. */
-export function WorkflowStageLedger({ children, enabled, view = "ledger", historyHref, onStockFlowClick, market, active = false, basketReady = false, board = false }: {
+export function WorkflowStageLedger({ children, enabled, view = "ledger", historyHref, onStockFlowClick, onManageSource, onManageCard, market, active = false, basketReady = false, board = false }: {
   children: ReactElement<Stage>[];
   enabled: boolean;
   basketReady?: boolean;
@@ -50,6 +54,8 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
   market?: "zerodha" | "indmoneyUs";
   historyHref: string;
   onStockFlowClick: () => void;
+  onManageSource?: () => void;
+  onManageCard?: (card: CardKey) => void;
 }) {
   const [selectedStage, setSelectedStage] = useState("sync");
   const [durationStage, setDurationStage] = useState<Stage | null>(null);
@@ -74,7 +80,12 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
       ["Calculation", item.onCalculationsClick], ["Stock Flow", onStockFlowClick],
     ];
     const actions: TileAction[] = controls.flatMap(([label, onSelect]) => onSelect ? [{ label, onSelect }] : []);
-    actions.push({ label: "History", href: historyHref });
+    actions.push({ label: "History", href: market && isCard(item.stage) ? scorecardHref(market,item.stage) : historyHref });
+    const card = item.stage;
+    if (market && isCard(card)) {
+      actions.push({label:"Workflow history",href:historyHref});
+      if (onManageCard) actions.push({label:"Scorecard controls",onSelect:() => onManageCard(card)});
+    }
     if (!item.selectable && item.onClick) actions.push({ label: "Open stage", onSelect: item.onClick });
     return actions;
   };
@@ -90,7 +101,7 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
     ];
     return <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Rebalance workflow">
       {lanes.map((lane, index) => <section key={lane.title} className="min-w-0 rounded-xl border border-slate-200 bg-white p-3">
-        <h3 className="mb-3 font-semibold">{index + 1} · {lane.title}</h3>
+        <h3 className="mb-3 font-semibold">{index + 1} · {lane.title === "Scorecards" && market ? <Link className="text-indigo-800 underline-offset-4 hover:underline" href={scorecardHref(market)}>Scorecards</Link> : lane.title}</h3>
         {lane.keys.map(key => {
           const item = stages.find(stage => stage.stage === key);
           if (!item) return null;
@@ -127,7 +138,7 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
               {item.placeOrderLabel ?? "Place Order"}
             </button>}
             {item.stage === "swing" && <div className="mt-2 rounded-lg border p-3 text-sm">
-              {tileHeader("Merge contenders", [{ label: "Stock Flow", onSelect: onStockFlowClick }, { label: "History", href: historyHref }], item.info.recommendedStocks != null ? item.info : { state: "idle" })}
+              {tileHeader("Merge contenders", [...(onManageSource ? [{label:"Manage Stage 2 inputs",onSelect:onManageSource}] : []), { label: "Stock Flow", onSelect: onStockFlowClick }, { label: "History", href: historyHref }], item.info.recommendedStocks != null ? item.info : { state: "idle" })}
               <p>{item.info.recommendedStocks != null ? item.info.recommendedStocks + " unique listings" : "Awaiting scan evidence"}</p></div>}
 
           </div>;
@@ -192,7 +203,7 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
         ].filter((value): value is string => Boolean(value))).map((reference, index) => <li key={index}>{reference}</li>)}
       </ul>
       <div className="mt-3 flex flex-wrap gap-1">{evidenceActions(selected).map(action => "href" in action
-        ? <a key={action.label} className={control} href={action.href}>{action.label}</a>
+        ? <Link key={action.label} className={control} href={action.href}>{action.label}</Link>
         : <button key={action.label} type="button" className={control} onClick={action.onSelect}>{action.label}</button>)}</div>
     </section> : null}
     <section aria-label="Sync and order controls" className="rounded-xl border border-slate-300 bg-slate-50 p-3">
