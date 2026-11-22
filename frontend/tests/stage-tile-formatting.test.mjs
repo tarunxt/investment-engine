@@ -136,3 +136,8 @@ test('complete saved evidence can coexist with a historical execution error and 
   assert.equal(rows['Recorded execution'],'#537 · failed');
   assert.equal(rows['Stage 4 used'],'Output #433 · final #450');
 });
+
+test('zero published coverage is unassessed even when a model job completed', () => {
+  const {getStageOutcome}=load(workflowPath,['getStageOutcome','hasStagePartialOutput']);
+  assert.equal(getStageOutcome({state:'idle',runStatus:'completed',published:{covered:0,expected:16}}),'unassessed');
+});

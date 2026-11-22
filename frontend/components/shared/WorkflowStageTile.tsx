@@ -297,8 +297,10 @@ export function getTileErrorDetail(error?: string | null) {
 export function getStageOutcome(info: StageInfo) {
   const status = info.runStatus?.trim().toLowerCase() ?? "";
   if (info.state === "running" || info.state === "queued") return info.state;
-  if (info.published && info.published.expected > 0 && info.published.covered > 0)
+  if (info.published) {
+    if (!info.published.covered) return "unassessed";
     return info.published.covered === info.published.expected ? "completed" : "partial";
+  }
   if (info.state === "failed" || ["failed", "verification failed", "error", "canceled", "cancelled", "interrupted", "killed", "start failed", "auth expired"].includes(status)) return "failed";
   if (status === "completion unconfirmed" && info.error?.startsWith("Final calculation could not be verified:")) return "failed";
   if (status === "completion unconfirmed") return "unconfirmed";
@@ -315,7 +317,7 @@ export function getStageOutcome(info: StageInfo) {
 
 export function getStageLedgerTone(info: StageInfo) {
   const outcome = getStageOutcome(info);
-  if (outcome === "partial" || outcome === "unconfirmed" || outcome === "stale") return "bg-amber-50";
+  if (outcome === "partial" || outcome === "unassessed" || outcome === "unconfirmed" || outcome === "stale") return "bg-amber-50";
   if (outcome === "derived" || outcome === "paused" || outcome === "skipped") return getStageBackgroundClass("idle");
   return getStageBackgroundClass(outcome);
 }
@@ -323,7 +325,7 @@ export function getStageLedgerTone(info: StageInfo) {
 export function StageStatusIcon({ info }: { info: StageInfo }) {
   const outcome = getStageOutcome(info);
   const symbols = {
-    completed: "✅", failed: "❌", partial: "⚠️", stale: "⚠️", unconfirmed: "⚠️", queued: "⏳",
+    completed: "✅", failed: "❌", partial: "⚠️", stale: "⚠️", unconfirmed: "⚠️", unassessed: "○", queued: "⏳",
     running: "🔄", derived: "ℹ️", skipped: "⏭️", paused: "⏸️", idle: "○",
   };
   const description = info.published ? `Output #${info.published.output_id} · ${info.published.covered}/${info.published.expected} covered` : info.runStatus || outcome;
