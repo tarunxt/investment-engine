@@ -171,7 +171,7 @@ function harness({ analysisOnly = false, formulaScore = 0, intercept, read, emai
     buildZerodhaBasketPreviewOrders: () => [],
     buildDashboardActionRows: rows => rows.map(stock => ({ stock, formulaAction: "Hold", formulaScore, formulaEstimate: {}, detail: {} })),
     getSelectedThreatJobIds: () => [], deduplicateThreatStageInputs: (input) => input,
-    buildRunPayload: (payload) => payload, summarizeRun: () => ({ runStatus: "completed" }), getRunProgress: () => ({ completedLlms: 1, totalLlms: 1 }), countUniqueStocksFromRun: () => 1, listingsFromSwingRun: () => ["NSE:TEST"], workflowRanking: () => [],
+    buildRunPayload: (payload) => payload, summarizeRun: () => ({ runStatus: "completed" }), getRunProgress: () => ({ completedLlms: 1, totalLlms: 1 }), swingRecommendationCounts: () => ({recommendedStocks:2,commonStocks:1}), countUniqueStocksFromRun: () => 1, listingsFromSwingRun: () => ["NSE:TEST"], workflowRanking: () => [],
     getStageTileLabel: (stage) => stage, normalizeError: (error) => error.message,
     RecordedWorkflowStageFailure: class extends Error {}, WORKFLOW_COMPLETION_RESET_DELAY_MS: 1,
     getWorkflowRunCost: () => 0,

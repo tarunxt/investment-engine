@@ -189,7 +189,7 @@ test("Zerodha Run preserves the popup user gesture and surfaces start failures",
   assert.match(runWorkflowSource, /window\.alert\(message\)/);
   assert.match(
     stageTileSource,
-    /rows\.push\(getStageTileError\(info\)\);/,
+    /rows\.push\(\.\.\.stageErrorRows\(info\)\);/,
   );
 });
 

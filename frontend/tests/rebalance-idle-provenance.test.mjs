@@ -30,7 +30,7 @@ async function hydrate({ runs = [], histories = [], initial, historyFailure, sna
     getLatestMatchingRebalanceRuns: (rows, market) => market === 'india' ? rows.filter(row => row.stage === 'rebalance') : [],
     getLatestRunTimestamp: run => run.updated_at, parseTimestampMs: time => Date.parse(time ?? '') || 0,
     buildConsensusRows: rows => rows.flatMap(row => Array.from({length: row.stocks ?? 0}, () => ({}))),
-    countUniqueStocksFromRun: run => run.stocks,
+    swingRecommendationCounts: () => ({recommendedStocks:2,commonStocks:1}), countUniqueStocksFromRun: run => run.stocks,
     summarizeRunForIdleTile: run => run ? { completedAt: run.updated_at, runStatus: run.status, lastRunId: run.id, evidence:{kind:'saved',references:[`Run #${run.id}`]} } : {},
     withInrCost: value => value,
     mergeStageEvidence,

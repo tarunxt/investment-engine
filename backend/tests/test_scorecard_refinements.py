@@ -96,6 +96,10 @@ def test_single_job_assignments_cover_full_universe_and_only_unresolved_pairs():
     keys = [f"NSE:S{i:02}" for i in range(16)]
     stocks = [{"listing": k} for k in reversed(keys)]
     expected = list(combinations(keys, 2))
+    rebalance_keys = [f"NSE:R{i:02}" for i in range(34)]
+    rebalance_stocks = [{"listing": key} for key in rebalance_keys]
+    assert list(batches(rebalance_stocks, "rebalance", portfolio="india")) == [(rebalance_keys, [])]
+    assert len(list(batches(rebalance_stocks, "rebalance", portfolio="indmoney_us"))) == 3
     assert list(batches(stocks, "threats", portfolio="india")) == [(keys, [])]
     assert list(batches(stocks, "pairwise", portfolio="india")) == [(keys, expected)]
     unresolved = expected[12:42]
@@ -130,6 +134,14 @@ async def exercise_single_job_start(monkeypatch, card):
     def body(targets, check=False):
         return router.Start(request_key="fixture", sequence=5, targets=targets, check_pair_order=check)
 
+    if card == "rebalance":
+        await router.start("india", rev.id, card, body([target, target]), AsyncMock(), user)
+        command, = enqueue.await_args.args
+        assert len(command.targets) == 2
+        assert len(command.batch_prompts) == len(command.scorecard_batches) == 1
+        assert command.scorecard_batches[0]["scorecard_batch"]["listings"] == keys
+        assert command.allow_parallel and not command.stagger_gemini
+        return
     with pytest.raises(HTTPException, match="exactly one"):
         await router.start("india", rev.id, card, body([target,target]), AsyncMock(), user)
     if card == "pairwise":
@@ -147,5 +159,40 @@ async def exercise_single_job_start(monkeypatch, card):
 
 def test_scorecard_start_dispatches_exactly_one_job_per_india_card(monkeypatch):
     import asyncio
-    for card in ("threats", "pairwise"):
+    for card in ("rebalance", "threats", "pairwise"):
         asyncio.run(exercise_single_job_start(monkeypatch, card))
+
+
+def _wait_for_sibling(directory, slot):
+    """Both model slots must start before either may finish."""
+    from pathlib import Path
+    from time import monotonic, sleep
+
+    root = Path(directory)
+    (root / str(slot)).touch()
+    deadline = monotonic() + 5
+    while not (root / str(1 - slot)).exists():
+        if monotonic() >= deadline:
+            return False
+        sleep(0.01)
+    return True
+
+
+def test_recovery_worker_executes_two_slots_concurrently(monkeypatch, tmp_path):
+    from app.infrastructure.messaging.recovery_celery import RecoveryCelery
+    from app.core.recovery import ANALYSIS_QUEUE
+
+    monkeypatch.setenv("CREDX_RECOVERY_MODE", "1")
+    app = RecoveryCelery("scorecard-test", broker="memory://", backend="cache+memory://",
+                         set_as_current=False)
+    worker = app.Worker(pool_cls="solo", concurrency=1, queues=[ANALYSIS_QUEUE],
+                        use_eventloop=False, quiet=True)
+    assert worker.min_concurrency == 2
+    assert worker.max_concurrency == 8
+    worker.pool.start()
+    try:
+        jobs = [worker.pool.apply_async(_wait_for_sibling, (str(tmp_path), slot)) for slot in (0, 1)]
+        assert all(job.get(timeout=10) for job in jobs)
+    finally:
+        worker.pool.terminate()
+        app.close()

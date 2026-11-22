@@ -240,6 +240,7 @@ async def start(portfolio:Portfolio,revision_id:int,card:Card,body:Start,db:Asyn
     try:
         result=await CreateRunUseCase(db,RedisLock(redis)).execute(CreateRunCommand(
             prompt=prompts[0],batch_prompts=prompts,scorecard_batches=batch_contexts,scorecard_attempt_id=attempt.id,targets=[RunModelTarget(**t.model_dump()) for t in body.targets],
+            stagger_gemini=not (portfolio == "india" and card == "rebalance"),
             user_id=UserId(user.id),allow_parallel=True,auto_rebalance_portfolio=portfolio,auto_rebalance_sequence=w.sequence,
             auto_rebalance_label=f"{w.label} ({card.title()} Scan)"))
     except AppException as exc:

@@ -1,5 +1,9 @@
 """Same Redis connection, independent recovery queues/reservations/results."""
+from functools import cached_property
+
 from celery import Celery, Task
+from celery.apps.worker import Worker
+from app.domains.jobs.resource_policy import MAX_TARGETS
 from kombu import Queue
 from app.core.recovery import (
     ANALYSIS_TASK, RECOVERY_TASKS, ANALYSIS_QUEUE, TRANSPORT_PREFIX, RecoveryBlocked,
@@ -43,7 +47,24 @@ class RecoveryTask(Task):
         return super().__call__(*args, **kwargs)
 
 
+class EquityAnalysisWorker(Worker):
+    """Size the isolated analysis pool for simultaneous model slots."""
+
+    def __init__(self, *args, **options):
+        # Existing recovery units may specify a solo worker or a single process.
+        # Prefork preserves per-job task IDs, cancellation and hard time limits.
+        options.update(pool_cls="prefork", concurrency=2, autoscale=(MAX_TARGETS, 2),
+                       prefetch_multiplier=1)
+        super().__init__(*args, **options)
+
+
 class RecoveryCelery(Celery):
+    @cached_property
+    def Worker(self):
+        if recovery_mode():
+            return self.subclass_with_self(EquityAnalysisWorker, reverse="Worker")
+        return super().Worker
+
     def send_task(self, name, args=None, kwargs=None, **options):
         require_task_allowed(name)
         if recovery_mode():

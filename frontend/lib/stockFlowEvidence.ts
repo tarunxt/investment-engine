@@ -67,6 +67,15 @@ export function buildSwingFlow(runs: RunResponse[]) {
   return { stocks: [...stocks.values()].sort((a, b) => a.key.localeCompare(b.key)), outputs };
 }
 
+export function swingRecommendationCounts(run: RunResponse) {
+  const { stocks, outputs } = buildSwingFlow([run]);
+  const hasOutput = stocks.length > 0 || outputs.some(output => output.state === "empty");
+  return {
+    recommendedStocks: hasOutput ? stocks.length : null,
+    commonStocks: hasOutput ? stocks.filter(stock => stock.totalSuggestions > 1).length : null,
+  };
+}
+
 export function selectFlowStage(runs: RunResponse[], stage: "swing" | "technical", market: SwingTradeMarket) {
   const matching = runs.filter(run => isAnalysisRunForStage(run, stage, market)).sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
   const latest = matching[0];
@@ -78,7 +87,7 @@ export function sameFlowSequence(a: RunResponse | undefined, b: RunResponse | un
   return Boolean(a && b && a.auto_rebalance_portfolio && a.auto_rebalance_portfolio === b.auto_rebalance_portfolio && typeof a.auto_rebalance_sequence === "number" && a.auto_rebalance_sequence === b.auto_rebalance_sequence);
 }
 
-export function mergeStageEvidence<T extends { completedAt?: string | null; jobId?: number | null; lastRunId?: number | null; evidenceCoverage?: string; distinctModels?: number }>(observed: T, history: T, preferHistoryOnTie = false): T {
+export function mergeStageEvidence<T extends { completedAt?: string | null; jobId?: number | null; lastRunId?: number | null; evidenceCoverage?: string; distinctModels?: number; commonStocks?: number | null; recommendedStocks?: number | null }>(observed: T, history: T, preferHistoryOnTie = false): T {
   const observedAt = Date.parse(observed.completedAt ?? ""), historyAt = Date.parse(history.completedAt ?? "");
   const useHistory = Number.isFinite(historyAt) && (!Number.isFinite(observedAt) || historyAt > observedAt || (preferHistoryOnTie && historyAt === observedAt));
   if (!useHistory) return { ...observed };
@@ -89,6 +98,10 @@ export function mergeStageEvidence<T extends { completedAt?: string | null; jobI
   }
   if (history.lastRunId != null && history.lastRunId === observed.lastRunId && result.distinctModels == null && observed.distinctModels != null) {
     result.distinctModels = observed.distinctModels;
+  }
+  if (history.lastRunId != null && history.lastRunId === observed.lastRunId && result.commonStocks == null && observed.commonStocks != null) {
+    result.commonStocks = observed.commonStocks;
+    result.recommendedStocks = observed.recommendedStocks;
   }
   return result;
 }
