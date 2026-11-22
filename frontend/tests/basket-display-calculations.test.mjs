@@ -943,3 +943,35 @@ test('basket width restores after the parent attaches its ref and stays scoped t
     h.unmount();
   }
 });
+
+test('Zerodha issuer target, sizing and popup use the unshifted mean of saved workflow finals', async () => {
+ const h = hooks();
+ const stocks = [{symbol:'HAL', exchange:'NSE', score:-3, isin:'INE000000001', holdingQuantity:0},
+                 {symbol:'BEL', exchange:'NSE', score:3, isin:'INE000000002', holdingQuantity:0}]
+   .map(row => ({...row, ltp:10, currentValue:0, upstoxLtp:10, upstoxSource:'Upstox test', upstoxAsOf:end}));
+ const finals = (symbol, scores) => scores.map((score, i) => ({sequence:i+1, symbol, exchange:'NSE', covered_at:end, score}));
+ const data = {...history([observation(42,-3)]), symbols:['BEL','HAL'], basis:'workflow_final',
+   workflow_finals:[...finals('HAL',[60,80]), ...finals('BEL',[30]), {...finals('HAL',[100])[0],exchange:'BSE'}]};
+ let response = data;
+ const component = load('../components/BasketDisplayCalculations.tsx', {...h.bindings,...math,apiService:{
+   async getBasketScoreHistory(params) { assert.equal(params.basis, 'workflow_final'); return response; }
+ }});
+ function render() {
+   h.start(); return component.useBasketDisplayCalculations(true,'india',stocks,10000,end,'Zerodha',{},'issuer-v2');
+ }
+ let state = render();
+ state.setParameters({...state.parameters, normalised:100, cash:0});
+ state = render(); h.flush(); await tick(); state = render();
+ assert.equal(state.metrics(stocks[0]).mean.score,70);
+ assert.equal(state.metrics(stocks[0]).target,0.7);
+ assert.equal(state.metrics(stocks[1]).target,0.3);
+ assert.equal(state.metrics(stocks[0]).actionSizing.stocks,700);
+ find(state.cells(stocks[0]), n=>n.props?.['aria-label']==='HAL Target Weight calculation').props.onClick();
+ state=render();
+ assert.deepEqual(state.renderPopup().props.summary.metrics[0],{label:'5-day mean of Workflow final score (/100)',value:'70'});
+ response = {...data, workflow_finals:[]};
+ state.retry(); state=render(); h.flush(); await tick(); state=render();
+ assert.equal(state.metrics(stocks[0]).target,null);
+ assert.equal(math.workflowFinalMean({...data,truncated:true},'HAL','NSE').score,null);
+ assert.equal(math.workflowFinalMean({...data,workflow_finals:finals('HAL',[0])},'HAL','NSE').score,0);
+});
