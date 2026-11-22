@@ -5701,12 +5701,15 @@ ${zerodhaExecutionMode === "direct_market"
         const f=saved.final_summary;
         Object.assign(nextByPortfolio.zerodha.actionables,{finalSummary:f,rebalanceInputs:f.rebalance_inputs,recommendedStocks:f.eligible});
       }
-      for(const card of ["technical","pairwise","rebalance"] as const){
+      for(const card of ["technical","pairwise","rebalance","threats"] as const){
         const output=saved?.cards[card];
         if(!output) continue;
         const stage=nextByPortfolio[portfolio][card];
         if(stage.workflowSequence && stage.workflowSequence!==sequence) continue;
         stage.published=output;
+        if(card==="threats") {
+          stage.threatCounts={expected:output.expected,returned:output.threat_returned??0,scored:output.covered,complete:output.threat_complete??0,status:output.threat_status??"unassessed"};
+        }
         stage.evidenceCoverage=`${output.covered}/${output.expected} ${card==="pairwise"?"pairs judged":"stocks scored"}`;
         stage.workflowSequence=sequence;
       }
@@ -7240,6 +7243,7 @@ ${zerodhaExecutionMode === "direct_market"
               chosen[card]=queued.id;
               await markCompleted(portfolio,card,{...(run?{...summarizeRun(run),...getRunProgress(run),lastRunId:run.id}:{totalLlms:0,completedLlms:0}),
                 ...(result.status !== "completed" ? {partialNotice:`Scorecard ${result.status}. ${result.scored ?? 0} of ${source.manifest.stocks.length} listings have verified scores.`} : {}),
+                ...(card==="threats" && result.threat_counts ? {threatCounts:{...result.threat_counts,status:result.status}} : {}),
                 recommendedStocks:result.scored ?? 0,evidenceCoverage:result.pair_counts ? `${result.pair_counts.judged}/${result.pair_counts.expected} pairs judged` : String(result.scored ?? 0)+"/"+source.manifest.stocks.length+" scored",
                 ...(result.pair_counts ? {published:{output_id:queued.id,run_id:queued.run_id,covered:result.pair_counts.judged,expected:result.pair_counts.expected,pair_counts:result.pair_counts,used_output_id:null,final_id:null}} : {}),
                 ...(result.rebalance_audit?{published:{output_id:result.id,run_id:run?.id??0,covered:result.rebalance_audit.coverage.assessed,

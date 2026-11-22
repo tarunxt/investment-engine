@@ -67,6 +67,7 @@ export type StageInfo = StageCost & {
   finalInputs?: Record<string, unknown>;
   published?: import("@/lib/independentScorecards").AvailableOutput;
   evidenceCoverage?: string;
+  threatCounts?: {expected:number;returned:number;scored:number;complete:number;status:string};
   distinctModels?: number;
   pairCoverage?: string;
   pairStatus?: "completed" | "partial";
@@ -302,6 +303,10 @@ export function getStageOutcome(info: StageInfo) {
   const status = info.runStatus?.trim().toLowerCase() ?? "";
   if (info.state === "running" || info.state === "queued") return info.state;
   if (info.state === "idle" && ["processing", "running"].includes(status)) return "running";
+  if (info.threatCounts && info.state!=="failed") {
+    const {status}=info.threatCounts;
+    return status==="completed" ? "completed" : status==="unassessed" ? "unassessed" : "partial";
+  }
   if (info.published) {
     if (info.published.counts) {
       const c=info.published.counts;
@@ -360,6 +365,12 @@ export function hasStagePartialOutput(info: StageInfo) {
 
 export function getStageTileError(info: StageInfo): StageTileRow {
   const error = getTileErrorDetail(info.error);
+  if (!error && info.threatCounts) {
+    const t=info.threatCounts;
+    const cause=t.scored<t.expected ? "Insufficient verified risk categories" : t.complete<t.expected ? "Some risk categories unresolved" : "Unresolved validation errors";
+    return {label:"Assessment",value:t.status==="completed"?"Complete":cause,detail:t.status==="completed"?null:
+      `${t.scored}/${t.expected} listings meet the three-category threshold. ${t.complete}/${t.expected} have all eight categories resolved.`};
+  }
   const partial = info.partialNotice?.trim() ? info.partialNotice :
     info.runStatus === "partial" || (info.partialLlms ?? 0) > 0
       ? `Recorded partial output${info.partialLlms != null ? `: ${info.partialLlms} partial LLM responses` : ""}.` : null;
@@ -392,6 +403,10 @@ export function getLlmStageTileRows(info: StageInfo, now: number): StageTileRow[
       {label:"Results recorded",value:`${pairs.returned}/${pairs.expected} · ${pairs.jobs} model jobs`},
       {label:"Missing evidence",value:`${pairs.one_missing} pairs on one side · ${pairs.both_missing} on both`},
       {label:"Fully compared",value:`${pairs.complete_stocks}/${pairs.listings} listings · ${pairs.mode}`},
+    ] : info.threatCounts ? [
+      {label:"Listings in scope",value:String(info.threatCounts.expected)},
+      {label:"Listings returned",value:`${info.threatCounts.returned}/${info.threatCounts.expected}`},
+      {label:"Fully assessed",value:`${info.threatCounts.complete}/${info.threatCounts.expected}`},
     ] : info.published?.counts ? [
       {label:"Listings assessed",value:String(info.published.counts.assessed)},
       {label:"Score quality",value:`${info.published.counts.complete} complete · ${info.published.counts.provisional} provisional · ${info.published.counts.unassessed} unassessed`},

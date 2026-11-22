@@ -164,3 +164,13 @@ test('running, partial and clean tiles have distinct presentation', () => {
     assert.equal(ui.getIdleStageRows(stage,{state:'completed'},0).some(row => row.label==='Error'),false);
   }
 });
+
+test('Threats distinguishes returned rows, provisional scores and full assessment', () => {
+  const info = {state:'completed', runStatus:'completed',threatCounts:{expected:34,returned:34,scored:0,complete:0,status:'unassessed'}};
+  assert.equal(ui.getStageOutcome(info),'unassessed');
+  const rows=ui.getLlmStageTileRows(info,0);
+  assert.equal(rows.find(r=>r.label==='Listings returned').value,'34/34');
+  assert.equal(rows.find(r=>r.label==='Assessment').value,'Insufficient verified risk categories');
+  assert.ok(!rows.some(r=>r.label==='Stocks recommended'));
+  assert.equal(ui.getStageOutcome({...info,threatCounts:{...info.threatCounts,scored:34,status:'partial'}}),'partial');
+});

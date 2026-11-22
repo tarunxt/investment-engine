@@ -3,6 +3,7 @@
 import { RebalanceStockScores } from "./RebalanceStockScores";
 import { TechnicalValidation } from "./TechnicalValidation";
 import { PairwiseCoverage } from "./PairwiseCoverage";
+import { ThreatStockScores } from "./ThreatStockScores";
 import { TechnicalStockScores } from "./TechnicalStockScores";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -310,6 +311,7 @@ function Evidence({
   const { rate } = useRebalanceCostQuote();
   const [durationOpen, setDurationOpen] = useState(false);
   const [templateOpen, setTemplateOpen] = useState(false);
+  const retryKeys = useRef(new Map<number,string>());
   const api = useMemo(() => scorecardApi(client, brokerKey(market)), [client, market]);
   const readHistory = useCallback(
     () => client.getAutoRebalanceHistoryDetail(brokerKey(market), sequence),
@@ -320,15 +322,15 @@ function Evidence({
   const { runs, standalone } =
     history.data && stage ? stageExecutions(history.data, stage) : { runs: [], standalone: [] };
   const readCoverage = useCallback(()=>api.coverage(sequence),[api,sequence,refresh]);
-  const coverage = useRead(readCoverage,card==="technical" || card==="pairwise");
-  const published = card==="technical" || card==="pairwise" ? coverage.data?.cards[card] : undefined;
+  const coverage = useRead(readCoverage,card==="technical" || card==="pairwise" || (card==="threats" && market==="zerodha"));
+  const published = card==="technical" || card==="pairwise" || (card==="threats" && market==="zerodha") ? coverage.data?.cards[card] : undefined;
   const run =
     published && execution===null && !published.run_id ? undefined : execution !== null
       ? runs.find((r) => r.id === execution)
       : (runs.find((r) => r.id === (published?.run_id ?? stage?.run_id)) ?? runs[0]);
   const jobs = run?.jobs ?? (execution === null && !(published && !published.run_id) ? standalone : []);
   const runId = run?.id;
-  const revision = inputRevision(run?.prompt, card, market) ?? ((card==="technical" || card==="pairwise") && !runId ? coverage.data?.revision_id : null);
+  const revision = inputRevision(run?.prompt, card, market) ?? ((card==="technical" || card==="pairwise" || card==="threats") && !runId ? coverage.data?.revision_id : null);
   const readTemplate = useCallback(() => api.prompt(revision!, card), [api, revision, card]);
   const template = useRead(readTemplate, !!revision && tab === "prompts" && templateOpen);
   const readSource = useCallback(() => api.read(revision!), [api, revision, refresh]);
@@ -533,13 +535,20 @@ function Evidence({
           )}
           {card==="pairwise" && scores.data && <PairwiseCoverage result={scores.data}/>}
           {attempt && (
-            <details className={panel} open={(card==="technical"||card==="rebalance")&&market==="zerodha"?true:undefined}>
+            <details className={panel} open={(card==="technical"||card==="threats"||card==="rebalance")&&market==="zerodha"?true:undefined}>
               <summary className="cursor-pointer font-semibold">
                 Saved stock scores · Output #{attempt.id}
               </summary>
               <Feedback query={scores} />
               {scores.data?.rebalance_audit && card==="rebalance" ? <RebalanceStockScores result={scores.data}/> : scores.data && card==="technical" && market==="zerodha" ? (
                 <TechnicalStockScores key={scores.data.id} result={scores.data} onRecover={()=>api.recover(scores.data!.id)} />
+              ) : scores.data && card==="threats" && market==="zerodha" ? (
+                <ThreatStockScores key={scores.data.id} result={scores.data} onRecover={id=>api.recover(id)} onRetry={revision && jobs[0] ? async id=>{
+                  const key=retryKeys.current.get(id)??crypto.randomUUID();
+                  retryKeys.current.set(id,key);
+                  await api.start(revision,"threats",{sequence,request_key:key,retry_attempt_id:id,
+                    targets:[{provider:jobs[0].provider,model:jobs[0].model}]});
+                }:undefined} />
               ) : scores.data && (
                 <Table
                   columns={["Listing", "Score /100", "Coverage", ...(card==="pairwise"?["W / T / L", "Judged / assigned","Unknown"]:card==="technical"?["Setup","Entry at close","Catalogue rating","5-session return %","20-session relative %","Relative volume","20-session volatility %","Distance to SMA50 %","Research score /100"]:[])]}

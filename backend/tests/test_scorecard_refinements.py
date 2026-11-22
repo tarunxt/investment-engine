@@ -134,8 +134,13 @@ async def exercise_single_job_start(monkeypatch, card):
     monkeypatch.setattr(router.pair_evidence,"news",AsyncMock(return_value={}))
     monkeypatch.setattr(router.pair_evidence,"save_history",AsyncMock())
     monkeypatch.setattr(router, "collect_research", AsyncMock(return_value={}))
+    from app.domains.scorecards import threat_sources
+    threat_packet = {"threat_version":2,
+        "sources":{"S1":{"title":"Fixture release"}},"matrix":{k:{"C3":["S1"]} for k in keys},
+        "targets":{k:["C3"] for k in keys},"notices":[]}
+    monkeypatch.setattr(threat_sources, "collect", AsyncMock(return_value=threat_packet))
     monkeypatch.setattr(router, "workflow", AsyncMock(return_value=SimpleNamespace(id=2, sequence=5, label="Test")))
-    monkeypatch.setattr(router.storage, "append", AsyncMock(return_value=SimpleNamespace(id=3, data={"research":evidence})))
+    monkeypatch.setattr(router.storage, "append", AsyncMock(return_value=SimpleNamespace(id=3, data={"research":threat_packet if card=="threats" else evidence})))
     monkeypatch.setattr(router, "_get_redis", lambda: AsyncMock())
     enqueue = AsyncMock(return_value=SimpleNamespace(id=10))
     monkeypatch.setattr(router.CreateRunUseCase, "execute", enqueue)
