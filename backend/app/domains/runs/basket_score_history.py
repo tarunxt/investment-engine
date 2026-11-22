@@ -52,7 +52,7 @@ def component_digest(components):
     return digest.hexdigest()
 
 
-def score_history_view(session, *, user_id, market, symbols, days, as_of, timezone_name):
+def score_history_view(session, *, user_id, market, symbols, days, as_of, timezone_name, basis="run"):
     if as_of.tzinfo is None: raise ValueError('An offset-aware as-of timestamp is required')
     if days < 1 or days > 3650: raise ValueError('Choose between 1 and 3650 past days')
     try: ZoneInfo(timezone_name)
@@ -62,6 +62,14 @@ def score_history_view(session, *, user_id, market, symbols, days, as_of, timezo
     start = end - timedelta(days=days)
     symbols = sorted({normalize_stock_symbol(s) for s in symbols})
     if not symbols or len(symbols) > 500: raise ValueError('Select between 1 and 500 stock symbols')
+    if basis == "workflow_final":
+        from .workflow_final_history import workflow_final_history
+        if market != "india":
+            raise ValueError("Workflow final allocation history is available for Zerodha")
+        finals, truncated = workflow_final_history(session, user_id, set(symbols), start, end)
+        return {"basis": basis, "market": market, "symbols": symbols, "as_of": end.isoformat(),
+                "window_start": start.isoformat(), "timezone": timezone_name, "days": days,
+                "workflow_finals": finals, "observations": [], "truncated": truncated, "notes": []}
     rows = session.execute(select(FinalActionableHistory, Run).outerjoin(Run, and_(Run.id == FinalActionableHistory.rebalance_run_id, Run.user_id == user_id)).where(FinalActionableHistory.user_id == user_id, FinalActionableHistory.market == market, FinalActionableHistory.stock_symbol.in_(symbols), FinalActionableHistory.covered_at > start, FinalActionableHistory.covered_at <= end).order_by(FinalActionableHistory.covered_at, FinalActionableHistory.id).limit(10001)).all()
     observations = []
     for history, run in rows[:10000]:

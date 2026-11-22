@@ -1084,8 +1084,9 @@ class apiServiceClass implements IApiService {
     return this.get<StockSourceObservationPage>(`${URLs.runs.create()}/final-actionables/stock-observations?${query}`, { timeoutMs: FINAL_ACTIONABLE_HISTORY_READ_TIMEOUT_MS });
   }
 
-  getBasketScoreHistory(params: { market: "india" | "us"; symbols: string[]; days: number; as_of?: string }): Promise<BasketScoreHistory> {
+  getBasketScoreHistory(params: { market: "india" | "us"; symbols: string[]; days: number; as_of?: string; basis?: "workflow_final" }): Promise<BasketScoreHistory> {
     const query = new URLSearchParams({ market: params.market, days: String(params.days) });
+    if (params.basis) query.set("basis", params.basis);
     params.symbols.forEach(symbol => query.append("symbols", symbol));
     if (params.as_of) query.set("as_of", params.as_of);
     return this.get<BasketScoreHistory>(`${URLs.runs.create()}/final-actionables/score-history?${query}`, { timeoutMs: FINAL_ACTIONABLE_HISTORY_READ_TIMEOUT_MS });

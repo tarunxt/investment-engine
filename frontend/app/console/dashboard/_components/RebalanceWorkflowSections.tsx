@@ -2912,8 +2912,10 @@ function ScopedZerodhaBasketPreviewDialog({
   const portfolioAssets = tradingViewMarket === "india"
     ? { portfolioValue: currentWeights.portfolioValue, availableMargin, totalAssets: currentWeights.totalAssets }
     : portfolioParameterAssets(detailsData.portfolioSnapshot, tradingViewMarket, availableMargin);
+  const finalListings = Array.from(scoreRevision?.finalRows?.values() ?? []);
   const quoteRows = allocationUniverse.map(row => row.stock);
-  const quoteInstruments = (tradingViewMarket === "us" ? [...quoteRows, ...orders] : quoteRows)
+  const indiaListings = [...quoteRows, ...finalListings];
+  const quoteInstruments = (tradingViewMarket === "us" ? [...quoteRows, ...orders] : indiaListings)
     .map(row => `${row.exchange.toUpperCase()}:${row.symbol.toUpperCase()}`);
   const columnNames = { ...(tradingViewMarket === "india" ? { "Score": "Workflow final score", "Consensus": "Votes for proposed trade", "Action": "Score-based action", "Side": "Trade side", "Action New": "Proposed trade" } : {}), ...(tradingViewMarket === "us" ? { "Vendor LTP": "Alpaca IEX LTP" } : {}), ...columnPreferences?.names } as Record<string, string>;
   const quoteRead = useBasketDisplayQuotes(open, tradingViewMarket, quoteInstruments, detailsData.portfolioSnapshot ? `${tradingViewMarket}:${detailsData.portfolioSnapshot.snapshot_date}:${detailsData.portfolioSnapshot.captured_at}:${ltpRefreshedAt ?? "initial"}` : null);
@@ -2930,16 +2932,20 @@ function ScopedZerodhaBasketPreviewDialog({
     const rowQuote = tradingViewMarket === "india" ? validDisplayPrice(order?.lastPrice) : null;
     return { ltp: quote?.price ?? rowQuote, limitPrice: tradingViewMarket === "india" ? validDisplayPrice(order?.price) : null, ltpAsOf: quote?.asOf ?? (rowQuote !== null ? ltpRefreshedAt ?? undefined : undefined), ltpSource: quote?.source ?? (rowQuote !== null ? "Quoted LTP shown in this exact row; freshness not independently verified" : undefined), quoteLoading: quoteRead.loading && !quote && rowQuote === null };
   };
+  const venueEvidence = (symbol: string, exchange: string) => {
+    const holding = tradingViewMarket === "india" ? kiteHoldingQuantity(detailsData.portfolioSnapshot as ZerodhaPortfolioSnapshotDetail | null, symbol, exchange) : null;
+    const upstox = verifiedFetchedDisplayQuote((quoteRead.upstoxQuotes ?? []).filter(quote => quote.source.startsWith("Upstox ")), symbol, exchange);
+    const snapshot = detailsData.portfolioSnapshot as ZerodhaPortfolioSnapshotDetail | null;
+    const exact = tradingViewMarket === "india" ? snapshot?.holdings?.filter(h => stockIdentity(h.tradingsymbol, h.exchange) === stockIdentity(symbol, exchange)) ?? [] : [];
+    const idsForVenue = new Set([...exact.map(h => h.isin), upstox?.isin].filter((s): s is string => Boolean(s)));
+    const issuer = idsForVenue.size === 1 ? [...idsForVenue][0] : null;
+    const hasOutsideHolding = issuer && snapshot?.holdings?.some(h => h.isin === issuer && !indiaListings.some(item => stockIdentity(item.symbol, item.exchange) === stockIdentity(h.tradingsymbol, h.exchange)));
+    return {holding, upstox, isin: hasOutsideHolding ? null : issuer};
+  };
   const displayStock = (row: DashboardActionRow) => {
     const currentOrder = orders.find(order => order.symbol === row.stock.symbol && order.exchange === row.stock.exchange);
     const currentDetail = currentOrder?.detail ?? row.detail;
-    const holding = tradingViewMarket === "india" ? kiteHoldingQuantity(detailsData.portfolioSnapshot as ZerodhaPortfolioSnapshotDetail | null, row.stock.symbol, row.stock.exchange) : null;
-    const upstox = verifiedFetchedDisplayQuote((quoteRead.upstoxQuotes ?? []).filter(quote => quote.source.startsWith("Upstox ")), row.stock.symbol, row.stock.exchange);
-    const snapshot = detailsData.portfolioSnapshot as ZerodhaPortfolioSnapshotDetail | null;
-    const exact = tradingViewMarket === "india" ? snapshot?.holdings?.filter(h => stockIdentity(h.tradingsymbol, h.exchange) === stockIdentity(row.stock.symbol, row.stock.exchange)) ?? [] : [];
-    const idsForVenue = new Set([...exact.map(h => h.isin), upstox?.isin].filter((s): s is string => Boolean(s)));
-    const issuer = idsForVenue.size === 1 ? [...idsForVenue][0] : null;
-    const hasOutsideHolding = issuer && snapshot?.holdings?.some(h => h.isin === issuer && !allocationUniverse.some(item => stockIdentity(item.stock.symbol, item.stock.exchange) === stockIdentity(h.tradingsymbol, h.exchange)));
+    const { holding, upstox, isin } = venueEvidence(row.stock.symbol, row.stock.exchange);
     const modelPrices = row.stock.rows.map(({meta, cells}) => ({
       job: meta.jobId, provider: meta.provider, time: meta.createdAt,
       price: validDisplayPrice(Number(String(cells["Price Per Unit"] ?? "").replace(/,/g, ""))),
@@ -2955,14 +2961,18 @@ function ScopedZerodhaBasketPreviewDialog({
       return { runId, createdAt: parseApiTimestamp(run?.created_at)?.toISOString() ?? "", completed: run?.status === "completed", status: run?.status, market: sameMarket ? tradingViewMarket : null };
     });
     const saved = openSavedBasket ? scoreRevision?.saved.get(stockIdentity(row.stock.symbol, row.stock.exchange)) : undefined;
-    return { savedComparison: saved && {score: saved.score, divisor: saved.divisor, currentDivisor: currentDetail.detailedRationaleDenominator}, modelUnits: currentDetail.meanUnitsChange, isin: hasOutsideHolding ? null : issuer, modelPrices, verifiedUsIdentity: row.stock.usIdentity?.listing ? {securityId:row.stock.usIdentity.listing.security_id,exchangeAliases:row.stock.usIdentity.holdingSafe ? ["US"] : []} : undefined, identityIssue: row.stock.identityIssue, vendorReady: (quoteRead.vendorQuotes ?? []).find(quote => quote.instrument === stockIdentity(row.stock.symbol, row.stock.exchange))?.eligible_for_readiness === true, investedValue: usHolding?.investedValue ?? null, vendorLtp: vendor?.price ?? null, vendorSource: vendor?.source, vendorAsOf: vendor?.asOf, currentValue: tradingViewMarket === "us" ? usHolding?.currentValue ?? null : currentWeights.valid ? currentWeights.values.get(stockIdentity(row.stock.symbol, row.stock.exchange)) ?? 0 : null, holdingQuantity: tradingViewMarket === "us" ? usHolding?.quantity ?? null : holding?.quantity ?? null, holdingAsOf: holding?.asOf, holdingSource: holding?.source, upstoxLtp: upstox?.price ?? null, upstoxAsOf: upstox?.asOf, upstoxSource: upstox?.source, symbol: row.stock.symbol, exchange: row.stock.exchange, score: currentOrder ? currentDetail.calculatedScore : row.formulaScore, action: currentOrder ? getZerodhaBasketActionForPercent(currentOrder) : row.formulaAction, scoreSources, ...displayQuote(row.stock.symbol, row.stock.exchange) };
+    return { savedComparison: saved && {score: saved.score, divisor: saved.divisor, currentDivisor: currentDetail.detailedRationaleDenominator}, modelUnits: currentDetail.meanUnitsChange, isin, modelPrices, verifiedUsIdentity: row.stock.usIdentity?.listing ? {securityId:row.stock.usIdentity.listing.security_id,exchangeAliases:row.stock.usIdentity.holdingSafe ? ["US"] : []} : undefined, identityIssue: row.stock.identityIssue, vendorReady: (quoteRead.vendorQuotes ?? []).find(quote => quote.instrument === stockIdentity(row.stock.symbol, row.stock.exchange))?.eligible_for_readiness === true, investedValue: usHolding?.investedValue ?? null, vendorLtp: vendor?.price ?? null, vendorSource: vendor?.source, vendorAsOf: vendor?.asOf, currentValue: tradingViewMarket === "us" ? usHolding?.currentValue ?? null : currentWeights.valid ? currentWeights.values.get(stockIdentity(row.stock.symbol, row.stock.exchange)) ?? 0 : null, holdingQuantity: tradingViewMarket === "us" ? usHolding?.quantity ?? null : holding?.quantity ?? null, holdingAsOf: holding?.asOf, holdingSource: holding?.source, upstoxLtp: upstox?.price ?? null, upstoxAsOf: upstox?.asOf, upstoxSource: upstox?.source, symbol: row.stock.symbol, exchange: row.stock.exchange, score: currentOrder ? currentDetail.calculatedScore : row.formulaScore, action: currentOrder ? getZerodhaBasketActionForPercent(currentOrder) : row.formulaAction, scoreSources, ...displayQuote(row.stock.symbol, row.stock.exchange) };
   };
   const calculationStocks = allocationUniverse.map(displayStock);
   const knownListings = new Set(calculationStocks.map(stock => stockIdentity(stock.symbol, stock.exchange)));
-  const finalOnlyStocks = Array.from(scoreRevision?.finalRows?.values() ?? [])
-    .filter(row => !knownListings.has(row.listing))
-    .map(row => ({symbol:row.symbol, exchange:row.exchange, score:row.signed, currentValue:row.value,
-      holdingQuantity:row.units, action:row.action, ...displayQuote(row.symbol, row.exchange)}));
+  const finalOnlyStocks = finalListings.filter(row => !knownListings.has(row.listing)).map(row => {
+    const stock = {symbol:row.symbol, exchange:row.exchange, score:row.signed, currentValue:row.value,
+      holdingQuantity:row.units, action:row.action, ...displayQuote(row.symbol, row.exchange)};
+    if (tradingViewMarket !== "india") return stock;
+    const {holding, upstox, isin} = venueEvidence(row.symbol, row.exchange);
+    return {...stock, isin, holdingQuantity:holding?.quantity ?? null, upstoxLtp:upstox?.price ?? null,
+      upstoxAsOf:upstox?.asOf, upstoxSource:upstox?.source};
+  });
   const displayCalculations = useBasketDisplayCalculations(open, tradingViewMarket, [...calculationStocks, ...finalOnlyStocks], portfolioAssets.totalAssets, detailsData.portfolioSnapshot?.captured_at ?? null, basketBrokerLabel, { portfolioValue: portfolioAssets.portfolioValue, availableMargin: portfolioAssets.availableMargin }, tradingViewMarket === "india" ? "issuer-v2" : "listing-v1");
   const legacyDisplayOnlyRows = allocationUniverse.filter(row => row.independentEligible !== false && !orders.some(order => order.symbol === row.stock.symbol && order.exchange === row.stock.exchange));
   const visibleScore = (_score: number | null) => true;
@@ -3269,7 +3279,7 @@ function ScopedZerodhaBasketPreviewDialog({
               </div>
               <h3 className="sticky left-5 mb-2 text-lg font-bold text-slate-900">Order Basket</h3>
               <div className="basket-preview-scroll mb-5 w-max min-w-full rounded-2xl border border-slate-200">
-                  <BasketColumnTable hidden={hiddenColumns} order={columnPreferences?.order} names={displayCalculations.parameters ? { "Historical Weighted Score": `${displayCalculations.parameters.days}-day mean of run scores (−3 to +3)`, ...columnNames } : columnNames} onOpen={setColumnMenu} onRequestRename={setRenameColumn}>
+                  <BasketColumnTable hidden={hiddenColumns} order={columnPreferences?.order} names={displayCalculations.parameters ? { "Historical Weighted Score": tradingViewMarket === "india" ? `${displayCalculations.parameters.days}-day mean of Workflow final score` : `${displayCalculations.parameters.days}-day mean of run scores (−3 to +3)`, ...columnNames } : columnNames} onOpen={setColumnMenu} onRequestRename={setRenameColumn}>
                   <table aria-label="Order Basket" className="min-w-[92rem] w-full border-separate border-spacing-0 text-sm">
                     <thead className="bg-slate-50">
                       <tr className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">

@@ -155,3 +155,39 @@ def test_saved_partial_score_is_eligible_without_claiming_run_completed(db):
     run.status = JobStatus.FAILED
     db.commit()
     assert read()['eligible'] is False
+
+
+def test_workflow_final_basis_uses_saved_listing_finals_once_per_workflow(db):
+    from app.domains.runs.models import AutoRebalanceWorkflow as Workflow, AutoRebalanceWorkflowStage as Stage
+    Workflow.__table__.create(db.bind)
+    Stage.__table__.create(db.bind)
+    def workflow(seq, owner=1, market="india"):
+        w = Workflow(user_id=owner, portfolio=market, sequence=seq, label=str(seq))
+        db.add(w)
+        db.flush()
+        return w
+    def final(w, revision, when, score):
+        db.add(Stage(workflow_id=w.id, stage=f"sc1.f.{revision}", status="completed",
+                     created_at=when.replace(tzinfo=None), summary_json={"result": {"rows": [
+                         {"listing":"NSE:HAL", "final":score, "signed":-2, "status":"Provisional"},
+                         {"listing":"BSE:HAL", "final":0}, {"listing":"NSE:MISSING", "final":None}]}}))
+    def legacy(w, signed):
+        db.add(Stage(workflow_id=w.id, stage="actionables", status="completed", completed_at=AS_OF,
+                     summary_json={"frozen_final":{"schema":"workflow-final-v2", "rows":[
+                         {"exchange":"NSE", "symbol":"HAL", "effectiveScore":signed}]}}))
+    first = workflow(1)
+    final(first, 1, AS_OF - timedelta(days=2), 95)
+    final(first, 2, AS_OF - timedelta(days=1), 40)
+    final(first, 3, AS_OF + timedelta(seconds=1), 99)
+    legacy(first, 3)
+    legacy(workflow(2), 1.5)
+    final(workflow(3), 1, AS_OF-timedelta(days=5), 90)
+    final(workflow(4), 1, AS_OF, 80)
+    final(workflow(5, owner=2), 1, AS_OF, 30)
+    final(workflow(6, market="indmoney_us"), 1, AS_OF, 60)
+    db.commit()
+    result = score_history_view(db, user_id=1, market="india", symbols=["HAL","MISSING"], days=5,
+                                as_of=AS_OF, timezone_name="Asia/Kolkata", basis="workflow_final")
+    assert result["basis"] == "workflow_final" and result["observations"] == [] and not result["truncated"]
+    assert [(r["sequence"],r["exchange"],r["score"]) for r in result["workflow_finals"]] == [
+        (1,"BSE",0), (1,"NSE",40), (2,"NSE",75), (4,"BSE",0), (4,"NSE",80)]

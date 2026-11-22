@@ -8,10 +8,21 @@ export type AllocationScoreContract = ReturnType<typeof allocationScoreContract>
 export type ExcludedScoreObservation = { row: SavedScoreObservation; reason: string };
 export type SavedScoreObservation = { id: number | string; run_id: number; symbol: string; exchange: string | null; covered_at: string; score: number | null; action: string | null; formula_version: string; completed: boolean; eligible?: boolean; run_status?: string; coverage_status: string; source_run_ids?: number[]; rawScore?: number | null; effectiveScore?: number | null; scorePolicy?: string };
 export type CurrentScoreCalculation = Partial<AllocationScoreContract> & { symbol: string; exchange: string; market: 'india' | 'us'; score: number | null; action?: string | null; calculatedAt: string; sources: { runId: number; createdAt: string; completed: boolean; status?: string; market: 'india' | 'us' | null }[] };
-export type BasketScoreHistory = { market: 'india' | 'us'; symbols: string[]; as_of: string; window_start: string; timezone: string; days: number; truncated: boolean; observations: SavedScoreObservation[]; notes: string[] };
+export type WorkflowFinalObservation = { sequence: number; symbol: string; exchange: string; covered_at: string; score: number };
+export type BasketScoreHistory = { basis?: 'workflow_final'; workflow_finals?: WorkflowFinalObservation[]; market: 'india' | 'us'; symbols: string[]; as_of: string; window_start: string; timezone: string; days: number; truncated: boolean; observations: SavedScoreObservation[]; notes: string[] };
 export type DisplayParameters = { maximumStocks: number; days: number; cash: number; normalised: number; valid: boolean };
 export const defaultDisplayParameters = (): DisplayParameters => ({ maximumStocks: 20, days: 5, cash: 5, normalised: 9.5, valid: true });
 export const stockIdentity = (symbol: string, exchange: string) => `${exchange.toUpperCase()}:${symbol.toUpperCase()}`;
+export function workflowFinalMean(history: BasketScoreHistory, symbol: string, exchange: string) {
+  const start = Date.parse(history.window_start), end = Date.parse(history.as_of);
+  const rows = (history.basis === 'workflow_final' && history.market === 'india' ? history.workflow_finals ?? [] : []).filter(row =>
+    row.symbol === symbol && row.exchange === exchange && Number.isSafeInteger(row.sequence) && row.sequence > 0 &&
+    Number.isFinite(row.score) && row.score >= 0 && row.score <= 100 &&
+    Date.parse(row.covered_at) > start && Date.parse(row.covered_at) <= end);
+  const sum = rows.reduce((total, row) => total + row.score, 0);
+  const complete = !history.truncated && rows.length > 0 && new Set(rows.map(row => row.sequence)).size === rows.length;
+  return { rows, score: complete ? sum / rows.length : null };
+}
 export function historicalMean(history: BasketScoreHistory, symbol: string, exchange: string, current?: CurrentScoreCalculation, verifiedIdentity?: {securityId:string;exchangeAliases:readonly string[]}) {
   const start = Date.parse(history.window_start), end = Date.parse(history.as_of);
   const acceptedVenues = new Set([exchange.toUpperCase(), ...(history.market === 'us' && verifiedIdentity?.securityId ? verifiedIdentity.exchangeAliases.filter(value => value === 'US') : [])]);

@@ -164,7 +164,7 @@ export interface IApiService {
     }): Promise<FinalActionableHistoryListResponse>;
     getStockSourceObservations(params: { market: "india" | "us"; symbol: string; cursor?: string | null }): Promise<StockSourceObservationPage>;
 
-    getBasketScoreHistory(params: { market: "india" | "us"; symbols: string[]; days: number; as_of?: string }): Promise<BasketScoreHistory>;
+    getBasketScoreHistory(params: { market: "india" | "us"; symbols: string[]; days: number; as_of?: string; basis?: "workflow_final" }): Promise<BasketScoreHistory>;
     getHistoricalScoreEvidence(params: { run_id: number; market: "india" | "us"; symbol: string; exchange: string; covered_at: string; history_id?: number }): Promise<HistoricalScoreEvidenceResponse>;
     saveFinalActionableHistory(
         data: FinalActionableHistoryBulkCreateRequest,
