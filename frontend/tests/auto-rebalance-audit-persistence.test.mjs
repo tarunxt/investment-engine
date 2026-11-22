@@ -376,7 +376,7 @@ test("workflow card retains pending status and omits the failed-history banner",
   const workflowStates = Object.fromEntries(stages.map((stage) => [stage, { state: "completed" }]));
   for (const status of ["pending", "failed"]) {
     const bindings = {
-      isCard:stage=>["rebalance","technical","threats","pairwise"].includes(stage),exports: {}, technicalInputPlanIssue, selectedInputs: { zerodha: { technical: new Set(["technical:next"]) } },
+      latestIndiaWorkflow:null, preparedSwing:null, isCard:stage=>["rebalance","technical","threats","pairwise"].includes(stage),exports: {}, technicalInputPlanIssue, selectedInputs: { zerodha: { technical: new Set(["technical:next"]) } },
       require: (name) => { assert.equal(name, "react/jsx-runtime"); return jsxRuntime; },
       scoreRevision: null, zerodhaBasketOrders: [],
       auditStates: { zerodha: { key: "india:42", label: "India 42", status, message: "History not acknowledged" } },
