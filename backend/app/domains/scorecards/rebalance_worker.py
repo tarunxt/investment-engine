@@ -1,4 +1,4 @@
-"""Execute one selected slot, checkpoint accepted fields, and bound repair to one call."""
+"""Checkpoint each selected slot and give each eligible field one bounded repair pass."""
 import json
 from dataclasses import replace
 from app.domains.api_usage.recorder import provider_usage_phase
@@ -27,12 +27,12 @@ def execute(provider, model, prompt, batch, save, previous=None):
         return {"version":2,"rows":rows,"first_rows":first_rows,"calls":receipts,
                 "missing":missing}
 
-    def call(page, repair=None):
+    def call(page, repair=None, *, retry=False):
         packet={**envelope,"listings":{k:listings[k] for k in page}}
         with provider_usage_phase("row_repair" if repair else "initial_generation"):
             response=provider.generate(model=model,prompt=contract.instructions(revision,packet,repair))
         accepted=contract.validated(response.content,packet["listings"])
-        if repair and scope:
+        if repair and scope and not retry:
             for k,fields in repair.items():
                 rows[k]={f:v if f in fields else None for f,v in accepted[k].items()}
                 first_rows[k]=dict(rows[k])
@@ -41,7 +41,7 @@ def execute(provider, model, prompt, batch, save, previous=None):
         else:
             rows.update(accepted)
             first_rows.update({k:dict(v) for k,v in accepted.items()})
-        receipts.append({"phase":"repair" if repair else "initial","listings":page,"requested":repair,
+        receipts.append({"phase":"repair" if retry else "targeted" if repair else "initial","listings":page,"requested":repair,
                          "hash":contract.digest_text(response.content or ""),"model":response.model,
                          "tokens_in":response.tokens_in,"tokens_out":response.tokens_out,"cost":response.cost})
         save(snapshot())
@@ -53,9 +53,14 @@ def execute(provider, model, prompt, batch, save, previous=None):
         if page:
             result=call(page,{k:scope[k] for k in page} if scope else None)
     pending=contract.repairable(rows,listings)
-    if not scope and pending and not any(r["phase"]=="repair" for r in receipts):
-        requested={k:pending[k] for k in list(pending)[:limit]}
-        result=call(list(requested),requested)
+    if scope:
+        pending={k:[f for f in fields if f in scope[k]] for k,fields in pending.items()}
+    attempted = {key for receipt in receipts if receipt["phase"]=="repair" for key in receipt["listings"]}
+    remaining = [k for k,fields in pending.items() if fields and k not in attempted]
+    for start in range(0,len(remaining),limit):
+        page = remaining[start:start+limit]
+        requested = {k:pending[k] for k in page}
+        result = call(page,requested,retry=True)
     if result is None:
         from app.domains.ai_providers.base import AIProviderResponse
         result=AIProviderResponse("",0,0,0,"",model)

@@ -132,7 +132,7 @@ def upstox_daily_bars(payload, cutoff, url, limit=10):
     return [sessions[day] for day in sorted(sessions, reverse=True)[:limit]]
 
 
-async def supplement_indian_bars(client, result, cutoff, notices, owner, *, sessions=5, diagnostics=None, verified_keys=None):
+async def supplement_indian_bars(client, result, cutoff, notices, owner, *, sessions=5, diagnostics=None, calendars=None, verified_keys=None):
     from app.domains.zerodha.upstox_quote_guard import QuoteGuard, redis_client
     from app.domains.zerodha.upstox_quotes import load_instruments
     missing = [key for key, items in result.items() if len({r["as_of"][:10] for r in items if r["kind"] == "daily_bar"}) < sessions]
@@ -148,7 +148,23 @@ async def supplement_indian_bars(client, result, cutoff, notices, owner, *, sess
             if diagnostics is not None:
                 diagnostics[key]={"reason":"Exact venue instrument unavailable"}
             return
-        url = f"https://api.upstox.com/v3/historical-candle/{quote(instrument, safe='')}/days/1/{end}/{end-timedelta(days=330 if sessions>60 else 100 if sessions>5 else 24)}"
+        start = end-timedelta(days=400 if sessions>60 else 100 if sessions>5 else 24)
+        until = end
+        cached = {}
+        cache_key = "rebalance:bars:1:"+instrument
+        expected = list((calendars or {}).get(key.split(":")[0], {}))[-sessions:]
+        if expected:
+            try:
+                values = await redis.hmget(cache_key, expected)
+                cached = {day:json.loads(v) for day,v in zip(expected,values) if v}
+            except (RedisError, ValueError):
+                pass
+            absent = [day for day in expected if day not in cached]
+            result[key] = list(cached.values())
+            if not absent:
+                return
+            start, until = absent[0], absent[-1]
+        url = f"https://api.upstox.com/v3/historical-candle/{quote(instrument, safe='')}/days/1/{until}/{start}"
         async with semaphore:
             try:
                 if not await guard.admit():
@@ -165,6 +181,18 @@ async def supplement_indian_bars(client, result, cutoff, notices, owner, *, sess
                         diagnostics[key]={"reason":"Upstox HTTP 429","retry_after":retry_after_seconds(response.headers.get("Retry-After"))}
                 response.raise_for_status()
                 bars = upstox_daily_bars(response.json(), cutoff, url, limit=max(10,sessions))
+                if expected:
+                    dated = {r["as_of"][:10]:r for r in bars if r["as_of"][:10] in expected}
+                    result[key] = list((cached | dated).values())
+                    if dated:
+                        try:
+                            async with redis.pipeline(transaction=True) as pipe:
+                                pipe.hset(cache_key, mapping={d:json.dumps(r) for d,r in dated.items()})
+                                pipe.expire(cache_key, 86400*400)
+                                await pipe.execute()
+                        except RedisError:
+                            pass
+                    return
                 if len(bars) >= max(5, len({r["as_of"][:10] for r in result[key] if r["kind"]=="daily_bar"})):
                     result[key] = [r for r in result[key] if r["kind"] != "daily_bar"] + bars
             except (ValueError, TypeError, AttributeError, httpx.HTTPError):

@@ -29,12 +29,12 @@ CLOSED_2026 = set("01-15 01-26 03-03 03-26 03-31 04-03 04-14 05-01 05-28 06-26 0
 SPECIAL_2026 = {"02-01":time(15,30), "11-08":time(15,35)}
 
 
-def session_calendar(cutoff, venue, holidays):
+def session_calendar(cutoff, venue, holidays, sessions=60):
     local=cutoff.astimezone(INDIA)
     by_date={v["date"]:v for v in holidays if isinstance(v,dict) and v.get("date")}
     years={d[:4] for d in by_date}
     schedule={}
-    for offset in range(105,-1,-1):
+    for offset in range(max(105, sessions * 2),-1,-1):
         day=local.date()-timedelta(days=offset)
         if day.year!=2026 and str(day.year) not in years:
             schedule.clear()
@@ -54,7 +54,7 @@ def session_calendar(cutoff, venue, holidays):
             end=datetime.combine(day,close,INDIA)
             if end<=local:
                 schedule[day.isoformat()]=end.isoformat()
-    return dict(list(schedule.items())[-60:])
+    return dict(list(schedule.items())[-sessions:])
 
 
 def archive_url(venue, day):
@@ -171,7 +171,7 @@ def resolve_history_instruments(stocks, master, previous):
     return aliases
 
 
-async def collect(manifest, username, previous=None, requested=None, *, pair_repair=False, action_only=()):
+async def collect(manifest, username, previous=None, requested=None, *, sessions=60, pair_repair=False, action_only=()):
     cutoff=datetime.fromisoformat(manifest["as_of"])
     receipt=datetime.now(timezone.utc)
     ids=[s["listing"] for s in manifest["stocks"]]
@@ -222,7 +222,7 @@ async def collect(manifest, username, previous=None, requested=None, *, pair_rep
             except ERRORS:
                 saved=[]
             for venue in venues:
-                calendars[venue]=session_calendar(cutoff,venue,saved)
+                calendars[venue]=session_calendar(cutoff,venue,saved,sessions)
         async def instruments():
             nonlocal master
             try:
@@ -243,8 +243,9 @@ async def collect(manifest, username, previous=None, requested=None, *, pair_rep
                     actions[isin] = source["actions"]
                     action_urls[isin] = source["action_url"]
         semaphore=asyncio.Semaphore(8)
+        verified_days = {k:{r["as_of"][:10] for r in records[k] if r.get("basis")=="venue-raw"} for k in keys}
         async def history(venue,day,close):
-            subset={k:master.get(k,{}).get("isin") for k in keys if k.startswith(venue+":")}
+            subset={k:master.get(k,{}).get("isin") for k in keys if k.startswith(venue+":") and (sessions <= 60 or day not in verified_days[k])}
             if pair_repair:
                 subset = {k:i for k,i in subset.items() if k not in action_only and not any(
                     r["as_of"][:10] == day and (r.get("basis") == "venue-raw" or
@@ -281,7 +282,7 @@ async def collect(manifest, username, previous=None, requested=None, *, pair_rep
                         if downloaded and redis is not None:
                             async with redis.pipeline(transaction=True) as pipe:
                                 pipe.hset(ck,mapping={fields[k]:json.dumps(rows) for k,rows in downloaded.items()})
-                                pipe.expire(ck,86400*7)
+                                pipe.expire(ck,86400*(400 if sessions>60 else 7))
                                 await pipe.execute()
                     except ERRORS:
                         pass
@@ -289,7 +290,7 @@ async def collect(manifest, username, previous=None, requested=None, *, pair_rep
                 rows=[r for r in rows if not r.get("published_at") or datetime.fromisoformat(r["published_at"])<=cutoff]
                 by_day={r["as_of"][:10] for r in rows}
                 records[key]=[r for r in records[key] if r["as_of"][:10] not in by_day]+rows
-        start_day=cutoff.astimezone(INDIA).date()-timedelta(days=105)
+        start_day=cutoff.astimezone(INDIA).date()-timedelta(days=max(105, sessions * 2))
         end_day=cutoff.astimezone(INDIA).date()
         exchange_actions=("https://www.nseindia.com/api/corporates-corporateActions?index=equities"
                           +f"&from_date={start_day:%d-%m-%Y}&to_date={end_day:%d-%m-%Y}")
@@ -297,18 +298,18 @@ async def collect(manifest, username, previous=None, requested=None, *, pair_rep
         dual_listed=isins & {i["isin"] for k,i in master.items() if k.startswith("NSE:")}
         try:
             wanted_actions = dual_listed - actions.keys()
-            bulk=await cached("nse-actions:"+end_day.isoformat()) if wanted_actions else []
+            bulk=await cached(f"nse-actions:{start_day}:{end_day}") if wanted_actions else []
             if bulk is None:
                 bulk=json.loads(await download(client,exchange_actions))
                 if isinstance(bulk,list) and bulk:
-                    await cache("nse-actions:"+end_day.isoformat(),bulk,3600)
+                    await cache(f"nse-actions:{start_day}:{end_day}",bulk,3600)
             if wanted_actions:
                 actions.update(nse_actions(bulk,wanted_actions))
                 action_urls.update({isin:exchange_actions for isin in wanted_actions})
         except ERRORS:
             notices.append("NSE corporate-action ledger unavailable")
         async def ledger(isin):
-            key="actions:"+isin+":"+cutoff.astimezone(INDIA).date().isoformat()
+            key=f"actions:{isin}:{start_day}:{end_day}"
             data=await cached(key)
             url=f"https://api.upstox.com/v2/fundamentals/{isin}/corporate-actions"
             if data is None:
@@ -319,7 +320,7 @@ async def collect(manifest, username, previous=None, requested=None, *, pair_rep
                         body=response.json()
                         if body.get("status")!="success" or not isinstance(body.get("data"),list):
                             raise ValueError("Malformed action ledger")
-                        data=action_ledger(body["data"],(cutoff.date()-timedelta(days=110)).isoformat(),cutoff.astimezone(INDIA).date().isoformat())
+                        data=action_ledger(body["data"],(cutoff.date()-timedelta(days=max(110, sessions * 2))).isoformat(),cutoff.astimezone(INDIA).date().isoformat())
                         await cache(key,data,3600)
                     except ERRORS:
                         return
@@ -327,7 +328,7 @@ async def collect(manifest, username, previous=None, requested=None, *, pair_rep
             action_urls[isin]=url
         tasks=[asyncio.create_task(ledger(i)) for i in isins-actions.keys()]
         # Start with newest sessions. A bounded cold fetch retains all completed days.
-        for days_ago in range(60):
+        for days_ago in range(sessions):
             for venue,cal in calendars.items():
                 dates=list(cal.items())
                 if days_ago<len(dates):
@@ -341,10 +342,11 @@ async def collect(manifest, username, previous=None, requested=None, *, pair_rep
             if pending or any(isinstance(v,Exception) for v in outcomes):
                 notices.append("Exchange history or actions incomplete within the retrieval window")
         if eligible_token:
-            supplement={k:[] for k in keys if k not in action_only and len({r["as_of"][:10] for r in records[k]})<55}
+            supplement={k:[] for k in keys if k not in action_only and len({r["as_of"][:10] for r in records[k]})<(sessions if sessions>60 else 55)}
             if supplement:
                 try:
-                    await asyncio.wait_for(supplement_indian_bars(client,supplement,cutoff,notices,manifest["owner_id"],sessions=60,diagnostics=provider_status,**({"verified_keys": aliases} if aliases else {})),10)
+                    await asyncio.wait_for(supplement_indian_bars(client,supplement,cutoff,notices,manifest["owner_id"],sessions=sessions,diagnostics=provider_status,
+                        **({"verified_keys":aliases} if aliases else {}), **({"calendars":calendars} if sessions>60 else {})),25 if sessions>60 else 10)
                 except (*ERRORS,TimeoutError):
                     notices.append("Alternate history unavailable")
                 for k,rows in supplement.items():

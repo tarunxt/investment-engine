@@ -115,13 +115,17 @@ async def publish_manifest(db, owner, workflow, body):
             original = dict(zip(block.headers, block.rows[observation.source.row-1]))
             evidence.append({"original_headers":list(block.headers),"original_row":original,"listing": row["listing"], "run_id": run.id, "job_id": job.id, "model": job.model,
                              "source_time": utc(job.updated_at).isoformat(), "row": {k: str(v) if v is not None else None for k,v in raw.items()}})
+    aliases = {}
+    if india:
+        from .rebalance_identity import publication_aliases
+        aliases = await publication_aliases(listings, evidence)
     # A ticker-only US position with an unresolved share class cannot establish zero units for a contender.
     for row in listings.values():
         if row["origin"] == "contender" and any(h["origin"] == "holding" and h["symbol"] == row["symbol"] for h in unresolved):
             row.update(units=None, settled=None, weight=None, value=None)
     for row in listings.values():
         row.update(currency="INR" if india else "USD", position_status="unknown" if row["units"] is None else "held" if row["units"] else "absent")
-    return {"version": 1, "owner_id":owner,"research_horizon_weeks": [2,12], "portfolio": workflow.portfolio, "sequence": workflow.sequence, "market": market,
+    return {"version": 1, **({"listing_aliases": aliases} if aliases else {}), "owner_id":owner,"research_horizon_weeks": [2,12], "portfolio": workflow.portfolio, "sequence": workflow.sequence, "market": market,
             "currency": "INR" if india else "USD", "as_of": datetime.now(timezone.utc).isoformat(),
             "verified_listings":corrections, "snapshot_id": snap.id, "snapshot_at": utc(snap.captured_at).isoformat(), "swing_job_ids": selected,
             "funds": {"type": "available_margin" if india else "wallet_balance", "value": snap.available_margin if india else snap.wallet_balance,"captured_at":utc(snap.captured_at).isoformat()},
