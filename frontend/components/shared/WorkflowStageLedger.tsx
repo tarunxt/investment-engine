@@ -80,10 +80,10 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
       ["Calculation", item.onCalculationsClick], ["Stock Flow", onStockFlowClick],
     ];
     const actions: TileAction[] = controls.flatMap(([label, onSelect]) => onSelect ? [{ label, onSelect }] : []);
-    actions.push({ label: "History", href: market && isCard(item.stage) ? scorecardHref(market,item.stage) : historyHref });
+    actions.push({ label: "History", href: historyHref });
     const card = item.stage;
     if (market && isCard(card)) {
-      actions.push({label:"Workflow history",href:historyHref});
+      actions.push({label:"Scorecard history",href:scorecardHref(market,card)});
       if (onManageCard) actions.push({label:"Scorecard controls",onSelect:() => onManageCard(card)});
     }
     if (!item.selectable && item.onClick) actions.push({ label: "Open stage", onSelect: item.onClick });
