@@ -329,13 +329,24 @@ async def test_stage2_publication_source_ownership_and_frozen_independent_final(
     from unittest.mock import AsyncMock
     from contextlib import asynccontextmanager
     from app.infrastructure.database.outbox.models import OutboxMessage
-    from app.domains.scorecards.prompts import HEADERS
+    from sqlalchemy.dialects.sqlite.base import SQLiteTypeCompiler
+    monkeypatch.setattr(SQLiteTypeCompiler,"visit_JSONB",SQLiteTypeCompiler.visit_JSON,raising=False)
     from app.domains.runs.use_cases import create_run
     @asynccontextmanager
     async def local_lock(*args, **kwargs):
         yield
-    research={"listings":{"NSE:ABC":[{"kind":"daily_bar","url":"https://example.org/chart","as_of":f"2025-01-{d:02d}T12:00:00Z"} for d in range(1,6)]},"notices":[]}
-    monkeypatch.setattr(cards,"collect_research",AsyncMock(return_value=research))
+    from app.domains.scorecards import technical_output, technical_sources, technical_v3
+    from datetime import date, timedelta
+    keys=["NSE:ABC"]
+    days=[(date(2026,9,1)+timedelta(days=i)).isoformat() for i in range(5)]
+    observations=[{"kind":"daily_bar","url":"https://example.org/chart","as_of":day+"T15:30:00+05:30",
+                   "open":10,"high":11,"low":9,"close":10,"volume":100} for day in days]
+    factors={k:{"value":0,"points":-50*w,"weight":w,"inputs":{},"reason":None} for k,w in technical_v3.WEIGHTS.items()}
+    ledger={**technical_v3.summarize(factors),"factors":factors,"sources":{"stock":{"last_bar":observations[-1]}},
+            "flags":[],"reason":"","readiness":{},"input_hash":"frozen-test"}
+    research={"version":3,"listings":{keys[0]:observations},"technical":{keys[0]:ledger},"notices":[],
+              "calendars":{"NSE":dict.fromkeys(days)}}
+    monkeypatch.setattr(technical_sources,"collect",AsyncMock(return_value=research))
     monkeypatch.setattr(cards, "_get_redis", lambda: SimpleNamespace(aclose=AsyncMock()))
     monkeypatch.setattr(cards, "RedisLock", lambda redis: SimpleNamespace(acquire=local_lock))
     monkeypatch.setattr(create_run, "filter_recently_available_targets", AsyncMock(side_effect=lambda db,targets:(targets,[])))
@@ -358,18 +369,21 @@ async def test_stage2_publication_source_ownership_and_frozen_independent_final(
         start = cards.Start(sequence=42,request_key="only-once",targets=[target,target])
         owner = SimpleNamespace(id=OWNER.id, username="fixture")
         monkeypatch.setenv("CREDX_RECOVERY_MODE", "1")
+        with pytest.raises(HTTPException) as extra:
+            await cards.start("india",rev["id"],"technical",start,db,owner)
+        assert extra.value.status_code==422
+        start=start.model_copy(update={"targets":[start.targets[0]]})
         queued = await cards.start("india",rev["id"],"technical",start,db,owner)
         assert (await cards.start("india",rev["id"],"technical",start,db,owner)) == queued
         jobs=(await db.execute(select(Job).join(RunJob,RunJob.job_id==Job.id).where(RunJob.run_id==queued["run_id"]))).scalars().all()
-        assert len(jobs)==2 and create_run.dispatch_one.await_count==2
-        values = {"Exchange Symbol":"NSE","Stock Symbol":"ABC","Last 5 candles trend":"-3",
-                  "Technical rationale":"Five verified lower closes","Evidence source and as-of":"https://example.org/chart 2025-01-01T12:00:00Z"}
-        header=HEADERS["technical"]
-        response="\n".join("|"+"|".join(row)+"|" for row in (header,["---"]*len(header),[values.get(k,"—") for k in header]))
+        assert len(jobs)==1 and create_run.dispatch_one.await_count==1
+        header=technical_output.COLUMNS
+        response="\n".join("|"+"|".join(row)+"|" for row in (header,["---"]*len(header),
+            [keys[0],"0","Complete","Range","Held below","Trend","Volume","10","PRICE","-3"]))
         for job in jobs:
             assert job.prompt.startswith("[INDEPENDENT_SCORECARD:india:technical:")
             from app.domains.jobs.output_sources import scorecard_batch_for_job
-            assert scorecard_batch_for_job(job) == {"kind":"equity_scorecard_batch_v1", "card":"technical", "listings":["NSE:ABC"], "absent_contenders":[]}
+            assert scorecard_batch_for_job(job) == {"kind":"equity_scorecard_batch_v1", "card":"technical", "listings":["NSE:ABC"], "absent_contenders":[],"technical_v3":{keys[0]:["STATUS","PRICE","BENCH"]}}
             job.status=JobStatus.COMPLETED
             job.response=response
         await db.commit()
