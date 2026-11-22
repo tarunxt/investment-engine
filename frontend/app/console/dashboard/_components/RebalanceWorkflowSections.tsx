@@ -23,6 +23,10 @@ import { workflowRanking } from "@/lib/workflowScorecardRanking";
 import { type WorkflowStageKey, type StageState, type StageErrorDetail, type StageInfo, STAGE_ORDER, STAGE_METADATA, getStageTileLabel, parseTimestampMs, formatDuration, formatInrCost, WorkflowStageTile } from "@/components/shared/WorkflowStageTile";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { scorecardHref, type ScorecardTab } from "@/lib/scorecardNavigation";
+import { ScorecardScreen, ScorecardEvidenceDialog } from "./ScorecardScreen";
+import { STANDARD_ACTION_ROW_CLASS, STANDARD_ACTION_ORDER, parseActionLabel } from "@/lib/actionColorScheme";
 import { AutomatedRebalanceReliabilityBridge } from "@/app/console/automated-rebalance/_components/AutomatedRebalanceReliabilityBridge";
 import { InputEvidenceRows, InputEvidenceSummary } from "./InputEvidenceRows";
 import { threatInputRationale } from "./threatInputRationale";
@@ -2329,14 +2333,7 @@ function isRunForStageHistory(
   portfolio: WorkflowPortfolio,
 ) {
   const market: SwingTradeMarket = portfolio === "zerodha" ? "india" : "us";
-  const prompt = run.prompt || "";
-  if (stage === "swing") return isAnalysisRunForStage(run, "swing", market);
-  if (stage === "rebalance") return isCompletedRebalanceRun(run, market);
-  if (stage === "technical") return isTechnicalScanRun(run, market);
-  if (stage === "threats") {
-    const marker = portfolio === "zerodha" ? "[ZERODHA_THREATS]" : "[INDMONEY_US_THREATS]";
-    return prompt.includes(marker) || /Threat Scan Flow/i.test(prompt);
-  }
+  if (isCard(stage) || stage === "swing") return isAnalysisRunForStage(run, stage, market);
   return false;
 }
 
@@ -2810,6 +2807,7 @@ function ScopedZerodhaBasketPreviewDialog({
   placing,
   directMarketAvailable,
   orderSubmissionBlockedReason,
+  showSubmissionNotice = true,
   executionMode,
   onExecutionModeChange,
   onRefreshLtp,
@@ -2861,6 +2859,7 @@ function ScopedZerodhaBasketPreviewDialog({
   placing: boolean;
   directMarketAvailable: boolean;
   orderSubmissionBlockedReason?: string | null;
+  showSubmissionNotice?: boolean;
   executionMode: ZerodhaExecutionMode;
   onExecutionModeChange: (mode: ZerodhaExecutionMode) => void;
   onRefreshLtp: () => void;
@@ -3045,7 +3044,11 @@ function ScopedZerodhaBasketPreviewDialog({
       .sort((left, right) => parseTimestampMs(right) - parseTimestampMs(left))[0] ?? null
   );
   const orderCalculation = (order: ZerodhaBasketPreviewOrder) => displayCalculations.metrics?.({ symbol: order.symbol, exchange: order.exchange, score: order.detail.calculatedScore, ...displayQuote(order.symbol, order.exchange) });
-  const groupForOrder = (order: ZerodhaBasketPreviewOrder) => typeof displayCalculations.metrics === "function" ? basketActionGroup(orderCalculation(order)?.comparison.action) : getZerodhaBasketActionForPercent(order);
+  const groupForOrder = (order: ZerodhaBasketPreviewOrder) => {
+    const saved = scoreRevision?.finalRows?.get(stockIdentity(order.symbol, order.exchange));
+    if (saved) return parseActionLabel(saved.action ?? "") ?? "Unavailable";
+    return typeof displayCalculations.metrics === "function" ? basketActionGroup(orderCalculation(order)?.comparison.action) : getZerodhaBasketActionForPercent(order);
+  };
   const indiaSource = (order: ZerodhaBasketPreviewOrder) => calculationStocks.find(stock => stockIdentity(stock.symbol, stock.exchange) === stockIdentity(order.symbol, order.exchange));
   const priceReviewKey = (order: ZerodhaBasketPreviewOrder) => JSON.stringify([order.exchange, order.symbol, order.price, order.draftContext?.asOf, indiaSource(order)?.modelPrices]);
   const divergent = (order: ZerodhaBasketPreviewOrder) => indiaSource(order)?.modelPrices.some(model => model.price && order.price && Math.abs(order.price / model.price - 1) >= 0.10);
@@ -3093,13 +3096,14 @@ function ScopedZerodhaBasketPreviewDialog({
     }
   }
   const selectedDraftIssues = Array.from(issuesByReason.keys());
-  const sectionGroups = [...new Set<string>([...ZERODHA_BASKET_SECTION_ORDER, "Hold", "Unavailable"])].map((action) => ({
+  const sectionGroups = [...STANDARD_ACTION_ORDER, "Unavailable"].map((action) => ({
     action,
     label: ZERODHA_BASKET_SECTION_LABELS[action as ActionCategory] ?? action,
+    review: reviewRows.filter(row => (parseActionLabel(row.action ?? "") ?? "Unavailable") === action),
     orders: basketRows
       .filter((order) => groupForOrder(order) === action && visibleScore(order.detail.calculatedScore))
       .sort(compareZerodhaBasketOrdersByScore),
-  })).filter((group) => group.orders.length > 0);
+  })).filter((group) => group.orders.length > 0 || group.review.length > 0);
 
   const orderBlockers = [
     ...(!selectedOrders.length ? ["Select at least one stock."] : []),
@@ -3191,7 +3195,7 @@ function ScopedZerodhaBasketPreviewDialog({
         </div>
 
         {compareCurrentSettings && <button type="button" className="mx-5 mt-2 self-start underline" onClick={compareCurrentSettings}>Compare with current settings</button>}
-        {orderSubmissionBlockedReason ? (
+        {showSubmissionNotice && orderSubmissionBlockedReason ? (
           <div role="alert" className="mx-5 mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
             {scoreRevision?.divisors.length ? <p className="font-semibold">Rationale divisor (basket → saved): {scoreRevision.divisors.join(", ")}</p> : null}
             {orderSubmissionBlockedReason}
@@ -3296,7 +3300,7 @@ function ScopedZerodhaBasketPreviewDialog({
                         const sectionAllSelected = sectionSelectable.length > 0 && sectionSelected === sectionSelectable.length;
                         return (
                           <Fragment key={group.action}>
-                            <tr className="border-y border-slate-200 bg-slate-100 text-slate-900">
+                            <tr className={cn("border-y border-slate-200 text-slate-900", STANDARD_ACTION_ROW_CLASS[parseActionLabel(group.action)!] ?? "bg-slate-100")}>
                               <td className="px-4 py-3" colSpan={23}>
                                 <label className="inline-flex items-center gap-3 text-sm font-black">
                                   <input
@@ -3412,23 +3416,21 @@ function ScopedZerodhaBasketPreviewDialog({
                               </Fragment>
                               );
                             })}
+                            {group.review.map(row => {
+                              const stock = {symbol:row.symbol, exchange:row.exchange, score:row.signed, ...displayQuote(row.symbol, row.exchange)};
+                              return <tr key={row.listing} data-display-only="true">
+                                <td className="px-4"><input type="checkbox" disabled aria-label={row.listing + " review only"} /></td>
+                                <td className="whitespace-nowrap px-4 py-3"><strong>{row.listing}</strong><small className="block">{row.name}</small></td>
+                                <td className="whitespace-nowrap px-4 py-3">{renderSavedScore(row)}</td>
+                                <td>—</td><td>{row.action ?? "Unavailable"}</td><td>—</td>
+                                {displayCalculations.cells(stock)}
+                                <td>—</td><td>—</td>{providerPriceCell(row.symbol, row.exchange)}
+                                <td>—</td><td>—</td><td>—</td><td>—</td>
+                                <td className="px-4 text-xs">{row.sizing_reason ?? "Review only"}</td>
+                              </tr>;
+                            })}
                           </Fragment>
                         );
-                      })}
-
-                      {reviewRows.length > 0 && <tr className="bg-slate-100"><td colSpan={23} className="px-4 py-3 font-bold">Scorecard review · {reviewRows.length} listings</td></tr>}
-                      {reviewRows.map(row => {
-                        const stock = {symbol:row.symbol, exchange:row.exchange, score:row.signed, ...displayQuote(row.symbol, row.exchange)};
-                        return <tr key={row.listing} data-display-only="true">
-                          <td className="px-4"><input type="checkbox" disabled aria-label={row.listing + " review only"} /></td>
-                          <td className="whitespace-nowrap px-4 py-3"><strong>{row.listing}</strong><small className="block">{row.name}</small></td>
-                          <td className="whitespace-nowrap px-4 py-3">{renderSavedScore(row)}</td>
-                          <td>—</td><td>{row.action ?? "Unavailable"}</td><td>—</td>
-                          {displayCalculations.cells(stock)}
-                          <td>—</td><td>—</td>{providerPriceCell(row.symbol, row.exchange)}
-                          <td>—</td><td>—</td><td>—</td><td>—</td>
-                          <td className="px-4 text-xs">{row.sizing_reason ?? "Review only"}</td>
-                        </tr>;
                       })}
                     </tbody>
                   </table>
@@ -4436,7 +4438,9 @@ export function RebalanceWorkflowSections({
   stageLedger?: boolean;
   surface?: WorkflowSurface | null;
 }) {
-  const [cardReview, setCardReview] = useState<{portfolio:WorkflowPortfolio;stage:CardKey|"actionables"|"source"}|null>(null);
+  const router = useRouter();
+  const [cardEvidence, setCardEvidence] = useState<{market:WorkflowPortfolio; card:CardKey; sequence:number; tab:ScorecardTab}|null>(null);
+  const [cardReview, setCardReview] = useState<{portfolio:WorkflowPortfolio;stage:CardKey|"actionables"|"source"; revision?: number; attempt?: number}|null>(null);
   const [sourceSelections,setSourceSelections] = useState<Partial<Record<WorkflowPortfolio,number>>>({});
   const [cardPolicies,setCardPolicies] = useState<Partial<Record<WorkflowPortfolio,CardPolicy>>>({});
   const [preflightPortfolio, setPreflightPortfolio] = useState<WorkflowPortfolio | null>(null);
@@ -4690,10 +4694,10 @@ export function RebalanceWorkflowSections({
   const [localBasketFormula, setLocalBasketFormula] = useState<ScoreMatrixFormulaConfig | null>(null);
   const basketFormula = localBasketFormula ?? scoreMatrixFormulaConfig;
   const [scoreRevision, setScoreRevision] = useState<BasketScoreRevision | null>(null);
-  const [verificationIssue, setVerificationIssue] = useState("A unique Technical source run and complete basket inputs are required.");
+  const [verificationIssue, setVerificationIssue] = useState<string | null>(null);
   const [verifiedBasketFormula, setVerifiedBasketFormula] = useState<string | null>(null);
   const zerodhaOrderSubmissionBlockedReason = [brokerOrderBlock, verifiedBasketFormula === canonicalBasketInputs(basketFormula) ? null :
-    `Provisional basket. ${verifiedBasketFormula ? "The formula changed since verification." : verificationIssue} Open workflow history to check the saved calculation.`].filter(Boolean).join(" ") || null;
+    (verifiedBasketFormula ? "The scoring formula changed after verification." : verificationIssue ?? "Basket inputs await verification.")].filter(Boolean).join(" ") || null;
   const [selectedZerodhaBasketIds, setSelectedZerodhaBasketIds] = useState<Set<string>>(new Set());
   const [indmoneyBasketOpen, setIndmoneyBasketOpen] = useState(false);
   const [indmoneyBasketLoading, setIndmoneyBasketLoading] = useState(false);
@@ -4945,7 +4949,7 @@ export function RebalanceWorkflowSections({
     setLocalBasketFormula(requested?.formula ?? null);
     const generation = ++zerodhaPreparation.current;
     setVerifiedBasketFormula(null);
-    setVerificationIssue("A unique Technical source run and complete basket inputs are required.");
+    setVerificationIssue(null);
     setScoreRevision(null);
     setZerodhaAllocationUniverse([]);
     setZerodhaBasketOrders([]);
@@ -7600,6 +7604,11 @@ ${zerodhaExecutionMode === "direct_market"
     const displayedWorkflowSequence =
       activeAutoRebalanceMetadata[section.portfolio]?.auto_rebalance_sequence ??
       (savedWorkflowSequences.length ? Math.max(...savedWorkflowSequences) : null);
+    const openCard = (card: CardKey, tab?: ScorecardTab) => {
+      const sequence = states[section.portfolio][card].workflowSequence ?? displayedWorkflowSequence;
+      if (tab && sequence) setCardEvidence({market:section.portfolio, card, sequence, tab});
+      else router.push(scorecardHref(section.portfolio, card, sequence, tab));
+    };
     const finalStage = states[section.portfolio].actionables;
     const basketRevision = section.portfolio === "zerodha" ? scoreRevision : usRevision;
     const preparedOrders = section.portfolio === "zerodha" ? zerodhaBasketOrders : indmoneyBasketOrders;
@@ -7788,7 +7797,7 @@ ${zerodhaExecutionMode === "direct_market"
           </div>
         )}
 
-        <WorkflowStageLedger basketReady={basketReady} active={runningPortfolio === section.portfolio} market={section.portfolio} board enabled={stageLedger} view={ledgerView} historyHref={URLs.routes.console.autoRebalanceRuns(section.portfolio)} onStockFlowClick={() => setCardReview({portfolio:section.portfolio,stage:"source"})}>
+        <WorkflowStageLedger basketReady={basketReady} active={runningPortfolio === section.portfolio} market={section.portfolio} board enabled={stageLedger} view={ledgerView} historyHref={URLs.routes.console.autoRebalanceRuns(section.portfolio)} onStockFlowClick={() => setStockFlowPortfolio(section.portfolio)} onManageSource={() => setCardReview({portfolio:section.portfolio,stage:"source"})} onManageCard={stage => setCardReview({portfolio:section.portfolio,stage})}>
           {STAGE_ORDER.map((stage) => (
             <WorkflowStageTile
               key={stage}
@@ -7805,23 +7814,23 @@ ${zerodhaExecutionMode === "direct_market"
                 specificMode[section.portfolio] && !isBusy
                   ? () => toggleStageSelection(section.portfolio, stage)
                   : () =>
-                      isCard(stage) ? setCardReview({portfolio:section.portfolio,stage}) : navigateForStage(
+                      isCard(stage) ? openCard(stage) : navigateForStage(
                         section.portfolio,
                         stage,
                         states[section.portfolio][stage],
                       )
               }
-              onInfoClick={isCard(stage) ? ()=>setCardReview({portfolio:section.portfolio,stage}) :
-                stage !== "sync" && stage !== "actionables"
+              onInfoClick={stage !== "sync" && stage !== "actionables"
                   ? () => void showStageLlmInfo(section.portfolio, stage)
                   : undefined
               }
-              onInputClick={isCard(stage) || stage==="actionables" ? ()=>setCardReview({portfolio:section.portfolio,stage}) :
+              onInputClick={stage === "pairwise" ? () => openCard(stage,"inputs") : isCard(stage) ? () => openInputSelection(section.portfolio,stage) : stage==="actionables" ? ()=>setCardReview({portfolio:section.portfolio,stage}) :
                 stage==="swing" ? ()=>openInputSelection(section.portfolio,stage):undefined}
-              onPromptClick={isCard(stage) ? ()=>setCardReview({portfolio:section.portfolio,stage}) :
+              onPromptClick={isCard(stage) ? () => openCard(stage,"prompts") :
                 stage==="swing" ? ()=>showStagePrompt(section.portfolio,stage):undefined}
               onOutputClick={() => {
-                if(isCard(stage) || stage==="actionables"){setCardReview({portfolio:section.portfolio,stage});return;}
+                if (isCard(stage)) { openCard(stage, "output"); return; }
+                if(stage==="actionables"){setCardReview({portfolio:section.portfolio,stage});return;}
                 setActionablesCalculationsPortfolio(null);
                 void showStageOutput(section.portfolio,stage,states[section.portfolio][stage].lastRunId ?? undefined);
               }}
@@ -7880,7 +7889,7 @@ ${zerodhaExecutionMode === "direct_market"
                   variant="outline"
                   className="h-9 rounded-full border-amber-300 bg-white px-4 text-xs font-extrabold text-amber-950 hover:bg-amber-100"
                   onClick={() =>
-                    setCardReview({portfolio:section.portfolio,stage:"threats"})
+                    void showStageLlmInfo(section.portfolio,"threats")
                   }
                 >
                   Switch Threats LLMs
@@ -7930,6 +7939,8 @@ ${zerodhaExecutionMode === "direct_market"
 
   useEffect(() => {
     setLedgerView("ledger");
+    setCardEvidence(null);
+    setCardReview(null);
     setDialogOpen(false);
     setIndMoneySyncOnly(false);
     setStockFlowPortfolio(null);
@@ -7942,7 +7953,7 @@ ${zerodhaExecutionMode === "direct_market"
     setIndmoneyBasketOpen(false);
     outputRequestRef.current += 1;
     llmDialogRequestRef.current += 1;
-  }, [surface?.target, surface?.market, closeOutputDialog]);
+  }, [surface?.target, surface?.market, surface?.scorecards?.sequence, surface?.scorecards?.card, closeOutputDialog]);
 
   const zerodhaSection = sections[0];
   const indmoneySection = sections[1];
@@ -7950,15 +7961,30 @@ ${zerodhaExecutionMode === "direct_market"
   const content = (
     <AutomatedRebalanceReliabilityBridge>
       {cardReview && <ScorecardReview key={cardReview.portfolio+cardReview.stage} portfolio={cardReview.portfolio} stage={cardReview.stage}
-        revisionId={sourceSelections[cardReview.portfolio]} previousFormula={scoreMatrixFormulaConfig} fallbackPolicy={migratedPolicy(scoreMatrixFormulaConfig)}
+        initialAttempt={cardReview.attempt} revisionId={cardReview.revision ?? sourceSelections[cardReview.portfolio]} previousFormula={scoreMatrixFormulaConfig} fallbackPolicy={migratedPolicy(scoreMatrixFormulaConfig)}
         onRevision={id=>setSourceSelections(previous=>({...previous,[cardReview.portfolio]:id}))}
         onPolicy={policy=>setCardPolicies(previous=>({...previous,[cardReview.portfolio]:policy}))}
         onClose={()=>setCardReview(null)} />}
+      {cardEvidence && <ScorecardEvidenceDialog key={cardEvidence.market+cardEvidence.card+cardEvidence.sequence}
+        {...cardEvidence} client={apiService} onClose={() => setCardEvidence(null)}
+        renderOutput={run => <RunOutputDetails run={run} />}
+        onInputs={() => { const {market,card}=cardEvidence; setCardEvidence(null); if (card === "pairwise") setCardReview({portfolio:market,stage:"source"}); else openInputSelection(market,card); }}
+        onTemplate={cardEvidence.card === "pairwise" ? undefined : () => { const {market,card}=cardEvidence; setCardEvidence(null); if (card !== "pairwise") showStagePrompt(market,card); }} />}
+      {surface?.scorecards ? <ScorecardScreen key={[surface.market,surface.scorecards.card,surface.scorecards.sequence].join("/")}
+        market={surface.market} screen={surface.scorecards} client={apiService}
+        account={basketOwner?.full_name || basketOwner?.username || "Account"}
+        renderOutput={run => <RunOutputDetails run={run} />}
+        onModels={card => void showStageLlmInfo(surface.market,card)}
+        onInputs={card => card === "pairwise" ? setCardReview({portfolio:surface.market,stage:"source"}) : openInputSelection(surface.market,card)}
+        onTemplate={card => showStagePrompt(surface.market,card)}
+        onStockFlow={() => setStockFlowPortfolio(surface.market)}
+        onManage={(stage,revision,attempt) => setCardReview({portfolio:surface.market,stage,revision,attempt})} /> : <>
       {stageLedger ? <WorkflowStageLedgerViews market={surface?.market ?? ledgerMarket} portfolioOnly={Boolean(surface)} view={ledgerView} onChange={(market, view) => { setLedgerMarket(market); setLedgerView(view); }} /> : null}
       <section className={stageLedger ? "min-w-0" : "grid gap-6 xl:grid-cols-2"}>
         {(!stageLedger || (surface?.market ?? ledgerMarket) === "zerodha") && renderSectionCard(zerodhaSection)}
         {(!stageLedger || (surface?.market ?? ledgerMarket) === "indmoneyUs") && renderSectionCard(indmoneySection)}
       </section>
+      </>}
       {!llmDialogStage && modelSaveError && <p role="alert" className="text-sm text-red-800">{modelSaveError}</p>}
       {workflowHistoryError ? <div role="alert" className="mb-4 rounded border border-amber-500 p-3">{workflowHistoryError}</div> : null}
 
@@ -8073,6 +8099,7 @@ ${zerodhaExecutionMode === "direct_market"
         onWholeShareChoice={reviewZerodhaWholeShareChoice}
         onPlaceOrder={placeSelectedZerodhaBasketOrders}
         placing={zerodhaBasketPlacing}
+        showSubmissionNotice={Boolean(basketSafety.blockedReason || brokerOrderBlock || verificationIssue || verifiedBasketFormula || scoreRevision?.differences.length)}
         orderSubmissionBlockedReason={basketSafety.blockedReason ?? zerodhaOrderSubmissionBlockedReason}
         directMarketAvailable={zerodhaDirectMarketAvailable}
         executionMode={zerodhaExecutionMode}

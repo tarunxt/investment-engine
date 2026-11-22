@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRef } from "react";
 import { Menu } from "lucide-react";
 import { DropdownMenu } from "radix-ui";
@@ -20,7 +21,7 @@ export function WorkflowTileMenu({ title, actions }: { title: string; actions: T
       aria-label={`${title} actions`} className="z-50 grid max-h-[var(--radix-dropdown-menu-content-available-height)] min-w-40 overflow-y-auto rounded-xl border border-slate-200 bg-white p-1.5 shadow-lg"
       onCloseAutoFocus={event => { if (selected.current) event.preventDefault(); }}>
       {actions.map(action => "href" in action ? <DropdownMenu.Item key={action.label} asChild>
-        <a href={action.href} className={itemClass}>{action.label}</a>
+        <Link href={action.href} className={itemClass}>{action.label}</Link>
       </DropdownMenu.Item> : <DropdownMenu.Item key={action.label} className={itemClass} onSelect={() => {
         selected.current = true;
         trigger.current?.focus();
