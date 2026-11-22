@@ -21,13 +21,13 @@ const DashboardPageClient = dynamic(
 );
 
 export function DashboardInteractiveIsland({
-  initialSummary,
+  initialFx,
 }: {
-  initialSummary: DashboardSummaryResponse | null;
+  initialFx: DashboardSummaryResponse["fx"] | null;
 }) {
   return (
     <div data-dashboard-analytics="mounted">
-      <DashboardPageClient initialSummary={initialSummary} />
+      <DashboardPageClient initialFx={initialFx} />
     </div>
   );
 }

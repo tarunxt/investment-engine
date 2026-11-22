@@ -354,7 +354,7 @@ async function runtime(session, responseStatus = 200) {
   const context = vm.createContext({ Request, Response, Headers, AbortController, DOMException, URL, setTimeout, clearTimeout, console,
     process: {env:{BACKEND_API_URL:'http://backend.invalid'}},
     fetch: async (url, options) => {
-      assert.equal(url, 'http://backend.invalid/dashboard/summary', 'SSR must not call refresh or any external target');
+      assert.equal(url, 'http://backend.invalid/dashboard/fx', 'SSR must not call refresh or any external target');
       assert.equal(options.method, 'GET');
       calls.push({url, options});
       return Response.json(responseStatus === 200 ? {synthetic:true} : {detail:'synthetic denied'}, {status:responseStatus});
@@ -380,10 +380,10 @@ for (const scenario of ['valid','expired','missing-access','backend-401','no-ses
     const ctx = await fixture.api.createBackendSessionContext({headers:new Headers()});
     assert.equal(ctx.refreshAllowed, false);
     await assert.rejects(fixture.api.rotateBackendTokens(ctx), e=>e.name==='BackendSessionHandlerRequiredError');
-    await assert.rejects(fixture.api.fetchBackendJsonWithSession(ctx,'/dashboard/summary',{method:'POST',body:{}}), e=>e.name==='BackendSessionHandlerRequiredError');
+    await assert.rejects(fixture.api.fetchBackendJsonWithSession(ctx,'/dashboard/fx',{method:'POST',body:{}}), e=>e.name==='BackendSessionHandlerRequiredError');
     const source = read('../app/console/dashboard/page.tsx');
-    const body = source.slice(source.indexOf('  let initialSummary:'),source.indexOf('\n  return ('));
-    const output = stripTypeScriptTypes(`globalThis.bootstrap = async function(){${body}\nreturn initialSummary;}`,{mode:'transform'});
+    const body = source.slice(source.indexOf('  let initialFx:'),source.indexOf('\n  return ('));
+    const output = stripTypeScriptTypes(`globalThis.bootstrap = async function(){${body}\nreturn initialFx;}`,{mode:'transform'});
     const redirected = [];
     const context = vm.createContext({headers:async()=>new Headers(),console:{warn:()=>{}},
       createBackendSessionContext:fixture.api.createBackendSessionContext,

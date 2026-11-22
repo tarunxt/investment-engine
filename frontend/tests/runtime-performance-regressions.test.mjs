@@ -82,27 +82,13 @@ test("read attempts share one deadline instead of receiving full timeouts", () =
   );
 });
 
-test("dashboard cache is user-scoped and below-fold panels mount on visibility", () => {
+test("dashboard reads only enabled balances and uses account-scoped last known values", () => {
   const dashboard = read("../app/console/dashboard/DashboardPageClient.tsx");
-  const automatedRebalance = read(
-    "../app/console/automated-rebalance/_components/AutomatedRebalanceClient.tsx",
-  );
-  const lazyMount = read("../components/shared/LazyMount.tsx");
-
-  assert.match(dashboard, /dashboard-overview-cache:v3:user:/);
-  assert.match(dashboard, /dashboardOverviewCacheKey\(userId\)/);
-  assert.match(dashboard, /getDashboardSummary\(\)/);
-  assert.doesNotMatch(dashboard, /useUsdInrRate/);
-  assert.doesNotMatch(dashboard, /RebalanceWorkflowSections/);
-  assert.match(dashboard, /zerodha\(\)\}#india-workflow[^>]+>\s*Review India workflow\s*<\/Link>/);
-  assert.match(dashboard, /indmoneyUs\(\)\}#us-workflow[^>]+>\s*Review US workflow\s*<\/Link>/);
-  assert.match(automatedRebalance, /RebalanceWorkflowSections/);
-  assert.match(dashboard, /Start and monitor each market’s multi-stage workflow below its portfolio page/);
-  assert.doesNotMatch(dashboard, /DashboardFinalActionablesTables/);
-  assert.match(dashboard, /Open the market-specific report for full histories, model evidence, and action tables/);
-  assert.match(dashboard, /onVisible=\{\(\) => \{[\s\S]*loadThreats/);
+  const balances = read("../app/console/dashboard/_components/dashboardBalances.ts");
+  assert.match(balances, /dashboard-overview-cache:v4:user:/);
+  assert.match(dashboard, /visibleSources\(policy, user.role\)/);
   assert.match(dashboard, /data-performance-usable=/);
-  assert.match(lazyMount, /IntersectionObserver/);
+  assert.doesNotMatch(dashboard, /RebalanceWorkflowSections|DashboardFinalActionablesTables|loadThreats/);
 });
 
 test("hidden Bullpen legacy controls remain disabled", () => {

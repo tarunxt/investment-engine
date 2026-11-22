@@ -3,7 +3,7 @@
 import { useEffect, useState, type CSSProperties } from 'react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { useSidebarPolicy } from '@/hooks/useSidebarPolicy';
+import { SidebarPolicyContext, useSidebarPolicy } from '@/hooks/useSidebarPolicy';
 import { useAuth } from '@/hooks/useAuth';
 import {
     HiOutlineMenu,
@@ -144,6 +144,7 @@ export function ConsoleShell({
                 </button>
 
                 {/* Page content */}
+                <SidebarPolicyContext.Provider value={policy}>
                 <main
                     className="px-4 py-6 sm:px-6 lg:py-6"
                     data-console-shell="authenticated"
@@ -162,6 +163,7 @@ export function ConsoleShell({
                         </button>
                     ) : null}
                 </main>
+                </SidebarPolicyContext.Provider>
             </div>
         </div>
     );

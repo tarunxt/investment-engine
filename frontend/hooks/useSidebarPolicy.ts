@@ -1,8 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { createContext, useEffect, useState } from 'react';
 import { apiService } from '@/services/api';
 import { isSidebarPolicy, SIDEBAR_POLICY_CHANGED, type SidebarPolicy } from '@/lib/sidebarVisibility';
+
+export const SidebarPolicyContext = createContext<SidebarPolicy | null | undefined>(undefined);
 
 export function useSidebarPolicy(userId: number | undefined) {
     const [record, setRecord] = useState<{userId: number; policy: SidebarPolicy | null} | null>(null);

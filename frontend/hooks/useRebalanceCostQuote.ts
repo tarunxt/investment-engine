@@ -24,7 +24,7 @@ function savedQuote(): Quote {
   return referenceCostQuote;
 }
 
-async function fetchReferenceQuote() {
+export async function fetchReferenceQuote() {
   const previous = savedQuote();
   try {
     const response = await fetch("https://api.frankfurter.dev/v1/latest?base=USD&symbols=INR", {

@@ -389,7 +389,7 @@ async def _load_portfolio_history(
     )
 
 
-async def _load_fx(_user_id: int) -> DashboardFxRate:
+async def load_dashboard_fx() -> DashboardFxRate:
     assessment = await load_persisted_usd_inr_rate()
     return DashboardFxRate(
         value=assessment.value,
@@ -399,6 +399,10 @@ async def _load_fx(_user_id: int) -> DashboardFxRate:
         stale_after_seconds=assessment.stale_after_seconds,
         status=assessment.status,
     )
+
+
+async def _load_fx(_user_id: int) -> DashboardFxRate:
+    return await load_dashboard_fx()
 
 
 async def _timed_section(

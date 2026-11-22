@@ -161,7 +161,7 @@ def recovery_http_allowed(method, path):
     """Minimal API surface for login, existing data, and INDmoney fanout/results."""
     if method == "OPTIONS":
         return True
-    if method in {"GET", "HEAD"} and path == "/auth/google/config":
+    if method in {"GET", "HEAD"} and path in {"/auth/google/config", "/dashboard/fx"}:
         return True
     if manual_zerodha_orders_enabled():
         if method == "POST" and path in MANUAL_ZERODHA_ORDER_PATHS:
