@@ -20,7 +20,7 @@ try {
   await writeFile(path.join(temporary,'navigation.tsx'),`import {useSyncExternalStore} from 'react';export function useRouter(){return {replace:()=>{}}}export function usePathname(){return useSyncExternalStore(cb=>{window.addEventListener('popstate',cb);return()=>window.removeEventListener('popstate',cb)},()=>location.pathname)}export function useSearchParams(){return new URLSearchParams(location.search)}`);
   await writeFile(path.join(temporary,'link.tsx'),`import React from 'react';export default function Link({href,prefetch,children,onClick,...props}){return <a {...props} href={href} onClick={e=>{e.preventDefault();history.pushState({},'',href);window.dispatchEvent(new Event('popstate'));onClick?.(e)}}>{children}</a>}`);
   await writeFile(path.join(temporary,'auth.ts'),`export function useAuth(){return {user:{id:42,username:'fixture',full_name:'Demo User',email:'demo@example.test'},logout:async()=>{window.logoutCalls++},loading:false,error:null}}`);
-  await writeFile(path.join(temporary,'api.ts'),`export const apiService={getSidebarPolicy:async()=>({visible_ids:null,revision:0,can_manage:false}),updateProfile:async()=>{window.profileWrites++;throw Error('Unexpected profile write')}}`);
+  await writeFile(path.join(temporary,'api.ts'),`export const apiService={getSidebarPolicy:async()=>({visible_ids:window.visibleIds??null,revision:0,can_manage:!window.visibleIds}),updateProfile:async({theme_preference})=>{window.profileWrites++;window.savedTheme=theme_preference}}`);
   await writeFile(path.join(temporary,'loader.cjs'),`const ts=require(${JSON.stringify(require.resolve('typescript'))});module.exports=function(s){return ts.transpileModule(s,{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2020},fileName:this.resourcePath}).outputText}`);
   const w=require('next/dist/compiled/webpack/webpack');
   await new Promise((resolve,reject)=>w.webpack({mode:'development',devtool:false,entry:path.join(temporary,'entry.tsx'),output:{path:temporary,filename:'bundle.js'},resolve:{extensions:['.tsx','.ts','.js'],modules:[path.join(frontend,'node_modules'),'node_modules'],alias:{'next/navigation$':path.join(temporary,'navigation.tsx'),'next/link$':path.join(temporary,'link.tsx'),'@/hooks/useAuth$':path.join(temporary,'auth.ts'),'@/services/api$':path.join(temporary,'api.ts'),'@':frontend}},module:{rules:[{test:/\.tsx?$/,use:path.join(temporary,'loader.cjs')}]},plugins:[new w.webpack.DefinePlugin({'process.env':JSON.stringify({NODE_ENV:'development'})})]},(error,stats)=>error?reject(error):stats.hasErrors()?reject(Error(stats.toString({all:false,errors:true}))):resolve()));
@@ -131,16 +131,23 @@ try {
     assert.equal(await nav.locator('[aria-current="page"]').getAttribute('href'),'/console/apis','Back restores destination and group');
     const summary=page.locator('summary').filter({hasText:'Account'});
     await summary.focus();await page.keyboard.press('Enter');
-    const panel=page.getByRole('region',{name:'Account and appearance'});await panel.waitFor();
+    const panel=page.getByRole('region',{name:'Account',exact:true});await panel.waitFor();
     const before=await nav.boundingBox();assert.equal(before.height,box.height,'expanded account must not shrink navigation');
     for(const item of await page.evaluate(()=>window.account))assert.equal(await panel.locator(`a[href="${item.href}"]`).count(),1);
-    const appearance=panel.locator('summary');await appearance.focus();await page.keyboard.press(' ');
-    await panel.getByRole('button',{name:'Light',exact:true}).waitFor({state:'visible'});
-    assert.ok(await panel.getByRole('button',{name:'Light',exact:true}).isVisible());
-    assert.ok(await panel.getByRole('button',{name:'Dark',exact:true}).isVisible());
-    await panel.getByRole('button',{name:'Dark',exact:true}).focus();
+    assert.deepEqual(await panel.getByRole('link').allTextContents(),['Profile','Settings','Admin panel']);
+    const [profileBox,settingsBox,adminBox]=await Promise.all((await panel.getByRole('link').all()).map(link=>link.boundingBox()));
+    assert.ok(profileBox.y<settingsBox.y && settingsBox.y<adminBox.y,'account links stack vertically');
     const panelRect=await panel.boundingBox();assert.ok(panelRect.y>=0&&panelRect.y+panelRect.height<=height/zoom);
     await page.keyboard.press('Escape');assert.equal(await panel.isVisible(),false);assert.ok(await summary.evaluate(el=>el===document.activeElement));
+    const appearance=page.locator('summary[aria-label="Appearance"]');
+    assert.ok((await appearance.boundingBox()).y<(await summary.boundingBox()).y);
+    await appearance.focus();await page.keyboard.press(' ');
+    const theme=page.getByRole('region',{name:'Appearance'});
+    await theme.getByRole('button',{name:'Light',exact:true}).waitFor();
+    assert.ok(await theme.getByRole('button',{name:'Dark',exact:true}).isVisible());
+    assert.equal(await panel.isVisible(),false);
+    await page.keyboard.press('Escape');
+    assert.ok(await appearance.evaluate(el=>el===document.activeElement));
     assert.deepEqual(await page.evaluate(()=>({...localStorage})),storageBefore,'layout interactions must preserve preferences');
     assert.equal(await page.evaluate(()=>window.profileWrites+window.logoutCalls),0);
     await page.screenshot({animations:'disabled',path:path.join(output,`sidebar-${width}-${Math.round(zoom*100)}.png`)});
@@ -151,7 +158,7 @@ try {
     await preferences.focus();await page.keyboard.press('Enter');
     assert.equal(await panel.isVisible(),false);
     if(await open.isVisible())await open.click();
-    assert.equal(await page.locator('summary[aria-label="Account and appearance, current section"]').count(),1);
+    assert.equal(await page.locator('summary[aria-label="Account, current section"]').count(),1);
     await summary.click();await panel.waitFor();
     assert.equal(await preferences.getAttribute('aria-current'),'page');
     await page.keyboard.press('Escape');
@@ -161,10 +168,19 @@ try {
     for(let i=0;i<60;i++){
       await page.keyboard.press('Tab');
       if(await summary.evaluate(el=>el===document.activeElement)){reachedAccount=true;break}
-      assert.ok(await nav.evaluate(el=>el.contains(document.activeElement)),'Tab should traverse navigation before account');
+      assert.ok(await nav.evaluate(el=>el.contains(document.activeElement)) || await appearance.evaluate(el=>el===document.activeElement),'Tab traverses navigation and appearance before account');
     }
     assert.ok(reachedAccount,'Tab must reach account controls');
+    await appearance.click();
+    await theme.getByRole('button',{name:'Dark',exact:true}).click();
+    assert.deepEqual(await page.evaluate(()=>[document.documentElement.classList.contains('dark'),localStorage.getItem('investment-engine:theme-preference'),window.savedTheme]),[true,'dark','dark']);
+    await theme.getByRole('button',{name:'Light',exact:true}).click();
+    assert.deepEqual(await page.evaluate(()=>[document.documentElement.classList.contains('dark'),localStorage.getItem('investment-engine:theme-preference'),window.savedTheme]),[false,'light','light']);
   }
+  await page.evaluate(()=>{window.visibleIds=['usage-costs'];window.dispatchEvent(new Event('credx:sidebar-policy-changed'))});
+  await page.locator('summary[aria-label="Appearance"]').waitFor({state:'detached'});
+  await page.locator('summary').filter({hasText:'Account'}).click();
+  assert.deepEqual(await page.getByRole('region',{name:'Account',exact:true}).getByRole('link').allTextContents(),['Settings']);
   assert.deepEqual(errors,[]);assert.deepEqual(external,[]);
-  console.log(JSON.stringify({result:'PASS',measurements,screenshots:output,checks:'all root/child/directory destinations, two-column directory and return controls, modal focus containment/Escape restoration, group-state preservation, back/forward, matched row heights, single active fill, named groups, scroll, active route on transition, keyboard expand/collapse, focus and Escape restoration, compact account, bounded expanded panel, unchanged preferences, zero profile/logout/external requests'},null,2));
+  console.log(JSON.stringify({result:'PASS',measurements,screenshots:output,checks:'all root/child/directory destinations, two-column directory and return controls, modal focus containment/Escape restoration, group-state preservation, back/forward, matched row heights, single active fill, named groups, scroll, active route on transition, keyboard expand/collapse, focus and Escape restoration, compact account, bounded expanded panel, unchanged preferences, Light and Dark persistence, legacy sidebar visibility, zero external requests'},null,2));
 }finally{if(browser)await browser.close();if(server)await new Promise(resolve=>server.close(resolve));await rm(temporary,{recursive:true,force:true})}

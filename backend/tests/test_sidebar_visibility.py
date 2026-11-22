@@ -24,7 +24,8 @@ def test_destination_ids_match_the_console_catalog():
     root = Path(__file__).resolve().parents[2]
     config = (root / "frontend/app/console/_components/sidebarNavigationConfig.ts").read_text()
     ids = re.findall(r"type: 'item',\s+id: '([^']+)'", config)
-    assert set(get_args(Destination)) == {*ids, "appearance"}
+    # Older saved policies and clients can still use the former cost shortcut.
+    assert set(get_args(Destination)) == {*ids, "appearance", "usage-costs"}
 
 
 @pytest.mark.asyncio

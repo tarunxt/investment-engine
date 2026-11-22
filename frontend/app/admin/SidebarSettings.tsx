@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { ACCOUNT_ACTIONS, ACCOUNT_NAVIGATION, SIDEBAR_SECTIONS } from '@/app/console/_components/sidebarNavigationConfig';
 import { collectLeafEntries } from '@/app/console/_components/sidebarNavigationUtils';
-import { SIDEBAR_POLICY_CHANGED, type SidebarSettingsRecord, type SidebarMode, type SidebarAccount } from '@/lib/sidebarVisibility';
+import { sidebarSelection, SIDEBAR_POLICY_CHANGED, type SidebarSettingsRecord, type SidebarMode, type SidebarAccount } from '@/lib/sidebarVisibility';
 import { AccountPicker } from './AccountPicker';
 import { apiService } from '@/services/api';
 
@@ -14,7 +14,7 @@ const control = 'size-4 shrink-0 accent-violet-600';
 const button = 'rounded-lg border border-border px-4 py-2 text-sm font-medium hover:bg-muted disabled:opacity-50';
 
 function checkedIds(policy: SidebarSettingsRecord) {
-    return new Set(policy.visible_ids ?? allIds);
+    return sidebarSelection(policy.visible_ids ?? allIds);
 }
 
 function GroupToggle({ label, ids, selected, onChange }: {
@@ -102,7 +102,7 @@ function SelectionEditor({ account, onEditing }: {account: SidebarAccount | null
     const baseline = saved && checkedIds(saved);
     const dirty = Boolean(saved && baseline && (mode !== saved.mode || allIds.some((id) => baseline.has(id) !== selected.has(id))));
     useEffect(() => { onEditing(dirty || busy); }, [dirty, busy, onEditing]);
-    const defaults = new Set(saved?.global_ids ?? allIds);
+    const defaults = sidebarSelection(saved?.global_ids ?? allIds);
     const effective = mode === 'custom' ? selected : mode === 'inherit' ? defaults : new Set([...defaults, ...selected]);
     function changeMode(next: SidebarMode) {
         setMode(next);

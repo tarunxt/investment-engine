@@ -31,7 +31,7 @@ for(const {width,height} of [{width:1180,height:757},{width:1440,height:900},{wi
  await page.setViewportSize({width,height});await page.goto(base);await page.getByRole('status').waitFor();await page.waitForFunction(()=>requests.length===1);assert.equal(await page.getByRole('heading',{name:'Settings',exact:true}).count(),1);await page.screenshot({path:path.join(output,`loading-${width}.png`)});await settle(0,'backend timeout after 4 seconds',true);
  await page.getByRole('region',{name:'Usage and costs unavailable'}).waitFor();assert.equal(await page.getByRole('alert').count(),1);assert.equal(await page.getByText('backend timeout',{exact:false}).count(),0);assert.equal(await page.getByText('$0.00',{exact:false}).count(),0);assert.equal(await page.getByRole('link',{name:'API cost details'}).getAttribute('href'),'/console/apis');
  assert.equal(await page.getByText('Manage your account settings and preferences.',{exact:true}).count(),1);
- const destinations=[['Profile','/console/profile'],['Preferences','/console/profile/preferences'],['Platform Cost Drivers','/console/profile/cost-drivers'],['Security','/console/profile/security'],['Activity','/console/profile/activity']];
+ const destinations=[['Profile','/console/profile'],['Preferences','/console/profile/preferences'],['Usage & Costs','/console/profile/cost-drivers'],['Security','/console/profile/security'],['Activity','/console/profile/activity']];
  for(const [name,href] of destinations){
    const link=page.getByRole('link',{name,exact:true});
    assert.equal(await link.count(),1);
@@ -39,7 +39,7 @@ for(const {width,height} of [{width:1180,height:757},{width:1440,height:900},{wi
    await link.focus();
    assert.equal(await link.evaluate(el=>el===document.activeElement),true);
  }
- assert.ok((await page.getByRole('link',{name:'Platform Cost Drivers',exact:true}).getAttribute('class')).includes('text-primary'));
+ assert.ok((await page.getByRole('link',{name:'Usage & Costs',exact:true}).getAttribute('class')).includes('text-primary'));
  assert.equal(await page.getByText('We couldn’t read the stored snapshot for this month. Costs are unknown. Passive reads do not request AWS collection.',{exact:true}).count(),1);
  assert.equal(await page.getByText('No zero-cost inference is made and no retry was triggered.',{exact:true}).count(),0);
  assert.equal(await page.getByRole('tab').count(),0);
