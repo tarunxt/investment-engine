@@ -188,6 +188,8 @@ def recovery_http_allowed(method, path):
             "/jobs", "/prompts", "/providers", "/api-usage",
         ))
     if method == "POST":
+        if re.fullmatch(r"/runs/scorecards/india/workflows/[1-9][0-9]*/prepare-swing-source", path):
+            return True
         if re.fullmatch(r"/runs/scorecards/(?:india|indmoney_us)/attempts/[1-9][0-9]*/recover", path):
             return True
         if re.fullmatch(r"/runs/scorecards/(?:india|indmoney_us)/revisions(?:/[1-9][0-9]*/(?:final|(?:technical|threats|rebalance|pairwise)/start))?", path):

@@ -28,6 +28,10 @@ async def available(db, owner, portfolio, sequence):
                              .order_by(Stage.id.desc()).limit(1))).first()
     rows_expr = data["result"]["rows"]
     postgres = db.get_bind().dialect.name=="postgresql"
+    stocks = data["manifest"]["stocks"]
+    count = func.jsonb_array_length(cast(stocks, JSONB)) if postgres else func.json_array_length(stocks)
+    listing_count = await db.scalar(select(count).select_from(Stage).join(Workflow).where(
+        Stage.id == rev, storage.of_kind("revision"), Workflow.user_id == owner, Workflow.portfolio == portfolio))
     if postgres:
         # Aggregate historical JSON on the server. The dashboard never needs raw responses.
         arr=func.jsonb_array_elements(cast(rows_expr,JSONB)).table_valued("value").alias("stock")
@@ -51,4 +55,4 @@ async def available(db, owner, portfolio, sequence):
             continue
         cards[card] = {"output_id":output,"run_id":run,"covered":got,"expected":total,
                        "used_output_id":(final[1] or {}).get(card) if final else None,"final_id":final[0] if final else None}
-    return {"revision_id":rev,"cards":cards}
+    return {"revision_id":rev,"listing_count":listing_count,"cards":cards}

@@ -20,7 +20,7 @@ export type VerifiedListing = {symbol:string;venue:string;security_id:string;sha
 export type StockInput = {listing:string;name:string;origin:string;units:number|null};
 export type SourceRevision = {id:number;sequence:number;created_at:string};
 export type AvailableOutput = {output_id:number;run_id:number;covered:number;expected:number;used_output_id:number|null;final_id:number|null};
-export type WorkflowCoverage = {revision_id:number|null;cards:Partial<Record<"technical"|"pairwise",AvailableOutput>>};
+export type WorkflowCoverage = {revision_id:number|null;listing_count?:number;cards:Partial<Record<"technical"|"pairwise",AvailableOutput>>};
 export type CardRef = {id:number;card:CardKey;run_id:number};
 export type SourceDetail = {id:number;manifest:{sequence:number;as_of:string;snapshot_id:number;snapshot_at:string;swing_job_ids:number[];verified_listings?:VerifiedListing[];stocks:StockInput[];unresolved:Record<string,unknown>[]};attempts:CardRef[]; finals:{id:number}[]};
 export type CardRow = {listing:string;score:number|null;coverage:string;terms?:Record<string,number|null>; [field:string]:unknown};
@@ -31,6 +31,7 @@ export const isCard = (value:string):value is CardKey => (cards as readonly stri
 export function scorecardApi(client: Pick<typeof apiService,"get"|"post">, market: AutoRebalancePortfolioKey) {
   const base=URLs.runs.list()+"/scorecards/"+market;
   return {
+    prepareSwingSource:(sequence:number)=>client.post<{id:number;sequence:number;listings:number;snapshot_id:number;swing_job_ids:number[]}>(base+"/workflows/"+sequence+"/prepare-swing-source",{}),
     coverage:(sequence:number)=>client.get<WorkflowCoverage>(base+"/workflows/"+sequence+"/coverage"),
     performance:()=>client.get<{eligible_workflows:number;rows:Record<string,unknown>[];top_n:number;one_way_cost_bps:number;benchmark:string}>(base+"/research-performance"),
     savedPolicy:()=>client.get<CardPolicy|null>(base+"/saved-policy"),

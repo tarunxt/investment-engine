@@ -111,6 +111,18 @@ async def workflow_coverage(portfolio:Portfolio, sequence:int, db:AsyncSession=D
     return await available(db,user.id,portfolio,sequence)
 
 
+@router.post("/india/workflows/{sequence}/prepare-swing-source")
+async def prepare_saved_swing(sequence: int, db: AsyncSession = Depends(get_async_db), user: User = Depends(get_current_user)):
+    from .swing_recovery import prepare_swing_source
+    parent = await workflow(db, user.id, "india", sequence)
+    revision = await prepare_swing_source(db, user.id, parent)
+    manifest = revision.manifest
+    result = {"id": revision.id, "sequence": sequence, "listings": len(manifest["stocks"]),
+              "snapshot_id": manifest["snapshot_id"], "swing_job_ids": manifest["swing_job_ids"]}
+    await db.commit()
+    return result
+
+
 @router.post("/{portfolio}/revisions")
 async def publish(portfolio:Portfolio, body:Publication, db:AsyncSession=Depends(get_async_db), user:User=Depends(get_current_user)):
     w=await workflow(db,user.id,portfolio,body.sequence)
