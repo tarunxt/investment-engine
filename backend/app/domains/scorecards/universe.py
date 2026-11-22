@@ -79,6 +79,9 @@ async def publish_manifest(db, owner, workflow, body):
         row = listing(venue, symbol.split(":")[-1] if symbol else "", holding.get("company_name") or holding.get("name"), "holding")
         if not row:
             continue
+        isin = holding.get("isin") if india else None
+        if isinstance(isin,str) and re.fullmatch(r"IN[A-Z0-9]{10}",isin):
+            row["isin"] = isin
         if row["origin"] == "holding":
             raise HTTPException(422, f"Ambiguous duplicate holding {row['listing']}")
         settled = finite(holding.get("quantity"))

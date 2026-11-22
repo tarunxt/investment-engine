@@ -301,6 +301,11 @@ export function getTileErrorDetail(error?: string | null) {
 /** Execution state and saved result are distinct: an idle page can still show a terminal result. */
 export function getStageOutcome(info: StageInfo) {
   const status = info.runStatus?.trim().toLowerCase() ?? "";
+  const pair = info.published?.pair_counts;
+  if (pair && info.published?.run_id==null && !info.activeRunId && info.published?.recovery?.phase!=="judging") {
+    return pair.judged===pair.expected && pair.expected>0 && !pair.errors ? "completed" : pair.judged ? "partial" : "unassessed";
+  }
+  if (info.published?.recovery?.phase==="judging") return "running";
   if (info.state === "running" || info.state === "queued") return info.state;
   if (info.state === "idle" && ["processing", "running"].includes(status)) return "running";
   if (info.threatCounts && info.state!=="failed") {
@@ -351,8 +356,9 @@ export function StageStatusIcon({ info }: { info: StageInfo }) {
     <LoaderCircle aria-hidden="true" className="size-4 animate-spin" /> (Running)
   </span>;
   const pair=info.published?.pair_counts;
-  if (pair && info.published?.run_id==null && outcome!=="queued" && pair.ready===pair.listings && pair.judged<pair.expected) {
-    return <span className="ml-1 inline-block align-middle text-xs font-medium">Awaiting judgments</span>;
+  if (pair && info.published?.run_id==null && outcome!=="queued" && pair.judged<pair.expected) {
+    const phase=info.published?.recovery?.phase;
+    return <span className="ml-1 inline-block align-middle text-xs font-medium">{phase==="needs attention" || phase==="evidence recovery exhausted" ? "Needs attention" : pair.ready<pair.listings ? "Waiting for market evidence" : "Awaiting judgments"}</span>;
   }
   const symbols = {
     completed: "✅", failed: "❌", partial: "⚠️✅", stale: "⚠️", unconfirmed: "⚠️", unassessed: "○", queued: "⏳",
@@ -394,11 +400,11 @@ export function getLlmStageTileRows(info: StageInfo, now: number): StageTileRow[
   const pairs=info.published?.pair_counts;
   const evidenceOnly=Boolean(pairs && info.published?.run_id==null);
   return [
-    { label: evidenceOnly ? "Last model scan" : "Last Scan", value: formatCompactStageTime(info.completedAt ?? info.startedAt) },
+    { label: evidenceOnly ? "Last evidence update" : "Last Scan", value: formatCompactStageTime(info.completedAt ?? info.startedAt) },
     ...(evidenceOnly ? [{ label:"Model jobs",value:"0 · evidence only" }] : [{ label: "LLMs Used", value: formatLlmCompletion(info) }]),
     ...(info.published ? [
       {label:"Available output",value:`#${info.published.output_id} · ${info.published.run_id ? "run #"+info.published.run_id : "evidence only"}`},
-      {label:"Recorded execution",value:`${info.lastRunId ? "#"+info.lastRunId+" · " : ""}${info.runStatus || info.state}`},
+      {label:"Recorded execution",value:evidenceOnly ? "Evidence only" : `${info.lastRunId ? "#"+info.lastRunId+" · " : ""}${info.runStatus || info.state}`},
       {label:"Stage 4 used",value:info.published.used_output_id ? `Output #${info.published.used_output_id} · final #${info.published.final_id}` : "No saved reference"},
     ] : []),
     ...(info.evidenceCoverage ? [{label: "Score coverage", value: info.evidenceCoverage}] : []),
@@ -406,6 +412,12 @@ export function getLlmStageTileRows(info: StageInfo, now: number): StageTileRow[
     ...(pairs ? [
       {label:"Listings in scope",value:String(pairs.listings)},
       {label:"Evidence ready",value:`${pairs.ready}/${pairs.listings} listings`},
+      {label:"Ready to judge",value:`${Math.max(0,pairs.eligible-pairs.judged)} pairs · ${pairs.one_missing+pairs.both_missing} blocked`},
+      ...(info.published?.recovery ? [
+        {label:"Recovery",value:info.published.recovery.phase,detail:info.published.recovery.error ?? undefined},
+        ...(info.published.recovery.next_at ? [{label:"Next check",value:formatCompactStageTime(new Date(info.published.recovery.next_at*1000).toISOString())}] : []),
+        ...(Object.keys(info.published.recovery.listings).length ? [{label:"Missing inputs",value:`${Object.keys(info.published.recovery.listings).length} listings`,detail:Object.entries(info.published.recovery.listings).map(([k,v])=>`${k} · ${v.reason} · ${v.attempts} attempts`).join("\n")}] : [])
+      ] : []),
       {label:"Results recorded",value:`${pairs.returned}/${pairs.expected} · ${pairs.jobs} model job${pairs.jobs===1?"":"s"}`},
       {label:"Missing evidence",value:`${pairs.one_missing} pairs on one side · ${pairs.both_missing} on both`},
       {label:"Fully compared",value:`${pairs.complete_stocks}/${pairs.listings} listings · ${pairs.mode}`},
@@ -431,6 +443,7 @@ export function getActionablesStageTileRows(info: StageInfo): StageTileRow[] {
     { label: "Last update", value: formatCompactStageTime(info.completedAt ?? info.startedAt) },
     ...(info.finalSummary ? [
       {label:"Rebalance inputs",value:info.finalSummary.rebalance_output ? `${info.finalSummary.rebalance_inputs ?? "—"} listings · Output #${info.finalSummary.rebalance_output}` : "No Rebalance output selected"},
+      ...(info.finalSummary.pairwise && info.finalSummary.pairwise.judged<info.finalSummary.pairwise.expected ? [{label:"Pairwise input",value:`Pending · ${info.finalSummary.pairwise.judged}/${info.finalSummary.pairwise.expected} judged in #${info.finalSummary.pairwise.used}${info.finalSummary.pairwise.completed_output ? " · completed output #"+info.finalSummary.pairwise.completed_output+" available for recalculation" : ""}`}] : []),
       {label:"Fully assessed",value:`${info.finalSummary.complete}/${info.finalSummary.assessed}`},
       {label:"Eligibility",value:`${info.finalSummary.eligible} trade-eligible · ${info.finalSummary.holds} Hold · ${info.finalSummary.blocked} blocked`},
     ] : [{ label: "Rebalance inputs", value: info.rebalanceInputs?.toString() ?? "n/a" }]),

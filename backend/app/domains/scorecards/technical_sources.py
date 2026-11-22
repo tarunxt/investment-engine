@@ -145,7 +145,33 @@ def nse_actions(raw, wanted):
     return result
 
 
-async def collect(manifest, username, previous=None, requested=None):
+def resolve_history_instruments(stocks, master, previous):
+    """Keep venue identity fixed, including when a source escaped punctuation."""
+    aliases = {}
+    for stock in stocks:
+        key = stock["listing"]
+        if key in master:
+            continue
+        venue, symbol = key.split(":", 1)
+        prior = previous.get("technical", {}).get(key, {}).get("sources", {}).get("stock", {})
+        known = {r["isin"] for r in previous.get("listings", {}).get(key, []) if r.get("isin")}
+        known.update(i for i in (stock.get("isin"), prior.get("instrument")) if i)
+        name = lambda value: re.sub(r"[^a-z0-9]", "", re.sub(r"\b(?:limited|ltd)\.?$", "", (value or "").casefold().strip()).replace("&","and"))
+        matches = []
+        for candidate, meta in master.items():
+            if not candidate.startswith(venue + ":") or not meta.get("isin"):
+                continue
+            same_isin = known == {meta["isin"]}
+            same_alias = ("_" in symbol and candidate.split(":",1)[1].replace("&","_") == symbol
+                          and name(stock.get("name")) and name(stock["name"]) == name(meta.get("name")))
+            if same_isin or (not known and same_alias):
+                matches.append(candidate)
+        if len(matches) == 1:
+            aliases[key] = matches[0]
+    return aliases
+
+
+async def collect(manifest, username, previous=None, requested=None, *, pair_repair=False, action_only=()):
     cutoff=datetime.fromisoformat(manifest["as_of"])
     receipt=datetime.now(timezone.utc)
     ids=[s["listing"] for s in manifest["stocks"]]
@@ -154,11 +180,11 @@ async def collect(manifest, username, previous=None, requested=None):
     previous=previous or {}
     records={k:list(previous.get("listings",{}).get(k,[])) for k in keys}
     notices=[]
-    provider_status={}
+    provider_status={k:v for k,v in previous.get("provider_status",{}).items() if k not in keys} if pair_repair else {}
     per_key={k:[] for k in keys}
     actions={}
     action_urls={}
-    calendars={}
+    calendars=dict(previous.get("calendars",{})) if pair_repair else {}
     master={}
     sources={}
     eligible_token=configured_for(manifest["owner_id"],username)
@@ -204,9 +230,25 @@ async def collect(manifest, username, previous=None, requested=None):
             except ERRORS:
                 notices.append("Instrument master unavailable")
         await asyncio.gather(calendar(),instruments())
+        aliases = resolve_history_instruments(manifest["stocks"], master, previous) if pair_repair else {}
+        master = {**master, **{k: master[v] for k,v in aliases.items()}}
+        if pair_repair:
+            for key, row in previous.get("technical", {}).items():
+                source = row.get("sources", {}).get("stock", {})
+                isin = source.get("instrument")
+                if not isin or (key in master and master[key]["isin"] != isin):
+                    continue
+                master.setdefault(key, {"isin":isin, "tick":source.get("tick")})
+                if source.get("action_url"):
+                    actions[isin] = source["actions"]
+                    action_urls[isin] = source["action_url"]
         semaphore=asyncio.Semaphore(8)
         async def history(venue,day,close):
             subset={k:master.get(k,{}).get("isin") for k in keys if k.startswith(venue+":")}
+            if pair_repair:
+                subset = {k:i for k,i in subset.items() if k not in action_only and not any(
+                    r["as_of"][:10] == day and (r.get("basis") == "venue-raw" or
+                    (r.get("basis") == "unverified-provider" and i)) for r in records[k])}
             # Share each verified venue/instrument/session across overlapping universes.
             ck="tech3:bars:"+venue+":"+day
             fields={k:k+"|"+(isin or "") for k,isin in subset.items()}
@@ -254,13 +296,15 @@ async def collect(manifest, username, previous=None, requested=None):
         isins={master[k]["isin"] for k in keys if k in master}
         dual_listed=isins & {i["isin"] for k,i in master.items() if k.startswith("NSE:")}
         try:
-            bulk=await cached("nse-actions:"+end_day.isoformat())
+            wanted_actions = dual_listed - actions.keys()
+            bulk=await cached("nse-actions:"+end_day.isoformat()) if wanted_actions else []
             if bulk is None:
                 bulk=json.loads(await download(client,exchange_actions))
                 if isinstance(bulk,list) and bulk:
                     await cache("nse-actions:"+end_day.isoformat(),bulk,3600)
-            actions.update(nse_actions(bulk,dual_listed))
-            action_urls.update({isin:exchange_actions for isin in actions})
+            if wanted_actions:
+                actions.update(nse_actions(bulk,wanted_actions))
+                action_urls.update({isin:exchange_actions for isin in wanted_actions})
         except ERRORS:
             notices.append("NSE corporate-action ledger unavailable")
         async def ledger(isin):
@@ -297,10 +341,10 @@ async def collect(manifest, username, previous=None, requested=None):
             if pending or any(isinstance(v,Exception) for v in outcomes):
                 notices.append("Exchange history or actions incomplete within the retrieval window")
         if eligible_token:
-            supplement={k:[] for k in keys if len({r["as_of"][:10] for r in records[k]})<55}
+            supplement={k:[] for k in keys if k not in action_only and len({r["as_of"][:10] for r in records[k]})<55}
             if supplement:
                 try:
-                    await asyncio.wait_for(supplement_indian_bars(client,supplement,cutoff,notices,manifest["owner_id"],sessions=60,diagnostics=provider_status),10)
+                    await asyncio.wait_for(supplement_indian_bars(client,supplement,cutoff,notices,manifest["owner_id"],sessions=60,diagnostics=provider_status,**({"verified_keys": aliases} if aliases else {})),10)
                 except (*ERRORS,TimeoutError):
                     notices.append("Alternate history unavailable")
                 for k,rows in supplement.items():

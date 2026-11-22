@@ -13,7 +13,8 @@ from app.shared.exceptions import AppException
 
 ANALYSIS_TASK = "app.domains.jobs.tasks.execute_ai_job"
 ZERODHA_SYNC_TASK = "app.domains.zerodha.tasks.sync_portfolio_snapshot_task"
-RECOVERY_TASKS = frozenset({ANALYSIS_TASK, ZERODHA_SYNC_TASK})
+PAIRWISE_TASK = "app.domains.scorecards.pair_task.advance_pairwise"
+RECOVERY_TASKS = frozenset({ANALYSIS_TASK, ZERODHA_SYNC_TASK, PAIRWISE_TASK})
 AUDIT_TASK = "app.domains.recommendation_audit.tasks.verify_reversal"
 
 ANALYSIS_QUEUE = "credx_recovery_analysis"

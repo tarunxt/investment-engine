@@ -15,6 +15,8 @@ from app.domains.polymarket_auto_live.run_lifecycle import AUTO_LIVE_QUEUE
 
 logger = logging.getLogger(__name__)
 
+from app.domains.scorecards.pair_delivery import PairwiseDelivery
+
 # The position snapshot wrapper was originally installed only by FastAPI for UI
 # reads. Auto-Live Stage 1 runs in a Celery worker, so install the same wrapper
 # here as well. Non-Stage-1 execution callers still fall through to the original
@@ -26,6 +28,9 @@ _broker = settings.celery_broker_url or settings.redis_url
 _backend = settings.celery_result_backend or settings.redis_url
 
 celery = RecoveryCelery("worker", broker=_broker, backend=_backend, task_cls=RecoveryTask)
+
+celery.steps["consumer"].add(PairwiseDelivery)
+celery.conf.imports = ("app.domains.scorecards.pair_task",)
 
 # Recovery of advisory verification requests lives in the consumer service,
 # rather than adding a recurring Beat task or touching financial workflows.

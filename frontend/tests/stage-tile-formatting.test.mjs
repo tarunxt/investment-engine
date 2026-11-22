@@ -187,3 +187,16 @@ test('a repaired Pairwise packet displays its own zero model cost and pending ve
   assert.equal(values.Error,undefined);
   assert.equal(values['Model coverage'],undefined);
 });
+
+test('Pairwise workflow 247 distinguishes blocked inputs and eligible unjudged pairs',()=>{
+  const info={state:'running',runStatus:'processing',published:{output_id:494,run_id:null,covered:0,expected:561,
+    used_output_id:494,final_id:498,pair_counts:{mode:'full',ready:18,listings:34,judged:0,eligible:153,
+      expected:561,returned:0,jobs:0,one_missing:288,both_missing:120,complete_stocks:0}}};
+  assert.equal(ui.getStageOutcome(info),'unassessed');
+  const rows=Object.fromEntries(ui.getLlmStageTileRows(info,0).map(r=>[r.label,r.value]));
+  assert.equal(rows['Recorded execution'],'Evidence only');
+  assert.equal(rows['Ready to judge'],'153 pairs · 408 blocked');
+  const final=ui.getActionablesStageTileRows({state:'completed',finalSummary:{pairwise:{
+    used:494,judged:0,expected:561,completed_output:510}}});
+  assert.match(final.find(r=>r.label==='Pairwise input').value,/Pending.*0\/561.*#494.*#510/);
+});
