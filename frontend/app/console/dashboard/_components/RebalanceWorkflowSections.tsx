@@ -7275,7 +7275,7 @@ ${zerodhaExecutionMode === "direct_market"
                 recommendedStocks:result.scored ?? 0,evidenceCoverage:result.pair_counts ? `${result.pair_counts.judged}/${result.pair_counts.expected} pairs judged` : String(result.scored ?? 0)+"/"+source.manifest.stocks.length+" scored",
                 ...(card==="technical" && result.technical_counts ? {published:{output_id:result.id,run_id:queued.run_id,
                   covered:result.scored??0,expected:result.rows.length,technical_counts:{...result.technical_counts,bullish:result.technical_bullish},
-                  technical_recovery:result.recovery,used_output_id:null,final_id:null}} : {}),
+                  technical_recovery:result.recovery && "state" in result.recovery ? result.recovery : undefined,used_output_id:null,final_id:null}} : {}),
                 ...(result.pair_counts ? {published:{output_id:queued.id,run_id:queued.run_id,covered:result.pair_counts.judged,expected:result.pair_counts.expected,pair_counts:result.pair_counts,used_output_id:null,final_id:null}} : {}),
                 ...(result.rebalance_audit?{published:{output_id:result.id,run_id:run?.id??0,covered:result.rebalance_audit.coverage.assessed,
                   expected:result.rows.length,used_output_id:null,final_id:null,counts:result.rebalance_audit.coverage,actions:result.rebalance_audit.actions}}:{}),
