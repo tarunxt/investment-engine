@@ -4152,7 +4152,7 @@ function StageLlmSelectorDialog({
 
   if (!open || !stage) return null;
 
-  const organizedPicker = stage === "threats" && portfolio === "zerodha";
+  const organizedPicker = isCard(stage);
   const singleSelect = stage === "threats" || stage === "technical";
   const compatibleTargets = new Set(
     providers.flatMap((provider) =>
