@@ -16,6 +16,9 @@ function kiteBoardRows(item: Stage, rebalance: Stage["info"] | undefined) {
   if (isCard(item.stage)) {
     const sameWorkflow = item.info.workflowSequence === rebalance?.workflowSequence;
     const recommendedStocks = sameWorkflow ? rebalance?.recommendedStocks : null;
+    if(item.stage==="technical" && item.info.published?.technical_counts) {
+      return getIdleStageRows(item.stage,{...item.info,rebalanceReportedCount:recommendedStocks},item.now);
+    }
     return getIdleStageRows(item.stage, { ...item.info, recommendedStocks }, item.now);
   }
   const rows = getIdleStageRows(item.stage, item.info, item.now);

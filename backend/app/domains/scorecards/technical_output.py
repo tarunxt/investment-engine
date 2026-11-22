@@ -102,7 +102,18 @@ def saved_rows(manifest,research,accepted,errors,job_ids):
                         "terms":{k:v["value"] for k,v in r["factors"].items()},"readiness":r["readiness"],
                         "legacy_score":baseline,"signed_terms":{"candles":legacy},
                         "raw_rows":[a] if a else [],"commentary_job":job,"model_disagreement":mismatch})
-    count=Counter(r["coverage"] for r in results)
+    groups={}
+    for row in results:
+        key=row["technical_v3"].get("canonical_listing",row["listing"])
+        groups.setdefault(key,[]).append(row)
+    # Source references are retained for traceability. A verified same-venue alias counts once.
+    count=Counter("Complete" if all(v["coverage"]=="Complete" for v in rows) else
+                  "Insufficient data" if any(v["score"] is None for v in rows) else "Provisional"
+                  for rows in groups.values())
+    counts={"expected":len(groups),"complete":count["Complete"],"provisional":count["Provisional"],
+            "insufficient":count["Insufficient data"],"commentary":len(accepted)}
+    if len(groups)!=len(results):
+        counts["source_rows"]=len(results)
     return {"scoring_version":3,"rows":results,"errors":errors,"model_tables":[],"recovered_pairs":[],
-            "job_ids":job_ids,"technical_counts":{"expected":len(results),"complete":count["Complete"],
-            "provisional":count["Provisional"],"insufficient":count["Insufficient data"],"commentary":len(accepted)}}
+            "job_ids":job_ids,"technical_counts":counts,
+            "technical_bullish":sum(all(r["coverage"]=="Complete" and r["score"]>55 for r in refs) for refs in groups.values())}

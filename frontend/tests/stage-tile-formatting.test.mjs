@@ -188,6 +188,20 @@ test('a repaired Pairwise packet displays its own zero model cost and pending ve
   assert.equal(values['Model coverage'],undefined);
 });
 
+test('Technical coverage distinguishes successful annotations, unique prices, cross-stage recommendations and retries',()=>{
+  const info={state:'completed',runStatus:'completed',partialNotice:'LLM output partial',rebalanceReportedCount:19,
+    published:{output_id:491,run_id:551,covered:18,expected:34,technical_counts:{expected:33,source_rows:34,
+      complete:18,provisional:0,insufficient:15,commentary:34,bullish:6},technical_recovery:{state:'scheduled',next_retry:'2026-11-22T15:30:00Z',pending:{}}}};
+  const rows=Object.fromEntries(ui.getLlmStageTileRows(info,0).map(r=>[r.label,r.value]));
+  assert.equal(rows['Model rows'],'34/34');
+  assert.equal(rows['Complete scores'],'18/33 unique listings');
+  assert.equal(rows['Stocks recommended (Rebalance)'],'19');
+  assert.equal(rows['Evidence status'],'Recovering evidence');
+  assert.equal(rows['Error'],undefined);
+  info.published.technical_counts.complete=33;
+  assert.equal(ui.getStageOutcome(info),'completed');
+});
+
 test('Pairwise workflow 247 distinguishes blocked inputs and eligible unjudged pairs',()=>{
   const info={state:'running',runStatus:'processing',published:{output_id:494,run_id:null,covered:0,expected:561,
     used_output_id:494,final_id:498,pair_counts:{mode:'full',ready:18,listings:34,judged:0,eligible:153,

@@ -65,6 +65,7 @@ export type StageInfo = StageCost & {
   sourceRevision?: number;
   sourceListingCount?: number;
   finalInputs?: Record<string, unknown>;
+  rebalanceReportedCount?: number | null;
   published?: import("@/lib/independentScorecards").AvailableOutput;
   evidenceCoverage?: string;
   threatCounts?: {diagnostics?:import("@/lib/independentScorecards").ThreatDiagnostics;expected:number;returned:number;scored:number;complete:number;status:string};
@@ -313,6 +314,8 @@ export function getStageOutcome(info: StageInfo) {
     return status==="completed" ? "completed" : status==="unassessed" ? "unassessed" : "partial";
   }
   if (info.published) {
+    const t=info.published.technical_counts;
+    if(t) return t.complete===t.expected ? "completed" : t.complete||t.provisional ? "partial" : "unassessed";
     if (info.published.counts) {
       const c=info.published.counts;
       return !c.assessed ? "unassessed" : c.complete===info.published.expected ? "completed" : "partial";
@@ -355,6 +358,8 @@ export function StageStatusIcon({ info }: { info: StageInfo }) {
   if (outcome === "running") return <span className="ml-1 inline-flex items-center gap-1 align-middle text-xs">
     <LoaderCircle aria-hidden="true" className="size-4 animate-spin" /> (Running)
   </span>;
+  const recovering=info.published?.technical_recovery?.state;
+  if(recovering==="scheduled"||recovering==="recovering") return <span className="ml-1 text-xs">⏳ Recovering evidence</span>;
   const pair=info.published?.pair_counts;
   if (pair && info.published?.run_id==null && outcome!=="queued" && pair.judged<pair.expected) {
     const phase=info.published?.recovery?.phase;
@@ -376,6 +381,14 @@ export function hasStagePartialOutput(info: StageInfo) {
 
 export function getStageTileError(info: StageInfo): StageTileRow {
   const error = getTileErrorDetail(info.error);
+  const t=info.published?.technical_counts;
+  if(t && (!error||/partial/i.test(error))) {
+    const work=info.published?.technical_recovery;
+    const pending=Object.entries(work?.pending??{}).map(([k,v])=>k+" · "+v.reason).join("\n");
+    return {label:"Evidence status",value:t.complete===t.expected?"Complete":work?.state==="exhausted"?"Retries exhausted":
+      work?.state==="scheduled"||work?.state==="recovering"?"Recovering evidence":"Missing verified evidence",
+      detail:pending||(t.complete<t.expected?"Open Saved stock scores for individual evidence and recovery controls.":null)};
+  }
   if (!error && info.threatCounts) {
     const t=info.threatCounts;
     const cause=t.scored<t.expected ? "Insufficient verified risk categories" : t.complete<t.expected ? "Some risk categories unresolved" : "Unresolved validation errors";
@@ -398,6 +411,8 @@ function stageErrorRows(info: StageInfo): StageTileRow[] {
 export function getLlmStageTileRows(info: StageInfo, now: number): StageTileRow[] {
   const cost = formatRebalanceCost(info);
   const pairs=info.published?.pair_counts;
+  const tech=info.published?.technical_counts;
+  const work=info.published?.technical_recovery;
   const evidenceOnly=Boolean(info.published && (pairs || info.threatCounts) && info.published.run_id==null);
   return [
     { label: evidenceOnly ? "Last evidence update" : "Last Scan", value: formatCompactStageTime(info.completedAt ?? info.startedAt) },
@@ -407,9 +422,17 @@ export function getLlmStageTileRows(info: StageInfo, now: number): StageTileRow[
       {label:"Recorded execution",value:evidenceOnly ? "Evidence only" : `${info.lastRunId ? "#"+info.lastRunId+" · " : ""}${info.runStatus || info.state}`},
       {label:"Stage 4 used",value:info.published.used_output_id ? `Output #${info.published.used_output_id} · final #${info.published.final_id}` : "No saved reference"},
     ] : []),
-    ...(info.evidenceCoverage ? [{label: "Score coverage", value: info.evidenceCoverage}] : []),
+    ...(!tech && info.evidenceCoverage ? [{label: "Score coverage", value: info.evidenceCoverage}] : []),
     ...(!evidenceOnly && info.distinctModels != null ? [{label: "Model coverage", value: `${info.totalLlms ?? "?"} jobs · ${info.distinctModels} distinct model${info.distinctModels === 1 ? "" : "s"}`}] : []),
-    ...(pairs ? [
+    ...(tech ? [
+      {label:"Model rows",value:tech.commentary+"/"+(tech.source_rows??tech.expected)},
+      {label:"Complete scores",value:tech.complete+"/"+tech.expected+" unique listings"},
+      {label:"Missing evidence",value:String(tech.expected-tech.complete)+" listings"},
+      ...(tech.source_rows && tech.source_rows!==tech.expected?[{label:"Source references",value:String(tech.source_rows)}]:[]),
+      ...(info.rebalanceReportedCount!=null?[{label:"Stocks recommended (Rebalance)",value:String(info.rebalanceReportedCount),detail:"Number reported by the Rebalance stage for this workflow, across its assessed actions. Includes holds and trims."}]:[]),
+      ...(tech.bullish!=null?[{label:"Bullish Technical scores",value:tech.bullish+" · complete score >55"}]:[]),
+      ...(work?.next_retry?[{label:"Next evidence retry",value:new Date(work.next_retry).toLocaleTimeString("en-IN",{timeZone:"Asia/Kolkata"})+" IST"}]:[]),
+    ] : pairs ? [
       {label:"Listings in scope",value:String(pairs.listings)},
       {label:"Evidence ready",value:`${pairs.ready}/${pairs.listings} listings`},
       {label:"Ready to judge",value:`${Math.max(0,pairs.eligible-pairs.judged)} pairs · ${pairs.one_missing+pairs.both_missing} blocked`},

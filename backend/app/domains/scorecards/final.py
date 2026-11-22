@@ -63,11 +63,13 @@ def calculate_final(manifest, attempts, config):
         units=position if action=="Sell All" else position/2 if action=="Trim" else mean(buys) if action in ("Add more","Buy New") and buys else 0 if action=="Hold" else None
         tech=tables.get("technical",{}).get(key,{})
         using_candidate=attempts.get("technical",{}).get("stage4_method")=="v3" and config["weights"]["technical"]>0
-        constrained=using_candidate and (tech.get("coverage")!="Complete" or bool(tech.get("technical_v3",{}).get("flags")))
+        alias=tech.get("technical_v3",{}).get("canonical_listing")
+        duplicate=using_candidate and alias and alias!=key and alias in tables.get("technical",{})
+        constrained=using_candidate and (duplicate or tech.get("coverage")!="Complete" or bool(tech.get("technical_v3",{}).get("flags")))
         if constrained:
             action=units=None
         sizing_blocked = attempts.get("rebalance",{}).get("rebalance_version")==2 and action in ("Buy New","Add more") and not buys
-        eligibility = ("Technical evidence incomplete or execution constrained" if constrained else "Incomplete positive-weight scores" if not complete else "Position unavailable" if position is None
+        eligibility = (f"Technical alias already represented by {alias}" if duplicate else "Technical evidence incomplete or execution constrained" if constrained else "Incomplete positive-weight scores" if not complete else "Position unavailable" if position is None
                        else "No position to sell" if action in ("Trim","Sell All") and position == 0
                        else "Rebalance buy sizing unavailable" if sizing_blocked else "Hold" if action == "Hold" else "Suggested quantity unavailable" if units is None or units<=0
                        else "Subject to broker order checks")

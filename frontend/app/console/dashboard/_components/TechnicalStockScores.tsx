@@ -6,7 +6,7 @@ import type { CardResult, CardRow } from "@/lib/independentScorecards";
 type Factor = {weight:number; value:number|null; points:number|null; reason:string|null; inputs:Record<string,number>};
 type Source = {instrument?:string; history_hash?:string; tick?:number; master?:string; calendar?:string; action_url?:string;
   actions?: {date:string; kind:string; multiplier:number|null}[]; last_bar?:{as_of:string; url:string; received_at?:string; published_at?:string}};
-type Ledger = {version:number; direction:string; coverage_pct:number; range:[number,number]|null; as_of:string; session:string|null;
+type Ledger = {canonical_listing?:string;identity_source?:string;version:number; direction:string; coverage_pct:number; range:[number,number]|null; as_of:string; session:string|null;
   input_hash:string; vintage:string; flags:string[]; reason:string; readiness:Record<string,string|number|null>;
   factors:Record<string,Factor>; sources:{stock:Source; benchmark:Source}};
 const fmt = (n:unknown, digits=1) => typeof n==="number" && Number.isFinite(n) ? n.toFixed(digits) : "—";
@@ -26,7 +26,7 @@ function Evidence({name,source}:{name:string;source:Source}) {
 }
 
 export function TechnicalStockScores({result,revision,onRecover,onRetryCommentary}:{result:CardResult;revision?:number;
-  onRecover?:()=>Promise<CardResult>;onRetryCommentary?:()=>Promise<void>}) {
+  onRecover?:(id:number)=>Promise<CardResult>;onRetryCommentary?:()=>Promise<void>}) {
   const [selection,setSelection]=useState<CardRow|null>(null);
   const dialog=useRef<HTMLDialogElement>(null);
   useEffect(()=>{if(selection&&!dialog.current?.open) dialog.current?.showModal();},[selection]);
@@ -34,16 +34,19 @@ export function TechnicalStockScores({result,revision,onRecover,onRetryCommentar
   const [busy,setBusy]=useState(false);
   const [message,setMessage]=useState("");
   const current=recovered?.from===result.id?recovered.data:result;
+  const recovery=current.recovery && "state" in current.recovery ? current.recovery : undefined;
   const counts=current.technical_counts;
   const data=selection&&lines(selection);
-  const annotation=(selection?.raw_rows as Record<string,string>[]|undefined)?.[0];
+  const original=selection?.original_annotation as {row:Record<string,string>;job:number}|undefined;
+  const annotation=(selection?.raw_rows as Record<string,string>[]|undefined)?.[0]??original?.row;
   const rank={Complete:0,Provisional:1};
   const ordered=counts?[...current.rows].sort((a,b)=>(rank[a.coverage as keyof typeof rank]??2)-(rank[b.coverage as keyof typeof rank]??2)
     || (b.score??-1)-(a.score??-1)):current.rows;
   const unfilled=current.rows.filter(r=>r.score==null).length;
   return <div className="space-y-3 py-2 text-sm">
-    <p className="font-semibold">{counts?`${counts.expected} expected · ${counts.complete} complete · ${counts.provisional} provisional · ${counts.insufficient} insufficient · ${counts.commentary} model rows`:
+    <p className="font-semibold">{counts?`${counts.source_rows??counts.expected} source rows · ${counts.expected} unique listings · ${counts.complete} complete · ${counts.provisional} provisional · ${counts.insufficient} insufficient · ${counts.commentary} model rows`:
       `${current.rows.length} expected · ${current.rows.length-unfilled} saved scores · ${unfilled} without a score`}</p>
+    {recovery?.state&&<p role="status">Evidence recovery · {recovery.state}{recovery.next_retry&&" · next check "+at(recovery.next_retry)}</p>}
     {counts&&<p>20-session direction · Stage 2 #{revision??current.revision_id} · Output #{current.id} · {current.stage4_method==="v3"?"Validated for Stage 4":"Shadow evaluation · Stage 4 uses the legacy score"}</p>}
     <div className="overflow-x-auto"><table className="w-full text-left"><thead className="bg-slate-100"><tr>
       {["Listing","Score /100","Coverage","Setup / entry","Reason"].map(k=><th key={k} className={cell}>{k}</th>)}</tr></thead>
@@ -53,9 +56,9 @@ export function TechnicalStockScores({result,revision,onRecover,onRetryCommentar
           <td className={cell}>{r.coverage}{v&&` · ${v.coverage_pct}%`}</td><td className={cell}>{ready?.setup??"—"} · {ready?.entry??"—"}</td>
           <td className={cell}>{v?.reason||String(r.reason??v?.direction??"—")}</td></tr>;})}</tbody></table></div>
     {onRecover&&(!counts||counts.provisional+counts.insufficient>0)&&<button className={link} disabled={busy} onClick={async()=>{
-      setBusy(true);try{const next=await onRecover();setRecovered({from:result.id,data:next});setMessage(next.id===current.id?"No new verified evidence available.":`Showing recovered output #${next.id}.`);}catch(e){setMessage(String(e));}finally{setBusy(false);}
+      setBusy(true);try{const next=await onRecover(current.id);setRecovered({from:result.id,data:next});setMessage(next.id===current.id?"No new verified evidence available.":`Showing recovered output #${next.id}.`);}catch(e){setMessage(String(e));}finally{setBusy(false);}
     }}>{busy?"Checking history…":"Recover missing evidence · no model call"}</button>}
-    {onRetryCommentary&&counts&&counts.commentary<counts.expected&&<button className={link} disabled={busy} onClick={async()=>{
+    {onRetryCommentary&&counts&&(counts.current_commentary??counts.commentary)<(counts.source_rows??counts.expected)&&<button className={link} disabled={busy} onClick={async()=>{
       setBusy(true);try{await onRetryCommentary();setMessage("Commentary retry queued.");}catch(e){setMessage(String(e));}finally{setBusy(false);}
     }}>Retry missing model commentary</button>}
     {message&&<p role="status">{message}</p>}
@@ -64,6 +67,8 @@ export function TechnicalStockScores({result,revision,onRecover,onRetryCommentar
       <div className="sticky top-0 flex items-center justify-between bg-white py-2"><h3 className="font-semibold">{selection.listing} · {fmt(selection.score)} /100</h3>
       <button type="button" className={link} onClick={()=>dialog.current?.close()}>Close calculation</button></div>
       <div className="space-y-3 p-3 text-sm"><p>Output #{current.id} · Stage 2 #{current.revision_id??revision} · {selection.coverage}</p>
+      {original&&<p>Original commentary from job #{original.job} refers to the earlier evidence revision.</p>}
+      {data?.canonical_listing&&<p>Verified source alias for {data.canonical_listing}. <a href={data.identity_source} className={link}>Exchange identity record</a></p>}
       {data?<><p>{data.direction} · Cutoff {at(data.as_of)} · Decision session {data.session??"—"} · {data.vintage}</p>
         <div className="overflow-x-auto"><table className="w-full text-left"><thead><tr>{["Factor","Score /100","Weight","Points from 50","Inputs"].map(k=><th key={k} className={cell}>{k}</th>)}</tr></thead>
         <tbody>{Object.entries(data.factors).map(([name,f])=><tr key={name}><th className={cell}>{name}</th><td className={cell}>{fmt(f.value)}</td><td className={cell}>{fmt(100*f.weight,0)}%</td>

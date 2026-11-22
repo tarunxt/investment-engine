@@ -11,7 +11,7 @@ export function PairwiseCoverage({result}:{result:CardResult}) {
     <p>{c.returned} pairs have a recorded response. {c.jobs} model jobs in this attempt{c.carried ? ` · ${c.carried} previous judgments retained` : ""}.</p>
     {result.attempt_cost_inr!=null && <p>Attempt cost ₹{result.attempt_cost_inr.toFixed(2)}{result.attempt_elapsed_seconds!=null ? ` · ${Math.round(result.attempt_elapsed_seconds)} seconds` : ""}.</p>}
     {!!result.observed_at && <p>Decision cutoff {result.as_of} · evidence retrieved {result.observed_at}</p>}
-    {result.recovery && <div>
+    {result.recovery && "phase" in result.recovery && <div>
       <p>Recovery · {result.recovery.phase}{result.recovery.next_at ? " · next check "+new Date(result.recovery.next_at*1000).toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})+" IST" : ""}</p>
       {result.recovery.error && <p>{result.recovery.error}</p>}
       {Object.keys(result.recovery.listings).length>0 && <details><summary>Pending recovery by listing</summary>

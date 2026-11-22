@@ -5,7 +5,8 @@ from app.domains.jobs.resource_body import ResourceBodyMiddleware
 from app.core.recovery import recovery_mode
 import json
 import time
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
+import asyncio
 from os import getenv
 from urllib.parse import urlsplit
 from uuid import uuid4
@@ -142,7 +143,14 @@ async def lifespan(app: FastAPI):
     async with AsyncSessionLocal() as db:
         await seed_system_prompts(db)
 
-    yield
+    from app.domains.scorecards.technical_queue import serve as serve_technical_evidence
+    technical_worker=asyncio.create_task(serve_technical_evidence(AsyncSessionLocal))
+    try:
+        yield
+    finally:
+        technical_worker.cancel()
+        with suppress(asyncio.CancelledError):
+            await technical_worker
 
     await polymarket_bot_manager.shutdown()
     await polymarket_auto_live_bot_manager.shutdown()
