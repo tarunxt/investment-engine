@@ -2,6 +2,7 @@
 import { PairwiseCoverage } from "./PairwiseCoverage";
 import { Grid } from "./ScorecardResultGrid";
 import { TechnicalValidation } from "./TechnicalValidation";
+import { ThreatStockScores } from "./ThreatStockScores";
 import { TechnicalStockScores } from "./TechnicalStockScores";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ScoreMatrixFormulaConfig } from "@/app/console/_components/FinalActionablesConsole";
@@ -151,7 +152,7 @@ export function ScorecardReview({portfolio,stage:initial,revisionId,initialAttem
       {card==="technical"&&broker==="india"&&<TechnicalValidation key={id} read={api.technicalValidation} executions={api.technicalExecutions}/>}
       {result&&<><p>{result.status} · {result.completed}/{result.jobs} model jobs · {result.scored??0} stocks scored</p>{card==="technical"&&broker==="india"?<TechnicalStockScores key={result.id} revision={id} result={result}
           onRecover={async()=>{const updated=await api.recover(result.id);selectedOutput.current=updated.id;setVersion(n=>n+1);return updated;}}
-          onRetryCommentary={async()=>{await launch("technical",result.id);setVersion(n=>n+1);}}/>:card!=="rebalance"&&<Grid rows={resultRows}/>}
+          onRetryCommentary={async()=>{await launch("technical",result.id);setVersion(n=>n+1);}}/>:card==="threats"&&broker==="india"?<ThreatStockScores key={result.id} result={result} onRecover={async id=>{const next=await api.recover(id);selectedOutput.current=next.id;setResult(next);return next;}} onRetry={async id=>{selectedOutput.current=await launch("threats",id);setVersion(n=>n+1);}}/>:card!=="rebalance"&&<Grid rows={resultRows}/>}
         {card==="rebalance"&&<><h3>Rebalance output</h3>{result.model_tables?.map(t=><section key={t.job_id}><h4>Slot {t.slot} · {t.model} · Job {t.job_id}</h4><Grid rows={t.rows}/></section>)}<h3>Scores for Stage 4</h3><Grid rows={resultRows}/></>}
         {!!result.research_notices?.length&&<details><summary>Research source availability</summary><ul>{result.research_notices.map(n=><li key={n}>{n}</li>)}</ul></details>}
         {result.balanced_schedule&&<details><summary>Balanced schedule comparison</summary><Grid rows={[result.balanced_schedule]}/></details>}

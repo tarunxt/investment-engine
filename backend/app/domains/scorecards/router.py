@@ -207,10 +207,13 @@ async def start(portfolio:Portfolio,revision_id:int,card:Card,body:Start,db:Asyn
     if portfolio=="india" and card=="pairwise" and body.retry_attempt_id:
         identity=f"pairwise/resume/{body.sequence}/{body.retry_attempt_id}/{body.pair_mode}"
     technical_v3 = portfolio == "india" and card == "technical"
+    india_threats = portfolio == "india" and card == "threats"
     pair_v3 = portfolio == "india" and card == "pairwise"
     packet_key = "pairwise-v3" if pair_v3 else "technical-v3" if technical_v3 else "market-v2"
     shared = portfolio=="india" and card in ("technical","pairwise")
     packet = await storage.by_key(db,"packet",packet_key,revision_id=rev.id) if shared else None
+    if india_threats and not body.retry_attempt_id:
+        packet = await storage.by_key(db,"packet","threats-v2",revision_id=rev.id)
     already_started = await storage.by_key(db,"attempt",identity,revision_id=rev.id)
     if not already_started and single_job_card(portfolio, card):
         if len(body.targets) != 1:
@@ -222,9 +225,23 @@ async def start(portfolio:Portfolio,revision_id:int,card:Card,body:Start,db:Asyn
     if not already_started and not packet and not (pair_v3 and body.retry_attempt_id):
         manifest = rev.manifest
         username = user.username
+        wanted = None
+        if india_threats and body.retry_attempt_id:
+            from .threat_output import target_gaps
+            prior = await owned(db,owner,portfolio,"attempt",body.retry_attempt_id)
+            if prior.data["revision_id"] != rev.id or prior.data["card"] != "threats" or not prior.result_json:
+                raise HTTPException(422,"Select a finished Threats output from this revision")
+            if body.targets[0].model_dump() not in prior.data["settings"]["targets"]:
+                raise HTTPException(422,"Select the original Threats model for recovery")
+            wanted = target_gaps(prior.result_json["rows"])
+            if not wanted:
+                raise HTTPException(422,"All Threats categories are resolved")
         history = await pair_evidence.latest_history(db,rev.id) if shared else None
         await db.commit()
-        if shared:
+        if india_threats:
+            from .threat_sources import collect
+            research = await collect(manifest, username, wanted)
+        elif shared:
             history = history or await shared_history(revision_id,manifest,username)
             if pair_v3:
                 research = pair_evidence.reconcile(manifest,history,await pair_evidence.news(manifest))
@@ -248,7 +265,13 @@ async def start(portfolio:Portfolio,revision_id:int,card:Card,body:Start,db:Asyn
     missing=None
     if body.retry_attempt_id:
         parent=await owned(db,user.id,portfolio,"attempt",body.retry_attempt_id)
-        if technical_v3:
+        if india_threats:
+            from .threat_output import new_evidence_targets
+            previous = {r["listing"]:r.get("source_ids",{}) for r in parent.result_json["rows"]}
+            research["targets"] = new_evidence_targets(research, previous)
+            if not research["targets"]:
+                raise HTTPException(422,"No new dated evidence for unresolved categories. No model job was started.")
+        elif technical_v3:
             if parent.data["revision_id"]!=rev.id or parent.data["card"]!=card or not parent.result_json or parent.result_json.get("scoring_version")!=3:
                 raise HTTPException(422,"Select a finished Technical v3 attempt from this revision")
             retry_keys={r["listing"] for r in parent.result_json["rows"] if not r["raw_rows"] or r.get("model_disagreement")}
@@ -281,10 +304,22 @@ async def start(portfolio:Portfolio,revision_id:int,card:Card,body:Start,db:Asyn
             if not missing and not pair_v3:
                 raise HTTPException(422,"All pair assignments have been resolved")
     assignments=list(batches(rev.manifest["stocks"],card,pairs=missing,portfolio=portfolio))
+    if india_threats:
+        if body.retry_attempt_id:
+            assignments = [(sorted(research["targets"]),[])]
+        elif not research["sources"]:
+            assignments = []
     if technical_v3 and body.retry_attempt_id:
         # Commentary recovery reuses the exact packet, including its factor calculations.
         assignments=[([k for k in keys if k in retry_keys],[]) for keys,_ in assignments if any(k in retry_keys for k in keys)]
-    if shared and research.get("version") in (2,3):
+    if india_threats and not body.retry_attempt_id:
+        packet = await storage.by_key(db,"packet","threats-v2",revision_id=rev.id)
+        if not packet:
+            packet = await storage.append(db,w.id,"packet","threats-v2",{"research":research},revision_id=rev.id)
+        research = packet.data["research"]
+        config["packet_id"] = packet.id
+        assignments = list(batches(rev.manifest["stocks"],card,portfolio=portfolio)) if research["sources"] else []
+    elif shared and research.get("version") in (2,3):
         packet = (await owned(db,owner,portfolio,"packet",config["packet_id"]) if config.get("packet_id") else
                   await storage.by_key(db,"packet",packet_key,revision_id=rev.id))
         if not packet:
@@ -313,6 +348,12 @@ async def start(portfolio:Portfolio,revision_id:int,card:Card,body:Start,db:Asyn
         from .technical_validation import stage4_validated
         config["technical_validated"] = await stage4_validated(db, owner, rev.manifest["as_of"])
     config["assignments"]=assignments
+    if india_threats and body.retry_attempt_id:
+        retry_identity = f"threats/retry/{body.retry_attempt_id}/" + digest({"targets":research["targets"],"sources":sorted(research["sources"])})
+        previous_retry = await storage.by_key(db,"attempt",retry_identity,workflow_id=w.id,revision_id=rev.id)
+        if previous_retry:
+            return {"id":previous_retry.id,"run_id":previous_retry.row.run_id}
+        identity = retry_identity
     attempt=await storage.append(db,w.id,"attempt",identity,{"card":card,"settings":config},revision_id=rev.id)
     if pair_v3 and not assignments:
         data=pair_plan.project_plan(rev.manifest,research,body.pair_mode,{"errors":[]})
@@ -321,6 +362,15 @@ async def start(portfolio:Portfolio,revision_id:int,card:Card,body:Start,db:Asyn
         await db.commit()
         if len(keys)>1 and not complete_inputs:
             await pair_evidence.queue_repair(owner,attempt.id)
+        return {"id":attempt.id,"run_id":None}
+    if india_threats and not assignments:
+        from .threat_output import project as empty_threats
+        out = {**empty_threats(rev.manifest,[]),"id":attempt.id,"revision_id":rev.id,"card":card,
+               "status":"unassessed","scored":0,"jobs":0,"completed":0,"source_hashes":{},
+               "research_notices":[*research["notices"],"No usable dated evidence. No model job was started."]}
+        attempt.row.summary_json = {**attempt.data,"result":out}
+        attempt.row.status = "unassessed"
+        await db.commit()
         return {"id":attempt.id,"run_id":None}
     absent = {r["listing"] for r in rev.manifest["stocks"] if r["origin"] == "contender" and r["units"] == 0}
     batch_contexts = tuple({
@@ -468,6 +518,27 @@ async def repair_pair_evidence(attempt_id:int, db:AsyncSession=Depends(get_async
 @router.post("/{portfolio}/attempts/{attempt_id}/recover")
 async def recover_pairs(portfolio:Portfolio,attempt_id:int,db:AsyncSession=Depends(get_async_db),user:User=Depends(get_current_user)):
     original=await owned(db,user.id,portfolio,"attempt",attempt_id,lock=True)
+    if portfolio=="india" and original.data["card"]=="threats" and original.result_json:
+        if original.result_json.get("threat_version")==2:
+            return original.result_json
+        key = f"threats/replay-v2/{attempt_id}"
+        rev_id = original.data["revision_id"]
+        existing = await storage.by_key(db,"attempt",key,workflow_id=original.row.workflow_id,revision_id=rev_id)
+        if existing:
+            return existing.result_json
+        from .threat_output import project as project_threats
+        revision = await owned(db,user.id,portfolio,"revision",rev_id)
+        projected = project_threats(revision.manifest,await observations(db,original,user.id,portfolio))
+        counts = projected["threat_counts"]
+        status = "completed" if counts["complete"]==counts["expected"] and not projected["errors"] else "partial" if counts["scored"] else "unassessed"
+        record = await storage.append(db,original.row.workflow_id,"attempt",key,
+            {"card":"threats","settings":original.data["settings"],"recovered_from":attempt_id},revision_id=rev_id)
+        record.row.run_id = original.row.run_id
+        out = {**original.result_json,**projected,"id":record.id,"recovered_from":attempt_id,"scored":counts["scored"],"status":status}
+        record.row.status = status
+        record.row.summary_json = {**record.data,"result":out}
+        await db.commit()
+        return out
     if portfolio=="india" and original.data["card"]=="technical" and original.result_json:
         from .technical_recovery import recover
         return await recover(db, original, user.id, user.username)
@@ -538,8 +609,8 @@ async def finalize(portfolio:Portfolio,revision_id:int,body:Finalize,db:AsyncSes
 async def prompt_preview(portfolio:Portfolio,revision_id:int,card:Card,db:AsyncSession=Depends(get_async_db),user:User=Depends(get_current_user)):
     rev=await owned(db,user.id,portfolio,"revision",revision_id)
     first=next(batches(rev.manifest["stocks"],card,portfolio=portfolio),([],[]))
-    packet_key = {"technical":"technical-v3","pairwise":"pairwise-v3"}.get(card,"market-v2") if portfolio=="india" else "market-v2"
-    packet = await storage.by_key(db,"packet",packet_key,revision_id=rev.id) if card in ("technical","pairwise") else None
+    packet_key = {"technical":"technical-v3","pairwise":"pairwise-v3","threats":"threats-v2"}.get(card,"market-v2") if portfolio=="india" else "market-v2"
+    packet = await storage.by_key(db,"packet",packet_key,revision_id=rev.id) if card in ("technical","pairwise") or (portfolio=="india" and card=="threats") else None
     research = packet.data["research"] if packet else None
     if research is None and portfolio=="india" and card=="technical":
         research={"version":3,"technical":{},"listings":{}}
