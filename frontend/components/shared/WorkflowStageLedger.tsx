@@ -9,9 +9,22 @@ import { StageStatusIcon, getStageLedgerTone, getIdleStageRows, getStageTileLabe
 
 import Link from "next/link";
 import { isCard, type CardKey } from "@/lib/independentScorecards";
-import { scorecardHref } from "@/lib/scorecardNavigation";
+import { cardNames, scorecardHref } from "@/lib/scorecardNavigation";
 
 type Stage = ComponentProps<typeof WorkflowStageTile>;
+function kiteBoardRows(item: Stage, rebalance: Stage["info"] | undefined) {
+  if (isCard(item.stage)) {
+    const sameWorkflow = item.info.workflowSequence === rebalance?.workflowSequence;
+    const recommendedStocks = sameWorkflow ? rebalance?.recommendedStocks : null;
+    return getIdleStageRows(item.stage, { ...item.info, recommendedStocks }, item.now);
+  }
+  const rows = getIdleStageRows(item.stage, item.info, item.now);
+  if (item.stage === "sync") {
+    rows.splice(1, 0, { label: "Stocks synced", value: String(item.info.portfolioStockCount ?? "n/a") });
+  }
+  return rows;
+}
+
 function evidenceLabel(item: Stage) {
   if (item.info.evidence?.kind === "derived") return "Derived summary · saved final execution not established";
   if (item.info.evidence?.kind === "saved") return null;
@@ -93,6 +106,7 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
     <h4 className="font-semibold">{title}{info && <StageStatusIcon info={info} />}</h4><WorkflowTileMenu title={title} actions={actions} />
   </div>;
   if (board && view === "ledger") {
+    const rebalance = stages.find(item => item.stage === "rebalance")?.info;
     const lanes = [
       { title: "Sync portfolio", keys: ["sync"] },
       { title: market === "zerodha" ? "Find New Promising Stocks" : "Discover contenders", keys: ["swing"] },
@@ -105,7 +119,12 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
         {lane.keys.map(key => {
           const item = stages.find(stage => stage.stage === key);
           if (!item) return null;
-          const rows = getIdleStageRows(item.stage, item.info, item.now);
+          const rows = market === "zerodha" ? kiteBoardRows(item, rebalance) : getIdleStageRows(item.stage, item.info, item.now);
+          let title = getStageTileLabel(item.stage);
+          if (market === "zerodha") {
+            if (item.stage === "sync") title = "Sync Kite Portfolio";
+            if (isCard(item.stage)) title = cardNames[item.stage];
+          }
           const ranking = item.info.frozenFinal?.actionable_ranking as { rows?: RankedListing[] } | undefined;
           const label = evidenceLabel(item);
           const upcoming = active && (item.info.state === "idle" || item.info.state === "queued");
@@ -113,7 +132,7 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
           if (item.onSyncNowClick) actions.push({ label: "Sync Now", onSelect: item.onSyncNowClick });
           return <div key={key} className="mb-3">
             <article className={`rounded-lg border border-slate-200 p-3 ${getStageLedgerTone(item.info)}`}>
-              {tileHeader(market === "zerodha" && item.stage === "sync" ? "Sync Kite Portfolio" : getStageTileLabel(item.stage), actions, item.info)}
+              {tileHeader(title, actions, item.info)}
               {item.selectable && <label className="text-xs"><input type="checkbox" checked={Boolean(item.selected)} onChange={item.onClick} /> Select for next run</label>}
               {!upcoming && <>{label && <p className="text-xs">{label}</p>}
                 <dl className="mt-2 text-xs">{rows.map(row => <div key={row.label} className="flex justify-between gap-2">
@@ -123,7 +142,7 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
                     data-workflow-total={item.info.totalLlms ?? undefined} data-workflow-run-id={item.info.activeRunId ?? item.info.lastRunId ?? undefined}
                     data-workflow-job-id={item.info.jobId ?? undefined} data-workflow-sequence={item.info.workflowSequence ?? undefined}
                     data-workflow-passed={item.info.passedLlms ?? undefined} data-workflow-partial={item.info.partialLlms ?? undefined}
-                    data-workflow-failed={item.info.failedLlms ?? undefined} className="text-indigo-700 underline">{row.value}</button> : row.value}{row.detail && <StageErrorDetails stageLabel={getStageTileLabel(item.stage)} info={item.info} row={row} />}</dd>
+                    data-workflow-failed={item.info.failedLlms ?? undefined} className="text-indigo-700 underline">{row.value}</button> : row.value}{row.detail && <StageErrorDetails stageLabel={title} info={item.info} row={row} />}</dd>
                 </div>)}</dl></>}
               {item.stage === "actionables" && ranking?.rows && <details className="mt-2 text-xs">
                 <summary>Final scores · {ranking.rows.length} stocks</summary>
