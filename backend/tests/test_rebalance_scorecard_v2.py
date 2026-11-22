@@ -153,3 +153,102 @@ def test_legacy_repair_preserves_known_votes_and_complete_rows():
     assert row["coverage"]=="Complete" and row["model_count"]==2 and row["action"]=="Buy New"
     assert row["signed_terms"]["cruxx"]==2 and row["signed_terms"]["fundamentals-short"]==0
     assert repaired["rows"][1]==complete and parent["rows"][0]["signed_terms"]["fundamentals-short"] is None
+
+
+def test_rebalance_source_readiness_reproduces_the_two_distinct_gap_patterns():
+    from app.domains.scorecards.rebalance_readiness import checklist
+    packets={}
+    for i in range(34):
+        p=packet()
+        p["allowed"]={f:[f] if i<19 and f in ("cruxx","technical-short","technical-medium") else [] for f in out.FACTORS}
+        packets[str(i)]=p
+    check=checklist({"packets":packets})
+    assert (check["ready"],check["provisional"],check["awaiting"])==(0,19,15)
+    packets["0"]=packet()
+    assert checklist({"packets":packets})["ready"]==1
+
+
+def test_all_pages_repair_thesis_once_per_slot_and_do_not_recharge_checkpoints():
+    keys=[f"NSE:T{i}" for i in range(34)]
+    packets={k:packet() for k in keys}
+    provider=Mock()
+    requests=[]
+    def generate(model,prompt):
+        page=json.loads(prompt.splitlines()[-1])
+        repair=page.get("repair_fields")
+        items=[]
+        for k in page["listings"]:
+            r={**record(),"listing":k}
+            if not repair:
+                r["factors"].pop("cruxx")
+            else:
+                assert repair[k]==["cruxx"]
+            items.append(r)
+        requests.append(list(page["listings"]))
+        return AIProviderResponse(json.dumps(items),1,1,0.01,"test",model)
+    provider.generate.side_effect=generate
+    opts={"rebalance_v2":1,"listings":keys}
+    prompt=out.instructions(1,{"as_of":AS_OF,"listings":packets})
+    _,saved=execute(provider,"fixture",prompt,opts,lambda _:None)
+    assert list(map(len,requests))==[21,13,21,13] and not saved["missing"]
+    replay,_=execute(provider,"fixture",prompt,opts,lambda _:None,saved)
+    assert len(requests)==4 and replay.cost==pytest.approx(.04)
+
+
+def test_same_venue_alias_verified_and_financial_periods_compatible():
+    from app.domains.scorecards.rebalance_identity import aliases
+    from app.domains.scorecards.rebalance_filings import comparable,period_documents
+    listings=[{"listing":"NSE:A_B","name":"A & B Limited"}]
+    master={"NSE:A&B":{"isin":"INE123456789","name":"A and B Ltd"},"BSE:A&B":{"isin":"INE123456789","name":"A and B Ltd"}}
+    assert aliases(listings,master)=={"NSE:A_B":"NSE:A&B"}
+    assert not aliases([{"listing":"NSE:A_B","name":"Different issuer"}],master)
+    one={"period":["2026-04-01","2026-06-30"],"values":{"Revenue":[1,"INR"]}}
+    two={"period":["2026-01-01","2026-03-31"],"values":{"Revenue":[2,"INR"]}}
+    assert comparable([one,two])
+    a={"scope":"standalone","url":"a","as_of":AS_OF,"facts":[one]}
+    b={**a,"url":"b","facts":[two]}
+    assert period_documents([a,b])[0]["comparison_source"]["url"]=="b"
+    assert not comparable(period_documents([a,{**b,"scope":"consolidated"}])[0]["facts"])
+
+
+@pytest.mark.anyio
+async def test_free_recovery_publishes_child_once_without_touching_scores(audit_db,monkeypatch):
+    from app.domains.scorecards import rebalance_readiness as ready
+    async with audit_db.sessions() as db:
+        rev=await storage.append(db,7001,"revision","source",{"manifest":{"stocks":[{"listing":KEY}]}})
+        packet_doc=await storage.append(db,7001,"packet","prepared",{"research":{"packets":{KEY:packet()}}},revision_id=rev.id)
+        old=await storage.append(db,7001,"attempt","old",{"card":"rebalance","settings":{"targets":[]},
+            "result":{"id":0,"card":"rebalance","status":"unassessed","rows":[{"listing":KEY,"score":None,"coverage":"Unassessed"}]}},revision_id=rev.id)
+        await db.commit()
+        from unittest.mock import AsyncMock
+        monkeypatch.setattr(ready,"prepare",AsyncMock(return_value=packet_doc))
+        child=await ready.recover(db,old,7,"fixture")
+        assert child["rebalance_readiness"]["ready"]==1 and child["rebalance_readiness"]["repairable"]==1
+        assert child["jobs"]==0 and child["rows"]==old.result_json["rows"] and child["id"]!=old.id
+        assert (await ready.recover(db,old,7,"fixture"))["id"]==child["id"]
+
+
+@pytest.mark.anyio
+async def test_bse_fallback_filters_publication_time_and_preserves_period_sources(monkeypatch):
+    from unittest.mock import AsyncMock
+    from app.domains.scorecards import rebalance_filings as feeds
+    xml=b'<x><context id="q"><period><startDate>2026-04-01</startDate><endDate>2026-06-30</endDate></period></context><RevenueFromOperations contextRef="q" unitRef="INR">123</RevenueFromOperations><ISIN>INE123456789</ISIN></x>'
+    response=Mock()
+    response.json.return_value={"Table":[{"filing_date_time":"2026-08-14T09:33:12.12","xbrlurl":"/XBRLFILES/finance/a.html"},
+        {"filing_date_time":"2026-08-15T09:30:00","xbrlurl":"/XBRLFILES/finance/future.html"}]}
+    client=Mock(get=AsyncMock(return_value=response))
+    fetch=AsyncMock(return_value=xml)
+    monkeypatch.setattr(feeds,"download",fetch)
+    docs=await feeds.bse_filings(client,"500000","INE123456789",datetime.fromisoformat(AS_OF))
+    assert len(docs)==1 and docs[0]["url"]=="https://www.bseindia.com/XBRLFILES/finance/a.xml"
+    assert fetch.await_count==1
+
+
+def test_buy_plan_is_required_for_full_completion_even_with_all_factors():
+    p=packet()
+    job_record=record()
+    job_record.update(action="Buy New",delta=1,entry=100,stop=105,target=120)
+    accepted=out.validated(json.dumps(job_record),{KEY:p})
+    job=SimpleNamespace(id=1,model="fake",status="partial",runtime_metadata_json={"rebalance_records":{"rows":accepted}})
+    result=out.project({"stocks":[{"listing":KEY}]},[(job,0,[KEY],[],{"packets":{KEY:p}})])
+    assert result["rows"][0]["available_weight"]==17 and result["rows"][0]["coverage"]=="Partial"

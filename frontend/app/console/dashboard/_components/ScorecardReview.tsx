@@ -1,6 +1,6 @@
 "use client";
 import { PairwiseCoverage } from "./PairwiseCoverage";
-import { RebalanceStockScores } from "./RebalanceStockScores";
+import { RebalanceSourceCheck, RebalanceStockScores } from "./RebalanceStockScores";
 import { Grid } from "./ScorecardResultGrid";
 import { TechnicalValidation } from "./TechnicalValidation";
 import { ThreatStockScores } from "./ThreatStockScores";
@@ -65,6 +65,7 @@ export function ScorecardReview({portfolio,stage:initial,revisionId,initialAttem
     void poll();return()=>{active=false;clearTimeout(timer);};},[api,attempt]);
   useEffect(()=>{if(!finalId){setFinal(null);return;}let active=true;void api.final(finalId).then(f=>active&&setFinal(f)).catch(e=>active&&setError(String(e)));return()=>{active=false;};},[api,finalId]);
   useEffect(()=>{if(stage!=="source")return;let active=true;void client.getRuns({limit:100,summary:true}).then(r=>active&&setSwings(r.items.filter(run=>{const i=getAnalysisRunIdentity(run);return i.stage==="swing"&&i.market===(broker==="india"?"india":"us");}))).catch(e=>active&&setError(String(e)));return()=>{active=false;};},[stage,client,broker]);
+  const [rebalanceCheck,setRebalanceCheck]=useState<{revision:number;data:Awaited<ReturnType<typeof api.rebalanceReadiness>>}|null>(null);
   async function perform(action:()=>Promise<void>){if(requestGuard.current||!isCurrentWorkflowOwner(owner))return;requestGuard.current=true;setBusy(true);setError("");try{await action();}catch(e){setError(e instanceof Error?e.message:String(e));}finally{requestGuard.current=false;setBusy(false);}}
   async function publish(){
     const snapshot=(broker==="india"?await client.zerodhaPortfolioOverview():await client.indmoneyUsPortfolioOverview()).latest;
@@ -136,6 +137,10 @@ export function ScorecardReview({portfolio,stage:initial,revisionId,initialAttem
       <button className={button} disabled={busy || (singleJob && !keys(card).length)} onClick={()=>void perform(async()=>{await client.saveWorkflowModels(card,keys(card));})}>Save models</button></div>
       {card==="pairwise"&&broker==="india"&&<div className="flex flex-wrap items-center gap-3"><label>Schedule <select className={input} value={pairMode} onChange={e=>setPairMode(e.target.value as "full"|"balanced")}><option value="full">Full round robin</option><option value="balanced">Balanced trial · up to 8 opponents per listing</option></select></label><label>Estimated spend limit (₹) <input className={input+" w-24"} type="number" min="0.01" step="0.01" value={pairBudget} onChange={e=>setPairBudget(e.target.value)} placeholder="Optional"/></label></div>}
       <div className="flex flex-wrap gap-2"><button disabled={busy||!detail} className={button} onClick={()=>void perform(async()=>{await launch(card);setVersion(n=>n+1);})}>Run {titles[card]}</button>
+      {card==="rebalance" && broker==="india" && id>0 && <>
+        <button type="button" className={button} disabled={busy} onClick={()=>void perform(async()=>setRebalanceCheck({revision:id,data:await api.rebalanceReadiness(id)}))}>Check source readiness before scoring</button>
+        {rebalanceCheck?.revision===id && <RebalanceSourceCheck data={rebalanceCheck.data}/>}
+      </>}
       {card==="pairwise"&&broker!=="india"&&result&&result.rows.some(r=>Number(r.valid)<Number(r.expected))&&<button className={button} disabled={busy} onClick={()=>void perform(async()=>{const replay=await api.recover(attempt);if(replay.rows.some(r=>Number(r.valid)<Number(r.expected)))await launch(card,replay.id);setVersion(n=>n+1);})}>Retry unresolved pairs</button>}
       <select aria-label="Scorecard output revision" className={input} value={attempt} onChange={e=>setAttempt(Number(e.target.value))}><option value={0}>Select output</option>{detail?.attempts.filter(a=>a.card===card).map(a=><option key={a.id} value={a.id}>Output #{a.id} · {a.run_id ? "Run "+a.run_id : "Evidence only"}</option>)}</select></div>
       {card==="pairwise"&&broker==="india"&&result&&<>
@@ -154,7 +159,7 @@ export function ScorecardReview({portfolio,stage:initial,revisionId,initialAttem
       {result&&<><p>{result.status} · {result.completed}/{result.jobs} model jobs · {result.scored??0} stocks scored</p>{card==="technical"&&broker==="india"?<TechnicalStockScores key={result.id} revision={id} result={result}
           onRecover={async outputId=>{const updated=await api.recover(outputId);selectedOutput.current=updated.id;setVersion(n=>n+1);return updated;}}
           onRetryCommentary={async()=>{await launch("technical",result.id);setVersion(n=>n+1);}}/>:card==="threats"&&broker==="india"?<ThreatStockScores key={result.id} result={result} onRecover={async id=>{const next=await api.recover(id);selectedOutput.current=next.id;setResult(next);return next;}} onRetry={async id=>{selectedOutput.current=await launch("threats",id);setVersion(n=>n+1);}}/>:card!=="rebalance"&&<Grid rows={resultRows}/>}
-        {card==="rebalance"&&<><h3>Rebalance output</h3>{result.model_tables?.map(t=><section key={t.job_id}><h4>Slot {t.slot} · {t.model} · Job {t.job_id}</h4><Grid rows={t.rows}/></section>)}<h3>Scores for Stage 4</h3>{result.rebalance_audit?<><RebalanceStockScores result={result}/>{((result.rebalance_audit.coverage.provisional+result.rebalance_audit.coverage.unassessed)>0 || result.rows.some(row=>Object.values((row.trade_gaps??{}) as Record<string,string[]>).some(fields=>fields.length))) && <button type="button" className={button} disabled={busy} onClick={()=>perform(async()=>{await launch("rebalance",result.id);})}>Refresh evidence and repair missing fields</button>}</>:<Grid rows={resultRows}/>}</>}
+        {card==="rebalance"&&<><h3>Rebalance output</h3>{result.model_tables?.map(t=><section key={t.job_id}><h4>Slot {t.slot} · {t.model} · Job {t.job_id}</h4><Grid rows={t.rows}/></section>)}<h3>Scores for Stage 4</h3>{result.rebalance_audit?<><RebalanceStockScores key={result.id} result={result} onRecover={async id=>{const child=await api.recover(id);selectedOutput.current=child.id;setResult(child);setVersion(n=>n+1);return child;}}/>{((result.rebalance_audit.coverage.provisional+result.rebalance_audit.coverage.unassessed)>0 || result.rows.some(row=>Object.values((row.trade_gaps??{}) as Record<string,string[]>).some(fields=>fields.length))) && <button type="button" className={button} disabled={busy} onClick={()=>perform(async()=>{await launch("rebalance",result.id);})}>Refresh evidence and repair missing fields</button>}</>:<Grid rows={resultRows}/>}</>}
         {!!result.research_notices?.length&&<details><summary>Research source availability</summary><ul>{result.research_notices.map(n=><li key={n}>{n}</li>)}</ul></details>}
         {result.balanced_schedule&&<details><summary>Balanced schedule comparison</summary><Grid rows={[result.balanced_schedule]}/></details>}
         {result.cost_per_judgment_usd!=null&&<p>Estimated cost per judged pair: US${result.cost_per_judgment_usd.toFixed(5)}</p>}
