@@ -178,7 +178,7 @@ def recovery_http_allowed(method, path):
     if method == "DELETE" and path == "/zerodha/disconnect":
         return True
     # Presentation and model preferences cannot execute a run.
-    if method == "PUT" and path in {"/auth/profile/workflow-models", "/auth/profile/sidebar-visibility"}:
+    if method == "PUT" and path in {"/auth/profile/workflow-models", "/auth/profile/sidebar-visibility/settings"}:
         return True
     if method == "POST" and path in {"/zerodha/callback", "/zerodha/portfolio/sync"}:
         return True

@@ -61,25 +61,52 @@ async def test_owner_login_methods_and_global_visibility(tmp_path, monkeypatch):
         password_owner = await login("/auth/login", {"username": "owner", "password": password})
         google_owner = await login("/auth/google", {"credential": "verified-test-id"})
         other = await login("/auth/login", {"username": "other", "password": password})
+        editor = PATH + "/settings"
         for headers in (google_owner, password_owner):
-            assert (await client.get(PATH, headers=headers)).json() == {
-                "can_manage": True, "visible_ids": None, "revision": 0,
-            }
-        selection = {"visible_ids": ["india-portfolio"], "revision": 0}
-        assert (await client.put(PATH, json=selection)).status_code == 401
-        assert (await client.put(PATH, headers=other, json=selection)).status_code == 403
-        assert (await client.put(PATH, headers=password_owner, json=selection)).status_code == 200
-        assert (await client.put(PATH, headers=google_owner, json=selection)).json()["revision"] == 1
-        assert (await client.get(PATH, headers=other)).json() == {
-            "can_manage": False, "visible_ids": ["india-portfolio"], "revision": 1,
-        }
-        assert (await client.put(PATH, headers=google_owner, json={"visible_ids": [], "revision": 0})).status_code == 409
-        assert (await client.put(PATH, headers=google_owner, json={"visible_ids": ["typo"], "revision": 1})).status_code == 422
-        assert (await client.put(PATH, headers=google_owner, json={"visible_ids": [], "revision": 1})).status_code == 200
-        # A brand-new Google account inherits the empty selection on its first read.
+            assert (await client.get(PATH, headers=headers)).json()["can_manage"]
+            assert (await client.get(editor, headers=headers)).json()["visible_ids"] is None
+        found = await client.get(PATH + "/users", params={"q": "OTHER@EXAMPLE"}, headers=google_owner)
+        assert len(found.json()) == 1
+        target = found.json()[0]
+        assert set(target) == {"id", "email", "username"}
+        target_editor = f"{editor}?user_id={target['id']}"
+        assert (await client.get(PATH + "/users", headers=other)).status_code == 403
+        assert (await client.get(target_editor, headers=other)).status_code == 403
+        assert (await client.get(editor + "?user_id=99999", headers=google_owner)).status_code == 404
+
+        async def save(url, headers, mode, ids, revision, expected=200):
+            response = await client.put(url, headers=headers, json={"mode": mode, "visible_ids": ids, "revision": revision})
+            assert response.status_code == expected, response.text
+            return response.json()
+
+        defaults = ["india-portfolio", "overview"]
+        extras = ["market-scanner", "database", "prompt-library", "run-history"]
+        await save(editor, {}, "custom", defaults, 0, 401)
+        await save(target_editor, other, "extra", extras, 0, 403)
+        await save(editor, password_owner, "custom", defaults, 0)
+        assert (await save(editor, google_owner, "custom", defaults, 0))["revision"] == 1
+        await save(editor, google_owner, "custom", [], 0, 409)
+        await save(editor, google_owner, "extra", extras, 1, 422)
+        await save(editor, google_owner, "custom", ["typo"], 1, 422)
+        await save(target_editor, google_owner, "extra", extras, 0)
+        assert (await client.get(PATH, headers=other)).json()["visible_ids"] == sorted(defaults + extras)
+        # New Google users follow global defaults, independently of the override.
         monkeypatch.setattr(google_signin, "verify_google_identity", lambda credential, client_id: "new@gmail.com")
         new_user = await login("/auth/google", {"credential": "second-verified-test-id"})
-        response = await client.get(PATH, headers=new_user)
-        assert response.json() == {"visible_ids": [], "revision": 2, "can_manage": False}
-        assert "no-store" in response.headers["cache-control"]
+        async def visible(headers):
+            response = await client.get(PATH, headers=headers)
+            assert "no-store" in response.headers["cache-control"]
+            return response.json()["visible_ids"]
+        assert await visible(new_user) == defaults
+        await save(editor, password_owner, "custom", ["profile"], 1)
+        assert await visible(other) == sorted(["profile", *extras])
+        await save(target_editor, password_owner, "custom", extras, 1)
+        assert await visible(other) == sorted(extras)
+        await save(editor, google_owner, "custom", [], 2)
+        assert await visible(other) == sorted(extras)
+        assert await visible(new_user) == []
+        await save(target_editor, password_owner, "inherit", [], 2)
+        assert await visible(other) == []
+        await save(editor, google_owner, "custom", defaults, 3)
+        assert await visible(other) == defaults
     await engine.dispose()

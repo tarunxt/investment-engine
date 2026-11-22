@@ -405,6 +405,8 @@ export const URLs = {
     updatePassword: () => `${resolveApiBaseUrl()}/auth/password`,
     getProfile: () => `${resolveApiBaseUrl()}/auth/profile`,
     sidebarVisibility: () => `${resolveApiBaseUrl()}/auth/profile/sidebar-visibility`,
+    sidebarSettings: (userId: number | null) =>
+      `${resolveApiBaseUrl()}/auth/profile/sidebar-visibility/settings${userId === null ? "" : `?user_id=${userId}`}`,
     workflowModels: () => `${resolveApiBaseUrl()}/auth/profile/workflow-models`,
     updateProfile: () => `${resolveApiBaseUrl()}/auth/profile`,
     forgotPassword: () => `${resolveApiBaseUrl()}/auth/forgot-password`,

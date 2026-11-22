@@ -13,3 +13,12 @@ export function isSidebarPolicy(value: unknown): value is SidebarPolicy {
         && (policy.visible_ids === null || (Array.isArray(policy.visible_ids)
             && policy.visible_ids.every((id) => typeof id === 'string')));
 }
+
+export type SidebarMode = 'inherit' | 'extra' | 'custom';
+export type SidebarAccount = {id: number; email: string; username: string};
+export type SidebarSettingsRecord = {
+    mode: SidebarMode;
+    visible_ids: string[] | null;
+    global_ids: string[] | null;
+    revision: number;
+};
