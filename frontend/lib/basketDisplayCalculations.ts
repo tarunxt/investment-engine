@@ -221,7 +221,8 @@ export function formatBasketIntegerCurrency(value: number | null | undefined, si
   return `${signed && normalized > 0 ? '+' : ''}${new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(normalized)}`;
 }
 
-export function basketActionGroup(action: string | null | undefined): string {
+export function basketActionGroup(action: string | null | undefined, current?: number | null, target?: number | null): string {
+  if (current === 0 && target === 0) return 'No Action';
   return action === 'Add More' ? 'Add more' : ['Sell All', 'Trim', 'Buy New', 'Add more', 'Hold'].includes(action ?? '') ? action! : 'Unavailable';
 }
 export function actionQuantityMatchesDraft(quantity: number | null | undefined, side: string, units: number | null | undefined) {

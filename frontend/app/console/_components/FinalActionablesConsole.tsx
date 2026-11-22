@@ -1,4 +1,5 @@
 "use client";
+import { BasketResizeHandles } from "@/components/BasketResizeHandles";
 import { parseActionLabel } from '@/lib/actionColorScheme';
 import { readScorecardManifest, weightedSigned, type SupplementalInputs } from "@/lib/workflowScorecardRanking";
 import { groupUsIdentityRows, usIdentityHolding, type VerifiedUsListing, type UsIdentity } from "@/lib/usSecurityIdentity";
@@ -4386,6 +4387,7 @@ function ScopedStockDetailsButton({
   formulaConfig?: ScoreMatrixFormulaConfig;
   onMatrixDetailOpen?: (detail: ScoreMatrixDetail) => void;
 }) {
+  const detailSurfaceRef = useRef<HTMLDivElement>(null);
   const detailPanelRef = useRef<HTMLDivElement | null>(null);
   const [open, setOpen] = useState(false);
   const [historicalMatrix, setHistoricalMatrix] = useState<{ item: FinalActionableHistoryItem | null; coveredAt: string; runId: number; reconstructedDetail?: ScoreMatrixDetail } | null>(null);
@@ -4607,7 +4609,7 @@ function ScopedStockDetailsButton({
 
       {open ? (
         <div
-          className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 px-4 py-10"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
           ref={detailPanelRef}
           tabIndex={-1}
           inert={historicalMatrix ? true : undefined}
@@ -4627,11 +4629,13 @@ function ScopedStockDetailsButton({
           onClick={(event) => { event.stopPropagation(); if (!historicalMatrix) closeDetails(); }}
         >
           <div
-            className="min-w-0 w-full max-w-5xl whitespace-normal rounded-2xl bg-white shadow-2xl [overflow-wrap:anywhere]"
+            ref={detailSurfaceRef}
+            className="relative flex h-[var(--popup-height,auto)] max-h-full w-[var(--popup-width,64rem)] min-w-0 max-w-full flex-col whitespace-normal rounded-2xl bg-white shadow-2xl [overflow-wrap:anywhere]"
             style={draggableStyle}
             onClick={(event) => event.stopPropagation()}
           >
-            <div className="sticky top-0 z-10 flex cursor-move touch-none select-none items-start justify-between gap-4 rounded-t-2xl border-b bg-white px-5 py-4" {...dragHandleProps}>
+            <BasketResizeHandles panelRef={detailSurfaceRef} label="captured stock details" />
+            <div className="z-10 flex shrink-0 cursor-move touch-none select-none items-start justify-between gap-4 rounded-t-2xl border-b bg-white px-5 py-4" {...dragHandleProps}>
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-600">Captured stock details</p>
                 <h2 id={`stock-details-${stock.key}`} className="mt-1 text-xl font-bold text-gray-900">
@@ -4674,7 +4678,7 @@ function ScopedStockDetailsButton({
               </div>
             </div>
 
-            <div className="min-w-0 max-h-[75vh] space-y-5 overflow-y-auto px-3 py-5 text-sm sm:px-5">
+            <div className="min-h-0 min-w-0 flex-1 space-y-5 overflow-auto px-3 py-5 text-sm sm:px-5">
               {effectiveDetailsData.error ? (
                 <OperationalErrorNotice
                   title="Some latest captured details could not be loaded:"

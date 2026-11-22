@@ -32,7 +32,7 @@ export function WorkflowMeanCalculation({ history, mean }: {
 type Allocation = ReturnType<typeof allocateIndiaEquities>;
 type Venue = Allocation["venues"] extends Map<string, infer T> ? T : never;
 export function IndiaWeightCalculation({ allocation, venue, listing, members, parameters, assets }: {
-  allocation: Allocation; venue: Venue; listing: string; members: { listing: string; mean: number | null }[];
+  allocation: Allocation; venue: Venue; listing: string; members: { listing: string; mean: ReturnType<typeof workflowFinalMean> | undefined }[];
   parameters: DisplayParameters; assets: number | null;
 }) {
   if (venue.issuerScore == null) return null;
@@ -43,7 +43,14 @@ export function IndiaWeightCalculation({ allocation, venue, listing, members, pa
   const raw = selected && allocation.denominator > 0 ? venue.issuerScore * investable / allocation.denominator : null;
   return <section aria-label="Target weight calculation">
     <h3>How {listing} gets its target weight</h3>
-    <p>Issuer score ({venue.issuer}) = ({members.map(m => m.listing + " " + (m.mean == null ? "unavailable" : numeric(m.mean))).join(" + ")})
+    <p>Each exchange listing contributes one mean to the issuer score for this ISIN.</p>
+    <table aria-label="Issuer score sources"><thead><tr><th>Listing</th><th>Saved workflow finals (/100)</th><th>Listing mean (/100)</th></tr></thead>
+      <tbody>{members.map(({ listing, mean }) => <tr key={listing}>
+        <td>{listing}</td><td>{mean?.rows.map(row => <div key={row.sequence}>#{row.sequence} · {numeric(row.score)}</div>)}</td>
+        <td>{mean?.score == null ? "Unavailable" : numeric(mean.score)}</td>
+      </tr>)}</tbody>
+    </table>
+    <p>Issuer score ({venue.issuer}) = ({members.map(m => m.listing + " " + (m.mean?.score == null ? "unavailable" : numeric(m.mean.score))).join(" + ")})
       {" ÷ "}{members.length} = <strong>{numeric(venue.issuerScore)} / 100</strong>.</p>
     <table><thead><tr><th>Positive-score ranking</th><th>Rank</th><th>Issuer score / 100</th></tr></thead><tbody>
       <tr><td>This issuer</td><td>{rank ? "#" + rank : "Unranked"}</td><td>{numeric(venue.issuerScore)}</td></tr>

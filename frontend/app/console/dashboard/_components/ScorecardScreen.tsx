@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Activity, ArrowUpRight, ChartCandlestick, GitCompareArrows, ShieldCheck } from "lucide-react";
+import { StandardLlmOutputRenderer } from "@/components/shared/StandardLlmOutputRenderer";
 import { SavedOutputDialog } from "@/components/shared/SavedOutputDialog";
 import { formatDuration } from "@/components/shared/WorkflowStageTile";
 import { StageDurationBreakdownDialog } from "./StageDurationBreakdownDialog";
@@ -31,7 +32,7 @@ import type {
 } from "@/types/api";
 
 type Client = typeof apiService;
-type Base = { market: ScorecardMarket; client: Client; renderOutput: (run: RunResponse) => ReactNode };
+type Base = { market: ScorecardMarket; client: Client; renderOutput: (run: RunResponse, card: CardKey) => ReactNode };
 type Tools = {
   onModels: (card: CardKey) => void;
   onInputs: (card: CardKey) => void;
@@ -506,7 +507,7 @@ function Evidence({
       {tab === "output" && (
         <section className="min-w-0 space-y-3">
           <Feedback query={output} />
-          {output.data && renderOutput(output.data)}
+          {output.data && renderOutput(output.data, card)}
           {!run && (
             <>
               {jobsTable(jobs)}
@@ -515,9 +516,11 @@ function Evidence({
                   <h3 className="font-semibold">
                     {j.provider} · Job #{j.id}
                   </h3>
-                  <pre className="mt-3 whitespace-pre-wrap break-words text-sm">
+                  {j.response && card === "pairwise" ? (
+                    <StandardLlmOutputRenderer content={j.response} pairwisePrompt={j.prompt ?? ""} />
+                  ) : <pre className="mt-3 whitespace-pre-wrap break-words text-sm">
                     {j.response || j.error_message || "No output text saved."}
-                  </pre>
+                  </pre>}
                 </article>
               ))}
             </>
