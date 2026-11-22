@@ -12,7 +12,7 @@ const submissionSafety=load('../lib/basketSubmissionSafety.ts');
 const reviewDialogHooks=load('../hooks/useReviewDialog.ts',{useRef:initial=>({current:initial}),useEffect:()=>{},useCallback:fn=>fn});
 const draftMath=load('../lib/basketEditableDraft.ts');
 const math=load('../lib/basketDisplayCalculations.ts');
-Object.assign(sharedColumnBindings, load('../components/AllocationScoreContext.tsx', math));
+Object.assign(sharedColumnBindings, load('../components/AllocationScoreContext.tsx', math), load('../components/BasketAllocationBreakdown.tsx'));
 const dateMath=load('../lib/datetime.ts');
 Object.assign(math,load('../lib/basketActionSizing.ts',math));
 const end='2026-10-28T12:00:00Z', start='2026-10-23T12:00:00Z';
@@ -181,7 +181,7 @@ test('actual broker preview renders US copy and labels without India routing con
  let sizingAssets;let providerQuotes=[];const tileComponent=()=>null;
  const bindings={...math,...load("../lib/actionColorScheme.ts"),...submissionSafety,...reviewDialogHooks,BasketResizeHandles:stub,BasketMarketClosedNotice:({closed})=>closed?React.createElement("button",{"aria-haspopup":"dialog"},"Markets closed"):null,basketActionGroup:math.basketActionGroup,...draftMath,BasketDraftUnits:load('../components/BasketDraftUnits.tsx',draftMath).BasketDraftUnits,BasketColumnTable:props=>props.children,kiteWeightContext:math.kiteWeightContext,kiteHoldingQuantity:math.kiteHoldingQuantity,stockIdentity:math.stockIdentity,validDisplayPrice:math.validDisplayPrice,useRef:initial=>({current:initial}),useId:()=>"fixture-order-blockers",useBasketDisplayQuotes:(_open,market,instruments)=>({quotes:market==="us"?providerQuotes.filter(row=>instruments.includes(row.instrument)):[],vendorQuotes:market==="us"?providerQuotes:[],upstoxQuotes:providerQuotes,loading:false}),verifiedFetchedDisplayQuote:math.verifiedFetchedDisplayQuote,useState:initial=>[typeof initial==='function'?initial():initial,()=>{}],useEffect:()=>{},useBasketDisplayCalculations:(_open,_market,_stocks,assets)=>{sizingAssets=assets;return({metrics:reviewDeltas.size ? stock=>{
    const delta=reviewDeltas.get(stock.symbol);
-   return {comparison:{action:delta>0?'Buy New':delta<0?'Trim':null},actionSizing:{stocks:delta??null},sourceStock:{}};
+   return {comparison:{action:delta>0?'Buy New':delta<0?'Trim':null},actionSizing:{stocks:delta??null,price:432},sourceStock:{}};
  } : undefined,units:(stock,label,qty)=>React.createElement('button',{'aria-label':stock.symbol+' '+label+' calculation'},qty??'Unavailable'),popupOpen:false,showAll:true,lower:-2,upper:1.5,cells:()=>Array.from({length:9},(_,i)=>React.createElement("td",{key:i},"derived")),headers:null,renderDisclosure:()=>null,renderPopup:()=>null,setParameters:()=>{}});},portfolioParameterMargin:snapshot=>snapshot?.available_margin ?? null,portfolioParameterAssets:()=>({portfolioValue:100,availableMargin:0,totalAssets:100}),verifiedDisplayQuote:()=>null,displayScoreAccepted:()=>true,isWholeShareOrderSelectable:()=>true,getZerodhaAvailableMarginToneClass:()=>'',getIndiaMarketStatus:()=>({open:false,label:'NSE/BSE closed → Zerodha AMO'}),ZERODHA_BASKET_SECTION_ORDER:['Buy New'],ZERODHA_BASKET_SECTION_LABELS:{'Buy New':'Buy New'},getZerodhaBasketActionForPercent:order=>order.action,compareZerodhaBasketOrdersByScore:()=>0,parseTimestampMs:Date.parse,formatTimestamp:v=>v,formatCompactQuoteTime:dateMath.formatCompactQuoteTime,formatCompactStageTime:dateMath.formatCompactStageTime,formatBasketCurrency:(value,currency)=>`${currency} ${value}`,formatZerodhaLtpRefreshTime:()=>'',formatBasketQuantity:String,formatBasketPercent:String,getZerodhaBasketUnitLimit:()=>null,ZERODHA_ORDER_KINDS:['Market'],Fragment:React.Fragment,Button,cn:(...v)=>v.filter(Boolean).join(' '),Info:stub,X:stub,Loader2:stub,TradingViewUrlListButton:stub,TradingViewSymbolLink:props=>React.createElement('span',null,props.children),PortfolioParametersTile:tileComponent,ScoreMatrixModal:stub,StockDetailsButton:stub,ScoreMatrixButton:stub,ConsensusBreakupButton:stub,WholeShareTrimChoice:stub};
  const result={exports:{}};new Function('exports','module','require',...Object.keys(bindings),output)(result.exports,result,require,...Object.values(bindings));
  const props={open:true,loading:false,error:null,orders:[{id:'row',symbol:'ABC',exchange:'NASDAQ',action:'Buy New',side:'BUY',units:1,lastPrice:20,price:20,amount:20,percent:100,orderKind:'Market',stock:{},detail:{calculatedScore:2}}],selectedIds:new Set(),detailsData:{portfolioSnapshot:null},historicalRows:[],formulaConfig:{},buyThreshold:2.5,buyThresholdDraft:'2.50',onBuyThresholdDraftChange:()=>{},onClose:()=>{},onToggle:()=>{},onToggleAll:()=>{},onToggleSection:()=>{},onUnitsChange:()=>{},onPercentChange:()=>{},onOrderKindChange:()=>{},onExecutionModeChange:()=>{},onRefreshLtp:()=>{},onFormulaConfigChange:()=>{},executionMode:'publisher_limit',placing:false,directMarketAvailable:false,submission:null,ltpRefreshing:false,ltpRefreshedAt:null};
@@ -213,7 +213,22 @@ test('actual broker preview renders US copy and labels without India routing con
  const sizedReview=renderToStaticMarkup(result.exports.ScopedZerodhaBasketPreviewDialog({...props,orders:[],tradingViewMarket:'india',onPlaceOrder,scoreRevision}));
  for (const [symbol, expected] of [['ONE','97'],['TWO','13'],['ZERO','0'],['UNKNOWN','Unavailable']]) {
    assert.ok(sizedReview.includes(`aria-label="${symbol} Units action calculation">${expected}</button>`));
-   for (const step of ['Decrease','Increase']) assert.ok(sizedReview.includes(`aria-label="${step} ${symbol} draft Units" disabled`));
+   assert.ok(sizedReview.includes(`aria-label="Increase ${symbol} draft Units" class=`));
+   assert.equal(sizedReview.includes(`aria-label="Decrease ${symbol} draft Units" disabled`), ['ZERO','UNKNOWN'].includes(symbol));
+ }
+ assert.match(sizedReview, /INR 41904/); // 97 × 432
+ assert.match(sizedReview, /INR 5616/); // 13 × 432
+ assert.match(sizedReview, />Market</);
+ const unitHooks=hooks(), interactive={exports:{}};
+ const interactiveBindings={...bindings,useState:unitHooks.bindings.useState};
+ new Function('exports','module','require',...Object.keys(interactiveBindings),output)(interactive.exports,interactive,require,...Object.values(interactiveBindings));
+ const preview=()=>{unitHooks.start();return interactive.exports.ScopedZerodhaBasketPreviewDialog({...props,orders:[],tradingViewMarket:'india',onPlaceOrder,scoreRevision});};
+ for (const [step,units] of [['Increase',98],['Decrease',97]]) {
+   const control=find(preview(),n=>n.type===bindings.BasketDraftUnits && n.props.symbol==='ONE');
+   find(control.type(control.props),n=>n.props?.['aria-label']===step+' ONE draft Units').props.onClick();
+   const after=renderToStaticMarkup(preview());
+   assert.ok(after.includes('aria-label="ONE Units action calculation">'+units+'</button>'));
+   assert.ok(after.includes('INR '+(units*432)));
  }
  const usReview=renderToStaticMarkup(result.exports.ScopedZerodhaBasketPreviewDialog({...props,orders:[],tradingViewMarket:'us',onPlaceOrder,scoreRevision}));
  assert.doesNotMatch(usReview,/draft Units/);
@@ -266,9 +281,9 @@ test('actual broker preview renders US copy and labels without India routing con
  const frozenRows = new Map(savedListings.map(r=>[r.listing,r]));
  const reviewHtml = renderToStaticMarkup(result.exports.ScopedZerodhaBasketPreviewDialog({...comparisonProps,orders:[],allocationUniverse:[],scoreRevision:{finalRows:frozenRows,divisors:[],differences:[],saved:new Map(),originals:new Map()}}));
  const headings = [...reviewHtml.matchAll(/aria-label="Select or deselect ([^"]+) Zerodha basket orders"/g)].map(m=>m[1]);
- assert.deepEqual(headings,['Sell All','Trim','Buy More','Buy New','Hold','Unavailable']);
- for (const [i,row] of savedListings.entries()) {
-   const section = reviewHtml.split('<tbody')[1].split('Select or deselect ')[i+1];
+ assert.deepEqual(headings,['Unavailable']); // No weight comparison is available in this fixture.
+ for (const row of savedListings) {
+   const section = reviewHtml.split('<tbody')[1];
    assert.ok(section.includes(row.listing+' review only'));
    assert.ok(section.includes('0.00 / 100'));
  }
@@ -986,6 +1001,20 @@ test('Zerodha issuer target, sizing and popup use the unshifted mean of saved wo
  find(state.cells(stocks[0]), n=>n.props?.['aria-label']==='HAL Target Weight calculation').props.onClick();
  state=render();
  assert.deepEqual(state.renderPopup().props.summary.metrics[0],{label:'5-day mean of Workflow final score (/100)',value:'70'});
+ const {renderToStaticMarkup} = require('react-dom/server');
+ const allocationHtml = renderToStaticMarkup(state.renderPopup().props.calculation);
+ assert.match(allocationHtml,/70 ÷ 100/);
+ assert.match(allocationHtml,/Last selected/);
+ find(state.cells(stocks[0]), n=>n.props?.['aria-label']==='HAL Historical Weighted Score calculation').props.onClick();
+ const meanHtml = renderToStaticMarkup(render().renderPopup().props.calculation);
+ assert.match(meanHtml,/60 \+ 80/); assert.match(meanHtml,/140 ÷ 2/);
+ assert.equal((meanHtml.match(/No saved score/g)??[]).length,4);
+ state.setParameters({...state.parameters, maximumStocks:1});
+ state=render();
+ find(state.cells(stocks[1]), n=>n.props?.['aria-label']==='BEL Target Weight calculation').props.onClick();
+ const excludedHtml = renderToStaticMarkup(render().renderPopup().props.calculation);
+ assert.match(excludedHtml,/#2<\/td><td>30/); assert.match(excludedHtml,/#1<\/td><td>70/);
+ assert.match(excludedHtml,/outside the top 1/);
  response = {...data, workflow_finals:[]};
  state.retry(); state=render(); h.flush(); await tick(); state=render();
  assert.equal(state.metrics(stocks[0]).target,null);

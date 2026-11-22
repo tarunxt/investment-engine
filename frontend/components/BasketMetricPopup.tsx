@@ -52,8 +52,8 @@ function ModalLayer({ title, eyebrow, onClose, children, footer, footerExtra, to
   );
 }
 /** Presentation only: values and audit detail come from the existing calculation. */
-export function BasketMetricPopup({ title, eyebrow, summary, children, onClose, wide = false }: {
-  title: string; eyebrow: string; summary: BasketMetricSummary; children: ReactNode; onClose: () => void; wide?: boolean;
+export function BasketMetricPopup({ title, eyebrow, summary, children, onClose, wide = false, calculation }: {
+  title: string; eyebrow: string; summary: BasketMetricSummary; children: ReactNode; onClose: () => void; wide?: boolean; calculation?: ReactNode;
 }) {
   const [detailsOpen, setDetailsOpen] = useState(false);
   return <>
@@ -65,6 +65,7 @@ export function BasketMetricPopup({ title, eyebrow, summary, children, onClose, 
       </div>
       <dl className={styles.metrics}>{summary.metrics.map(item => <div key={item.label}><dt>{item.label}</dt><dd>{item.value}</dd></div>)}</dl>
       <p className={`${styles.notice} ${summary.warning ? styles.warning : ""}`} role={summary.status === "error" ? "alert" : summary.status === "loading" ? "status" : undefined}>{summary.notice}</p>
+      {calculation && <div className={styles.calculation}>{calculation}</div>}
     </ModalLayer>
     {detailsOpen && <ModalLayer title="Behind the number" eyebrow={`${eyebrow} / ${title}`} details onClose={() => setDetailsOpen(false)}
       footer={<button type="button" className={styles.button} onClick={() => setDetailsOpen(false)}><ArrowLeft size={16} aria-hidden="true" />Back to summary</button>}>

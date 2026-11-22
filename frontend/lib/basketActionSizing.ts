@@ -20,7 +20,7 @@ export function basketActionSizing(input: BasketActionSizingInput) {
     totalAssets: assets, currentWeight: current, targetWeight: target, price, holdingQuantity: holding,
     difference, rawAmount, rawStocks: null as number | null, roundedStocks: null as number | null,
     sellCap: null as number | null, stocks: null as number | null, amount: null as number | null,
-    targetShares: input.targetShares, fullExit: false, direction: "Unavailable", reason: "" as string,
+    targetShares: input.targetShares, directionConflict: false, fullExit: false, direction: "Unavailable", reason: "" as string,
   };
   if (target === 0 && holding !== null) {
     result.fullExit = true;
@@ -43,7 +43,13 @@ export function basketActionSizing(input: BasketActionSizingInput) {
       result.reason = "Verified issuer allocation and whole-share holdings are required.";
       return result;
     }
-    result.stocks = input.targetShares - holding;
+    const signedUnits = input.targetShares - holding;
+    if (signedUnits !== 0 && difference != null && (Math.abs(difference) < 1e-12 || Math.sign(signedUnits) !== Math.sign(difference))) {
+      result.directionConflict = true;
+      result.reason = "Whole-share sizing and the snapshot weight difference point in different directions. Review holdings and prices.";
+      return result;
+    }
+    result.stocks = signedUnits;
     result.amount = result.stocks * price!;
     result.direction = result.stocks > 0 ? "Buy" : result.stocks < 0 ? "Sell" : "Hold";
     return result;
