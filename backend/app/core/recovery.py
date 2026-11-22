@@ -190,7 +190,7 @@ def recovery_http_allowed(method, path):
     if method == "POST":
         if re.fullmatch(r"/runs/scorecards/india/workflows/[1-9][0-9]*/prepare-swing-source", path):
             return True
-        if re.fullmatch(r"/runs/scorecards/india/attempts/[1-9][0-9]*/repair-pair-evidence", path):
+        if re.fullmatch(r"/runs/scorecards/india/attempts/[1-9][0-9]*/repair-(?:pair|threat)-evidence", path):
             return True
         if re.fullmatch(r"/runs/scorecards/(?:india|indmoney_us)/attempts/[1-9][0-9]*/recover", path):
             return True

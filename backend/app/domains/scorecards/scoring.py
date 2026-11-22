@@ -172,7 +172,7 @@ def normalize_threat_publication(entry, cutoff):
         pass  # The common evidence audit records the exclusion.
 
 
-def threats_by_slot(slot_rows, cutoff):
+def threats_by_slot(slot_rows, cutoff, *, typed_confidence=False):
     fields = {"Category":"category","Scenario":"scenario_id","Trigger":"trigger","Likelihood":"likelihood","Impact":"impact",
               "Downside":"downside","Source":"source_url","As of":"published_at","Confidence":"confidence","Rationale":"rationale"}
     boundary = datetime.fromisoformat(cutoff)
@@ -187,7 +187,12 @@ def threats_by_slot(slot_rows, cutoff):
             # The common auditor consumes dates. A timestamp must first pass
             # the exact decision cutoff, including its original time zone.
             normalize_threat_publication(entry, boundary)
-            if entry["Confidence"].strip().casefold() == "moderate":
+            if typed_confidence:
+                from .threat_coverage import confidence_label
+                raw = item.get("confidence")
+                label = confidence_label(raw)
+                entry.update({"Confidence reported": raw, "Confidence normalized": bool(label and str(raw).casefold() != label), "Confidence": label})
+            elif entry["Confidence"].strip().casefold() == "moderate":
                 entry["Confidence"] = "medium"
             evidence.append(entry)
     accepted, dispositions = audited_evidence(evidence, strict=True,snapshot_date=boundary.date())
