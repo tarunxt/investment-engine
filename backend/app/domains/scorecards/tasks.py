@@ -68,6 +68,26 @@ def recover_pair_history(self,owner,output_id):
     return {"output_id":current}
 
 
+@celery.task(soft_time_limit=200,time_limit=220,acks_late=True)
+def warm_rebalance_sources(owner, revision_id):
+    """Start the public-data backfill at Stage 2. This task creates no model jobs."""
+    async def run():
+        from app.infrastructure.database.session import AsyncSessionLocal, async_engine
+        from app.domains.auth.models import User
+        from . import storage
+        from .rebalance_readiness import prepare
+        try:
+            async with AsyncSessionLocal() as db:
+                rev=await storage.lookup(db,owner,"india","revision",revision_id)
+                if rev:
+                    username=await db.scalar(select(User.username).where(User.id==owner))
+                    packet=await prepare(db,rev,owner,username)
+                    return packet.id
+        finally:
+            await async_engine.dispose()
+    return asyncio.run(run())
+
+
 async def _refresh_threat_archive():
     """Collect public releases for the current Indian listing universe between runs."""
     from datetime import datetime, timezone

@@ -1,13 +1,28 @@
 "use client";
 
 import { useRef, useState } from "react";
-import type { CardResult, CardRow } from "@/lib/independentScorecards";
+import type { CardResult, CardRow, RebalanceReadiness } from "@/lib/independentScorecards";
 
 const labels:Record<string,string> = {cruxx:"Core thesis","technical-short":"Short-term technicals",
   "technical-medium":"Medium-term technicals","technical-long":"Long-term technicals",
   "fundamentals-short":"Short-term fundamentals","fundamentals-medium-long":"Medium/long-term fundamentals",action:"Consensus action"};
 
-export function RebalanceStockScores({result}:{result:CardResult}) {
+export function RebalanceSourceCheck({data}:{data:RebalanceReadiness}) {
+  return <section aria-label="Rebalance source readiness" className="space-y-2">
+    <p><strong>Source readiness</strong> · {data.ready} ready for full scoring · {data.provisional} provisional inputs · {data.awaiting} awaiting evidence</p>
+    <details><summary className="cursor-pointer">Evidence by listing ({data.rows.length})</summary>
+      <table className="w-full text-left text-sm"><thead><tr><th>Listing</th><th>Verified listing</th><th>Price sessions (20 / 60 / 200)</th><th>Missing evidence</th></tr></thead>
+        <tbody>{data.rows.map(row=><tr key={row.listing}><td>{row.listing}</td><td>{row.verified_listing}</td>
+          <td>{["technical-short","technical-medium","technical-long"].map(f=>row.sessions[f]??"—").join(" / ")}</td>
+          <td>{Object.entries(row.missing).map(([f,why])=><div key={f}>{labels[f]??f} · {why}</div>)}{row.state==="ready" && "Ready"}</td></tr>)}</tbody></table>
+    </details></section>;
+}
+
+export function RebalanceStockScores({result:original,onRecover}:{result:CardResult;onRecover?:(id:number)=>Promise<CardResult>}) {
+  const [updated,setUpdated]=useState<CardResult|null>(null);
+  const [busy,setBusy]=useState(false);
+  const [error,setError]=useState("");
+  const result=updated??original;
   const [current,setCurrent]=useState<CardRow|null>(null);
   const dialog=useRef<HTMLDialogElement>(null);
   const audit=result.rebalance_audit;
@@ -18,6 +33,12 @@ export function RebalanceStockScores({result}:{result:CardResult}) {
   const weighted=Object.entries(audit.weights).reduce((s,[k,w])=>s+(terms[k]??0)*w,0);
   const counts=audit.coverage;
   return <section className="space-y-3">
+    {result.rebalance_readiness && <RebalanceSourceCheck data={result.rebalance_readiness}/>}
+    {result.evidence_only && <p>Evidence-only output #{result.id} · Scores retained from #{result.recovered_from} · 0 model calls</p>}
+    {onRecover && counts.complete<result.rows.length && <button type="button" disabled={busy} className="rounded border px-3 py-1" onClick={async()=>{
+      setBusy(true);setError("");try {setUpdated(await onRecover(result.id));} catch(e){setError(e instanceof Error?e.message:String(e));} finally {setBusy(false);}
+    }}>{busy?"Checking sources…":"Refresh source evidence · no model charge"}</button>}
+    {error && <p role="alert">{error}</p>}
     <p>{counts.assessed} assessed · {counts.complete} complete · {counts.provisional} provisional · {counts.unassessed} unassessed</p>
     <table className="w-full text-left text-sm">
       <thead><tr>{["Listing","Score /100","Supported weight","Coverage","Action"].map(h=><th key={h} scope="col" className="p-2">{h}</th>)}</tr></thead>

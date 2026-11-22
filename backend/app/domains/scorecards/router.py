@@ -176,7 +176,24 @@ async def publish(portfolio:Portfolio, body:Publication, db:AsyncSession=Depends
     record=await storage.append(db, w.id, "revision", body.request_key, {"digest": digest(m), "manifest": m})
     out={"id":record.id,"manifest":m,"digest":record.digest}
     await db.commit()
+    if portfolio=="india" and m["stocks"]:
+        from .tasks import warm_rebalance_sources
+        from app.core.recovery import recovery_mode
+        if not recovery_mode():
+            try:
+                await asyncio.to_thread(warm_rebalance_sources.delay,user.id,record.id)
+            except Exception:
+                import logging
+                logging.getLogger(__name__).exception("Rebalance prefetch unavailable for revision %s",record.id)
     return out
+
+
+@router.post("/india/revisions/{revision_id}/rebalance/readiness")
+async def rebalance_preflight(revision_id:int,db:AsyncSession=Depends(get_async_db),user:User=Depends(get_current_user)):
+    from .rebalance_readiness import prepare, checklist
+    rev=await owned(db,user.id,"india","revision",revision_id)
+    packet=await prepare(db,rev,user.id,user.username)
+    return checklist(packet.data["research"])
 
 
 @router.get("/{portfolio}/revisions")
@@ -210,7 +227,7 @@ async def start(portfolio:Portfolio,revision_id:int,card:Card,body:Start,db:Asyn
     india_threats = portfolio == "india" and card == "threats"
     pair_v3 = portfolio == "india" and card == "pairwise"
     rebalance_v2 = portfolio == "india" and card == "rebalance"
-    packet_key = "rebalance-v2" if rebalance_v2 else "pairwise-v3" if pair_v3 else "technical-v3" if technical_v3 else "market-v2"
+    packet_key = "rebalance-preflight-v1" if rebalance_v2 else "pairwise-v3" if pair_v3 else "technical-v3" if technical_v3 else "market-v2"
     shared = portfolio=="india" and card in ("technical","pairwise","rebalance")
     repair_fields={}
     if rebalance_v2 and body.retry_attempt_id:
@@ -218,6 +235,8 @@ async def start(portfolio:Portfolio,revision_id:int,card:Card,body:Start,db:Asyn
         original=await owned(db,owner,portfolio,"attempt",body.retry_attempt_id)
         if original.data.get("revision_id")!=rev.id or original.data.get("card")!=card or not original.result_json:
             raise HTTPException(422,"Select a finished Rebalance output from this Stage 2 revision")
+        if original.data["settings"].get("targets") != [t.model_dump() for t in body.targets]:
+            raise HTTPException(422,"Use the original Rebalance model slots for repair")
         repair_fields=gaps(original.result_json)
         if not repair_fields:
             raise HTTPException(422,"All applicable Rebalance factors and sizing fields are present")
@@ -255,14 +274,19 @@ async def start(portfolio:Portfolio,revision_id:int,card:Card,body:Start,db:Asyn
         if india_threats:
             from .threat_sources import collect
             research = await collect(manifest, username, wanted, previous=prior_packet, venue_history=history)
+        elif rebalance_v2:
+            from .rebalance_readiness import prepare
+            previous = None
+            if body.retry_attempt_id:
+                previous = await pair_evidence.attempt_packet(db,original)
+            if body.retry_attempt_id and original.data.get("data_recovery") and previous:
+                packet=await owned(db,owner,portfolio,"packet",original.data["settings"]["packet_id"])
+            else:
+                packet=await prepare(db,rev,owner,username,previous,refresh=bool(body.retry_attempt_id))
+            research=packet.data["research"]
         elif shared:
             history = history or await shared_history(revision_id,manifest,username)
-            if rebalance_v2:
-                from .rebalance_evidence import collect
-                if repair_fields:
-                    manifest={**manifest,"stocks":[s for s in manifest["stocks"] if s["listing"] in repair_fields]}
-                research = await collect(manifest,username,history)
-            elif pair_v3:
+            if pair_v3:
                 research = pair_evidence.reconcile(manifest,history,await pair_evidence.news(manifest))
             else:
                 research = history
@@ -271,11 +295,13 @@ async def start(portfolio:Portfolio,revision_id:int,card:Card,body:Start,db:Asyn
     w=await workflow(db,owner,portfolio,body.sequence)
     rev=await owned(db,owner,portfolio,"revision",revision_id,lock=True)
     config={"targets":[t.model_dump() for t in body.targets],"parent":body.retry_attempt_id}
+    if rebalance_v2 and packet:
+        config["packet_id"]=packet.id
     if pair_v3:
         config.update(pair_mode=body.pair_mode,estimated_budget_inr=body.estimated_budget_inr)
     existing=await storage.by_key(db,"attempt",identity,revision_id=rev.id)
     if existing:
-        if bool(existing.data["settings"].get("check_pair_order"))!=body.check_pair_order or existing.row.workflow_id!=w.id or any(existing.data["settings"].get(k, "full" if k=="pair_mode" else None)!=v for k,v in config.items()):
+        if bool(existing.data["settings"].get("check_pair_order"))!=body.check_pair_order or existing.row.workflow_id!=w.id or any(existing.data["settings"].get(k, "full" if k=="pair_mode" else None)!=v for k,v in config.items() if k!="packet_id"):
             raise HTTPException(409,"Attempt key already names different inputs")
         return {"id":existing.id,"run_id":existing.row.run_id,**({"scoring_version":3} if technical_v3 else {})}
     if body.check_pair_order:
@@ -347,8 +373,17 @@ async def start(portfolio:Portfolio,revision_id:int,card:Card,body:Start,db:Asyn
             assignments = [(sorted(research["targets"]),[])]
         elif not research["sources"]:
             assignments = []
-    if rebalance_v2 and repair_fields:
-        assignments=[(sorted(repair_fields),[])]
+    if rebalance_v2:
+        from .rebalance_readiness import checklist
+        readiness=checklist(research)
+        eligible={r["listing"] for r in readiness["rows"] if r["state"]=="ready"}
+        if repair_fields:
+            repair_fields={k:v for k,v in repair_fields.items() if k in eligible}
+            config["repair_fields"]=repair_fields
+            if not repair_fields:
+                raise HTTPException(422,"No newly ready Rebalance fields. Check source recovery before scoring.")
+            eligible=set(repair_fields)
+        assignments=[(sorted(eligible),[])] if eligible else []
     if technical_v3 and body.retry_attempt_id:
         # Commentary recovery reuses the exact packet, including its factor calculations.
         assignments=[([k for k in keys if k in retry_keys],[]) for keys,_ in assignments if any(k in retry_keys for k in keys)]
@@ -361,7 +396,7 @@ async def start(portfolio:Portfolio,revision_id:int,card:Card,body:Start,db:Asyn
         ready = threat_coverage.plan(research)
         assignments = [(sorted(ready),[])] if ready else []
     elif shared and research.get("version") in (2,3,4):
-        packet = (await owned(db,owner,portfolio,"packet",config["packet_id"]) if config.get("packet_id") else
+        packet = (packet if rebalance_v2 and packet else await owned(db,owner,portfolio,"packet",config["packet_id"]) if config.get("packet_id") else
                   await storage.by_key(db,"packet",packet_key,revision_id=rev.id))
         if not packet:
             packet = await storage.append(db,w.id,"packet",packet_key,{"research":research},revision_id=rev.id)
@@ -396,6 +431,16 @@ async def start(portfolio:Portfolio,revision_id:int,card:Card,body:Start,db:Asyn
             return {"id":previous_retry.id,"run_id":previous_retry.row.run_id}
         identity = retry_identity
     attempt=await storage.append(db,w.id,"attempt",identity,{"card":card,"settings":config},revision_id=rev.id)
+    if rebalance_v2 and not assignments:
+        from .rebalance_output import project as project_records
+        from .rebalance_readiness import annotate
+        empty=project_records(rev.manifest,[])
+        result=annotate({**empty,"id":attempt.id,"card":card,"revision_id":rev.id,"status":"unassessed",
+            "jobs":0,"completed":0,"scored":0,"source_hashes":{},"research_notices":research["notices"]},research)
+        attempt.row.summary_json={**attempt.data,"result":result,"data_recovery":True}
+        attempt.row.status="unassessed"
+        await db.commit()
+        return {"id":attempt.id,"run_id":None}
     if pair_v3 and not assignments:
         data=pair_plan.project_plan(rev.manifest,research,body.pair_mode,{"errors":[]})
         pair_evidence.finish(data,attempt,research,rev.id)
@@ -494,6 +539,15 @@ async def attempt_result(portfolio:Portfolio,attempt_id:int,db:AsyncSession=Depe
                 out=a.result_json
                 counts=pair_plan.summarize(out["rows"],packet["packets"],"full",calls=out["jobs"],errors=len(out.get("errors",[])))
                 return {**out,"pair_counts":counts,"evidence_readiness":pair_plan.evidence_detail(packet["packets"])}
+        if portfolio=="india" and a.data["card"]=="rebalance" and not a.result_json.get("rebalance_readiness"):
+            from .rebalance_readiness import annotate
+            frozen=await pair_evidence.attempt_packet(db,a) if a.data.get("settings") else {}
+            if frozen.get("packets") and frozen.get("version")==4:
+                return replay(annotate(dict(a.result_json),frozen))
+        if portfolio=="india" and a.data["card"]=="threats":
+            targets = a.data["settings"]["targets"]
+            return {**a.result_json, "threat_target":targets[0] if targets else None,
+                    "threat_diagnostics":a.result_json.get("threat_diagnostics") or threat_coverage.diagnostics(a.result_json["rows"])}
         return replay(a.result_json) if portfolio=="india" else a.result_json
     jobs=await observations(db,a,user.id,portfolio)
     done=sum(j.status in ("partial","completed","failed","cancelled") for j,*_ in jobs)
@@ -528,6 +582,9 @@ async def attempt_result(portfolio:Portfolio,attempt_id:int,db:AsyncSession=Depe
     research = jobs[-1][-1] if jobs else None
     out={**base,**result,"status":"completed" if all(r["coverage"]=="Complete" for r in result["rows"]) and not result["errors"] else "partial" if scored else "unassessed",
                    "research_notices":(research or {}).get("notices",[]),"scored":scored,"source_hashes":{str(j.id):digest(j.response or "") for j,*_ in jobs}}
+    if a.data["card"]=="rebalance" and portfolio=="india" and research and research.get("readiness_version"):
+        from .rebalance_readiness import annotate
+        annotate(out,research)
     if result.get("scoring_version")==3:
         out["stage4_method"] = "v3" if a.data["settings"].get("technical_validated") else "legacy"
     retry_seconds=None
@@ -610,6 +667,9 @@ async def repair_threat_evidence(attempt_id:int, db:AsyncSession=Depends(get_asy
 @router.post("/{portfolio}/attempts/{attempt_id}/recover")
 async def recover_pairs(portfolio:Portfolio,attempt_id:int,db:AsyncSession=Depends(get_async_db),user:User=Depends(get_current_user)):
     original=await owned(db,user.id,portfolio,"attempt",attempt_id,lock=True)
+    if portfolio=="india" and original.data["card"]=="rebalance" and original.result_json:
+        from .rebalance_readiness import recover
+        return await recover(db,original,user.id,user.username)
     if portfolio=="india" and original.data["card"]=="threats" and original.result_json:
         if original.result_json.get("assessment_version")==3:
             return original.result_json
