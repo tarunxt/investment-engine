@@ -18,7 +18,7 @@ from app.infrastructure.locks.redis_lock import RedisLock
 from app.domains.runs.router import _get_redis
 from app.shared.types import UserId
 from app.shared.exceptions import AppException
-from . import storage, pair_evidence, pair_plan, threat_coverage
+from . import storage, pair_evidence, pair_plan, pair_work, threat_coverage
 from .storage import Stage
 from .prompts import build_prompt, batches, CARDS, single_job_card
 from .scoring import project
@@ -74,6 +74,7 @@ class Start(Request):
     targets: list[Target] = Field(min_length=1,max_length=8)
     retry_attempt_id: int | None = Field(default=None,gt=0)
     check_pair_order: bool = False
+    evidence_only: bool = False
     pair_mode: Literal['full','balanced'] = 'full'
     estimated_budget_inr: float | None = Field(default=None,gt=0,le=100000,allow_inf_nan=False)
 
@@ -216,13 +217,17 @@ async def detail(portfolio:Portfolio,revision_id:int,db:AsyncSession=Depends(get
 
 @router.post("/{portfolio}/revisions/{revision_id}/{card}/start")
 async def start(portfolio:Portfolio,revision_id:int,card:Card,body:Start,db:AsyncSession=Depends(get_async_db),user:User=Depends(get_current_user)):
+    return await start_scorecard(portfolio,revision_id,card,body,db,user)
+
+
+async def start_scorecard(portfolio,revision_id,card,body,db,user,*,managed=False):
     owner = user.id
     rev = await owned(db,owner,portfolio,"revision",revision_id)
     if not rev.manifest["stocks"]:
         raise HTTPException(422,"Resolve the flagged Stage 2 listing identities before scoring")
     identity = card + "/" + body.request_key
     if portfolio=="india" and card=="pairwise" and body.retry_attempt_id:
-        identity=f"pairwise/resume/{body.sequence}/{body.retry_attempt_id}/{body.pair_mode}"
+        identity=f"pairwise/resume/{body.sequence}/{body.retry_attempt_id}/{body.pair_mode}" + ("/evidence" if body.evidence_only else "")
     technical_v3 = portfolio == "india" and card == "technical"
     india_threats = portfolio == "india" and card == "threats"
     pair_v3 = portfolio == "india" and card == "pairwise"
@@ -299,11 +304,20 @@ async def start(portfolio:Portfolio,revision_id:int,card:Card,body:Start,db:Asyn
         config["packet_id"]=packet.id
     if pair_v3:
         config.update(pair_mode=body.pair_mode,estimated_budget_inr=body.estimated_budget_inr)
+        if body.evidence_only:
+            config["evidence_only"]=True
     existing=await storage.by_key(db,"attempt",identity,revision_id=rev.id)
     if existing:
         if bool(existing.data["settings"].get("check_pair_order"))!=body.check_pair_order or existing.row.workflow_id!=w.id or any(existing.data["settings"].get(k, "full" if k=="pair_mode" else None)!=v for k,v in config.items() if k!="packet_id"):
             raise HTTPException(409,"Attempt key already names different inputs")
         return {"id":existing.id,"run_id":existing.row.run_id,**({"scoring_version":3} if technical_v3 else {})}
+    if pair_v3 and not managed and not body.evidence_only:
+        active = await db.scalar(select(Stage.id).where(storage.of_kind("pair_work",rev.id),
+            Stage.workflow_id==w.id,Stage.status.in_(("queued","processing")),
+            Stage.summary_json["budget"].as_float()>0,Stage.summary_json["mode"].as_string()==body.pair_mode,
+            Stage.summary_json["target"].as_string()==digest(config["targets"])).limit(1))
+        if active:
+            raise HTTPException(409,"A budgeted Pairwise schedule is already active for this model and revision")
     if body.check_pair_order:
         raise HTTPException(422, "Extra reversed-order jobs are disabled.")
     parent=None
@@ -416,7 +430,8 @@ async def start(portfolio:Portfolio,revision_id:int,card:Card,body:Start,db:Asyn
         previous=research["packets"] if parent else None
         selected,carried=pair_plan.plan(keys,research,body.pair_mode,parent.result_json if parent else None,previous)
         complete_inputs=all(pair_plan.ready(research["packets"].get(k,{})) for k in keys)
-        assignments=list(pair_plan.assigned_batches(selected)) if complete_inputs or parent else []
+        dispatch = not body.evidence_only and (body.estimated_budget_inr is not None or complete_inputs or parent)
+        assignments=list(pair_plan.assigned_batches(selected)) if dispatch else []
         config["pair_protocol"]=3
         if parent and not selected:
             raise HTTPException(422,"No new eligible pairs. Repair the remaining evidence first.")
@@ -442,12 +457,13 @@ async def start(portfolio:Portfolio,revision_id:int,card:Card,body:Start,db:Asyn
         await db.commit()
         return {"id":attempt.id,"run_id":None}
     if pair_v3 and not assignments:
-        data=pair_plan.project_plan(rev.manifest,research,body.pair_mode,{"errors":[]})
+        data=pair_plan.project_plan(rev.manifest,research,body.pair_mode,{"errors":[]},
+                                    parent.result_json if parent else None,previous)
         pair_evidence.finish(data,attempt,research,rev.id)
         attempt.row.summary_json={**attempt.data,"data_recovery":True}
+        if not managed and len(keys)>1 and not complete_inputs:
+            await pair_work.register(db,attempt,owner,w.sequence,None if body.evidence_only else body.estimated_budget_inr)
         await db.commit()
-        if len(keys)>1 and not complete_inputs:
-            await pair_evidence.queue_repair(owner,attempt.id)
         return {"id":attempt.id,"run_id":None}
     if india_threats and not assignments:
         from .threat_output import project as empty_threats
@@ -475,7 +491,10 @@ async def start(portfolio:Portfolio,revision_id:int,card:Card,body:Start,db:Asyn
     } for keys, pairs in assignments)
     prompts=tuple(build_prompt(rev,card,keys,pairs,research) for keys,pairs in assignments)
     if pair_v3 and body.estimated_budget_inr is not None:
-        await pair_evidence.check_budget(prompts,body.targets[0],body.estimated_budget_inr)
+        estimate = await pair_evidence.check_budget(prompts,body.targets[0],body.estimated_budget_inr)
+        attempt.row.summary_json = {**attempt.data,"settings":{**config,"wave_estimate":estimate}}
+        if not managed:
+            await pair_work.register(db,attempt,owner,w.sequence,body.estimated_budget_inr)
     redis=_get_redis()
     try:
         result=await CreateRunUseCase(db,RedisLock(redis)).execute(CreateRunCommand(
@@ -539,6 +558,10 @@ async def attempt_result(portfolio:Portfolio,attempt_id:int,db:AsyncSession=Depe
                 out=a.result_json
                 counts=pair_plan.summarize(out["rows"],packet["packets"],"full",calls=out["jobs"],errors=len(out.get("errors",[])))
                 return {**out,"pair_counts":counts,"evidence_readiness":pair_plan.evidence_detail(packet["packets"])}
+        if portfolio=="india" and a.data["card"]=="pairwise":
+            progress=await pair_work.progress(db,a.data["revision_id"],a.row.workflow_id)
+            if progress and a.id in (progress["root"],progress["output"]):
+                return {**a.result_json,"recovery":progress}
         if portfolio=="india" and a.data["card"]=="rebalance" and not a.result_json.get("rebalance_readiness"):
             from .rebalance_readiness import annotate
             frozen=await pair_evidence.attempt_packet(db,a) if a.data.get("settings") else {}
@@ -616,7 +639,13 @@ async def repair_pair_evidence(attempt_id:int, db:AsyncSession=Depends(get_async
     original=await owned(db,user.id,"india","attempt",attempt_id)
     if original.data["card"]!="pairwise" or not original.result_json:
         raise HTTPException(409,"Select a saved Pairwise output")
-    return await pair_evidence.repair(db,original,user.id,user.username)
+    out = await pair_evidence.repair(db,original,user.id,user.username)
+    if out["pair_counts"]["ready"] < out["pair_counts"]["listings"]:
+        revision = await owned(db,user.id,"india","revision",original.data["revision_id"],lock=True)
+        latest = await owned(db,user.id,"india","attempt",out["id"])
+        await pair_work.register(db,latest,user.id,revision.manifest["sequence"])
+        await db.commit()
+    return out
 
 
 @router.post("/india/attempts/{attempt_id}/repair-threat-evidence")

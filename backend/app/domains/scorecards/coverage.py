@@ -80,6 +80,12 @@ async def available(db, owner, portfolio, sequence):
         source = await storage.lookup(db,owner,portfolio,"attempt",threats["output_id"])
         threats["threat_diagnostics"] = diagnostics(source.result_json["rows"])
     pair=cards.get("pairwise")
+    if pair and portfolio=="india":
+        from .pair_work import progress
+        workflow_id = await db.scalar(select(Stage.workflow_id).where(Stage.id==rev))
+        active = await progress(db,rev,workflow_id)
+        if active:
+            pair["recovery"] = active
     if pair and portfolio=="india" and not pair.get("pair_counts"):
         from .pair_evidence import attempt_packet
         from .pair_plan import summarize
@@ -94,6 +100,14 @@ async def available(db, owner, portfolio, sequence):
         if rebalance:
             cards["rebalance"]=rebalance
         if final_summary:
+            if pair and final and final[0]==final_summary["id"] and (used:=(final[1] or {}).get("pairwise")):
+                used_counts=await db.scalar(scoped(data["result"]["pair_counts"]).where(Stage.id==used,storage.of_kind("attempt",rev)))
+                if used_counts:
+                    final_summary["pairwise"]={"used":used,"judged":used_counts["judged"],"expected":used_counts["expected"]}
+                    available_counts=pair.get("pair_counts") or {}
+                    if (pair["output_id"]!=used and available_counts.get("mode")=="full" and pair["expected"] and
+                            pair["covered"]==pair["expected"] and not available_counts.get("errors")):
+                        final_summary["pairwise"]["completed_output"]=pair["output_id"]
             out["final_summary"]=final_summary
     return out
 

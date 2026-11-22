@@ -165,7 +165,9 @@ async def exercise_single_job_start(monkeypatch, card):
         with pytest.raises(HTTPException, match="reversed-order"):
             await router.start("india", rev.id, card, body([target], True), AsyncMock(), user)
     enqueue.assert_not_awaited()
-    await router.start("india", rev.id, card, body([target]), AsyncMock(), user)
+    db = AsyncMock()
+    db.scalar.return_value = None  # No prior funded Pairwise schedule.
+    await router.start("india", rev.id, card, body([target]), db, user)
     command, = enqueue.await_args.args
     assert len(command.targets)==1
     assert len(command.batch_prompts)==len(command.scorecard_batches)==(5 if card=="pairwise" else 1)
