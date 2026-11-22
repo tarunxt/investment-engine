@@ -190,6 +190,7 @@ celery.conf.worker_prefetch_multiplier = _prefetch_multiplier
 
 celery.autodiscover_tasks((["app.domains.jobs", "app.domains.zerodha"] + (["app.domains.recommendation_audit"] if stored_audit_recovery_enabled() else [])) if recovery_mode() else [
     "app.domains.sports_rankings",
+    "app.domains.scorecards",
     "app.domains.jobs",
     "app.domains.auth",
     "app.domains.mails",

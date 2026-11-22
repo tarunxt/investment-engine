@@ -34,6 +34,14 @@ def calculate_final(manifest, attempts, config):
             if card=="rebalance" and data.get("action"):
                 terms["action"]=favorable(config["actions"][data["action"]])
                 factors=factors or R_WEIGHTS
+            if card=="technical" and data.get("technical_v3"):
+                # The frozen promotion decision belongs to this output, including on replays.
+                if attempts[card].get("stage4_method")=="v3":
+                    factors=None
+                else:
+                    score=data.get("legacy_score")
+                    status="Complete" if score is not None else "Unassessed"
+                    terms={"candles":score}
             if factors:
                 score,divisor=weighted(terms,factors)
                 if divisor < sum(factors.values()):
@@ -49,11 +57,17 @@ def calculate_final(manifest, attempts, config):
         rebal=tables.get("rebalance",{}).get(key,{})
         buys=[n for r in rebal.get("raw_rows",[]) if (n:=number(r.get("Units Change"),0,1e15)) is not None and n>0]
         units=position if action=="Sell All" else position/2 if action=="Trim" else mean(buys) if action in ("Add more","Buy New") and buys else 0 if action=="Hold" else None
-        eligibility = ("Incomplete positive-weight scores" if not complete else "Position unavailable" if position is None
+        tech=tables.get("technical",{}).get(key,{})
+        using_candidate=attempts.get("technical",{}).get("stage4_method")=="v3" and config["weights"]["technical"]>0
+        constrained=using_candidate and (tech.get("coverage")!="Complete" or bool(tech.get("technical_v3",{}).get("flags")))
+        if constrained:
+            action=units=None
+        eligibility = ("Technical evidence incomplete or execution constrained" if constrained else "Incomplete positive-weight scores" if not complete else "Position unavailable" if position is None
                        else "No position to sell" if action in ("Trim","Sell All") and position == 0
                        else "Hold" if action == "Hold" else "Suggested quantity unavailable" if units is None or units<=0
                        else "Subject to broker order checks")
         rows.append({**stock,"scores":scores,"contributions":contributions,"coverage":coverage,"available_weight":available,
+                     **({"technical_method":attempts["technical"].get("stage4_method","legacy"),"technical_range":tech["technical_v3"]["range"]} if tech.get("technical_v3") else {}),
                      "final":final,"signed":signed,"action":action,"suggested_units":units,"sizing_reason":eligibility,"status":"Complete" if complete else "Provisional" if final is not None else "Unassessed"})
     rows.sort(key=lambda r:(r["status"]!="Complete", r["final"] is None, -(r["final"] or 0), r["listing"]))
     ranks={}

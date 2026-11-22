@@ -1,0 +1,353 @@
+"""Venue-session archives and point-in-time source reconciliation for Technical v3."""
+import asyncio
+import csv
+import io
+import json
+import logging
+import os
+import re
+import zipfile
+from datetime import date, datetime, time, timedelta, timezone
+from email.utils import parsedate_to_datetime
+from statistics import mean
+
+import httpx
+from redis.exceptions import RedisError
+
+from .research import INDIA, bar, download, supplement_indian_bars
+from .technical_v3 import BENCHMARK, calculate, normalise
+from .universe import digest
+from app.domains.zerodha.upstox_quote_guard import redis_client
+from app.domains.zerodha.upstox_quotes import configured_for, technical_instruments
+
+log = logging.getLogger(__name__)
+HOLIDAYS = "https://api.upstox.com/v2/market/holidays"
+MASTER = "https://assets.upstox.com/market-quote/instruments/exchange/complete.json.gz"
+ERRORS = (httpx.HTTPError, ValueError, OSError, KeyError, TypeError, EOFError, RuntimeError, RedisError, zipfile.BadZipFile)
+# Published 2026 Indian cash-equity calendar, including the Budget and Muhurat sessions.
+CLOSED_2026 = set("01-15 01-26 03-03 03-26 03-31 04-03 04-14 05-01 05-28 06-26 09-14 10-02 10-20 11-10 11-24 12-25".split())
+SPECIAL_2026 = {"02-01":time(15,30), "11-08":time(15,35)}
+
+
+def session_calendar(cutoff, venue, holidays):
+    local=cutoff.astimezone(INDIA)
+    by_date={v["date"]:v for v in holidays if isinstance(v,dict) and v.get("date")}
+    years={d[:4] for d in by_date}
+    schedule={}
+    for offset in range(105,-1,-1):
+        day=local.date()-timedelta(days=offset)
+        if day.year!=2026 and str(day.year) not in years:
+            schedule.clear()
+            continue
+        md=day.strftime("%m-%d")
+        regular=day.weekday()<5 and (day.year!=2026 or md not in CLOSED_2026)
+        close=time(15,30) if regular else None
+        if day.year==2026 and md in SPECIAL_2026:
+            close=SPECIAL_2026[md]
+        event=by_date.get(day.isoformat(),{})
+        if venue in event.get("closed_exchanges",[]):
+            close=None
+        for item in event.get("open_exchanges",[]):
+            if item.get("exchange")==venue and item.get("end_time"):
+                close=datetime.fromtimestamp(item["end_time"]/1000,INDIA).time()
+        if close:
+            end=datetime.combine(day,close,INDIA)
+            if end<=local:
+                schedule[day.isoformat()]=end.isoformat()
+    return dict(list(schedule.items())[-60:])
+
+
+def archive_url(venue, day):
+    stamp=day.replace("-","")
+    if venue=="NSE":
+        return f"https://nsearchives.nseindia.com/content/cm/BhavCopy_NSE_CM_0_0_0_{stamp}_F_0000.csv.zip"
+    return f"https://www.bseindia.com/download/BhavCopy/Equity/BhavCopy_BSE_CM_0_0_0_{stamp}_F_0000.CSV.ZIP"
+
+
+def extract_archive(data, venue, day, close, wanted, url):
+    found={}
+    by_isin={}
+    if isinstance(wanted,dict):
+        for listing,isin in wanted.items():
+            if isin:
+                by_isin.setdefault(isin,[]).append(listing)
+    wanted_keys=set(wanted)
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        files=[f for f in archive.infolist() if f.filename.lower().endswith(".csv") and f.file_size<=16_000_000]
+        if len(files)!=1:
+            raise ValueError("Unexpected exchange archive")
+        with archive.open(files[0]) as stream:
+            for row in csv.DictReader(io.TextIOWrapper(stream,encoding="utf-8-sig")):
+                if row.get("TradDt")!=day or (venue=="NSE" and row.get("SctySrs")!="EQ"):
+                    continue
+                matches={f"{venue}:{symbol}" for symbol in (row.get("TckrSymb"),row.get("FinInstrmId"))} & wanted_keys
+                aliases=by_isin.get(row.get("ISIN"),[])
+                if len(aliases)==1:
+                    matches.add(aliases[0])
+                for key in matches:
+                    values=[row.get(k) for k in ("OpnPric","HghPric","LwPric","ClsPric","TtlTradgVol")]
+                    item=bar(date.fromisoformat(day),INDIA,values,url,datetime.max.replace(tzinfo=timezone.utc))
+                    if item:
+                        item.update(as_of=close,isin=row.get("ISIN"),basis="venue-raw")
+                        found.setdefault(key,[]).append(item)
+    return found
+
+
+def action_ledger(rows, start, end):
+    events=[]
+    for r in rows:
+        kind=str(r["name"]).lower()
+        if "dividend" in kind or "interest" in kind:
+            continue
+        day=datetime.strptime(r["expiry_date"],"%d %b %Y").date().isoformat()
+        if not start < day <= end:
+            continue
+        factor=None
+        if "bonus" in kind:
+            match=re.fullmatch(r"\s*(\d+(?:\.\d+)?)\s*:\s*(\d+(?:\.\d+)?)\s*",str(r.get("ratio")))
+            if match and float(match[2])>0:
+                factor=1+float(match[1])/float(match[2])
+        if "split" in kind or "consolidat" in kind:
+            # Face values specify the direction unambiguously, including reverse splits.
+            details=" ".join(str(e.get("value","")) for e in (r.get("event_details") or []))
+            match=re.search(r"from\s+(?:rs\.?|inr|₹)?\s*(\d+(?:\.\d+)?)(?:\s*/-)?\s*(?:each\s+)?to\s+(?:rs\.?|inr|₹)?\s*(\d+(?:\.\d+)?)",details,re.I)
+            if match and float(match[2])>0:
+                factor=float(match[1])/float(match[2])
+        event={"date":day,"kind":kind,"multiplier":factor,"ratio":r.get("ratio")}
+        if event not in events:
+            events.append(event)
+    return sorted(events,key=lambda a:a["date"])
+
+
+def nse_actions(raw, wanted):
+    if not isinstance(raw,list) or not raw or not all(isinstance(r,dict) and "exDate" in r and "subject" in r and r.get("isin") for r in raw):
+        raise ValueError("Incomplete NSE action ledger")
+    result={isin:[] for isin in wanted}
+    for r in raw:
+        isin=r.get("isin")
+        if isin not in wanted:
+            continue
+        text=r["subject"]
+        day=datetime.strptime(r["exDate"],"%d-%b-%Y").date().isoformat()
+        if re.search(r"split|sub.division|consolidat|bonus|rights|merger|demerger|arrangement|reduction",text,re.I):
+            ratio=None
+            if re.search("bonus",text,re.I):
+                pair=re.search(r"(\d+)\s*:\s*(\d+)",text)
+                if pair and int(pair[2]):
+                    ratio=1+int(pair[1])/int(pair[2])
+            elif re.search(r"split|sub.division|consolidat",text,re.I):
+                vals=re.search(r"from\s*(?:rs\.?|inr|₹)?\s*(\d+(?:\.\d+)?)(?:\s*/-)?(?:\s*each)?\s*to\s*(?:rs\.?|inr|₹)?\s*(\d+(?:\.\d+)?)",text,re.I)
+                if vals and float(vals[2])>0:
+                    ratio=float(vals[1])/float(vals[2])
+            event={"date":day,"kind":text,"multiplier":ratio}
+            if event not in result[isin]:
+                result[isin].append(event)
+    return result
+
+
+async def collect(manifest, username, previous=None, requested=None):
+    cutoff=datetime.fromisoformat(manifest["as_of"])
+    receipt=datetime.now(timezone.utc)
+    ids=[s["listing"] for s in manifest["stocks"]]
+    keys=set(requested if requested is not None else ids)|{BENCHMARK}
+    venues={k.split(":")[0] for k in keys}
+    previous=previous or {}
+    records={k:list(previous.get("listings",{}).get(k,[])) for k in keys}
+    notices=[]
+    provider_status={}
+    per_key={k:[] for k in keys}
+    actions={}
+    action_urls={}
+    calendars={}
+    master={}
+    sources={}
+    eligible_token=configured_for(manifest["owner_id"],username)
+    auth={"Authorization":"Bearer "+os.environ["UPSTOX_ANALYTICS_TOKEN"]} if eligible_token else {}
+    redis=None
+    try:
+        redis=redis_client()
+    except RuntimeError:
+        pass
+    async def cached(key):
+        if redis is not None:
+            try:
+                value=await redis.get("tech3:"+key)
+                return json.loads(value) if value else None
+            except (RedisError,ValueError):
+                pass
+        return None
+    async def cache(key,value,ttl):
+        if redis is not None:
+            try:
+                await redis.set("tech3:"+key,json.dumps(value,separators=(",",":")),ex=ttl)
+            except RedisError:
+                pass
+    async with httpx.AsyncClient(timeout=5,headers={"User-Agent":"Cred-X market research (https://cred-x.in)"}) as client:
+        async def calendar():
+            try:
+                saved=await cached("holidays:"+str(receipt.year))
+                if saved is None:
+                    response=await client.get(HOLIDAYS,headers=auth)
+                    response.raise_for_status()
+                    saved=response.json()["data"]
+                    if not isinstance(saved,list):
+                        raise ValueError("Malformed trading calendar")
+                    await cache("holidays:"+str(receipt.year),saved,21600)
+            except ERRORS:
+                saved=[]
+            for venue in venues:
+                calendars[venue]=session_calendar(cutoff,venue,saved)
+        async def instruments():
+            nonlocal master
+            try:
+                master=await technical_instruments(client)
+            except ERRORS:
+                notices.append("Instrument master unavailable")
+        await asyncio.gather(calendar(),instruments())
+        semaphore=asyncio.Semaphore(8)
+        async def history(venue,day,close):
+            subset={k:master.get(k,{}).get("isin") for k in keys if k.startswith(venue+":")}
+            # Cache only public rows for the exact identities and session; a miss can add another listing.
+            ck="archive:"+day+":"+digest(sorted(subset.items()))
+            found=await cached(ck)
+            if found is None:
+                url=archive_url(venue,day)
+                async with semaphore:
+                    try:
+                        async with client.stream("GET",url) as response:
+                            response.raise_for_status()
+                            chunks=bytearray()
+                            for_header=response.headers.get("last-modified")
+                            async for chunk in response.aiter_bytes():
+                                chunks.extend(chunk)
+                                if len(chunks)>6_000_000:
+                                    raise ValueError("Oversized archive")
+                        found=await asyncio.to_thread(extract_archive,bytes(chunks),venue,day,close,subset,url)
+                        for rows in found.values():
+                            for item in rows:
+                                published=parsedate_to_datetime(for_header) if for_header else None
+                                item.update(received_at=datetime.now(timezone.utc).isoformat(),published_at=published.isoformat() if published else None)
+                        if found:
+                            await cache(ck,found,86400*5)
+                    except ERRORS:
+                        return
+            for key,rows in found.items():
+                rows=[r for r in rows if not r.get("published_at") or datetime.fromisoformat(r["published_at"])<=cutoff]
+                by_day={r["as_of"][:10] for r in rows}
+                records[key]=[r for r in records[key] if r["as_of"][:10] not in by_day]+rows
+        start_day=cutoff.astimezone(INDIA).date()-timedelta(days=105)
+        end_day=cutoff.astimezone(INDIA).date()
+        exchange_actions=("https://www.nseindia.com/api/corporates-corporateActions?index=equities"
+                          +f"&from_date={start_day:%d-%m-%Y}&to_date={end_day:%d-%m-%Y}")
+        isins={master[k]["isin"] for k in keys if k in master}
+        dual_listed=isins & {i["isin"] for k,i in master.items() if k.startswith("NSE:")}
+        try:
+            bulk=await cached("nse-actions:"+end_day.isoformat())
+            if bulk is None:
+                bulk=json.loads(await download(client,exchange_actions))
+                if isinstance(bulk,list) and bulk:
+                    await cache("nse-actions:"+end_day.isoformat(),bulk,3600)
+            actions.update(nse_actions(bulk,dual_listed))
+            action_urls.update({isin:exchange_actions for isin in actions})
+        except ERRORS:
+            notices.append("NSE corporate-action ledger unavailable")
+        async def ledger(isin):
+            key="actions:"+isin+":"+cutoff.astimezone(INDIA).date().isoformat()
+            data=await cached(key)
+            url=f"https://api.upstox.com/v2/fundamentals/{isin}/corporate-actions"
+            if data is None:
+                async with semaphore:
+                    try:
+                        response=await client.get(url,headers=auth)
+                        response.raise_for_status()
+                        body=response.json()
+                        if body.get("status")!="success" or not isinstance(body.get("data"),list):
+                            raise ValueError("Malformed action ledger")
+                        data=action_ledger(body["data"],(cutoff.date()-timedelta(days=110)).isoformat(),cutoff.astimezone(INDIA).date().isoformat())
+                        await cache(key,data,3600)
+                    except ERRORS:
+                        return
+            actions[isin]=data
+            action_urls[isin]=url
+        tasks=[asyncio.create_task(ledger(i)) for i in isins-actions.keys()]
+        # Start with newest sessions. A bounded cold fetch retains all completed days.
+        for days_ago in range(60):
+            for venue,cal in calendars.items():
+                dates=list(cal.items())
+                if days_ago<len(dates):
+                    day,close=dates[-1-days_ago]
+                    tasks.append(asyncio.create_task(history(venue,day,close)))
+        if tasks:
+            _,pending=await asyncio.wait(tasks,timeout=22)
+            for t in pending:
+                t.cancel()
+            outcomes=await asyncio.gather(*tasks,return_exceptions=True)
+            if pending or any(isinstance(v,Exception) for v in outcomes):
+                notices.append("Exchange history or actions incomplete within the retrieval window")
+        if eligible_token:
+            supplement={k:[] for k in keys if len({r["as_of"][:10] for r in records[k]})<55}
+            if supplement:
+                try:
+                    await asyncio.wait_for(supplement_indian_bars(client,supplement,cutoff,notices,manifest["owner_id"],sessions=60,diagnostics=provider_status),10)
+                except (*ERRORS,TimeoutError):
+                    notices.append("Alternate history unavailable")
+                for k,rows in supplement.items():
+                    official={r["as_of"][:10] for r in records[k] if r.get("basis")=="venue-raw"}
+                    dates=calendars.get(k.split(":")[0],{})
+                    for r in rows:
+                        day=r["as_of"][:10]
+                        if day in dates and day not in official:
+                            records[k]=[v for v in records[k] if v["as_of"][:10]!=day]
+                            records[k].append({**r,"as_of":dates[day],"received_at":receipt.isoformat(),"basis":"unverified-provider"})
+    if redis is not None:
+        await redis.aclose()
+    series={}
+    for k in keys:
+        meta=master.get(k,{})
+        isin=meta.get("isin")
+        if not isin or isin not in actions:
+            per_key[k].append("Corporate-action history unavailable for this instrument")
+        wrong=any(r.get("isin") and r["isin"]!=isin for r in records[k])
+        if wrong:
+            per_key[k].append("Instrument identity changed within the lookup window")
+        days=list(calendars[k.split(":")[0]])
+        events=actions.get(isin,[])
+        series[k]=normalise(records[k],days,events,manifest["as_of"])
+        # A large unaccounted change of share basis must be reviewed before scoring.
+        observed=[series[k][0][d] for d in days if d in series[k][0]]
+        if (any(max(a[3],b[0])/min(a[3],b[0])>1.45 for a,b in zip(observed,observed[1:]))
+                and any(r.get("basis")!="venue-raw" for r in records[k])):
+            per_key[k].append("Exceptional price gap requires source reconciliation")
+        sources[k]={"instrument":isin,"tick":meta.get("tick"),"master":MASTER,"calendar":HOLIDAYS,
+                    "action_url":action_urls.get(isin),
+                    "actions":events,"history_hash":digest(sorted(({a:b for a,b in r.items() if a!="received_at"} for r in records[k]),key=lambda r:(r["as_of"],r["url"]))),
+                    "last_bar":max(records[k],key=lambda r:r["as_of"],default=None)}
+    index_prices=series[BENCHMARK][0]
+    index_dates=list(calendars["NSE"])[-50:]
+    if not per_key[BENCHMARK] and len(index_dates)==50 and all(d in index_prices for d in index_dates):
+        closes=[index_prices[d][3] for d in index_dates]
+        sources[BENCHMARK]["regime"]="Above SMA50" if closes[-1]>=mean(closes) else "Below SMA50"
+    ledgers=dict(previous.get("technical",{}))
+    for k in ids:
+        if k not in keys:
+            continue
+        dates=list(calendars[k.split(":")[0]])
+        row=calculate(k,manifest["as_of"],dates,series[k],({}, {}) if per_key[BENCHMARK] else series[BENCHMARK],
+                      tick=sources[k]["tick"],sources={"stock":sources[k],"benchmark":sources[BENCHMARK]},
+                      issues=per_key[k],benchmark_sessions=list(calendars["NSE"]))
+        row["provider_status"]=provider_status.get(k, {})
+        if row["score"] is None and row["provider_status"]:
+            row["reason"]+=" · "+row["provider_status"]["reason"]
+        row["observed_at"]=receipt.isoformat()
+        # A later history download without a pre-cutoff vintage remains a reconstruction.
+        stock_bars=records[k]
+        latest_source=all(
+            (r.get("published_at") and datetime.fromisoformat(r["published_at"])<=cutoff)
+            or (r.get("received_at") and datetime.fromisoformat(r["received_at"])<=cutoff)
+            for r in stock_bars+records[BENCHMARK])
+        row["vintage"]="prospective" if abs((receipt-cutoff).total_seconds())<=300 and latest_source else "later reconstruction"
+        row["input_hash"]=digest([k,manifest["as_of"],dates,sources[k]["instrument"],sources[k]["history_hash"],sources[k]["actions"],
+                                  sources[BENCHMARK]["history_hash"],sources[BENCHMARK]["actions"],row["factors"],row["reason"]])
+        ledgers[k]=row
+    return {"version":3,"technical":ledgers,"notices":sorted(set(notices)),"calendars":calendars,"provider_status":provider_status,
+            "listings":{**previous.get("listings",{}),**records},"benchmark":records[BENCHMARK]}

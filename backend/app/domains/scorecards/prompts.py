@@ -20,7 +20,7 @@ HEADERS = {
 
 
 def single_job_card(portfolio, card):
-    return portfolio == "india" and card in ("threats", "pairwise")
+    return portfolio == "india" and card in ("technical", "threats", "pairwise")
 
 
 def batches(stocks, card, *, pairs=None, portfolio=None):
@@ -30,7 +30,12 @@ def batches(stocks, card, *, pairs=None, portfolio=None):
         yield keys, []
         return
     if single_job_card(portfolio, card):
-        if card == "threats":
+        if card == "technical":
+            # Keep the original manifest order. Budget for journal-sized output per listing.
+            ordered = [row["listing"] for row in stocks]
+            for i in range(0, len(ordered), 40):
+                yield ordered[i:i+40], []
+        elif card == "threats":
             yield keys, []
         elif pairs is None:
             yield keys, list(combinations(keys, 2))
@@ -51,6 +56,9 @@ def batches(stocks, card, *, pairs=None, portfolio=None):
 
 def build_prompt(revision, card, keys, pairs, research=None, *, reverse_order=False):
     manifest = revision.manifest
+    if card == "technical" and research and research.get("version") == 3:
+        from .technical_output import prompt
+        return prompt(revision, keys, research)
     context = {k: v for k, v in manifest.items() if k not in ("stocks", "evidence", "unresolved")}
     context.pop("owner_id", None)
     context.pop("verified_listings", None)

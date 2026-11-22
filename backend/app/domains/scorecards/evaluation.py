@@ -105,7 +105,7 @@ async def evaluate(db, owner, portfolio, top, cost_bps):
         return select(*cols).select_from(Stage).join(Workflow).where(Workflow.user_id==owner,Workflow.portfolio==portfolio)
     data=Stage.summary_json
     packets=(await db.execute(scope(data["revision_id"].as_integer(),data["research"])
-             .where(storage.of_kind("packet")).order_by(Stage.id.desc()).limit(120))).all()
+             .where(storage.of_kind("packet"),data["research"]["version"].as_integer()==2).order_by(Stage.id.desc()).limit(120))).all()
     research_by_rev=dict(packets)
     prices=defaultdict(dict)
     for _,packet in reversed(packets):

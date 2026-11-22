@@ -1489,7 +1489,12 @@ def execute_ai_job(self, job_id: int) -> None:
                 pass  # A partial supplement can still contribute validated rows.
             content = merge_technical_rows(content, supplement)
         batch = scorecard_batch_for_job(job)
-        if batch and batch.get("pairs_v2"):
+        if batch and batch.get("technical_v3"):
+            from app.domains.scorecards.technical_output import annotations
+            accepted, issue = annotations(content, batch["technical_v3"])
+            if issue or len(accepted) != len(batch["listings"]):
+                partial_price_notice = issue or f"Technical commentary covered {len(accepted)}/{len(batch['listings'])} listings"
+        elif batch and batch.get("pairs_v2"):
             from app.domains.scorecards.pair_records import records
             accepted = records(content,batch["pairs_v2"],batch["packet_sources"],batch["as_of"])
             if not accepted:

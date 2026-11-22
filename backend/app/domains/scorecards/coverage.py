@@ -39,11 +39,12 @@ async def available(db, owner, portfolio, sequence):
         projections=[func.jsonb_array_length(cast(rows_expr,JSONB)),data["result"]["scored"].as_integer(),valid]
     else:
         projections=[rows_expr]
-    items = (await db.execute(scoped(Stage.id,Stage.run_id,data["card"].as_string(),*projections)
+    items = (await db.execute(scoped(Stage.id,Stage.run_id,data["card"].as_string(),data["result"]["scoring_version"].as_integer(),*projections)
              .where(storage.of_kind("attempt",rev),data["card"].as_string().in_(["technical","pairwise"]))
              .order_by(Stage.id.desc()))).all()
     cards = {}
-    for output,run,card,*info in items:
+    versions={}
+    for output,run,card,version,*info in items:
         if not info[0]:
             continue
         if postgres:
@@ -51,8 +52,10 @@ async def available(db, owner, portfolio, sequence):
             got,total=(scored or 0,n) if card=="technical" else ((judgments or 0)//2,n*(n-1)//2)
         else:
             got,total=summary(card,info[0])
-        if card in cards and cards[card]["covered"]>=got:
+        v3=card=="technical" and version==3
+        if card in cards and (versions[card] and not v3 or versions[card]==v3 and cards[card]["covered"]>=got):
             continue
+        versions[card]=v3
         cards[card] = {"output_id":output,"run_id":run,"covered":got,"expected":total,
                        "used_output_id":(final[1] or {}).get(card) if final else None,"final_id":final[0] if final else None}
     return {"revision_id":rev,"listing_count":listing_count,"cards":cards}

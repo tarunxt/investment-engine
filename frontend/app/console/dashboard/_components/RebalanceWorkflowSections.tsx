@@ -6365,6 +6365,7 @@ ${zerodhaExecutionMode === "direct_market"
       portfolio: WorkflowPortfolio,
       stage: WorkflowStageKey,
       runId: number,
+      backendScored = false,
     ) => {
       activeExecutionRefsRef.current = [
         ...activeExecutionRefsRef.current.filter(
@@ -6405,7 +6406,7 @@ ${zerodhaExecutionMode === "direct_market"
         throw error;
       }
       const status = (run.status || "").toLowerCase();
-      if (status === "completed" || status === "partial") return run;
+      if (status === "completed" || status === "partial" || (backendScored && status === "failed")) return run;
 
       const progress = getRunProgress(run);
       const failureSummary = summarizeRun(run);
@@ -7229,11 +7230,11 @@ ${zerodhaExecutionMode === "direct_market"
               if (cancelRequestedRef.current || !isCurrentWorkflowOwner(runtimeOwner)) return;
               if (cardModelErrors[card]) throw new Error(cardModelErrors[card]);
               const queued=await api.start(source.id,card,{sequence, request_key:"workflow-"+sequence,targets:targets[card] ?? []});
-              const run=await waitForRunWithStageHandling(portfolio,card,queued.run_id);
+              const run=queued.run_id==null?null:await waitForRunWithStageHandling(portfolio,card,queued.run_id,queued.scoring_version===3);
               const result=await api.result(queued.id);
               if (result.status === "processing") throw new Error("Scorecard jobs are still settling. Open its saved output to refresh.");
               chosen[card]=queued.id;
-              await markCompleted(portfolio,card,{...summarizeRun(run),...getRunProgress(run),lastRunId:run.id,
+              await markCompleted(portfolio,card,{...(run?{...summarizeRun(run),...getRunProgress(run),lastRunId:run.id}:{totalLlms:0,completedLlms:0}),
                 ...(result.status !== "completed" ? {partialNotice:`Scorecard ${result.status}. ${result.scored ?? 0} of ${source.manifest.stocks.length} listings have verified scores.`} : {}),
                 recommendedStocks:result.scored ?? 0,evidenceCoverage:String(result.scored ?? 0)+"/"+source.manifest.stocks.length+" scored",
                 finalInputs:{stage2_revision:source.id,attempt:queued.id}});

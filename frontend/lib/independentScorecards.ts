@@ -24,7 +24,7 @@ export type WorkflowCoverage = {revision_id:number|null;listing_count?:number;ca
 export type CardRef = {id:number;card:CardKey;run_id:number};
 export type SourceDetail = {id:number;manifest:{sequence:number;as_of:string;snapshot_id:number;snapshot_at:string;swing_job_ids:number[];verified_listings?:VerifiedListing[];stocks:StockInput[];unresolved:Record<string,unknown>[]};attempts:CardRef[]; finals:{id:number}[]};
 export type CardRow = {listing:string;score:number|null;coverage:string;terms?:Record<string,number|null>; [field:string]:unknown};
-export type CardResult = {id:number;status:string;research_notices?:string[];rows:CardRow[];jobs:number;completed:number;balanced_schedule?:Record<string,unknown>|null;cost_per_judgment_usd?:number|null;order_checks?:Record<string,unknown>[];recovered_pairs?:Record<string,unknown>[];model_tables?:{job_id:number;slot:number;model:string;rows:Record<string,unknown>[]}[];scored?:number;errors?:{job_id:number;reason:string}[]};
+export type CardResult = {id:number;revision_id?:number;stage4_method?:string;technical_counts?:{expected:number;complete:number;provisional:number;insufficient:number;commentary:number};status:string;research_notices?:string[];rows:CardRow[];jobs:number;completed:number;balanced_schedule?:Record<string,unknown>|null;cost_per_judgment_usd?:number|null;order_checks?:Record<string,unknown>[];recovered_pairs?:Record<string,unknown>[];model_tables?:{job_id:number;slot:number;model:string;rows:Record<string,unknown>[]}[];scored?:number;errors?:{job_id:number;reason:string}[]};
 export type FinalRow = StockInput & {symbol:string;exchange:string;scores:Record<CardKey,number|null>;contributions:Record<CardKey,number|null>;status:string;rank:number|null;final:number|null;signed:number|null;action:string|null;suggested_units:number|null;sizing_reason?:string;settled:number|null;price:number|null;value:number|null;available_weight:number};
 export type CardFinal = {id:number;sequence:number;revision_id:number;schema:"independent-scorecards-v1";policy:CardPolicy;rows:FinalRow[];attempts:Partial<Record<CardKey,number>>;source_runs:Partial<Record<CardKey,number>>};
 export const isCard = (value:string):value is CardKey => (cards as readonly string[]).includes(value);
@@ -33,6 +33,8 @@ export function scorecardApi(client: Pick<typeof apiService,"get"|"post">, marke
   return {
     prepareSwingSource:(sequence:number)=>client.post<{id:number;sequence:number;listings:number;snapshot_id:number;swing_job_ids:number[]}>(base+"/workflows/"+sequence+"/prepare-swing-source",{}),
     coverage:(sequence:number)=>client.get<WorkflowCoverage>(base+"/workflows/"+sequence+"/coverage"),
+    technicalExecutions:(rows:Record<string,unknown>[])=>client.post<Record<string,unknown>>(base+"/technical-execution-review",rows),
+    technicalValidation:()=>client.get<{status:string;holdout_start:string;holdout_end_exclusive:string;monitoring:{dates:number;qualifying_dates:number;expected:number;scored:number;unknown_outcomes:number};holdout_open:boolean;holdout:Record<string,unknown>;development_sensitivities:Record<string,{paired_dates:number;mean_change:number}>;calibration:{status:string;training_rows:number;test_rows:number;brier?:number;baseline_brier?:number;bins:{decile:number;n:number;predicted:number;observed:number;wilson_95:number[]}[]}}>(base+"/technical-validation"),
     performance:()=>client.get<{eligible_workflows:number;rows:Record<string,unknown>[];top_n:number;one_way_cost_bps:number;benchmark:string}>(base+"/research-performance"),
     savedPolicy:()=>client.get<CardPolicy|null>(base+"/saved-policy"),
     latestFinal:(seq?:number)=>client.get<CardFinal|null>(base+"/latest-final"+(seq?"?sequence="+seq:"")),
@@ -40,8 +42,8 @@ export function scorecardApi(client: Pick<typeof apiService,"get"|"post">, marke
     list:()=>client.get<SourceRevision[]>(base+"/revisions"),
     read:(id:number)=>client.get<SourceDetail>(base+"/revisions/"+id),
     publish:(data:{request_key:string;sequence:number;snapshot_id?:number;captured_at:string;swing_job_ids:number[];verified_listings?:VerifiedListing[]})=>client.post<{id:number}>(base+"/revisions",data,{timeoutMs:65_000}),
-    start:(revision:number,card:CardKey,data:{sequence:number;request_key:string;targets:ProviderModelTarget[];retry_attempt_id?:number;check_pair_order?:boolean})=>client.post<{id:number;run_id:number}>(base+"/revisions/"+revision+"/"+card+"/start",data,{timeoutMs:65_000}),
-    recover:(id:number)=>client.post<CardResult>(base+"/attempts/"+id+"/recover",{}),
+    start:(revision:number,card:CardKey,data:{sequence:number;request_key:string;targets:ProviderModelTarget[];retry_attempt_id?:number;check_pair_order?:boolean})=>client.post<{id:number;run_id:number|null;scoring_version?:number}>(base+"/revisions/"+revision+"/"+card+"/start",data,{timeoutMs:65_000}),
+    recover:(id:number)=>client.post<CardResult>(base+"/attempts/"+id+"/recover",{},{timeoutMs:65_000}),
     result:(id:number)=>client.get<CardResult>(base+"/attempts/"+id,{timeoutMs:22_000}),
     final:(id:number)=>client.get<CardFinal>(base+"/finals/"+id),
     compare:(revision:number,sequence:number,attempts:Partial<Record<CardKey,number>>,config:CardPolicy,previous:ScoreMatrixFormulaConfig)=>client.post<{comparison:Record<string,unknown>[]}>(base+"/revisions/"+revision+"/final",{sequence,attempts,...config,compare_with:previous}),

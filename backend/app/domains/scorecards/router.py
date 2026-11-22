@@ -1,6 +1,6 @@
 import asyncio
 from typing import Literal
-from datetime import datetime
+from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
@@ -22,6 +22,7 @@ from . import storage
 from .storage import Stage
 from .prompts import build_prompt, batches, CARDS, single_job_card
 from .scoring import project
+from .technical_output import evidence_ids as technical_evidence_ids
 from app.domains.recommendation_audit.schemas import Formula
 from .final import DEFAULT_WEIGHTS, calculate_final, compare_formula, policy
 from .universe import digest, publish_manifest
@@ -105,6 +106,37 @@ async def research_performance(portfolio:Portfolio, top:int=Query(5,ge=1,le=30),
     return await evaluate(db,user.id,portfolio,top,cost_bps)
 
 
+@router.get("/india/technical-validation")
+async def technical_validation(db:AsyncSession=Depends(get_async_db),user:User=Depends(get_current_user)):
+    from .technical_validation import evaluate
+    return await evaluate(db,user.id,datetime.now(timezone.utc).date())
+
+
+class ExecutionObservation(Request):
+    decision: date
+    listing: str = Field(pattern=r"^(NSE|BSE):[A-Z0-9&. -]{1,40}$")
+    status: Literal["filled","skipped","unfilled"]
+    entry_session: date | None = None
+    exit_session: date | None = None
+    entry_fill: float | None = Field(default=None,gt=0,allow_inf_nan=False)
+    exit_fill: float | None = Field(default=None,gt=0,allow_inf_nan=False)
+    entry_reference: float | None = Field(default=None,gt=0,allow_inf_nan=False)
+    exit_reference: float | None = Field(default=None,gt=0,allow_inf_nan=False)
+    entry_fees_per_share: float | None = Field(default=None,ge=0,allow_inf_nan=False)
+    exit_fees_per_share: float | None = Field(default=None,ge=0,allow_inf_nan=False)
+
+
+@router.post("/india/technical-execution-review")
+async def technical_execution_review(observations:list[ExecutionObservation],db:AsyncSession=Depends(get_async_db),
+                                     user:User=Depends(get_current_user)):
+    if len(observations)>5000:
+        raise HTTPException(422,"At most 5,000 dated observations per evaluation")
+    if len({(r.decision,r.listing) for r in observations})!=len(observations):
+        raise HTTPException(422,"Duplicate decision and listing in execution observations")
+    from .technical_validation import evaluate
+    return await evaluate(db,user.id,datetime.now(timezone.utc).date(),executions=observations)
+
+
 @router.get("/{portfolio}/workflows/{sequence}/coverage")
 async def workflow_coverage(portfolio:Portfolio, sequence:int, db:AsyncSession=Depends(get_async_db),user:User=Depends(get_current_user)):
     from .coverage import available
@@ -164,8 +196,10 @@ async def start(portfolio:Portfolio,revision_id:int,card:Card,body:Start,db:Asyn
     if not rev.manifest["stocks"]:
         raise HTTPException(422,"Resolve the flagged Stage 2 listing identities before scoring")
     identity = card + "/" + body.request_key
+    technical_v3 = portfolio == "india" and card == "technical"
+    packet_key = "technical-v3" if technical_v3 else "market-v2"
     shared = portfolio=="india" and card in ("technical","pairwise")
-    packet = await storage.by_key(db,"packet","market-v2",revision_id=rev.id) if shared else None
+    packet = await storage.by_key(db,"packet",packet_key,revision_id=rev.id) if shared else None
     already_started = await storage.by_key(db,"attempt",identity,revision_id=rev.id)
     if not already_started and single_job_card(portfolio, card):
         if len(body.targets) != 1:
@@ -177,7 +211,11 @@ async def start(portfolio:Portfolio,revision_id:int,card:Card,body:Start,db:Asyn
         manifest = rev.manifest
         username = user.username
         await db.commit()
-        research = await shared_research(revision_id,manifest,username) if shared else await collect_research(manifest,card,username=username)
+        if technical_v3:
+            from .technical_sources import collect
+            research = await collect(manifest, username)
+        else:
+            research = await shared_research(revision_id,manifest,username) if shared else await collect_research(manifest,card,username=username)
     w=await workflow(db,owner,portfolio,body.sequence)
     rev=await owned(db,owner,portfolio,"revision",revision_id,lock=True)
     config={"targets":[t.model_dump() for t in body.targets],"parent":body.retry_attempt_id}
@@ -185,42 +223,58 @@ async def start(portfolio:Portfolio,revision_id:int,card:Card,body:Start,db:Asyn
     if existing:
         if bool(existing.data["settings"].get("check_pair_order"))!=body.check_pair_order or existing.row.workflow_id!=w.id or any(existing.data["settings"].get(k)!=v for k,v in config.items()):
             raise HTTPException(409,"Attempt key already names different inputs")
-        return {"id":existing.id,"run_id":existing.row.run_id}
+        return {"id":existing.id,"run_id":existing.row.run_id,**({"scoring_version":3} if technical_v3 else {})}
     if body.check_pair_order:
         raise HTTPException(422, "Extra reversed-order jobs are disabled.")
     missing=None
     if body.retry_attempt_id:
         parent=await owned(db,user.id,portfolio,"attempt",body.retry_attempt_id)
-        if card!="pairwise" or parent.data["revision_id"]!=rev.id or parent.data["card"]!=card or not parent.result_json:
-            raise HTTPException(422,"Select a finished Pairwise attempt with the same inputs and model slots")
-        original_targets = parent.data["settings"]["targets"]
-        if single_job_card(portfolio, card):
-            if config["targets"][0] not in original_targets:
-                raise HTTPException(422, "Retry with a model from the original Pairwise run.")
-            config["vote_slot"] = parent.data["settings"].get("vote_slot", original_targets.index(config["targets"][0]))
-        elif original_targets != config["targets"]:
-            raise HTTPException(422, "Retry with the original Pairwise model slots.")
-        if not parent.data["settings"].get("packet_id"):
-            # Legacy assignments and sources must keep their original contract across a retry.
-            research=parent.data["settings"].get("research",{})
-        missing=[(r["listing"],v["opponent"]) for r in parent.result_json["rows"] for v in r["comparisons"]
-                 if v["verdict"]=="UNKNOWN" and r["listing"]<v["opponent"]]
-        if not missing:
-            raise HTTPException(422,"All pair assignments have been resolved")
+        if technical_v3:
+            if parent.data["revision_id"]!=rev.id or parent.data["card"]!=card or not parent.result_json or parent.result_json.get("scoring_version")!=3:
+                raise HTTPException(422,"Select a finished Technical v3 attempt from this revision")
+            retry_keys={r["listing"] for r in parent.result_json["rows"] if not r["raw_rows"] or r.get("model_disagreement")}
+            if not retry_keys:
+                raise HTTPException(422,"All Technical commentary is complete")
+            config["packet_id"]=parent.data["settings"]["packet_id"]
+            research=(await owned(db,owner,portfolio,"packet",config["packet_id"])).data["research"]
+        else:
+            if card!="pairwise" or parent.data["revision_id"]!=rev.id or parent.data["card"]!=card or not parent.result_json:
+                raise HTTPException(422,"Select a finished Pairwise attempt with the same inputs and model slots")
+            original_targets = parent.data["settings"]["targets"]
+            if single_job_card(portfolio, card):
+                if config["targets"][0] not in original_targets:
+                    raise HTTPException(422, "Retry with a model from the original Pairwise run.")
+                config["vote_slot"] = parent.data["settings"].get("vote_slot", original_targets.index(config["targets"][0]))
+            elif original_targets != config["targets"]:
+                raise HTTPException(422, "Retry with the original Pairwise model slots.")
+            if not parent.data["settings"].get("packet_id"):
+                # Legacy assignments and sources must keep their original contract across a retry.
+                research=parent.data["settings"].get("research",{})
+            missing=[(r["listing"],v["opponent"]) for r in parent.result_json["rows"] for v in r["comparisons"]
+                     if v["verdict"]=="UNKNOWN" and r["listing"]<v["opponent"]]
+            if not missing:
+                raise HTTPException(422,"All pair assignments have been resolved")
     assignments=list(batches(rev.manifest["stocks"],card,pairs=missing,portfolio=portfolio))
-    if shared and research.get("version")==2:
-        packet = await storage.by_key(db,"packet","market-v2",revision_id=rev.id)
+    if technical_v3 and body.retry_attempt_id:
+        # Commentary recovery reuses the exact packet, including its factor calculations.
+        assignments=[([k for k in keys if k in retry_keys],[]) for keys,_ in assignments if any(k in retry_keys for k in keys)]
+    if shared and research.get("version") in (2,3):
+        packet = (await owned(db,owner,portfolio,"packet",config["packet_id"]) if config.get("packet_id") else
+                  await storage.by_key(db,"packet",packet_key,revision_id=rev.id))
         if not packet:
-            packet = await storage.append(db,w.id,"packet","market-v2",{"research":research},revision_id=rev.id)
+            packet = await storage.append(db,w.id,"packet",packet_key,{"research":research},revision_id=rev.id)
         research = packet.data["research"]
         config["packet_id"]=packet.id
-        if card=="technical":
+        if card=="technical" and research["version"]==2:
             eligible = {k for k,v in research["packets"].items() if not v["features"]["issue"]}
             assignments = [(subset, []) for keys,_ in assignments if (subset := [k for k in keys if k in eligible])]
             if not assignments:
                 raise HTTPException(422,"No listings have sufficient verified candles. Check the historical data sources and retry.")
     else:
         config["research"]=research
+    if technical_v3:
+        from .technical_validation import stage4_validated
+        config["technical_validated"] = await stage4_validated(db, owner, rev.manifest["as_of"])
     config["assignments"]=assignments
     attempt=await storage.append(db,w.id,"attempt",identity,{"card":card,"settings":config},revision_id=rev.id)
     absent = {r["listing"] for r in rev.manifest["stocks"] if r["origin"] == "contender" and r["units"] == 0}
@@ -230,6 +284,8 @@ async def start(portfolio:Portfolio,revision_id:int,card:Card,body:Start,db:Asyn
         "scorecard_batch": {
             "kind": "equity_scorecard_batch_v1", "card": card, "listings": keys,
             "absent_contenders": sorted(absent.intersection(keys)),
+            **({"technical_v3":{k:technical_evidence_ids(research["technical"][k]) for k in keys}}
+               if technical_v3 else {}),
             **({"pairs_v2":pairs,"as_of":rev.manifest["as_of"],"packet_sources":{
                 k:{"sources":{i:{"url":r["url"],"as_of":r["as_of"]} for i,r in research["packets"][k]["sources"].items()}} for k in keys}}
                if card=="pairwise" and pairs and research.get("version")==2 else {}),
@@ -244,10 +300,22 @@ async def start(portfolio:Portfolio,revision_id:int,card:Card,body:Start,db:Asyn
             user_id=UserId(user.id),allow_parallel=True,auto_rebalance_portfolio=portfolio,auto_rebalance_sequence=w.sequence,
             auto_rebalance_label=f"{w.label} ({card.title()} Scan)"))
     except AppException as exc:
+        if technical_v3 and exc.code=="VALIDATION_ERROR" and exc.message=="A selected scorecard model is temporarily unavailable":
+            from .technical_output import saved_rows
+            data=saved_rows(rev.manifest,research,research.get("carried_comments",{}),[],[])
+            counts=data["technical_counts"]
+            status="partial" if counts["complete"]+counts["provisional"] else "unassessed"
+            out={**data,"id":attempt.id,"revision_id":rev.id,"card":card,"status":status,
+                 "jobs":0,"completed":0,"scored":counts["complete"]+counts["provisional"],"source_hashes":{},
+                 "stage4_method":"v3" if config["technical_validated"] else "legacy","research_notices":[*research.get("notices",[]),exc.message]}
+            attempt.row.summary_json={**attempt.data,"settings":{**config,"assignments":[]},"result":out,"data_recovery":True}
+            attempt.row.status=status
+            await db.commit()
+            return {"id":attempt.id,"run_id":None,"scoring_version":3}
         raise HTTPException(exc.status_code,exc.message) from exc
     finally:
         await redis.aclose()
-    return {"id":attempt.id,"run_id":result.id}
+    return {"id":attempt.id,"run_id":result.id,**({"scoring_version":3} if technical_v3 else {})}
 
 
 async def observations(db, attempt, uid, portfolio):
@@ -258,6 +326,8 @@ async def observations(db, attempt, uid, portfolio):
         attempt=await owned(db,uid,portfolio,"attempt",parent) if parent else None
     evidence=[]
     for a in reversed(chain):
+        if a.data.get("data_recovery"):
+            continue
         jobs=(await db.execute(select(Job).join(RunJob,RunJob.job_id==Job.id)
                                .where(RunJob.run_id==a.row.run_id,RunJob.stage==1).order_by(Job.id))).scalars().all()
         count=len(a.data["settings"]["targets"])
@@ -290,15 +360,38 @@ async def attempt_result(portfolio:Portfolio,attempt_id:int,db:AsyncSession=Depe
     research = jobs[-1][-1] if jobs else None
     out={**base,**result,"status":"completed" if all(r["coverage"]=="Complete" for r in result["rows"]) and not result["errors"] else "partial" if scored else "unassessed",
                    "research_notices":(research or {}).get("notices",[]),"scored":scored,"source_hashes":{str(j.id):digest(j.response or "") for j,*_ in jobs}}
+    if result.get("scoring_version")==3:
+        out["stage4_method"] = "v3" if a.data["settings"].get("technical_validated") else "legacy"
+    retry_seconds=None
+    if out.get("scoring_version")==3 and out["technical_counts"]["complete"]<out["technical_counts"]["expected"]:
+        limits=[v["retry_after"] for v in (research or {}).get("provider_status",{}).values() if v.get("retry_after")]
+        if limits:
+            from app.core.recovery import recovery_mode
+            if not recovery_mode():
+                retry_seconds=max(limits)
+                out["recovery"]={"state":"scheduled","after_seconds":retry_seconds}
     a.row.summary_json={**a.data,"result":out}
     a.row.status=out["status"]
     await db.commit()
+    if retry_seconds:
+        from .tasks import recover_technical_history
+        try:
+            await asyncio.to_thread(recover_technical_history.apply_async,args=[user.id,a.id],countdown=retry_seconds)
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception("Could not queue Technical history recovery for %s",a.id)
+            out["recovery"]={"state":"queue unavailable; manual recovery available"}
+            a.row.summary_json={**a.data,"result":out}
+            await db.commit()
     return out
 
 
 @router.post("/{portfolio}/attempts/{attempt_id}/recover")
 async def recover_pairs(portfolio:Portfolio,attempt_id:int,db:AsyncSession=Depends(get_async_db),user:User=Depends(get_current_user)):
     original=await owned(db,user.id,portfolio,"attempt",attempt_id,lock=True)
+    if portfolio=="india" and original.data["card"]=="technical" and original.result_json:
+        from .technical_recovery import recover
+        return await recover(db, original, user.id, user.username)
     if original.data["card"]!="pairwise" or not original.result_json:
         raise HTTPException(409,"A terminal Pairwise output is required")
     rev_id=original.data["revision_id"]
@@ -366,8 +459,11 @@ async def finalize(portfolio:Portfolio,revision_id:int,body:Finalize,db:AsyncSes
 async def prompt_preview(portfolio:Portfolio,revision_id:int,card:Card,db:AsyncSession=Depends(get_async_db),user:User=Depends(get_current_user)):
     rev=await owned(db,user.id,portfolio,"revision",revision_id)
     first=next(batches(rev.manifest["stocks"],card,portfolio=portfolio),([],[]))
-    packet = await storage.by_key(db,"packet","market-v2",revision_id=rev.id) if card in ("technical","pairwise") else None
+    packet_key = "technical-v3" if portfolio=="india" and card=="technical" else "market-v2"
+    packet = await storage.by_key(db,"packet",packet_key,revision_id=rev.id) if card in ("technical","pairwise") else None
     research = packet.data["research"] if packet else None
+    if research is None and portfolio=="india" and card=="technical":
+        research={"version":3,"technical":{},"listings":{}}
     if research is None and portfolio=="india" and card=="pairwise":
         research = {"version":2,"packets":{k:{"sources":{},"features":{}} for k in first[0]}}
     return {"prompt":build_prompt(rev,card,*first,research)}

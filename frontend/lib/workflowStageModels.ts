@@ -13,7 +13,7 @@ export function defaultStageModelKeys(stage: ModelStage): string[] {
 }
 
 export function usesSingleScorecardJob(stage: string, portfolio?: string | null) {
-  return portfolio === "zerodha" && (stage === "threats" || stage === "pairwise");
+  return portfolio === "zerodha" && (stage === "technical" || stage === "threats" || stage === "pairwise");
 }
 
 export function resolveStageModelKeys(stage: ModelStage, saved: StageModelPreferences, portfolio?: string | null) {

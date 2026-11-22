@@ -1,5 +1,7 @@
 "use client";
 
+import { TechnicalValidation } from "./TechnicalValidation";
+import { TechnicalStockScores } from "./TechnicalStockScores";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -319,17 +321,19 @@ function Evidence({
   const coverage = useRead(readCoverage,card==="technical" || card==="pairwise");
   const published = card==="technical" || card==="pairwise" ? coverage.data?.cards[card] : undefined;
   const run =
-    execution !== null
+    published && card==="technical" && execution===null && !published.run_id ? undefined : execution !== null
       ? runs.find((r) => r.id === execution)
       : (runs.find((r) => r.id === (published?.run_id ?? stage?.run_id)) ?? runs[0]);
   const jobs = run?.jobs ?? (execution === null ? standalone : []);
   const runId = run?.id;
-  const revision = inputRevision(run?.prompt, card, market);
+  const revision = inputRevision(run?.prompt, card, market) ?? (card==="technical" && !runId ? coverage.data?.revision_id : null);
   const readTemplate = useCallback(() => api.prompt(revision!, card), [api, revision, card]);
   const template = useRead(readTemplate, !!revision && tab === "prompts" && templateOpen);
   const readSource = useCallback(() => api.read(revision!), [api, revision, refresh]);
   const source = useRead(readSource, !!revision);
-  const attempt = source.data?.attempts.find((a) => a.run_id === runId && a.card === card);
+  const attempts=source.data?.attempts.filter(a=>a.card===card)??[];
+  const matching=attempts.filter(a=>runId?a.run_id===runId:a.id===published?.output_id);
+  const attempt=matching.find(a=>a.id===published?.output_id)??matching[0];
   const attemptId = attempt?.id;
   const readResult = useCallback(() => api.result(attemptId!), [api, attemptId, refresh]);
   const scores = useRead(readResult, !!attempt && (tab === "flow" || tab === "output"));
@@ -507,7 +511,7 @@ function Evidence({
       {tab === "output" && (
         <section className="min-w-0 space-y-3">
           <Feedback query={output} />
-          {output.data && renderOutput(output.data, card)}
+          {output.data && !(market==="zerodha"&&card==="technical") && renderOutput(output.data, card)}
           {!run && (
             <>
               {jobsTable(jobs)}
@@ -526,12 +530,14 @@ function Evidence({
             </>
           )}
           {attempt && (
-            <details className={panel}>
+            <details className={panel} open={card==="technical"&&market==="zerodha"?true:undefined}>
               <summary className="cursor-pointer font-semibold">
                 Saved stock scores · Output #{attempt.id}
               </summary>
               <Feedback query={scores} />
-              {scores.data && (
+              {scores.data && card==="technical" && market==="zerodha" ? (
+                <TechnicalStockScores key={scores.data.id} result={scores.data} onRecover={()=>api.recover(scores.data!.id)} />
+              ) : scores.data && (
                 <Table
                   columns={["Listing", "Score /100", "Coverage", ...(card==="pairwise"?["W / T / L", "Judged / assigned","Unknown"]:card==="technical"?["Setup","Entry at close","Catalogue rating","5-session return %","20-session relative %","Relative volume","20-session volatility %","Distance to SMA50 %","Research score /100"]:[])]}
                   rows={scores.data.rows.map((r) => ({
@@ -547,6 +553,8 @@ function Evidence({
               )}
             </details>
           )}
+          {card==="technical"&&market==="zerodha"&&<><TechnicalValidation key={sequence} read={api.technicalValidation} executions={api.technicalExecutions}/>
+            {output.data&&<details className={panel}><summary>Original model output</summary>{renderOutput(output.data,card)}</details>}</>}
         </section>
       )}
       {tab === "duration" && (
