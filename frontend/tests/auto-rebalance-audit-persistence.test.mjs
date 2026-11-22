@@ -41,6 +41,13 @@ const holdingsSnapshot = {
   id: 7001, parse_status: "parsed", reported_holdings_count: 1, captured_at: "2025-01-15T12:00:00Z",
   holdings: [{ symbol: "ABC", quantity: 0.125 }],
 };
+const swingExports = {};
+new Function("exports", compile(readFileSync(new URL("../lib/swingTrade.ts", import.meta.url), "utf8")))(swingExports);
+const fixtureSwingSettings = { stockCount: "8", investmentAmount: "1,25,000", horizon: "2–6 weeks" };
+const swingPrompts = {
+  zerodha: swingExports.buildSwingTradePrompt("india", fixtureSwingSettings.investmentAmount, fixtureSwingSettings),
+  indmoneyUs: swingExports.buildSwingTradePrompt("us"),
+};
 const workflowSource = readFileSync(new URL("../app/console/dashboard/_components/RebalanceWorkflowSections.tsx", import.meta.url), "utf8");
 function extract(start, end) {
   const index = workflowSource.indexOf(start);
@@ -149,7 +156,7 @@ function harness({ analysisOnly = false, formulaScore = 0, intercept, read, emai
     buildZerodhaPopupFeatures: () => "", ensureZerodhaConnectedForSync: async () => {},
     onDashboardRefresh: async () => {}, waitForRunWithStageHandling: async (_, __, id) => ({ id, status: "completed", run_jobs: [] }),
     retryWorkflowRead: (read) => read(),
-    buildSwingTradePrompt: () => "unchanged strategy", getSwingTradeDefaultInvestmentAmount: () => "existing amount", getSwingTradeDefaultExportSheetName: () => "existing sheet",
+    swingPrompts, getSwingTradeDefaultExportSheetName: () => "existing sheet",
     getLatestMatchingRebalanceRuns: runs => runs,
     getSelectedStageRunIds: () => [], selectStageRunInputs: () => [], deduplicateStageRunInputs: runs => runs,
     buildOutputSourceJobs: async () => [], getPreviousMarketClose: () => new Date(),
@@ -183,7 +190,11 @@ for (const rejectedStage of ["sync", "actionables"]) {
     assert.equal(h.view.audits.zerodha.status, "failed");
     assert.equal(h.modelCalls.length, 3, JSON.stringify(h.updates.filter(x => x.info.error)));
     assert.deepEqual(h.modelCalls[0].targets, [{ provider: "existing", model: "chosen", sample_count: 3 }]);
-    assert.equal(h.modelCalls[0].prompt, "unchanged strategy");
+    assert.equal(h.modelCalls[0].prompt, swingPrompts.zerodha);
+    assert.match(h.modelCalls[0].prompt, /Choose exactly 8 stocks/);
+    assert.equal(h.modelCalls[0].prompt.match(/INR 1,25,000/g)?.length, 5);
+    assert.match(h.modelCalls[0].prompt, /reaching target in 2–6 weeks/);
+    assert.doesNotMatch(h.modelCalls[0].prompt, /50,000|1–3 months|2–12 weeks/i);
     assert.equal(h.view.states.zerodha.swing.state, "completed");
     assert.equal(h.view.states.zerodha.actionables.state, "completed");
     assert.equal(h.updates.filter(({ info }) => info.state === "failed").length, 0, "audit failure is not an LLM failure");

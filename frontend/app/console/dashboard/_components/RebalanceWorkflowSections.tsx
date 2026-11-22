@@ -125,7 +125,8 @@ import {
 import {
   buildSwingTradePrompt,
   getSwingTradeDefaultExportSheetName,
-  getSwingTradeDefaultInvestmentAmount,
+  readZerodhaSwingSettings,
+  zerodhaSwingSettingsKey,
   type SwingTradeMarket,
 } from "@/lib/swingTrade";
 import {
@@ -1726,7 +1727,7 @@ function getInputMarketBadgeClass(market?: SwingTradeMarket) {
   return "border-slate-200 bg-slate-50 text-slate-600";
 }
 
-function getStagePromptPreview(portfolio: WorkflowPortfolio, stage: PromptPreviewStage) {
+function getStagePromptPreview(portfolio: WorkflowPortfolio, stage: PromptPreviewStage, swingPrompt: string) {
   const market: SwingTradeMarket = portfolio === "zerodha" ? "india" : "us";
   const portfolioName = portfolio === "zerodha" ? "Zerodha" : "INDmoney US";
   if (stage === "threats") {
@@ -1740,7 +1741,7 @@ ${portfolioName} Threat Scan Flow
 This dashboard queues the server-side ${portfolioName} threat prompt through the threat-scan worker endpoint. The runtime prompt includes the latest selected portfolio snapshot, web-search markers, and the normalized threat analysis instructions stored with the backend threat flow.`;
   }
   if (stage === "swing") {
-    return buildSwingTradePrompt(market, getSwingTradeDefaultInvestmentAmount(market));
+    return swingPrompt;
   }
   if (stage === "rebalance") {
     return `${ensureRebalanceFlowMarker(buildRebalancePrompt(market), market)}
@@ -4465,6 +4466,11 @@ export function RebalanceWorkflowSections({
   const [preflightPortfolio, setPreflightPortfolio] = useState<WorkflowPortfolio | null>(null);
   const [preflightErrors, setPreflightErrors] = useState<Partial<Record<WorkflowPortfolio, string[]>>>({});
   const [runtimeOwner] = useState(captureWorkflowOwner);
+  const [zerodhaSwingSettings, setZerodhaSwingSettings] = useState(() => readZerodhaSwingSettings(runtimeOwner?.id));
+  const swingPrompts = useMemo(() => ({
+    zerodha: buildSwingTradePrompt("india", zerodhaSwingSettings.investmentAmount, zerodhaSwingSettings),
+    indmoneyUs: buildSwingTradePrompt("us"),
+  }), [zerodhaSwingSettings]);
   const apiService = useMemo(() => workflowOwnedApi(workflowApiService, runtimeOwner), [runtimeOwner]);
   const { rate: usdInrRate, verifiedRate, label: costRateLabel } = useRebalanceCostQuote();
   const { user: basketOwner } = useAuth();
@@ -4687,7 +4693,6 @@ export function RebalanceWorkflowSections({
     portfolio: WorkflowPortfolio;
     stage: PromptPreviewStage;
     title: string;
-    body: string;
   } | null>(null);
   const [zerodhaBasketOpen, setZerodhaBasketOpen] = useState(false);
   const [zerodhaBasketLoading, setZerodhaBasketLoading] = useState(false);
@@ -6288,7 +6293,7 @@ ${zerodhaExecutionMode === "direct_market"
             });
           }
         } else if (stage === "swing") {
-          candidates = [{...nextCandidate, content: buildSwingTradePrompt(market, getSwingTradeDefaultInvestmentAmount(market))}];
+          candidates = [{...nextCandidate, content: swingPrompts[portfolio]}];
         } else if (stage !== "actionables") {
           const runs = await fetchDashboardRecentFullRuns();
           if (stage === "rebalance") {
@@ -6324,7 +6329,7 @@ ${zerodhaExecutionMode === "direct_market"
         setInputCandidatesLoading(false);
       }
     },
-    [apiService, ],
+    [apiService, swingPrompts],
   );
 
   const openInputSelection = useCallback(
@@ -6474,11 +6479,7 @@ ${zerodhaExecutionMode === "direct_market"
   const showStageLlmInfo = useCallback(async (portfolio: WorkflowPortfolio, stage: WorkflowStageKey) => {
     if (!isModelStage(stage)) return;
     const requestId = ++llmDialogRequestRef.current;
-    const market = portfolio === "zerodha" ? "india" : "us";
-    const prompt = buildSwingTradePrompt(
-      market,
-      getSwingTradeDefaultInvestmentAmount(market),
-    );
+    const prompt = swingPrompts[portfolio];
 
     setLegacyKeys(null);
     setModelSaveError(null);
@@ -6542,7 +6543,7 @@ ${zerodhaExecutionMode === "direct_market"
         setLlmDialogLoading(false);
       }
     }
-  }, [apiService, loadModelPreferences, usdInrRate]);
+  }, [apiService, loadModelPreferences, usdInrRate, swingPrompts]);
 
   const showStageOutput = useCallback(
     async (portfolio: WorkflowPortfolio, stage: WorkflowStageKey, requestedRunId?: number) => {
@@ -6759,7 +6760,6 @@ ${zerodhaExecutionMode === "direct_market"
         portfolio,
         stage,
         title: `${portfolioLabel} ${getStageTileLabel(stage)} prompt`,
-        body: getStagePromptPreview(portfolio, stage),
       });
     },
     [],
@@ -6922,7 +6922,7 @@ ${zerodhaExecutionMode === "direct_market"
           const modelStages = (["swing", ...cards] as const).filter(shouldRunCurrentStage);
           if (!modelStages.length) return;
           const [providers, saved] = await Promise.all([
-            apiService.getProviders({ prompt: buildSwingTradePrompt(market, getSwingTradeDefaultInvestmentAmount(market)) }),
+            apiService.getProviders({ prompt: swingPrompts[portfolio] }),
             loadModelPreferences(),
           ]);
           const issues: string[] = [];
@@ -7199,10 +7199,7 @@ ${zerodhaExecutionMode === "direct_market"
           });
           const swingRun = await apiService.createRun(
             buildRunPayload({
-              prompt: buildSwingTradePrompt(
-                market,
-                getSwingTradeDefaultInvestmentAmount(market),
-              ),
+              prompt: swingPrompts[portfolio],
               targets: swingTargets,
               sheetName: getSwingTradeDefaultExportSheetName(market),
               runMetadata,
@@ -7454,7 +7451,7 @@ ${zerodhaExecutionMode === "direct_market"
         }
       }
     },
-    [runtimeOwner, apiService, loadModelPreferences, scoreMatrixFormulaConfig,
+    [runtimeOwner, apiService, loadModelPreferences, scoreMatrixFormulaConfig, swingPrompts,
       analysisOnlyRuns,
       buildZerodhaPopupFeatures,
       completeSkippedStage,
@@ -8206,7 +8203,13 @@ ${zerodhaExecutionMode === "direct_market"
       {promptDialog ? (
         <PromptTemplateDialog
           title={promptDialog.title}
-          body={promptDialog.body}
+          body={getStagePromptPreview(promptDialog.portfolio, promptDialog.stage, swingPrompts[promptDialog.portfolio])}
+          swingSettings={promptDialog.portfolio === "zerodha" && promptDialog.stage === "swing" ? zerodhaSwingSettings : undefined}
+          onSaveSwingSettings={settings => {
+            const owner = requireWorkflowOwner(runtimeOwner);
+            window.localStorage.setItem(zerodhaSwingSettingsKey(owner.id), JSON.stringify(settings));
+            setZerodhaSwingSettings(settings);
+          }}
           onReviewInputs={() => {
             const { portfolio, stage } = promptDialog;
             setPromptDialog(null);
