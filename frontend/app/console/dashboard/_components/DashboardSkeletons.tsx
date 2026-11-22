@@ -214,22 +214,5 @@ export function DashboardThreatCardSkeleton({ title = "Threat report", deferred 
 }
 
 export function DashboardPageSkeleton() {
-  return (
-    <div className="mx-auto flex flex-col gap-6">
-      <DashboardHeroSkeleton />
-      <DashboardWorkflowSkeleton />
-
-      <section className="grid gap-6 xl:grid-cols-2">
-        <DashboardMarketCardSkeleton />
-        <DashboardMarketCardSkeleton />
-      </section>
-
-      <DashboardFinalActionablesSkeleton />
-
-      <section className="grid gap-6 xl:grid-cols-2">
-        <DashboardThreatCardSkeleton />
-        <DashboardThreatCardSkeleton />
-      </section>
-    </div>
-  );
+  return <DashboardHeroSkeleton />;
 }

@@ -58,101 +58,11 @@ test("Bullpen includes cash once and never double-counts an inclusive wallet val
   );
 });
 
-test("dashboard overview preserves three totals with native currency fallback", () => {
-  const source = readFileSync(
-    new URL(
-      "../app/console/dashboard/DashboardPageClient.tsx",
-      import.meta.url,
-    ),
-    "utf8",
-  );
-  for (const heading of ["Portfolio + cash", "Snapshot age", "Captured snapshot text", "Refresh"]) {
-    assert.ok(source.includes(heading));
-  }
-  assert.match(source, /currency: fx\?\.status === "valid" \? "INR" : "USD"/);
-});
-
-test("one overview replaces the duplicated command center", () => {
-  const source = readFileSync(
-    new URL(
-      "../app/console/dashboard/DashboardPageClient.tsx",
-      import.meta.url,
-    ),
-    "utf8",
-  );
-  assert.doesNotMatch(
-    source,
-    /Portfolio Command Center|Investments Control Room/,
-  );
-  assert.equal((source.match(/<PortfolioCommandSummary/g) ?? []).length, 1);
+test("dashboard keeps the portfolio board and its three views", () => {
+  const source = readFileSync(new URL("../app/console/dashboard/DashboardPageClient.tsx", import.meta.url), "utf8");
   assert.equal((source.match(/<h1/g) ?? []).length, 1);
-  assert.match(
-    source,
-    /aria-label="Portfolio history"[\s\S]*?<PortfolioCommandChart/,
-  );
-  for (const view of [
-    "Overview",
-    "Sources and freshness",
-    "Refresh behaviour",
-  ]) {
-    assert.ok(source.includes(view));
-  }
-  assert.match(source, /refreshBullpenTile\(false\)/);
-  assert.match(source, /filter\(isBullpenHistoryActivePosition\)/);
-  assert.match(source, /filter\(isBullpenHistoryClaimablePosition\)/);
-  assert.match(
-    source,
-    /bullpenSummary\?\.walletValue \?\?[\s\S]*?bullpenSummary\?\.totalValue/,
-  );
-});
-
-test("portfolio command chart supports and remembers every portfolio view", () => {
-  const dashboardSource = readFileSync(
-    new URL(
-      "../app/console/dashboard/DashboardPageClient.tsx",
-      import.meta.url,
-    ),
-    "utf8",
-  );
-  const chartSource = readFileSync(
-    new URL(
-      "../app/console/dashboard/_components/PortfolioCommandChart.tsx",
-      import.meta.url,
-    ),
-    "utf8",
-  );
-
-  for (const label of [
-    "India portfolio value",
-    "IndMoney portfolio value",
-    "Bullpen portfolio value",
-    "Combined portfolio value",
-  ]) {
-    assert.match(dashboardSource, new RegExp(label));
-  }
-  assert.match(chartSource, /aria-label="Choose portfolio chart"/);
-  assert.match(chartSource, /dashboard-command-chart:v1:user:/);
-  assert.match(chartSource, /window\.localStorage\.setItem/);
-  assert.match(chartSource, /dashboard-command-chart-history:v1:user:/);
-});
-
-test("Refresh Board preserves last-known-good Bullpen and requests a live refresh", () => {
-  const source = readFileSync(
-    new URL(
-      "../app/console/dashboard/DashboardPageClient.tsx",
-      import.meta.url,
-    ),
-    "utf8",
-  );
-
-  assert.match(
-    source,
-    /bullpenPositions:\s*current\.bullpenPositions \?\? update\.bullpenPositions \?\? null/,
-  );
-  assert.match(
-    source,
-    /Promise\.allSettled\(\[\s*loadDashboard\(false\),\s*refreshBullpenTile\(true\),/,
-  );
+  assert.doesNotMatch(source, /PortfolioCommandChart|ThreatMarketCard|StockFlowSlot|RebalanceWorkflowSections/);
+  for (const label of ["Portfolio + cash", "Sources and freshness", "Refresh behaviour"]) assert.ok(source.includes(label));
 });
 
 test("USD portfolio history is converted to portfolio-plus-cash INR totals", () => {
@@ -191,18 +101,35 @@ test("persisted server history drives Bullpen and combined charts", () => {
     [100, 101, 102, 103],
   );
 
-  const dashboardSource = readFileSync(
-    new URL(
-      "../app/console/dashboard/DashboardPageClient.tsx",
-      import.meta.url,
-    ),
-    "utf8",
-  );
-  assert.match(dashboardSource, /dashboard\.portfolioHistory\?\.bullpen/);
-  assert.match(dashboardSource, /dashboard\.portfolioHistory\?\.combined/);
   assert.match(sourceForDailyHistoryType(), /portfolio_history:/);
 });
 
 function sourceForDailyHistoryType() {
   return readFileSync(new URL("../types/api.ts", import.meta.url), "utf8");
 }
+
+test("dashboard selects enabled sources and keeps each latest observed component", async () => {
+  const { build } = await import("esbuild");
+  const { outputFiles } = await build({
+    entryPoints: [new URL("../app/console/dashboard/_components/dashboardBalances.ts", import.meta.url).pathname],
+    bundle: true, platform: "node", format: "esm", write: false,
+  });
+  const { visibleSources, indiaBalance, usBalance, balanceTotal, mergeBalances, emptyBalance, bullpenBalance } =
+    await import(`data:text/javascript;base64,${Buffer.from(outputFiles[0].contents).toString("base64")}`);
+  assert.deepEqual(visibleSources({visible_ids:["overview","india-portfolio","us-portfolio"]},"admin"), ["zerodha","indmoney"]);
+  assert.deepEqual(visibleSources({visible_ids:["bullpen-ai-review"]},"admin"), ["bullpen"]);
+  assert.deepEqual(visibleSources({visible_ids:null},"user"), ["zerodha","indmoney"]);
+  assert.deepEqual(visibleSources(undefined,"admin"), []);
+  const old = "2026-01-01T12:00:00Z", newer = "2026-01-03T12:00:00Z";
+  const us = usBalance({latest:{captured_at:newer,current_value:200,wallet_balance:null}, history:[
+    {captured_at:old,current_value:150,wallet_balance:0}
+  ]});
+  assert.equal(balanceTotal(us),200);
+  assert.deepEqual(us.cash, {value:0,at:old});
+  assert.equal(us.portfolio.at,newer);
+  assert.deepEqual(mergeBalances(us, emptyBalance), us);
+  const india = indiaBalance({latest:null,history:[{captured_at:old,holdings_market_value:100,available_margin:30}]});
+  assert.equal(balanceTotal(india),130);
+  assert.equal(balanceTotal({...india, cash:null}),null);
+  assert.equal(balanceTotal(bullpenBalance({positionsSource:"redis-cache", fetchedAt:newer,summary:{walletValue:100,cashBalance:20}})),100);
+});

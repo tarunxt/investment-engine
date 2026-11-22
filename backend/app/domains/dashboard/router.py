@@ -9,10 +9,16 @@ from fastapi.responses import Response as FastAPIResponse
 from app.domains.auth.dependencies import get_current_user
 from app.domains.auth.models import User
 from app.domains.polymarket.access import user_can_access_singleton_bullpen_runtime
-from app.domains.dashboard.schemas import DashboardSummaryResponse
-from app.domains.dashboard.service import build_dashboard_summary
+from app.domains.dashboard.schemas import DashboardFxRate, DashboardSummaryResponse
+from app.domains.dashboard.service import build_dashboard_summary, load_dashboard_fx
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
+
+
+@router.get("/fx", response_model=DashboardFxRate)
+async def dashboard_fx(response: Response, current_user: User = Depends(get_current_user)):
+    response.headers["Cache-Control"] = "private, no-store"
+    return await load_dashboard_fx()
 
 
 @router.get("/summary", response_model=DashboardSummaryResponse)

@@ -12,15 +12,15 @@ import type { DashboardSummaryResponse } from "@/types/api";
 import { DashboardInteractiveIsland } from "./DashboardInteractiveIsland";
 
 export default async function DashboardPage() {
-  let initialSummary: DashboardSummaryResponse | null = null;
+  let initialFx: DashboardSummaryResponse["fx"] | null = null;
   try {
     const requestHeaders = await headers();
     const session = await createBackendSessionContext({
       headers: requestHeaders,
     });
-    initialSummary = await fetchBackendJsonReadOnly<DashboardSummaryResponse>(
+    initialFx = await fetchBackendJsonReadOnly<DashboardSummaryResponse["fx"]>(
       session,
-      "/dashboard/summary",
+      "/dashboard/fx",
     );
   } catch (error) {
     if (error instanceof BackendRuntimeHttpError && error.status === 401) {
@@ -29,7 +29,7 @@ export default async function DashboardPage() {
     // No private bootstrap data on a missing/expired credential. The client
     // can use the existing supported BFF handler; SSR never mutates cookies.
     if (!(error instanceof BackendSessionHandlerRequiredError)) {
-      console.warn("Initial dashboard summary was unavailable.", {
+      console.warn("Initial dashboard exchange rate was unavailable.", {
         error_type: error instanceof Error ? error.name : "UnknownError",
       });
     }
@@ -37,7 +37,7 @@ export default async function DashboardPage() {
 
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-6">
-      <DashboardInteractiveIsland initialSummary={initialSummary} />
+      <DashboardInteractiveIsland initialFx={initialFx} />
     </div>
   );
 }

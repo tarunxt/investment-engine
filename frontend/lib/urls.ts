@@ -375,6 +375,7 @@ export const URLs = {
   },
 
   dashboard: {
+    fx: () => `${resolveApiBaseUrl()}/dashboard/fx`,
     summary: () => `${resolveApiBaseUrl()}/dashboard/summary`,
   },
 

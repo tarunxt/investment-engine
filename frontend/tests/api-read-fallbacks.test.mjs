@@ -164,7 +164,7 @@ test("Auto-Live start ambiguity uses two read-only reconciliations and never rep
   assert.doesNotMatch(method, /while\s*\(/);
 });
 
-test("dashboard tertiary fallbacks validate age-bounded saved data", () => {
+test("dashboard retains timestamped balances and deduplicates portfolio reads", () => {
   const dashboardSource = read(
     "../app/console/dashboard/DashboardPageClient.tsx",
   );
@@ -172,10 +172,8 @@ test("dashboard tertiary fallbacks validate age-bounded saved data", () => {
     "../app/console/_components/FinalActionablesConsole.tsx",
   );
 
-  assert.match(dashboardSource, /isValidDashboardCacheValue/);
-  assert.match(dashboardSource, /dashboard_read_fallback_triggered/);
-  assert.match(dashboardSource, /last-known-good-cache/);
-  assert.match(dashboardSource, /dashboard_refresh_deduplicated/);
+  assert.match(dashboardSource, /mergeBalances/);
+  assert.match(dashboardSource, /inFlight.current.has\(source\)/);
   assert.match(actionablesSource, /DASHBOARD_FINAL_ACTIONABLES_CACHE_MAX_AGE_MS/);
   assert.match(actionablesSource, /final_actionables_fallback_triggered/);
   assert.match(actionablesSource, /final_actionables_refresh_deduplicated/);

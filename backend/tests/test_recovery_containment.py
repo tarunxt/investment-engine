@@ -350,6 +350,8 @@ def test_worker_ready_hooks_do_not_dispatch_or_touch_legacy_state(recovery):
 
 
 @pytest.mark.parametrize("method,path,allowed", [
+    ("GET", "/dashboard/fx", True), ("POST", "/dashboard/fx", False),
+    ("GET", "/dashboard/summary", False),
     ("GET", "/indmoney-us/portfolio", True), ("GET", "/providers", True), ("POST", "/runs", True),
     ("POST", "/auth/login", True), ("GET", "/runs/123", True),
     ("POST", "/auth/refresh-intent", True), ("POST", "/auth/logout-refresh", True),
