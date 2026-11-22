@@ -902,6 +902,14 @@ class apiServiceClass implements IApiService {
   /**
    * Get user profile
    */
+  getSidebarPolicy() {
+    return this.get<import("@/lib/sidebarVisibility").SidebarPolicy>(URLs.auth.sidebarVisibility(), { cache: "no-store" });
+  }
+
+  saveSidebarPolicy(visible_ids: string[], revision: number) {
+    return this.put<import("@/lib/sidebarVisibility").SidebarPolicy>(URLs.auth.sidebarVisibility(), { visible_ids, revision });
+  }
+
   getWorkflowModels() {
     return this.get<import("@/lib/workflowStageModels").StageModelPreferences>(URLs.auth.workflowModels(), { cache: "no-store" });
   }

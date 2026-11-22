@@ -3,6 +3,7 @@
 import { useEffect, useState, type CSSProperties } from 'react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
+import { useSidebarPolicy } from '@/hooks/useSidebarPolicy';
 import { useAuth } from '@/hooks/useAuth';
 import {
     HiOutlineMenu,
@@ -31,6 +32,8 @@ export function ConsoleShell({
     const router = useRouter();
     const pathname = usePathname();
     const userId = user?.id;
+    const { policy, retry } = useSidebarPolicy(userId);
+    const dashboardVisible = policy && (policy.visible_ids === null || policy.visible_ids.includes('overview'));
     const [identity, setIdentity] = useState<{userId: number; name: string} | null>(null);
     useEffect(() => {
         if (!userId) return;
@@ -89,11 +92,7 @@ export function ConsoleShell({
                 <div className="flex flex-col h-full">
                     {/* Logo */}
                     <div className="relative flex min-h-28 items-center justify-center border-b border-sidebar-border px-5 py-5">
-                        <Link
-                            href={URLs.routes.console.dashboard()}
-                            prefetch={false}
-                            className="flex flex-col items-center gap-3 text-center"
-                        >
+                        <div className="relative flex flex-col items-center gap-3 text-center">
                             <div className="rounded-2xl bg-linear-to-r from-indigo-600 via-violet-600 to-fuchsia-600 px-5 py-3 shadow-sm">
                                 <span className="text-xs font-bold uppercase tracking-[0.28em] text-white">{BRAND_ACRONYM}</span>
                             </div>
@@ -103,7 +102,8 @@ export function ConsoleShell({
                                         Investment Engine
                                     </div>
                             </div>
-                        </Link>
+                            {dashboardVisible && <Link href={URLs.routes.console.dashboard()} prefetch={false} aria-label="Dashboard" className="absolute inset-0 rounded-md" />}
+                        </div>
                         <button
                             type="button"
                             onClick={() => setSidebarOpen(false)}
@@ -115,13 +115,18 @@ export function ConsoleShell({
 
                     {/* Navigation */}
                     <div className="flex-1 min-h-0 py-4">
-                        <SidebarNavigation
+                        {policy ? <SidebarNavigation
+                            key={userId}
+                            policy={policy}
                             pathname={pathname}
                             user={user}
                             userId={user?.id}
                             onLogout={logout}
                             onNavigate={() => setSidebarOpen(false)}
-                        />
+                        /> : <div className="space-y-3 px-5 text-sm text-muted-foreground" role="status">
+                            {policy === null ? <><p>Couldn’t load navigation.</p><button onClick={retry} className="underline">Retry</button></> : <p>Loading navigation…</p>}
+                            {user && <button onClick={() => void logout()} className="block underline">Sign out</button>}
+                        </div>}
                     </div>
 
                 </div>

@@ -9,7 +9,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import type { JWT } from "next-auth/jwt";
 
-const protectedRoutePrefixes = ["/console", "/dashboard", "/profile"] as const;
+const protectedRoutePrefixes = ["/console", "/dashboard", "/profile", "/admin"] as const;
 const authRoutePrefixes = [
   "/login",
   "/register",
@@ -150,6 +150,7 @@ export const config = {
     "/register",
     "/forgot-password",
     "/reset-password/:path*",
+    "/admin",
     "/console/:path*",
     "/dashboard/:path*",
     "/profile/:path*",

@@ -6,10 +6,10 @@ import Link from 'next/link';
 
 import { cn } from '@/lib/utils';
 import type { NavigationLeaf, NavigationSection } from './sidebarNavigationConfig';
-import { ACCOUNT_NAVIGATION } from './sidebarNavigationConfig';
 import { collectLeafEntries, isLeafActive } from './sidebarNavigationUtils';
 
 type Props = {
+    accountItems: readonly NavigationLeaf[];
     open: boolean;
     pathname: string;
     sections: readonly NavigationSection[];
@@ -17,7 +17,7 @@ type Props = {
     onNavigate: () => void;
 };
 
-export default function NavigationDirectory({ open, pathname, sections, onClose, onNavigate }: Props) {
+export default function NavigationDirectory({ accountItems, open, pathname, sections, onClose, onNavigate }: Props) {
     const dialogRef = useRef<HTMLDialogElement>(null);
     useEffect(() => {
         const dialog = dialogRef.current;
@@ -26,7 +26,7 @@ export default function NavigationDirectory({ open, pathname, sections, onClose,
     }, [open]);
 
     if (typeof document === 'undefined') return null;
-    const destinations: NavigationLeaf[] = [...collectLeafEntries(sections), ...ACCOUNT_NAVIGATION];
+    const destinations: NavigationLeaf[] = [...collectLeafEntries(sections), ...accountItems];
     const returnClass = 'rounded-lg px-3 py-2 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2';
 
     return createPortal(

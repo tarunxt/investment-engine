@@ -55,6 +55,21 @@ export function collectLeafEntries(sections: readonly NavigationSection[]) {
     ));
 }
 
+export function visibleNavigationSections(
+    sections: readonly NavigationSection[],
+    visibleIds: ReadonlySet<string> | null,
+): readonly NavigationSection[] {
+    if (visibleIds === null) return sections;
+    return sections.flatMap((section) => {
+        const entries = section.entries.flatMap((entry): NavigationEntry[] => {
+            if (!isNavigationGroup(entry)) return visibleIds.has(entry.id) ? [entry] : [];
+            const children = entry.children.filter((child) => visibleIds.has(child.id));
+            return children.length ? [{ ...entry, children }] : [];
+        });
+        return entries.length ? [{ ...section, entries }] : [];
+    });
+}
+
 export function reconcileSidebarOrder(
     storedValue: unknown,
     defaultOrder: SidebarOrderDefaults,

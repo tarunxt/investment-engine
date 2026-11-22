@@ -4,7 +4,7 @@ import enum
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, Column, DateTime, Enum, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, CheckConstraint, Boolean, Column, DateTime, Enum, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.infrastructure.database.base import Base, TimestampMixin
@@ -12,6 +12,15 @@ from app.infrastructure.database.base import Base, TimestampMixin
 if TYPE_CHECKING:
     from app.domains.jobs.models import Job
     from app.domains.prompts.models import Prompt
+
+
+class SidebarVisibility(Base):
+    __tablename__ = "sidebar_visibility"
+    __table_args__ = (CheckConstraint("id = 1", name="ck_sidebar_visibility_singleton"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=False)
+    revision: Mapped[int] = mapped_column(nullable=False)
+    visible_ids: Mapped[list[str] | None] = mapped_column(JSON(none_as_null=True))
 
 
 class UserRole(str, enum.Enum):
