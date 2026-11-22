@@ -174,3 +174,16 @@ test('Threats distinguishes returned rows, provisional scores and full assessmen
   assert.ok(!rows.some(r=>r.label==='Stocks recommended'));
   assert.equal(ui.getStageOutcome({...info,threatCounts:{...info.threatCounts,scored:34,status:'partial'}}),'partial');
 });
+
+test('a repaired Pairwise packet displays its own zero model cost and pending verdicts', () => {
+  const rows=ui.getLlmStageTileRows({state:'idle',lastRunId:545,runStatus:'partial',partialNotice:'Previous output was partial',
+    distinctModels:1,completedLlms:1,totalLlms:1,estimatedCostUsd:1,
+    published:{output_id:479,run_id:null,used_output_id:463,final_id:468,covered:0,expected:561,
+      pair_counts:{mode:'full',listings:34,ready:34,judged:0,eligible:561,returned:0,expected:561,jobs:0,complete_stocks:0,one_missing:0,both_missing:0}}},0);
+  const values=Object.fromEntries(rows.map(r=>[r.label,r.value]));
+  assert.equal(values['Cost incurred'],'₹0.00 · evidence only');
+  assert.equal(values.Assessment,'Awaiting judgments');
+  assert.equal(values['Stage 4 used'],'Output #463 · final #468');
+  assert.equal(values.Error,undefined);
+  assert.equal(values['Model coverage'],undefined);
+});
