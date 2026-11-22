@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core.security import PasswordUtils
 from app.domains.auth import google_signin
-from app.domains.auth.models import ActivityLog, AuthSessionFamily, SidebarVisibility, User, UserProfile, UserRole
+from app.domains.auth.models import ActivityLog, AuthSessionFamily, User, UserProfile, UserRole
 from app.domains.auth.router import router as auth_router
 from app.domains.auth.sidebar_visibility import Destination, OWNER_EMAIL, router
 from app.domains.jobs.models import Job  # register User relationship
@@ -32,14 +32,13 @@ async def test_owner_login_methods_and_global_visibility(tmp_path, monkeypatch):
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path}/sidebar.db")
     sessions = async_sessionmaker(engine, expire_on_commit=False)
     async with engine.begin() as conn:
-        for model in (User, UserProfile, ActivityLog, AuthSessionFamily, SidebarVisibility):
+        for model in (User, UserProfile, ActivityLog, AuthSessionFamily):
             await conn.run_sync(model.__table__.create)
     password = "SyntheticFixture123"
     async with sessions.begin() as db:
         for email, name, role in [(OWNER_EMAIL, "owner", UserRole.USER), ("other@example.com", "other", UserRole.ADMIN)]:
             db.add(User(email=email, username=name, password_hash=PasswordUtils.hash_password(password),
                         role=role, profile=UserProfile()))
-        db.add(SidebarVisibility(id=1, revision=0, visible_ids=None))
 
     async def database():
         async with sessions() as db:

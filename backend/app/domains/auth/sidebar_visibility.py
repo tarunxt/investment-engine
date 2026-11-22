@@ -1,16 +1,18 @@
 """Global sidebar presentation settings, managed by the existing Cred-X owner."""
+import json
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.auth.dependencies import get_current_user
-from app.domains.auth.models import SidebarVisibility, User
+from app.domains.auth.models import ActivityLog, User
 from app.infrastructure.database.session import get_async_db
 
 OWNER_EMAIL = "tarun.singh6893@gmail.com"
+ACTION = "navigation.sidebar_visibility"
 router = APIRouter(prefix="/auth/profile/sidebar-visibility", tags=["navigation"])
 
 Destination = Literal[
@@ -47,29 +49,40 @@ def require_sidebar_owner(user: User = Depends(get_current_user)) -> User:
     return user
 
 
+async def current_selection(db: AsyncSession, user: User) -> Policy:
+    # Use the existing durable preference log, as workflow model settings do.
+    result = await db.execute(
+        select(ActivityLog.details, ActivityLog.resource_id)
+        .join(User, User.id == ActivityLog.user_id)
+        .where(User.email == OWNER_EMAIL, ActivityLog.action == ACTION)
+        .order_by(ActivityLog.id.desc()).limit(1)
+    )
+    row = result.one_or_none()
+    return Policy(visible_ids=json.loads(row.details) if row else None,
+                  revision=row.resource_id if row else 0, can_manage=user.email == OWNER_EMAIL)
+
+
 @router.get("", response_model=Policy)
 async def read_policy(response: Response, user: User = Depends(get_current_user),
                       db: AsyncSession = Depends(get_async_db)):
-    row = (await db.execute(select(SidebarVisibility).where(SidebarVisibility.id == 1))).scalar_one()
     response.headers["Cache-Control"] = "private, no-store"
-    return Policy(visible_ids=row.visible_ids, revision=row.revision, can_manage=user.email == OWNER_EMAIL)
+    return await current_selection(db, user)
 
 
 @router.put("", response_model=Policy)
-async def save_policy(selection: Selection, response: Response, user: User = Depends(require_sidebar_owner),
+async def save_policy(selection: Selection, response: Response, owner: User = Depends(require_sidebar_owner),
                       db: AsyncSession = Depends(get_async_db)):
-    result = await db.execute(
-        update(SidebarVisibility)
-        .where(SidebarVisibility.id == 1, SidebarVisibility.revision == selection.revision)
-        .values(visible_ids=selection.visible_ids, revision=selection.revision + 1)
-        .returning(SidebarVisibility.revision)
-    )
-    revision = result.scalar_one_or_none()
     response.headers["Cache-Control"] = "private, no-store"
-    if revision is None:
-        current = await read_policy(response, user, db)
-        if current.visible_ids == selection.visible_ids:
-            return current
+    # Serialize the compare-and-append on the stable owner row, even before
+    # the first selection exists. A retry of an already-saved value is a no-op.
+    await db.execute(select(User.id).where(User.id == owner.id).with_for_update())
+    current = await current_selection(db, owner)
+    if current.visible_ids == selection.visible_ids:
+        return current
+    if current.revision != selection.revision:
         raise HTTPException(409, "Settings changed in another tab. Reload the saved selection and try again.")
+    revision = current.revision + 1
+    db.add(ActivityLog(user_id=owner.id, action=ACTION, resource_id=revision,
+                       details=json.dumps(selection.visible_ids)))
     await db.commit()
     return Policy(visible_ids=selection.visible_ids, revision=revision, can_manage=True)

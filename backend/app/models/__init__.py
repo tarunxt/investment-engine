@@ -1,6 +1,6 @@
 """Canonical model imports for SQLAlchemy metadata discovery."""
 
-from app.domains.auth.models import SidebarVisibility, ActivityLog, APIKey, User, UserProfile, UserSession, AuthSessionFamily, AuthRefreshIntent
+from app.domains.auth.models import ActivityLog, APIKey, User, UserProfile, UserSession, AuthSessionFamily, AuthRefreshIntent
 from app.domains.api_usage.models import (
     ApiUsageAttemptEvent,
     LlmProviderUsageCallRecord,
@@ -101,7 +101,6 @@ __all__ = [
     "Bullpen008ScenarioCooldownRecord",
     "Bullpen008ScenarioExposureSnapshotRecord",
     "Bullpen008ScenarioMembershipRecord",
-    "SidebarVisibility",
     "ActivityLog",
     "APIKey",
     "AutoRebalanceWorkflow",
