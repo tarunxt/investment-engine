@@ -8,7 +8,6 @@ import {
     LogOut,
     Mail,
     Plug2,
-    ReceiptText,
     ScanSearch,
     Settings2,
     Sparkles,
@@ -32,6 +31,7 @@ export type NavigationLeaf = {
     name: string;
     href: string;
     matchMode?: NavigationLeafMatchMode;
+    otherHrefs?: readonly string[];
     icon?: NavigationIcon;
     title?: string;
     badge?: NavigationBadge;
@@ -292,18 +292,16 @@ export const ACCOUNT_NAVIGATION = [
     {
         type: 'item',
         id: 'preferences',
-        name: 'Preferences',
+        name: 'Settings',
         href: URLs.routes.profile.preferences(),
         icon: Settings2,
         matchMode: 'prefix',
-    },
-    {
-        type: 'item',
-        id: 'usage-costs',
-        name: 'Usage & Costs',
-        href: URLs.routes.profile.costDrivers(),
-        icon: ReceiptText,
-        matchMode: 'prefix',
+        otherHrefs: [
+            URLs.routes.profile.costDrivers(),
+            URLs.routes.profile.security(),
+            URLs.routes.profile.activity(),
+            URLs.routes.profile.connectedBrokers(),
+        ],
     },
 ] satisfies readonly AccountNavigationItem[];
 

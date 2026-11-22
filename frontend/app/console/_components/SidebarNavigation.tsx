@@ -23,11 +23,13 @@ import {
     ChevronDown,
     ChevronRight,
     GripVertical,
+    Moon,
     Pencil,
     RotateCcw,
+    Sun,
 } from 'lucide-react';
 
-import type { SidebarPolicy } from '@/lib/sidebarVisibility';
+import { sidebarSelection, type SidebarPolicy } from '@/lib/sidebarVisibility';
 import type { User } from '@/hooks/useAuth';
 import { cn } from '@/lib/utils';
 
@@ -167,7 +169,6 @@ type SidebarSectionProps = {
 
 type AccountFooterProps = {
     items: readonly AccountNavigationItem[];
-    showAppearance: boolean;
     canManage: boolean;
     onLogout?: () => Promise<void>;
     onNavigate: () => void;
@@ -709,19 +710,8 @@ function SidebarSection({
     );
 }
 
-function AccountFooter({
-    items, showAppearance, canManage,
-    onLogout,
-    onNavigate,
-    pathname,
-    user,
-}: AccountFooterProps) {
-    const displayName = user?.full_name || user?.username || 'User';
-    const LogoutIcon = ACCOUNT_ACTIONS.logout.icon;
+function useSidebarDisclosure() {
     const detailsRef = useRef<HTMLDetailsElement>(null);
-    const [appearanceOpen, setAppearanceOpen] = useState(false);
-    const accountActive = items.some((item) => isLeafActive(pathname, item));
-
     useEffect(() => {
         const details = detailsRef.current;
         if (!details) return;
@@ -742,19 +732,53 @@ function AccountFooter({
         };
     }, []);
 
+    return detailsRef;
+}
+
+function SidebarAppearance() {
+    const detailsRef = useSidebarDisclosure();
+    const [open, setOpen] = useState(false);
+
+    return (
+        <details name="sidebar-footer" ref={detailsRef} onToggle={(event) => setOpen(event.currentTarget.open)}
+            className="relative mx-3 mb-1">
+            <summary aria-label="Appearance" title="Appearance"
+                className={cn('flex size-10 cursor-pointer list-none items-center justify-center rounded-xl border border-sidebar-border text-sidebar-foreground hover:bg-sidebar-accent [&::-webkit-details-marker]:hidden', NAVIGATION_FOCUS)}>
+                <Sun aria-hidden="true" className="size-5 dark:hidden" />
+                <Moon aria-hidden="true" className="hidden size-5 dark:block" />
+            </summary>
+            <div role="region" aria-label="Appearance" className="absolute inset-x-0 bottom-full z-30 mb-2 max-h-[60dvh] overflow-y-auto rounded-2xl border border-sidebar-border bg-sidebar p-2 shadow-xl">
+                {open && <Suspense fallback={<span role="status" className="p-2 text-sm">Loading theme…</span>}><SidebarThemeToggle /></Suspense>}
+            </div>
+        </details>
+    );
+}
+
+function AccountFooter({
+    items, canManage,
+    onLogout,
+    onNavigate,
+    pathname,
+    user,
+}: AccountFooterProps) {
+    const displayName = user?.full_name || user?.username || 'User';
+    const LogoutIcon = ACCOUNT_ACTIONS.logout.icon;
+    const detailsRef = useSidebarDisclosure();
+    const accountActive = items.some((item) => isLeafActive(pathname, item));
+
     const navigateFromAccount = () => {
         if (detailsRef.current) detailsRef.current.open = false;
         onNavigate();
     };
 
     return (
-        <details ref={detailsRef} className="group/account relative border-t border-sidebar-border/80 px-3 pt-2">
+        <details name="sidebar-footer" ref={detailsRef} className="group/account relative px-3">
             <summary
                 className={cn(
                     'flex cursor-pointer list-none items-center gap-3 rounded-xl px-3 py-2 text-sm [&::-webkit-details-marker]:hidden', NAVIGATION_FOCUS,
                     accountActive ? ACTIVE_ROW : 'hover:bg-sidebar-accent',
                 )}
-                aria-label={accountActive ? 'Account and appearance, current section' : 'Account and appearance'}
+                aria-label={accountActive ? 'Account, current section' : 'Account'}
             >
                 <span aria-hidden="true" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-indigo-600 text-xs font-semibold text-white">{getUserInitials(user)}</span>
                 <span className="min-w-0 flex-1 text-left">
@@ -763,33 +787,24 @@ function AccountFooter({
                 </span>
                 <ChevronDown aria-hidden="true" className="h-4 w-4 shrink-0 transition group-open/account:rotate-180" />
             </summary>
-            <div role="region" aria-label="Account and appearance" className="absolute bottom-full left-2 right-2 z-30 mb-2 max-h-[min(32rem,70dvh)] overflow-y-auto overscroll-contain rounded-2xl border border-sidebar-border bg-sidebar pb-3 shadow-xl">
+            <div role="region" aria-label="Account" className="absolute bottom-full left-2 right-2 z-30 mb-2 max-h-[min(32rem,70dvh)] overflow-y-auto overscroll-contain rounded-2xl border border-sidebar-border bg-sidebar pb-3 shadow-xl">
                 <div className="mx-3 mt-3 rounded-2xl border border-sidebar-border bg-sidebar-accent/80 p-3">
                     <p className="truncate text-sm font-semibold">{displayName}</p>
                     <p className="truncate text-xs text-muted-foreground">{user?.email}</p>
 
-                    <div className="mt-3 grid grid-cols-2 gap-2">
+                    <div className="mt-3 flex flex-col gap-1">
                         {items.map((item) => (
-                            <div
+                            <NavigationLeafLink
                                 key={item.id}
-                                className={item.id === 'usage-costs' ? 'col-span-2' : undefined}
-                            >
-                                <NavigationLeafLink
-                                    leaf={item}
-                                    active={isLeafActive(pathname, item)}
-                                    onNavigate={navigateFromAccount}
-                                />
-                            </div>
+                                leaf={item}
+                                active={isLeafActive(pathname, item)}
+                                onNavigate={navigateFromAccount}
+                            />
                         ))}
                     </div>
                 </div>
 
                 {canManage && <Link href="/admin" onClick={navigateFromAccount} className="mx-3 mt-3 block rounded-xl border border-sidebar-border px-3 py-2 text-sm font-semibold">Admin panel</Link>}
-                {showAppearance && <details onToggle={(event) => setAppearanceOpen(event.currentTarget.open)} className="mx-3 mt-3 rounded-xl border border-sidebar-border">
-                    <summary className={cn('cursor-pointer rounded-xl px-3 py-2 text-sm font-semibold', NAVIGATION_FOCUS)}>Appearance</summary>
-                    {appearanceOpen ? <Suspense fallback={null}><SidebarThemeToggle /></Suspense> : null}
-                </details>}
-
                 {onLogout ? (
                     <div className="px-3 pt-3">
                         <button
@@ -875,7 +890,7 @@ export function SidebarNavigation({
         () => readNavigationOrder(storageKey, defaultOrder, entrySectionById),
         () => cloneSidebarOrder(defaultOrder),
     );
-    const visibleIds = useMemo(() => policy.visible_ids === null ? null : new Set(policy.visible_ids), [policy.visible_ids]);
+    const visibleIds = useMemo(() => policy.visible_ids === null ? null : sidebarSelection(policy.visible_ids), [policy.visible_ids]);
     const accountItems = ACCOUNT_NAVIGATION.filter((item) => visibleIds === null || visibleIds.has(item.id));
     const sections = useMemo(() => (
         orderNavigationSections(visibleNavigationSections(SIDEBAR_SECTIONS, visibleIds), navigationOrder).map((section) => ({
@@ -1162,10 +1177,10 @@ export function SidebarNavigation({
                 </nav>
             </div>
 
-            <div className="shrink-0 pb-2">
+            <div className="shrink-0 border-t border-sidebar-border/80 py-2">
+                {(visibleIds === null || visibleIds.has('appearance')) && <SidebarAppearance />}
                 <AccountFooter
                     items={accountItems}
-                    showAppearance={visibleIds === null || visibleIds.has('appearance')}
                     canManage={policy.can_manage}
                     onLogout={onLogout}
                     onNavigate={onNavigate}

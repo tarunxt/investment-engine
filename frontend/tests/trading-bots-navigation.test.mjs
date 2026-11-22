@@ -41,7 +41,7 @@ test("Sidebar navigation config defines the redesigned sections, labels, and rou
     "AI Models",
     "Integrations",
     "API Connections",
-    "Usage & Costs",
+    "Settings",
   ]) {
     assert.match(configSource, new RegExp(`name: '${label}'`));
   }
@@ -106,7 +106,7 @@ test("Sidebar navigation config defines the redesigned sections, labels, and rou
   }
 });
 
-test("Trading Bots is a sibling group with explicit Bot Overview and badges, while Profile and Preferences stay out of primary navigation", () => {
+test("Trading Bots is a sibling group with explicit Bot Overview and badges, while Profile and Settings stay out of primary navigation", () => {
   const configSource = readSource(
     "../app/console/_components/sidebarNavigationConfig.ts",
   );
@@ -154,9 +154,8 @@ test("Trading Bots is a sibling group with explicit Bot Overview and badges, whi
   );
 
   assert.doesNotMatch(sidebarSectionsSource, /name: 'Profile'|name: 'Preferences'/);
-  assert.match(accountNavigationSource, /name: 'Profile'/);
-  assert.match(accountNavigationSource, /name: 'Preferences'/);
-  assert.match(accountNavigationSource, /name: 'Usage & Costs'/);
+  assert.match(accountNavigationSource, /name: 'Profile'[\s\S]*name: 'Settings'/);
+  assert.doesNotMatch(accountNavigationSource, /name: 'Preferences'|name: 'Usage & Costs'/);
   assert.doesNotMatch(sidebarSectionsSource, /name: 'Usage & Costs'/);
   assert.match(
     sidebarSectionsSource,

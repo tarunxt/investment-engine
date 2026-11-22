@@ -22,3 +22,9 @@ export type SidebarSettingsRecord = {
     global_ids: string[] | null;
     revision: number;
 };
+
+// Settings keeps the original preferences policy ID. Older saved lists may
+// have exposed only its former Usage & Costs shortcut.
+export function sidebarSelection(ids: readonly string[]) {
+    return new Set(ids.map((id) => id === 'usage-costs' ? 'preferences' : id));
+}

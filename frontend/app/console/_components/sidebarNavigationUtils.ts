@@ -147,7 +147,8 @@ export function isRouteActive(
 }
 
 export function isLeafActive(pathname: string, leaf: NavigationLeaf) {
-    return isRouteActive(pathname, leaf.href, leaf.matchMode);
+    return isRouteActive(pathname, leaf.href, leaf.matchMode)
+        || (leaf.otherHrefs?.some((href) => isRouteActive(pathname, href, leaf.matchMode)) ?? false);
 }
 
 export function isEntryActive(pathname: string, entry: NavigationEntry) {
