@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { ScoreMatrixFormulaConfig } from "@/app/console/_components/FinalActionablesConsole";
 import { apiService } from "@/services/api";
 import { scorecardApi, cards, type CardKey, type CardPolicy, type CardResult, type CardFinal, type SourceDetail, type SourceRevision, type VerifiedListing } from "@/lib/independentScorecards";
-import { getCompatibleTargets, resolveStageModelKeys, type StageModelPreferences } from "@/lib/workflowStageModels";
+import { getCompatibleTargets, usesSingleScorecardJob, resolveStageModelKeys, type StageModelPreferences } from "@/lib/workflowStageModels";
 import { getAnalysisRunIdentity } from "@/lib/rebalanceRunIdentity";
 import type { ProviderModelTarget, RunListItem } from "@/types/api";
 import { captureWorkflowOwner, isCurrentWorkflowOwner } from "@/lib/workflowOwnerLifetime";
@@ -39,7 +39,7 @@ export function ScorecardReview({portfolio,stage:initial,revisionId,initialAttem
   const card=stage==="source"||stage==="actionables"?null:stage;
   const [confirmation,setConfirmation]=useState<VerifiedListing>({symbol:"",venue:"NASDAQ",security_id:"",share_class:"",source_url:""});
   const [performance,setPerformance]=useState<Awaited<ReturnType<typeof api.performance>>|null>(null);
-  const [checkOrder,setCheckOrder]=useState(false);
+  const singleJob = usesSingleScorecardJob(card ?? "", portfolio);
   const requestGuard=useRef(false);
   const pendingStarts=useRef(new Map<string,string>());
   const selectedOutput=useRef<number|null>(initialAttempt ?? null);
@@ -67,15 +67,16 @@ export function ScorecardReview({portfolio,stage:initial,revisionId,initialAttem
     const p=await api.publish({sequence,request_key:crypto.randomUUID(),captured_at:snapshot.captured_at,...("id" in snapshot?{snapshot_id:snapshot.id}:{}),swing_job_ids:jobs});
     setId(p.id);onRevision(p.id);setVersion(n=>n+1);
   }
-  function keys(c:CardKey){return resolveStageModelKeys(c,models);}
+  function keys(c:CardKey){return resolveStageModelKeys(c,models,portfolio);}
   async function launch(c:CardKey, retry?:number){
     if(!detail)throw Error("Select a Stage 2 revision first.");
     const targets=keys(c).map(key=>{const target=providers.find(t=>t.provider+"::"+t.model===key);if(!target)throw Error("Choose available models for "+titles[c]);return target;});
+    if (!targets.length) throw Error("Choose a model for "+titles[c]);
     await client.saveWorkflowModels(c,keys(c));
-    const identity=JSON.stringify([detail.id,c,targets,retry,checkOrder]);
+    const identity=JSON.stringify([detail.id,c,targets,retry]);
     const token=pendingStarts.current.get(identity)??crypto.randomUUID();
     pendingStarts.current.set(identity,token);
-    const queued=await api.start(detail.id,c,{sequence:detail.manifest.sequence,request_key:token,targets,retry_attempt_id:retry,check_pair_order:broker==="india"&&c==="pairwise"&&!retry&&checkOrder});
+    const queued=await api.start(detail.id,c,{sequence:detail.manifest.sequence,request_key:token,targets,retry_attempt_id:retry});
     pendingStarts.current.delete(identity);
     return queued.id;
   }
@@ -120,12 +121,11 @@ export function ScorecardReview({portfolio,stage:initial,revisionId,initialAttem
           setId(next.id);onRevision(next.id);setVersion(v=>v+1);
         })}>Publish corrected revision</button></fieldset>}</>}
       <button className={button} disabled={busy} onClick={()=>void perform(async()=>{const outcomes=await Promise.allSettled(cards.map(c=>launch(c)));setVersion(n=>n+1);const failed=outcomes.flatMap((r,i)=>r.status==="rejected"?[titles[cards[i]]+" · "+String(r.reason)]:[]);if(failed.length)throw Error(failed.join("\n"));})}>Run all four scorecards</button></>}</section>}
-    {card&&<section className="space-y-3 py-3"><div className="flex flex-wrap gap-2">{keys(card).map((key,i)=><label key={i}>Model {i+1} <select className={input} value={key} onChange={e=>setModels(old=>({...old,[card]:keys(card).map((v,n)=>i===n?e.target.value:v)}))}>{[...new Set([key,...providers.map(t=>t.provider+"::"+t.model)])].map(k=><option key={k}>{k}</option>)}</select></label>)}
-      <button className={button} disabled={keys(card).length>=8} onClick={()=>setModels(old=>({...old,[card]:[...keys(card),keys(card)[0]??providers.map(t=>t.provider+"::"+t.model)[0]]}))}>Add model slot</button>
-      <button className={button} disabled={keys(card).length<2} onClick={()=>setModels(old=>({...old,[card]:keys(card).slice(0,-1)}))}>Remove last slot</button>
-      <button className={button} disabled={busy} onClick={()=>void perform(async()=>{await client.saveWorkflowModels(card,keys(card));})}>Save models</button></div>
+    {card&&<section className="space-y-3 py-3"><div className="flex flex-wrap gap-2">{(singleJob ? [keys(card)[0] ?? ""] : keys(card)).map((key,i)=><label key={i}>Model {i+1} <select className={input} value={key} onChange={e=>setModels(old=>({...old,[card]:singleJob?[e.target.value]:keys(card).map((v,n)=>i===n?e.target.value:v)}))}>{[...new Set([key,...providers.map(t=>t.provider+"::"+t.model)])].map(k=><option key={k} value={k} disabled={!k}>{k || "Choose a model"}</option>)}</select></label>)}
+      {!singleJob && <><button className={button} disabled={keys(card).length>=8} onClick={()=>setModels(old=>({...old,[card]:[...keys(card),keys(card)[0]??providers.map(t=>t.provider+"::"+t.model)[0]]}))}>Add model slot</button>
+      <button className={button} disabled={keys(card).length<2} onClick={()=>setModels(old=>({...old,[card]:keys(card).slice(0,-1)}))}>Remove last slot</button></>}
+      <button className={button} disabled={busy || (singleJob && !keys(card).length)} onClick={()=>void perform(async()=>{await client.saveWorkflowModels(card,keys(card));})}>Save models</button></div>
       <div className="flex flex-wrap gap-2"><button disabled={busy||!detail} className={button} onClick={()=>void perform(async()=>{await launch(card);setVersion(n=>n+1);})}>Run {titles[card]}</button>
-      {card==="pairwise"&&broker==="india"&&<label className="text-sm"><input type="checkbox" checked={checkOrder} onChange={e=>setCheckOrder(e.target.checked)}/> Check reversed order for up to 12 pairs (extra model batch)</label>}
       {card==="pairwise"&&result&&result.rows.some(r=>Number(r.valid)<Number(r.expected))&&<button className={button} disabled={busy} onClick={()=>void perform(async()=>{const replay=await api.recover(attempt);if(replay.rows.some(r=>Number(r.valid)<Number(r.expected)))await launch(card,replay.id);setVersion(n=>n+1);})}>Retry unresolved pairs</button>}
       <select aria-label="Scorecard output revision" className={input} value={attempt} onChange={e=>setAttempt(Number(e.target.value))}><option value={0}>Select output</option>{detail?.attempts.filter(a=>a.card===card).map(a=><option key={a.id} value={a.id}>Output #{a.id} · Run {a.run_id}</option>)}</select></div>
       {card==="pairwise"&&attempt>0&&<button className={button} disabled={busy} onClick={()=>void perform(async()=>{const r=await api.recover(attempt);selectedOutput.current=r.id;setVersion(n=>n+1);})}>Recheck saved responses · no model call</button>}

@@ -19,8 +19,20 @@ HEADERS = {
 }
 
 
-def batches(stocks, card, *, pairs=None):
+def single_job_card(portfolio, card):
+    return portfolio == "india" and card in ("threats", "pairwise")
+
+
+def batches(stocks, card, *, pairs=None, portfolio=None):
     keys = sorted(row["listing"] for row in stocks)
+    if single_job_card(portfolio, card):
+        if card == "threats":
+            yield keys, []
+        elif pairs is None:
+            yield keys, list(combinations(keys, 2))
+        elif pairs:
+            yield sorted({listing for pair in pairs for listing in pair}), list(pairs)
+        return
     if card == "pairwise":
         source = iter(pairs) if pairs is not None else combinations(keys, 2)
         while block := list(islice(source, 24)):
@@ -61,14 +73,16 @@ def build_prompt(revision, card, keys, pairs, research=None, *, reverse_order=Fa
         for left, right in pairs:
             identity = "~".join(sorted((left,right)))
             reverse = sha256((revision.digest+identity).encode()).digest()[0] % 2
-            assigned.append({"pair_id": identity, "listings":[right,left] if bool(reverse) != reverse_order else [left,right]})
+            assigned.append({"n": len(assigned) + 1, "pair_id": identity, "listings":[right,left] if bool(reverse) != reverse_order else [left,right]})
         instructions = ("Compare each assigned pair independently over 2–12 weeks using only its frozen listing evidence. "
             "Consider trend, relative strength, liquidity, volatility, and dated catalysts symmetrically. "
-            "Return one JSON object per line, with pair_id, result (winning listing ID, TIE, or UNKNOWN), "
-            "rationale, and evidence (object keyed by each listing ID, with arrays of source IDs from that listing). "
-            "TIE requires evidence of equivalence. Use UNKNOWN when evidence is inadequate. "
-            "Return no table, surrounding text, or other pairs. Features use NIFTYBEES as the benchmark proxy.")
-        return marker+"\n[PAIR_RECORDS_V2]\n"+instructions+"\n"+json.dumps({
+            "Return one compact JSON array per assigned pair on its own line: "
+            '[n, winning_listing_or_TIE_or_UNKNOWN, "short rationale", [first_source_id], [second_source_id]]. '
+            "Use the assignment number n. The source arrays follow the listing IDs in pair_id, split at ~. "
+            "Use exact source IDs from those listings. Cite both sides for a winner or TIE. "
+            "TIE requires evidence of equivalence. Use UNKNOWN for inadequate evidence. "
+            "Return no surrounding text. Features use NIFTYBEES as the benchmark proxy.")
+        return marker+"\n[PAIR_RECORDS_V2]\n[STAGE2_SHARED_EVIDENCE_ONLY]\n"+instructions+"\n"+json.dumps({
             "as_of":manifest["as_of"],"packets":{k:research["packets"][k] for k in keys},
             "assigned_pairs":assigned}, ensure_ascii=False,separators=(",",":"))
     if research is not None:

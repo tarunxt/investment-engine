@@ -38,6 +38,9 @@ def test_pair_records_repair_only_bad_pairs_and_exclude_reverse_audit_from_rank(
     packets={k:{"sources":{"1":{"url":"https://example.org/"+k,"as_of":cutoff}},"features":{}} for k in keys}
     def line(pair,winner):
         return json.dumps({"pair_id":"~".join(pair),"result":winner,"rationale":"Comparison","evidence":{k:["1"] for k in pair}})
+    compact = json.dumps([1, keys[0], "Comparison", ["1"], ["1"]])
+    assert records(compact, pairs, packets, cutoff) == records(line(pairs[0],keys[0]), pairs, packets, cutoff)
+    assert not records(compact+"\n"+line(pairs[0],keys[0]), pairs, packets, cutoff)
     first=line(pairs[0],keys[0])
     assert len(records(first+"\n{broken",pairs,packets,cutoff))==1
     assert not records(first+"\n"+first,pairs,packets,cutoff)
@@ -84,3 +87,65 @@ async def test_saved_output_and_consumed_output_have_separate_identities(audit_d
         assert saved["cards"]["technical"]=={"covered":2,"expected":2,"output_id":complete.id,
                  "used_output_id":empty.id,"run_id":None,"final_id":final.id}
         assert (await available(db,8,"india",42))["cards"]=={}
+
+
+def test_single_job_assignments_cover_full_universe_and_only_unresolved_pairs():
+    from itertools import combinations
+    from app.domains.scorecards.prompts import batches
+
+    keys = [f"NSE:S{i:02}" for i in range(16)]
+    stocks = [{"listing": k} for k in reversed(keys)]
+    expected = list(combinations(keys, 2))
+    assert list(batches(stocks, "threats", portfolio="india")) == [(keys, [])]
+    assert list(batches(stocks, "pairwise", portfolio="india")) == [(keys, expected)]
+    unresolved = expected[12:42]
+    assert list(batches(stocks, "pairwise", pairs=unresolved, portfolio="india")) == [
+        (sorted({key for pair in unresolved for key in pair}), unresolved)]
+    assert len(list(batches(stocks, "threats", portfolio="indmoney_us"))) == 4
+    assert len(list(batches(stocks, "pairwise", portfolio="indmoney_us"))) == 5
+
+
+async def exercise_single_job_start(monkeypatch, card):
+    from unittest.mock import AsyncMock
+    import pytest
+    from fastapi import HTTPException
+    from app.domains.scorecards import router
+
+    keys = [f"NSE:S{i:02}" for i in range(16)]
+    stocks = [dict(listing=k, symbol=k[4:], exchange="NSE", units=1, origin="holding") for k in keys]
+    rev = SimpleNamespace(id=1, digest="fixture", manifest=dict(stocks=stocks, market="india",
+                          as_of="2026-11-21T12:00:00Z", evidence=[]))
+    evidence = {"version":2, "packets":{k:{"features":{}, "sources":{}} for k in keys}}
+    monkeypatch.setattr(router, "owned", AsyncMock(return_value=rev))
+    monkeypatch.setattr(router.storage, "by_key", AsyncMock(return_value=None))
+    monkeypatch.setattr(router, "shared_research", AsyncMock(return_value=evidence))
+    monkeypatch.setattr(router, "collect_research", AsyncMock(return_value={}))
+    monkeypatch.setattr(router, "workflow", AsyncMock(return_value=SimpleNamespace(id=2, sequence=5, label="Test")))
+    monkeypatch.setattr(router.storage, "append", AsyncMock(return_value=SimpleNamespace(id=3, data={"research":evidence})))
+    monkeypatch.setattr(router, "_get_redis", lambda: AsyncMock())
+    enqueue = AsyncMock(return_value=SimpleNamespace(id=10))
+    monkeypatch.setattr(router.CreateRunUseCase, "execute", enqueue)
+    user = SimpleNamespace(id=1, username="test")
+    target = dict(provider="deepseek", model="deepseek-v4-flash")
+    def body(targets, check=False):
+        return router.Start(request_key="fixture", sequence=5, targets=targets, check_pair_order=check)
+
+    with pytest.raises(HTTPException, match="exactly one"):
+        await router.start("india", rev.id, card, body([target,target]), AsyncMock(), user)
+    if card == "pairwise":
+        with pytest.raises(HTTPException, match="reversed-order"):
+            await router.start("india", rev.id, card, body([target], True), AsyncMock(), user)
+    enqueue.assert_not_awaited()
+    await router.start("india", rev.id, card, body([target]), AsyncMock(), user)
+    command, = enqueue.await_args.args
+    assert len(command.targets) == len(command.batch_prompts) == len(command.scorecard_batches) == 1
+    assignment = command.scorecard_batches[0]["scorecard_batch"]
+    assert assignment["listings"] == keys
+    if card == "pairwise":
+        assert len(assignment["pairs_v2"]) == 120
+
+
+def test_scorecard_start_dispatches_exactly_one_job_per_india_card(monkeypatch):
+    import asyncio
+    for card in ("threats", "pairwise"):
+        asyncio.run(exercise_single_job_start(monkeypatch, card))

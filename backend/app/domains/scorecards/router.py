@@ -20,7 +20,7 @@ from app.shared.types import UserId
 from app.shared.exceptions import AppException
 from . import storage
 from .storage import Stage
-from .prompts import build_prompt, batches, CARDS
+from .prompts import build_prompt, batches, CARDS, single_job_card
 from .scoring import project
 from app.domains.recommendation_audit.schemas import Formula
 from .final import DEFAULT_WEIGHTS, calculate_final, compare_formula, policy
@@ -155,6 +155,11 @@ async def start(portfolio:Portfolio,revision_id:int,card:Card,body:Start,db:Asyn
     shared = portfolio=="india" and card in ("technical","pairwise")
     packet = await storage.by_key(db,"packet","market-v2",revision_id=rev.id) if shared else None
     already_started = await storage.by_key(db,"attempt",identity,revision_id=rev.id)
+    if not already_started and single_job_card(portfolio, card):
+        if len(body.targets) != 1:
+            raise HTTPException(422, "Choose exactly one model for this scorecard.")
+        if body.check_pair_order:
+            raise HTTPException(422, "Pairwise runs use one model job. Extra reversed-order jobs are disabled.")
     research = packet.data["research"] if packet else {}
     if not already_started and not packet:
         manifest = rev.manifest
@@ -165,19 +170,24 @@ async def start(portfolio:Portfolio,revision_id:int,card:Card,body:Start,db:Asyn
     rev=await owned(db,owner,portfolio,"revision",revision_id,lock=True)
     config={"targets":[t.model_dump() for t in body.targets],"parent":body.retry_attempt_id}
     existing=await storage.by_key(db,"attempt",identity,revision_id=rev.id)
-    if body.check_pair_order:
-        if card!="pairwise" or not shared or body.retry_attempt_id:
-            raise HTTPException(422,"Order checks require a new India Pairwise run")
-        config["check_pair_order"] = True
     if existing:
         if bool(existing.data["settings"].get("check_pair_order"))!=body.check_pair_order or existing.row.workflow_id!=w.id or any(existing.data["settings"].get(k)!=v for k,v in config.items()):
             raise HTTPException(409,"Attempt key already names different inputs")
         return {"id":existing.id,"run_id":existing.row.run_id}
+    if body.check_pair_order:
+        raise HTTPException(422, "Extra reversed-order jobs are disabled.")
     missing=None
     if body.retry_attempt_id:
         parent=await owned(db,user.id,portfolio,"attempt",body.retry_attempt_id)
-        if card!="pairwise" or parent.data["revision_id"]!=rev.id or parent.data["card"]!=card or not parent.result_json or parent.data["settings"]["targets"]!=config["targets"]:
+        if card!="pairwise" or parent.data["revision_id"]!=rev.id or parent.data["card"]!=card or not parent.result_json:
             raise HTTPException(422,"Select a finished Pairwise attempt with the same inputs and model slots")
+        original_targets = parent.data["settings"]["targets"]
+        if single_job_card(portfolio, card):
+            if config["targets"][0] not in original_targets:
+                raise HTTPException(422, "Retry with a model from the original Pairwise run.")
+            config["vote_slot"] = parent.data["settings"].get("vote_slot", original_targets.index(config["targets"][0]))
+        elif original_targets != config["targets"]:
+            raise HTTPException(422, "Retry with the original Pairwise model slots.")
         if not parent.data["settings"].get("packet_id"):
             # Legacy assignments and sources must keep their original contract across a retry.
             research=parent.data["settings"].get("research",{})
@@ -185,7 +195,7 @@ async def start(portfolio:Portfolio,revision_id:int,card:Card,body:Start,db:Asyn
                  if v["verdict"]=="UNKNOWN" and r["listing"]<v["opponent"]]
         if not missing:
             raise HTTPException(422,"All pair assignments have been resolved")
-    assignments=list(batches(rev.manifest["stocks"],card,pairs=missing))
+    assignments=list(batches(rev.manifest["stocks"],card,pairs=missing,portfolio=portfolio))
     if shared and research.get("version")==2:
         packet = await storage.by_key(db,"packet","market-v2",revision_id=rev.id)
         if not packet:
@@ -199,14 +209,6 @@ async def start(portfolio:Portfolio,revision_id:int,card:Card,body:Start,db:Asyn
                 raise HTTPException(422,"No listings have sufficient verified candles. Check the historical data sources and retry.")
     else:
         config["research"]=research
-    primary_batches = len(assignments)
-    if body.check_pair_order and research.get("version")==2:
-        from hashlib import sha256
-        selected = sorted((pair for _,group in assignments for pair in group),
-                          key=lambda pair:sha256((rev.digest+"~".join(pair)).encode()).digest())[:12]
-        if selected:
-            config["primary_batches"] = primary_batches
-            assignments.extend(batches(rev.manifest["stocks"],card,pairs=selected))
     config["assignments"]=assignments
     attempt=await storage.append(db,w.id,"attempt",identity,{"card":card,"settings":config},revision_id=rev.id)
     absent = {r["listing"] for r in rev.manifest["stocks"] if r["origin"] == "contender" and r["units"] == 0}
@@ -221,7 +223,7 @@ async def start(portfolio:Portfolio,revision_id:int,card:Card,body:Start,db:Asyn
                if card=="pairwise" and pairs and research.get("version")==2 else {}),
         },
     } for keys, pairs in assignments)
-    prompts=tuple(build_prompt(rev,card,keys,pairs,research,reverse_order=index>=primary_batches) for index,(keys,pairs) in enumerate(assignments))
+    prompts=tuple(build_prompt(rev,card,keys,pairs,research) for keys,pairs in assignments)
     redis=_get_redis()
     try:
         result=await CreateRunUseCase(db,RedisLock(redis)).execute(CreateRunCommand(
@@ -254,7 +256,7 @@ async def observations(db, attempt, uid, portfolio):
         if settings.get("packet_id"):
             packet = await owned(db,uid,portfolio,"packet",settings["packet_id"])
             research = packet.data["research"]
-        evidence.extend((job,i%count,*assignments[i//count],
+        evidence.extend((job,settings.get("vote_slot", i%count),*assignments[i//count],
                          {**research,"order_check":True} if research and i//count>=settings.get("primary_batches",len(assignments)) else research) for i,job in enumerate(jobs))
     return evidence
 
@@ -350,7 +352,7 @@ async def finalize(portfolio:Portfolio,revision_id:int,body:Finalize,db:AsyncSes
 @router.get("/{portfolio}/revisions/{revision_id}/{card}/prompt")
 async def prompt_preview(portfolio:Portfolio,revision_id:int,card:Card,db:AsyncSession=Depends(get_async_db),user:User=Depends(get_current_user)):
     rev=await owned(db,user.id,portfolio,"revision",revision_id)
-    first=next(batches(rev.manifest["stocks"],card),([],[]))
+    first=next(batches(rev.manifest["stocks"],card,portfolio=portfolio),([],[]))
     packet = await storage.by_key(db,"packet","market-v2",revision_id=rev.id) if card in ("technical","pairwise") else None
     research = packet.data["research"] if packet else None
     if research is None and portfolio=="india" and card=="pairwise":

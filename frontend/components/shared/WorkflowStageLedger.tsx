@@ -9,6 +9,7 @@ import { StageStatusIcon, getStageLedgerTone, getIdleStageRows, getStageTileLabe
 
 import Link from "next/link";
 import { isCard, type CardKey } from "@/lib/independentScorecards";
+import { usesSingleScorecardJob } from "@/lib/workflowStageModels";
 import { cardNames, scorecardHref } from "@/lib/scorecardNavigation";
 
 type Stage = ComponentProps<typeof WorkflowStageTile>;
@@ -136,7 +137,7 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
               {item.selectable && <label className="text-xs"><input type="checkbox" checked={Boolean(item.selected)} onChange={item.onClick} /> Select for next run</label>}
               {!upcoming && <>{label && <p className="text-xs">{label}</p>}
                 <dl className="mt-2 text-xs">{rows.map(row => <div key={row.label} className="flex justify-between gap-2">
-                  <dt>{row.label}</dt><dd>{row.label === "LLMs completed" && market ? <button type="button"
+                  <dt>{row.label === "LLMs completed" && usesSingleScorecardJob(item.stage, market) ? "Model jobs completed" : row.label}</dt><dd>{row.label === "LLMs completed" && market ? <button type="button"
                     data-auto-rebalance-llm-metric="true" data-workflow-stage={item.stage}
                     data-workflow-portfolio={market === "zerodha" ? "india" : "indmoney_us"}
                     data-workflow-total={item.info.totalLlms ?? undefined} data-workflow-run-id={item.info.activeRunId ?? item.info.lastRunId ?? undefined}

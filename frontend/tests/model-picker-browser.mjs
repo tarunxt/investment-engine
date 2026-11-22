@@ -38,6 +38,7 @@ import {InputEvidenceRows,InputEvidenceSummary} from '${root}/app/console/dashbo
 import {threatInputRationale} from '${root}/app/console/dashboard/_components/threatInputRationale';
 import {Button} from '${root}/components/ui/button';
 import {cn} from '${root}/lib/utils';
+import {usesSingleScorecardJob} from '${root}/lib/workflowStageModels';
 import {isCard} from '${root}/lib/independentScorecards';
 const inventory=${JSON.stringify(inventory)};
 const catalog=Object.entries(inventory).map(([name,models])=>({name,models,configured:true,model_estimated_cost_inr:Object.fromEntries(models.map(model=>[model,0])),model_compatibility:Object.fromEntries(models.map((model,index)=>[model,{compatible:name!=='anthropic'||index<2,reason:'Unavailable with current API access.'}])),model_last_run_web_search_used:{'gpt-4o-mini':true,'deepseek-v4-flash':true}}));
@@ -98,10 +99,21 @@ try {
  const errors=[]; page.on('pageerror',e=>errors.push(e.message));
  await page.route('**/*',route=>route.request().url().startsWith('http://127.0.0.1:')?route.continue():route.abort());
  await page.goto('http://127.0.0.1:'+server.address().port);
+ if(!browserZoom){
+  await page.getByLabel('Portfolio fixture',{exact:true}).selectOption('zerodha');
+  await page.getByLabel('Model stage fixture',{exact:true}).selectOption('pairwise');
+  await page.locator('#open').click();
+  const dialog=page.getByRole('dialog');
+  await dialog.getByText('Choose one model. All assignments for this scorecard run in one job.').waitFor();
+  await dialog.getByRole('tab',{name:'DeepSeek choices'}).click();
+  assert.equal(await dialog.getByRole('radio').count(),inventory.deepseek.length);
+  await dialog.getByRole('button',{name:'Done',exact:true}).click();
+  await page.getByLabel('Model stage fixture',{exact:true}).selectOption('threats');
+ }
  if(browserZoom){
   const metrics=await page.evaluate(()=>({width:innerWidth,height:innerHeight,dpr:devicePixelRatio,cssZoom:getComputedStyle(document.body).zoom,transform:getComputedStyle(document.body).transform}));
   assert.equal(metrics.dpr,2);assert.equal(metrics.cssZoom,'1');assert.equal(metrics.transform,'none');
-  const matrix=[],canonical={threats:'Threats Scan',swing:'Swing Scan',rebalance:'Rebalance',technical:'Technical Scan'};
+  const matrix=[],canonical={threats:'Threats Scan',swing:'Swing Scan',rebalance:'Rebalance',technical:'Technical Scan',pairwise:'Pairwise scorecard'};
   for(const market of ['zerodha','indmoneyUs']) for(const stage of Object.keys(canonical)){
    await page.getByLabel('Portfolio fixture',{exact:true}).selectOption(market);
    await page.getByLabel('Model stage fixture',{exact:true}).selectOption(stage);
