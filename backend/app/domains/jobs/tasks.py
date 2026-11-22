@@ -1502,7 +1502,6 @@ def execute_ai_job(self, job_id: int) -> None:
             except MissingTechnicalListings:
                 pass  # A partial supplement can still contribute validated rows.
             content = merge_technical_rows(content, supplement)
-        batch = scorecard_batch_for_job(job)
         if rebalance_records is not None:
             missing=rebalance_records["missing"]
             if missing:

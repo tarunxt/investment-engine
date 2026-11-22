@@ -229,6 +229,7 @@ class ExecutionHarness:
             content_hash=lambda value: 'synthetic-hash', active_contract_hash=lambda: 'synthetic-schema',
             register_job_task_sync=MagicMock(), _publish_job_update=MagicMock(), _refresh_run_status=MagicMock(),
             rebalance_serialization_instructions=lambda: '', provider_usage_phase=lambda phase: nullcontext(),
+            scorecard_batch_for_job=lambda job: None,  # These synthetic jobs have no frozen scorecard assignment.
             merge_web_metadata=lambda *args, **kwargs: (False, [], []),
             output_validation_metadata=lambda content: None,
             _requires_generic_table_output=lambda prompt: False, _is_portfolio_events_job=lambda prompt: False,
