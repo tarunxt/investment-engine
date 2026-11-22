@@ -132,7 +132,7 @@ def upstox_daily_bars(payload, cutoff, url, limit=10):
     return [sessions[day] for day in sorted(sessions, reverse=True)[:limit]]
 
 
-async def supplement_indian_bars(client, result, cutoff, notices, owner, *, sessions=5):
+async def supplement_indian_bars(client, result, cutoff, notices, owner, *, sessions=5, diagnostics=None):
     from app.domains.zerodha.upstox_quote_guard import QuoteGuard, redis_client
     from app.domains.zerodha.upstox_quotes import load_instruments
     missing = [key for key, items in result.items() if len({r["as_of"][:10] for r in items if r["kind"] == "daily_bar"}) < sessions]
@@ -145,21 +145,31 @@ async def supplement_indian_bars(client, result, cutoff, notices, owner, *, sess
     async def fetch(key, guard):
         instrument = mapping.get(key)
         if not instrument:
+            if diagnostics is not None:
+                diagnostics[key]={"reason":"Exact venue instrument unavailable"}
             return
         url = f"https://api.upstox.com/v3/historical-candle/{quote(instrument, safe='')}/days/1/{end}/{end-timedelta(days=100 if sessions>5 else 24)}"
         async with semaphore:
             try:
                 if not await guard.admit():
+                    if diagnostics is not None:
+                        ttl=await redis.pttl(guard.cooldown)
+                        diagnostics[key]={"reason":"Upstox history quota", "retry_after":max(60,(ttl+999)//1000)}
                     notices.append("Upstox historical requests limited")
                     return
                 response = await client.get(url, headers={"Authorization": "Bearer " + os.environ["UPSTOX_ANALYTICS_TOKEN"]})
                 if response.status_code == 429:
                     await guard.backoff(response.headers.get("Retry-After"))
+                    if diagnostics is not None:
+                        from app.domains.zerodha.upstox_quote_guard import retry_after_seconds
+                        diagnostics[key]={"reason":"Upstox HTTP 429","retry_after":retry_after_seconds(response.headers.get("Retry-After"))}
                 response.raise_for_status()
                 bars = upstox_daily_bars(response.json(), cutoff, url, limit=max(10,sessions))
                 if len(bars) >= max(5, len({r["as_of"][:10] for r in result[key] if r["kind"]=="daily_bar"})):
                     result[key] = [r for r in result[key] if r["kind"] != "daily_bar"] + bars
             except (ValueError, TypeError, AttributeError, httpx.HTTPError):
+                if diagnostics is not None:
+                    diagnostics.setdefault(key,{"reason":"Upstox historical candles unavailable"})
                 notices.append("Historical candles unavailable: " + key)
     async with redis_client() as redis:
         guard = QuoteGuard(redis, os.getenv("UPSTOX_LTP_OWNER_USER_ID") or owner, "history", missing)

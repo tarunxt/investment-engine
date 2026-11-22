@@ -14,6 +14,7 @@ import httpx
 
 logger = logging.getLogger(__name__)
 _master = ({}, 0.0)
+_technical_instruments = {}
 MASTER_TTL = 6 * 60 * 60
 RECENT_TRADE_AGE = 120
 
@@ -60,7 +61,7 @@ def instrument_map(rows):
 
 
 async def load_instruments(client):
-    global _master
+    global _master, _technical_instruments
     if time.monotonic() - _master[1] < MASTER_TTL and _master[0]:
         return _master[0]
     compressed = bytearray()
@@ -79,10 +80,25 @@ async def load_instruments(client):
         rows = json.loads(raw)
         if not isinstance(rows, list):
             raise ValueError("Invalid instrument master")
-        return instrument_map(rows)
-    mapping = await asyncio.to_thread(decode)
+        mapping = instrument_map(rows)
+        details = {}
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            key = str(row.get("segment", ""))[:3] + ":" + str(row.get("trading_symbol", ""))
+            if key in mapping and mapping[key] == row.get("instrument_key"):
+                tick = row.get("tick_size")
+                details[key] = {"isin": mapping[key].split("|")[1],
+                                "tick": tick / 100 if type(tick) in (int, float) and tick > 0 else None}
+        return mapping, details
+    mapping, _technical_instruments = await asyncio.to_thread(decode)
     _master = (mapping, time.monotonic())
     return mapping
+
+
+async def technical_instruments(client):
+    await load_instruments(client)
+    return _technical_instruments
 
 
 def normalize_quotes(data, requested, now):

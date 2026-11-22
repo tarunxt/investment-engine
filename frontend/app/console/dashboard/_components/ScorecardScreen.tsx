@@ -1,5 +1,6 @@
 "use client";
 
+import { TechnicalStockScores } from "./TechnicalStockScores";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -324,12 +325,12 @@ function Evidence({
       : (runs.find((r) => r.id === (published?.run_id ?? stage?.run_id)) ?? runs[0]);
   const jobs = run?.jobs ?? (execution === null ? standalone : []);
   const runId = run?.id;
-  const revision = inputRevision(run?.prompt, card, market);
+  const revision = inputRevision(run?.prompt, card, market) ?? (card==="technical" && !runId ? coverage.data?.revision_id : null);
   const readTemplate = useCallback(() => api.prompt(revision!, card), [api, revision, card]);
   const template = useRead(readTemplate, !!revision && tab === "prompts" && templateOpen);
   const readSource = useCallback(() => api.read(revision!), [api, revision, refresh]);
   const source = useRead(readSource, !!revision);
-  const attempt = source.data?.attempts.find((a) => a.run_id === runId && a.card === card);
+  const attempt = source.data?.attempts.find((a) => a.card === card && (runId ? a.run_id === runId : a.id === published?.output_id));
   const attemptId = attempt?.id;
   const readResult = useCallback(() => api.result(attemptId!), [api, attemptId, refresh]);
   const scores = useRead(readResult, !!attempt && (tab === "flow" || tab === "output"));
@@ -531,7 +532,9 @@ function Evidence({
                 Saved stock scores · Output #{attempt.id}
               </summary>
               <Feedback query={scores} />
-              {scores.data && (
+              {scores.data && card==="technical" && market==="zerodha" ? (
+                <TechnicalStockScores key={scores.data.id} result={scores.data} onRecover={()=>api.recover(scores.data!.id)} />
+              ) : scores.data && (
                 <Table
                   columns={["Listing", "Score /100", "Coverage", ...(card==="pairwise"?["W / T / L", "Judged / assigned","Unknown"]:card==="technical"?["Setup","Entry at close","Catalogue rating","5-session return %","20-session relative %","Relative volume","20-session volatility %","Distance to SMA50 %","Research score /100"]:[])]}
                   rows={scores.data.rows.map((r) => ({
