@@ -56,8 +56,8 @@ test("the workflow installs the reliability bridge inside its visible surface", 
   );
 });
 
-test("LLMs completed opens an inline provider/model dialog with layered saved-data fallbacks", () => {
-  assert.match(bridgeSource, /\^LLMs completed\\s\*:/);
+test("LLMs Used opens an inline provider/model dialog with layered saved-data fallbacks", () => {
+  assert.ok(bridgeSource.includes("^LLMs (?:Used|completed)"));
   assert.match(bridgeSource, /autoRebalanceLlmMetric/);
   assert.match(bridgeSource, /onClickCapture=\{handleClickCapture\}/);
   assert.match(bridgeSource, /onKeyDownCapture=\{handleKeyDownCapture\}/);
@@ -118,7 +118,7 @@ test("stage cards keep every shortcut as an independent native button", () => {
   }
   assert.match(
     tileSource,
-    /row\.label === "LLMs completed" && "pointer-events-auto"/,
+    /row\.label === "LLMs Used" && "pointer-events-auto"/,
   );
 });
 

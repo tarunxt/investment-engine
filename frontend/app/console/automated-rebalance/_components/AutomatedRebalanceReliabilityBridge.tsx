@@ -390,7 +390,7 @@ function findMetricElement(target: HTMLElement, root: HTMLElement) {
   while (element && element !== root) {
     if (element.dataset.autoRebalanceLlmMetric === "true") return element;
     const text = compactText(element.textContent);
-    if (text.length <= 180 && /^LLMs completed\s*:/i.test(text)) return element;
+    if (text.length <= 180 && /^LLMs (?:Used|completed)\s*:/i.test(text)) return element;
     element = element.parentElement;
   }
   return null;
@@ -417,7 +417,7 @@ function inferMetricContext(
 ): LlmMetricContext | null {
   const explicitStage = metricElement.dataset.workflowStage;
   const explicitPortfolio = metricElement.dataset.workflowPortfolio;
-  if (["threats", "swing", "rebalance", "technical"].includes(explicitStage ?? "") && ["india", "indmoney_us"].includes(explicitPortfolio ?? "")) {
+  if (["threats", "swing", "rebalance", "technical", "pairwise"].includes(explicitStage ?? "") && ["india", "indmoney_us"].includes(explicitPortfolio ?? "")) {
     const readCount = (value: string | undefined) => {
       if (value === undefined || value.trim() === "") return null;
       const number = Number(value);
@@ -431,7 +431,7 @@ function inferMetricContext(
       partial: readCount(metricElement.dataset.workflowPartial), failed: readCount(metricElement.dataset.workflowFailed) };
   }
   const metricText = compactText(metricElement.textContent);
-  const countMatch = metricText.match(/LLMs completed\s*:\s*\d+\s*\/\s*(\d+)/i);
+  const countMatch = metricText.match(/LLMs (?:Used|completed)\s*:\s*\d+\s*\/\s*(\d+)/i);
   let stage: LlmStage | null = null;
   let portfolio: AutoRebalancePortfolioKey | null = null;
   let element: HTMLElement | null = metricElement;
@@ -871,7 +871,7 @@ function LlmDetailsDialog({
             </h2>
             <p className="mt-1 text-sm text-slate-600">
               {loading ? "Loading model-level evidence…" : error ? "Model-level evidence unavailable" :
-                `${counts.total} LLMs returned · ${counts.passed} passed · ${counts.partial} partial · ${counts.failed} failed${counts.unresolved ? ` · ${counts.unresolved} unresolved` : ""}`}
+                `${counts.total} model jobs · ${counts.passed} passed · ${counts.partial} partial · ${counts.failed} failed${counts.unresolved ? ` · ${counts.unresolved} unresolved` : ""}`}
               {aggregateMismatch && recordedSummary ? <span role="status" className="mt-1 block text-amber-800">Recorded tile summary: {recordedSummary}. It differs from this exact run's model-level evidence; the summary needs refresh.</span> : null}
             </p>
           </div>
@@ -968,9 +968,9 @@ export function AutomatedRebalanceReliabilityBridge({
       root.querySelectorAll<HTMLElement>("p, span, a, button").forEach((element) => {
         const text = compactText(element.textContent);
         const nestedMetric = [...element.children].some((child) =>
-          /^LLMs completed\s*:/i.test(compactText(child.textContent)),
+          /^LLMs (?:Used|completed)\s*:/i.test(compactText(child.textContent)),
         );
-        if (!nestedMetric && /^LLMs completed\s*:/i.test(text)) {
+        if (!nestedMetric && /^LLMs (?:Used|completed)\s*:/i.test(text)) {
           element.dataset.autoRebalanceLlmMetric = "true";
           if (!element.matches("button, a, [role='button']")) {
             element.setAttribute("role", "button");

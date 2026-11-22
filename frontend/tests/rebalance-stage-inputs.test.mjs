@@ -313,7 +313,7 @@ async function executeWorkflow({ stages = ['sync', 'swing', 'threats', 'rebalanc
     retryWorkflowRead: async (read) => read(),
     waitForThreatCompletion: async () => threat(99, 'generated').analysis,
     waitForRunWithStageHandling: async (_portfolio, stage) => stage === 'swing' ? generatedSwing : stage === 'rebalance' ? generatedRebalance : { id: 70, run_jobs: [] },
-    summarizeThreat: () => ({}), summarizeRun: () => ({}), getRunProgress: () => ({}), countUniqueStocksFromRun: () => 2, listingsFromSwingRun: () => ['NASDAQ:AAPL'], workflowRanking: () => [],
+    summarizeThreat: () => ({}), summarizeRun: () => ({}), getRunProgress: () => ({}), swingRecommendationCounts: () => ({recommendedStocks:2,commonStocks:1}), countUniqueStocksFromRun: () => 2, listingsFromSwingRun: () => ['NASDAQ:AAPL'], workflowRanking: () => [],
     parseTimestampMs: (date) => Date.parse(date), getPreviousMarketClose: () => new Date('2026-10-02T20:00:00Z'),
     getLatestMatchingRebalanceRuns: (runs) => runs.filter((r) => modules['@/lib/rebalanceRunIdentity'].isAnalysisRunForStage(r, 'rebalance', 'us')),
     fetchAllFullRuns: async () => [generatedRebalance],

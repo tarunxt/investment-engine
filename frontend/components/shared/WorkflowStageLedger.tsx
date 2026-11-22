@@ -5,11 +5,10 @@ import type { RankedListing } from "@/lib/workflowScorecardRanking";
 import { StageDurationBreakdownDialog } from "@/app/console/dashboard/_components/StageDurationBreakdownDialog";
 import { WorkflowTileMenu, type TileAction } from "./WorkflowTileMenu";
 import { StageErrorDetails } from "./StageErrorDetails";
-import { StageStatusIcon, getStageLedgerTone, getIdleStageRows, getStageTileLabel, STAGE_METADATA, type WorkflowStageTile } from "./WorkflowStageTile";
+import { StageStatusIcon, stageTileBorder, getStageLedgerTone, getIdleStageRows, getStageTileLabel, STAGE_METADATA, type WorkflowStageTile } from "./WorkflowStageTile";
 
 import Link from "next/link";
 import { isCard, type CardKey } from "@/lib/independentScorecards";
-import { usesSingleScorecardJob } from "@/lib/workflowStageModels";
 import { cardNames, scorecardHref } from "@/lib/scorecardNavigation";
 
 type Stage = ComponentProps<typeof WorkflowStageTile>;
@@ -133,12 +132,12 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
           const actions = evidenceActions(item);
           if (item.onSyncNowClick) actions.push({ label: "Sync Now", onSelect: item.onSyncNowClick });
           return <div key={key} className="mb-3">
-            <article className={`rounded-lg border border-slate-200 p-3 ${getStageLedgerTone(item.info)}`}>
+            <article className={`rounded-lg p-3 ${stageTileBorder(item.info, "border border-slate-200")} ${getStageLedgerTone(item.info)}`}>
               {tileHeader(title, actions, item.info)}
               {item.selectable && <label className="text-xs"><input type="checkbox" checked={Boolean(item.selected)} onChange={item.onClick} /> Select for next run</label>}
               {!upcoming && <>{label && <p className="text-xs">{label}</p>}
                 <dl className="mt-2 text-xs">{rows.map(row => <div key={row.label} className="flex justify-between gap-2">
-                  <dt>{row.label === "LLMs completed" && usesSingleScorecardJob(item.stage, market) ? "Model jobs completed" : row.label}</dt><dd>{row.label === "LLMs completed" && market ? <button type="button"
+                  <dt>{row.label}</dt><dd>{row.label === "LLMs Used" && market ? <button type="button"
                     data-auto-rebalance-llm-metric="true" data-workflow-stage={item.stage}
                     data-workflow-portfolio={market === "zerodha" ? "india" : "indmoney_us"}
                     data-workflow-total={item.info.totalLlms ?? undefined} data-workflow-run-id={item.info.activeRunId ?? item.info.lastRunId ?? undefined}
@@ -182,7 +181,7 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
           const label = evidenceLabel(item);
           const upcoming = active && (item.info.state === "idle" || item.info.state === "queued");
           const rows = getIdleStageRows(item.stage, item.info, item.now);
-          const error = rows.find(row => row.label === "Error")!;
+          const error = rows.find(row => row.label === "Error");
           const time = rows[0].value;
           const inspecting = selected.stage === item.stage;
           const usesSyncStockCount = market === "zerodha" && item.stage === "sync";
@@ -206,10 +205,10 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
               data-workflow-passed={item.info.passedLlms ?? undefined}
               data-workflow-failed={item.info.failedLlms ?? undefined}
               data-workflow-partial={item.info.partialLlms ?? undefined}
-              aria-label={`Open ${STAGE_METADATA[item.stage].idle} LLM details`} aria-haspopup="dialog" className="rounded text-indigo-700 underline decoration-dotted underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600">{rowValue(item, "LLMs completed")}</button> : rowValue(item, "LLMs completed", item.stage === "actionables" ? `Rebalance inputs ${rowValue(item, "Rebalance inputs")}` : "—")}{rows.some(row => row.label === "Cost incurred") ? <span className="mt-1 block text-xs text-slate-500">Cost incurred: {rowValue(item, "Cost incurred")}</span> : null}</>}</td>
+              aria-label={`Open ${STAGE_METADATA[item.stage].idle} LLM details`} aria-haspopup="dialog" className="rounded text-indigo-700 underline decoration-dotted underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600">{rowValue(item, "LLMs Used")}</button> : rowValue(item, "LLMs Used", item.stage === "actionables" ? `Rebalance inputs ${rowValue(item, "Rebalance inputs")}` : "—")}{rows.some(row => row.label === "Cost incurred") ? <span className="mt-1 block text-xs text-slate-500">Cost incurred: {rowValue(item, "Cost incurred")}</span> : null}</>}</td>
             <td className="px-3 py-2" title={usesSyncStockCount ? "Holdings count from the latest saved Zerodha portfolio snapshot" : undefined}>{upcoming ? null : stockCell}</td>
             <td className="px-3 py-2 whitespace-nowrap">{upcoming ? null : rows.some(row => row.label === "Duration") ? <button type="button" aria-haspopup="dialog" aria-label={`Show duration breakdown for ${STAGE_METADATA[item.stage].idle}`} className="rounded text-indigo-700 underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600" onClick={() => openDuration(item)}>{rowValue(item, "Duration")}</button> : "—"}</td>
-            <td className={`max-w-44 px-3 py-2 ${error.detail ? "text-amber-900" : ""}`}>{upcoming ? null : error.value}{!upcoming && error.detail ? <StageErrorDetails stageLabel={STAGE_METADATA[item.stage].idle} info={item.info} row={error} /> : null}</td>
+            <td className={`max-w-44 px-3 py-2 ${error?.detail ? "text-amber-900" : ""}`}>{upcoming ? null : error?.value}{!upcoming && error?.detail ? <StageErrorDetails stageLabel={STAGE_METADATA[item.stage].idle} info={item.info} row={error} /> : null}</td>
           </tr>;
         })}</tbody>
       </table>

@@ -54,6 +54,14 @@ test('duplicates count unique jobs, while exchange identity remains distinct',()
   const a=run(JSON.stringify({stocks:[row,row,{...row,'Exchange Symbol':'BSE'}]}));const b=run(json,'completed','india',11);
   const result=flow.buildSwingFlow([a,b]);assert.equal(result.stocks.length,2);assert.equal(result.stocks.find(stock=>stock.exchange==='NSE').totalSuggestions,2);
 });
+test('Swing overlap counts each listing once per independent job, including repeated models',()=>{
+  const a=run(JSON.stringify({stocks:[row,row,{...row,'Exchange Symbol':'BSE'}]}));
+  const b=run(json,'partial','india',11);
+  const combined={...a,run_jobs:[a.run_jobs[0],{...b.run_jobs[0],job_id:a.run_jobs[0].job_id+1}]};
+  assert.deepEqual(flow.swingRecommendationCounts(combined),{recommendedStocks:2,commonStocks:1});
+  assert.deepEqual(flow.swingRecommendationCounts(a),{recommendedStocks:2,commonStocks:0});
+  assert.deepEqual(flow.swingRecommendationCounts(run('','pending')),{recommendedStocks:null,commonStocks:null});
+});
 test('newer pending scan is labeled separately and does not conceal completed rows',()=>{
   const a=run(json),b=run('','pending','india',11);b.created_at='2024-02-02T12:00:00Z';
   const selected=flow.selectFlowStage([b,a],'swing','india');assert.equal(selected.selected.id,10);assert.equal(selected.newerIncomplete.id,11);

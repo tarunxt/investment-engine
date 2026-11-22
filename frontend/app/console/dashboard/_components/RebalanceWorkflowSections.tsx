@@ -53,7 +53,7 @@ import { BasketUnitsPopup } from "@/components/BasketUnitsPopup";
 import { BasketColumnTable, BasketColumnPicker, BasketColumnRename } from "@/components/BasketColumnPicker";
 import type { BasketUnitsTrace } from "@/lib/basketUnitsExplanation";
 import { useWorkflowConfiguration } from "@/app/console/_components/WorkflowConfiguration";
-import { mergeStageEvidence } from "@/lib/stockFlowEvidence";
+import { mergeStageEvidence, swingRecommendationCounts } from "@/lib/stockFlowEvidence";
 import { classifyWorkflowLlmJob as classifyRunOutputJob } from "@/lib/workflowLlmEvidence";
 import { assertWholeShareOrdersReviewed, isWholeShareOrderSelectable, needsWholeShareTrimReview, type WholeShareChoice } from "@/lib/wholeShareReview";
 import {
@@ -1950,6 +1950,7 @@ function summarizeAutoRebalanceHistoryStage(
         summary,
         "recommended_stocks",
       ),
+      commonStocks: getAutoRebalanceSummaryNumber(summary, "common_stocks"),
       rebalanceInputs: getAutoRebalanceSummaryNumber(
         summary,
         "rebalance_inputs",
@@ -5636,7 +5637,8 @@ ${zerodhaExecutionMode === "direct_market"
             if (row?.run_id && stage === "swing") {
               const run = runs.find(run => run.id === row.run_id && run.auto_rebalance_sequence === latestIndia.sequence && run.auto_rebalance_portfolio === "india");
               if (run && run.run_jobs?.length) {
-                info.recommendedStocks ??= countUniqueStocksFromRun(run);
+                const counts = swingRecommendationCounts(run);
+                if (counts.recommendedStocks != null) Object.assign(info, counts);
                 info.distinctModels ??= summarizeRun(run).distinctModels;
               }
             }
@@ -5708,11 +5710,8 @@ ${zerodhaExecutionMode === "direct_market"
             ...(overview?.latest ? { portfolioStockCount: overview.latest.holdings_count } : {}),
           },
           swing: mergeStageEvidence(
-            summarizeRunForIdleTile(
-              latestSwingRun,
-              usdInrRate,
-              latestSwingRun ? countUniqueStocksFromRun(latestSwingRun) : null,
-            ),
+            { ...summarizeRunForIdleTile(latestSwingRun, usdInrRate),
+              ...(latestSwingRun ? swingRecommendationCounts(latestSwingRun) : {}) },
             historyInfo("swing"),
             true,
           ),
@@ -5976,6 +5975,7 @@ ${zerodhaExecutionMode === "direct_market"
           partial_notice: info.partialNotice ?? null,
           failed_llms: info.failedLlms ?? null,
           recommended_stocks: info.recommendedStocks ?? null,
+          ...(info.commonStocks != null ? { common_stocks: info.commonStocks } : {}),
           rebalance_inputs: info.rebalanceInputs ?? null,
           ...(info.portfolioStockCount != null ? { portfolio_stock_count: info.portfolioStockCount } : {}),
           ...(info.finalInputs ? { final_inputs: info.finalInputs } : {}),
@@ -6059,7 +6059,7 @@ ${zerodhaExecutionMode === "direct_market"
         completedAt: null,
         error: null,
         errorDetails: [],
-        lastRunId: null, activeRunId: null, recommendedStocks: null, jobId: null, workflowSequence: null,
+        lastRunId: null, activeRunId: null, recommendedStocks: null, commonStocks: null, jobId: null, workflowSequence: null,
         passedLlms: 0, partialLlms: 0, failedLlms: 0, completedLlms: 0,
         partialNotice: null, exportStatus: null, costUsd: null, costInr: null, costIncomplete: false,
         provider: null, model: null, runStatus: "processing", totalLlms: null,
@@ -6246,7 +6246,7 @@ ${zerodhaExecutionMode === "direct_market"
               ...getRunProgress(run),
               lastRunId: run.id,
               recommendedStocks:
-                stage === "swing" || stage === "technical"
+                stage === "technical"
                   ? countUniqueStocksFromRun(run)
                   : stage === "rebalance"
                     ? buildConsensusRows(
@@ -6254,6 +6254,7 @@ ${zerodhaExecutionMode === "direct_market"
                         market,
                       ).length || null
                     : undefined,
+              ...(stage === "swing" ? swingRecommendationCounts(run) : {}),
             },
             usdInrRate,
           );
@@ -6261,15 +6262,6 @@ ${zerodhaExecutionMode === "direct_market"
           if (status === "completed" || status === "partial") {
             markCompleted(runningPortfolio, stage, {
               ...runSummary,
-              recommendedStocks:
-                stage === "swing"
-                  ? countUniqueStocksFromRun(run)
-                  : stage === "rebalance"
-                    ? buildConsensusRows(
-                        getLatestMatchingRebalanceRuns([run], market),
-                        market,
-                      ).length || null
-                    : undefined,
             });
           } else if (status === "failed") {
             updateStage(runningPortfolio, stage, {
@@ -7286,7 +7278,7 @@ ${zerodhaExecutionMode === "direct_market"
             ...summarizeRun(completedSwingRun),
             ...getRunProgress(completedSwingRun),
             lastRunId: completedSwingRun.id,
-            recommendedStocks: countUniqueStocksFromRun(completedSwingRun),
+            ...swingRecommendationCounts(completedSwingRun),
           });
           } catch (error) {
             continueAfterStageFailure("swing", error);

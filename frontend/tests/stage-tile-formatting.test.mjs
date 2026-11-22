@@ -13,7 +13,7 @@ function load(relative, names=[], bindings={}) {
 }
 const date=load('../lib/datetime.ts');
 const workflowPath='../components/shared/WorkflowStageTile.tsx';
-const ui=load(workflowPath,['formatLlmCompletion','formatRecommendedStockProgress','getLlmStageTileRows','getActionablesStageTileRows','getIdleStageRows','LLM_STAGE_TILE_KEYS','formatBriefTileError','getStageTileError','getTileErrorDetail','isSheetExportError','isInsufficientBalanceError'],{formatCompactStageTime:date.formatCompactStageTime,formatDuration:()=>null,formatRebalanceCost:load('../lib/rebalanceCost.ts').formatRebalanceCost});
+const ui=load(workflowPath,['stageErrorRows','getStageOutcome','hasStagePartialOutput','stageTileBorder','formatLlmCompletion','formatRecommendedStockProgress','getLlmStageTileRows','getActionablesStageTileRows','getIdleStageRows','LLM_STAGE_TILE_KEYS','formatBriefTileError','getStageTileError','getTileErrorDetail','isSheetExportError','isInsufficientBalanceError'],{formatCompactStageTime:date.formatCompactStageTime,formatDuration:()=>null,formatRebalanceCost:load('../lib/rebalanceCost.ts').formatRebalanceCost});
 
 test('Kite board shows synced holdings and the shared Rebalance count alongside independent score coverage', () => {
   const cards = load('../lib/independentScorecards.ts', ['cards','isCard']);
@@ -149,5 +149,18 @@ test('unlaunched stages show only the current workflow and a verified zero worke
     assert.deepEqual(ui.getIdleStageRows(stage, {...info, runStatus:'interrupted before launch'}, 0), [
       {label:'Workflow',value:'#245 · Interrupted before launch'}, {label:'Model jobs launched',value:'0'},
     ]);
+  }
+});
+
+test('running, partial and clean tiles have distinct presentation', () => {
+  const running = {state:'running', partialLlms:1};
+  const rows = Object.fromEntries(ui.getIdleStageRows('rebalance',running,0).map(row => [row.label,row.value]));
+  assert.equal(rows['Cost incurred'],'Task running');
+  assert.ok(rows['LLMs Used']);
+  assert.equal(ui.stageTileBorder(running,'normal'),'normal');
+  assert.match(ui.stageTileBorder({...running,state:'completed'},'normal'),/border-red-500/);
+  assert.equal(ui.formatRecommendedStockProgress({recommendedStocks:28,commonStocks:11}),'28 (11 common)');
+  for (const stage of ['sync','swing','technical','rebalance','threats','pairwise','actionables']) {
+    assert.equal(ui.getIdleStageRows(stage,{state:'completed'},0).some(row => row.label==='Error'),false);
   }
 });

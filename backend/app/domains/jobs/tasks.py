@@ -887,7 +887,7 @@ def _refresh_run_status(db, job_id: int) -> None:
     """Recalculate and persist Run.status when a child job reaches a terminal state."""
     try:
         from sqlalchemy import select as sa_select
-        from app.domains.runs.models import RunJob
+        from app.domains.runs.models import Run, RunJob
         from app.domains.runs.repository import SyncRunRepository
 
         run_repo = SyncRunRepository(db)
@@ -897,7 +897,10 @@ def _refresh_run_status(db, job_id: int) -> None:
         ).scalars().all()
 
         for rj in rj_rows:
-            run = run_repo.get(rj.run_id)
+            # Serialize sibling snapshots so a late processing update cannot
+            # overwrite the final aggregate when model calls finish together.
+            run = db.scalar(sa_select(Run).where(Run.id == rj.run_id)
+                            .with_for_update().execution_options(populate_existing=True))
             if not run:
                 continue
             run_id = run.id
@@ -911,9 +914,14 @@ def _refresh_run_status(db, job_id: int) -> None:
 
             pairs = run_repo.get_stage_run_jobs(rj.run_id, rj.stage)
             if not pairs:
+                db.commit()
                 continue
 
             stage_jobs = [job for _, job in pairs]
+            new_status = aggregate_stage_status(j.status for j in stage_jobs)
+            status_changed = run.status != new_status
+            run.status = new_status
+            db.commit()
 
             # Push the triggering job's full data to the per-run channel so the
             # detail page can update response text, tokens, and cost in real-time.
@@ -962,10 +970,7 @@ def _refresh_run_status(db, job_id: int) -> None:
                         "updated_at": updated_job.updated_at.isoformat() if updated_job.updated_at else None,
                     })
 
-            new_status = aggregate_stage_status(j.status for j in stage_jobs)
-
-            if run.status != new_status:
-                run_repo.update_status(run, new_status)
+            if status_changed:
                 _publish_run_update(
                     run_id,
                     user_id,

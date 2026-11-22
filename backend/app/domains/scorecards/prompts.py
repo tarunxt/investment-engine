@@ -25,6 +25,10 @@ def single_job_card(portfolio, card):
 
 def batches(stocks, card, *, pairs=None, portfolio=None):
     keys = sorted(row["listing"] for row in stocks)
+    if portfolio == "india" and card == "rebalance":
+        # One full-universe assignment per selected model slot, including repeats.
+        yield keys, []
+        return
     if single_job_card(portfolio, card):
         if card == "threats":
             yield keys, []

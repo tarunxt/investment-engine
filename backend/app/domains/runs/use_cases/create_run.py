@@ -53,6 +53,7 @@ class CreateRunCommand:
     export_sheet_name: str | None = None
     export_investment_amount: str | None = None
     export_title: str | None = None
+    stagger_gemini: bool = True
     allow_parallel: bool = False
     auto_rebalance_portfolio: str | None = None
     auto_rebalance_sequence: int | None = None
@@ -197,7 +198,7 @@ class CreateRunUseCase:
                 for job in jobs:
                     self._session.add(RunJob(run_id=run.id, job_id=job.id, stage=1))
                     offset = 0
-                    if job.provider.strip().lower() == "gemini":
+                    if cmd.stagger_gemini and job.provider.strip().lower() == "gemini":
                         offset = gemini_offset
                         gemini_offset += 20
                     eta = (scheduled_at if is_future else now) + timedelta(seconds=offset)

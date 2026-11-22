@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, type SVGProps } from "react";
-import { FileSpreadsheet } from "lucide-react";
+import { FileSpreadsheet, LoaderCircle } from "lucide-react";
 import { StageErrorDetails } from "@/components/shared/StageErrorDetails";
 import { formatRebalanceCost, type StageCost } from "@/lib/rebalanceCost";
 import { cn } from "@/lib/utils";
@@ -59,6 +59,7 @@ export type StageInfo = StageCost & {
   failedLlms?: number | null;
   totalLlms?: number | null;
   recommendedStocks?: number | null;
+  commonStocks?: number | null;
   rebalanceInputs?: number | null;
   sourceRevision?: number;
   sourceListingCount?: number;
@@ -263,8 +264,8 @@ export function formatLlmCompletion(info: StageInfo) {
 }
 
 export function formatRecommendedStockProgress(info: StageInfo) {
-  return info.recommendedStocks === null || info.recommendedStocks === undefined
-    ? "n/a" : String(info.recommendedStocks);
+  if (info.recommendedStocks == null) return "n/a";
+  return info.commonStocks == null ? String(info.recommendedStocks) : `${info.recommendedStocks} (${info.commonStocks} common)`;
 }
 
 export function isSheetExportError(error?: string | null) {
@@ -291,7 +292,7 @@ export function formatBriefTileError(error?: string | null) {
 }
 
 export function getTileErrorDetail(error?: string | null) {
-  if (!error?.trim() || error.trim().toLowerCase() === "none" || isSheetExportError(error)) return null;
+  if (!error?.trim() || /^(?:none|[-–—])$/i.test(error.trim()) || isSheetExportError(error)) return null;
   return error;
 }
 
@@ -299,6 +300,7 @@ export function getTileErrorDetail(error?: string | null) {
 export function getStageOutcome(info: StageInfo) {
   const status = info.runStatus?.trim().toLowerCase() ?? "";
   if (info.state === "running" || info.state === "queued") return info.state;
+  if (info.state === "idle" && ["processing", "running"].includes(status)) return "running";
   if (info.published) {
     if (!info.published.covered) return "unassessed";
     return info.published.covered === info.published.expected ? "completed" : "partial";
@@ -325,11 +327,20 @@ export function getStageLedgerTone(info: StageInfo) {
   return getStageBackgroundClass(outcome);
 }
 
+export function stageTileBorder(info: StageInfo, fallback: string) {
+  const outcome = getStageOutcome(info);
+  return outcome === "partial" || (outcome === "unassessed" && hasStagePartialOutput(info))
+    ? "border-2 border-red-500" : fallback;
+}
+
 export function StageStatusIcon({ info }: { info: StageInfo }) {
   const outcome = getStageOutcome(info);
+  if (outcome === "running") return <span className="ml-1 inline-flex items-center gap-1 align-middle text-xs">
+    <LoaderCircle aria-hidden="true" className="size-4 animate-spin" /> (Running)
+  </span>;
   const symbols = {
     completed: "✅", failed: "❌", partial: "⚠️", stale: "⚠️", unconfirmed: "⚠️", unassessed: "○", queued: "⏳",
-    running: "🔄", derived: "ℹ️", skipped: "⏭️", paused: "⏸️", idle: "○",
+    derived: "ℹ️", skipped: "⏭️", paused: "⏸️", idle: "○",
   };
   const description = info.published ? `Output #${info.published.output_id} · ${info.published.covered}/${info.published.expected} covered` : info.runStatus || outcome;
   return <span role="img" aria-label={outcome} title={description} className="ml-1 inline-block align-middle text-xs">{symbols[outcome]}</span>;
@@ -351,10 +362,16 @@ export function getStageTileError(info: StageInfo): StageTileRow {
   return { label: "Error", value: error ? formatBriefTileError(error) : partial ? "LLM output partial" : detail ? "Stage execution failed" : "-", detail, errorDetails: info.errorDetails };
 }
 
+function stageErrorRows(info: StageInfo): StageTileRow[] {
+  const row = getStageTileError(info);
+  return row.detail ? [row] : [];
+}
+
 export function getLlmStageTileRows(info: StageInfo, now: number): StageTileRow[] {
+  const cost = formatRebalanceCost(info);
   return [
     { label: "Last Scan", value: formatCompactStageTime(info.completedAt ?? info.startedAt) },
-    { label: "LLMs completed", value: formatLlmCompletion(info) },
+    { label: "LLMs Used", value: formatLlmCompletion(info) },
     ...(info.published ? [
       {label:"Available output",value:`#${info.published.output_id} · run #${info.published.run_id}`},
       {label:"Recorded execution",value:`${info.lastRunId ? "#"+info.lastRunId+" · " : ""}${info.runStatus || info.state}`},
@@ -364,8 +381,8 @@ export function getLlmStageTileRows(info: StageInfo, now: number): StageTileRow[
     ...(info.distinctModels != null ? [{label: "Model coverage", value: `${info.totalLlms ?? "?"} jobs · ${info.distinctModels} distinct model${info.distinctModels === 1 ? "" : "s"}`}] : []),
     { label: "Stocks recommended", value: formatRecommendedStockProgress(info) },
     { label: "Duration", value: formatDuration(info.startedAt, info.endedAt, now) ?? "n/a" },
-    { label: "Cost incurred", value: formatRebalanceCost(info) },
-    getStageTileError(info),
+    { label: "Cost incurred", value: cost === "Usage unavailable" && getStageOutcome(info) === "running" ? "Task running" : cost },
+    ...stageErrorRows(info),
   ];
 }
 
@@ -374,7 +391,7 @@ export function getActionablesStageTileRows(info: StageInfo): StageTileRow[] {
     { label: "Last update", value: formatCompactStageTime(info.completedAt ?? info.startedAt) },
     { label: "Rebalance inputs", value: info.rebalanceInputs?.toString() ?? "n/a" },
     { label: "Stocks recommended", value: info.recommendedStocks?.toString() ?? "n/a" },
-    getStageTileError(info),
+    ...stageErrorRows(info),
   ];
 }
 
@@ -389,7 +406,7 @@ export function getIdleStageRows(stage: WorkflowStageKey, info: StageInfo, now: 
     const rows: StageTileRow[] = [
       { label: "Latest sync", value: formatCompactStageTime(info.completedAt) },
     ];
-    rows.push(getStageTileError(info));
+    rows.push(...stageErrorRows(info));
     return rows;
   }
   if (LLM_STAGE_TILE_KEYS.has(stage)) {
@@ -605,7 +622,7 @@ export function WorkflowStageTile({
       </p>;
     }
     return <p key={row.label}>
-      <span className={cn("font-semibold text-slate-600", row.label === "LLMs completed" && "pointer-events-auto")}>{row.label}:</span>{" "}
+      <span className={cn("font-semibold text-slate-600", row.label === "LLMs Used" && "pointer-events-auto")}>{row.label}:</span>{" "}
       <span>{row.value}</span>
     </p>;
   };
@@ -613,7 +630,7 @@ export function WorkflowStageTile({
   return (
     <>
     <article
-      className={`relative flex min-h-[17rem] flex-col items-start justify-start rounded-2xl border p-5 text-left align-top shadow-sm transition hover:-translate-y-0.5 hover:shadow-md disabled:cursor-default disabled:hover:translate-y-0 ${getStageLedgerTone(info)} ${getStageToneClasses(info.state)} ${selectionClasses}`}
+      className={`relative flex min-h-[17rem] flex-col items-start justify-start rounded-2xl border p-5 text-left align-top shadow-sm transition hover:-translate-y-0.5 hover:shadow-md disabled:cursor-default disabled:hover:translate-y-0 ${getStageLedgerTone(info)} ${stageTileBorder(info, getStageToneClasses(info.state))} ${selectionClasses}`}
     >
       <button
         type="button"
