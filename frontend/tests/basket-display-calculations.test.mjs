@@ -14,6 +14,7 @@ const draftMath=load('../lib/basketEditableDraft.ts');
 const math=load('../lib/basketDisplayCalculations.ts');
 Object.assign(sharedColumnBindings, load('../components/AllocationScoreContext.tsx', math), load('../components/BasketAllocationBreakdown.tsx'));
 const dateMath=load('../lib/datetime.ts');
+const scorecardBasket = load('../lib/scorecardBasket.ts', load('../lib/actionColorScheme.ts'));
 Object.assign(math,load('../lib/basketActionSizing.ts',math));
 const end='2026-10-28T12:00:00Z', start='2026-10-23T12:00:00Z';
 const observation=(run,score,overrides={})=>({id:run,run_id:run,symbol:'HAL',exchange:'NSE',covered_at:end,score,completed:true,coverage_status:'suggested',...overrides});
@@ -140,8 +141,15 @@ test('actual preparation callbacks clear prior display scope on reopen/failure a
  for(const [broker,cap,market]of[['zerodha','Zerodha','india'],['indmoney','Indmoney','us']]){
   const source=readFileSync(new URL('../app/console/dashboard/_components/RebalanceWorkflowSections.tsx',import.meta.url),'utf8');
   const begin=source.indexOf(`  const open${cap}BasketPreview =`),endIndex=source.indexOf('\n  }, [',begin),body=source.slice(begin,endIndex);
-  const state={},pending=[],generation={current:0},bindings={verifyBasketRevision:async()=>{throw new Error("Unexpected saved revision");},useCallback:fn=>fn,[`${broker}Preparation`]:generation,scoreMatrixFormulaConfig:{},zerodhaBasketBuyThreshold:2.5,indmoneyBasketBuyThreshold:2.5,
-   fetchRebalanceStockFlowSource:()=>new Promise((resolve,reject)=>pending.push({resolve,reject})),scorecardApi:()=>({latestFinal:async()=>null}),apiService:{zerodhaStatus:async()=>({}),zerodhaLoginUrl:async()=>({}),zerodhaEventsLatest:async()=>({analysis:null}),zerodhaThreatsLatest:async()=>({analysis:null}),indmoneyUsEventsLatest:async()=>({analysis:null}),indmoneyUsThreatsLatest:async()=>({analysis:null})},
+  let final = null;
+  const requestedRuns = [];
+  const state={},pending=[],generation={current:0},bindings={...scorecardBasket,canonicalBasketInputs:JSON.stringify,verifyBasketRevision:async()=>{throw new Error("Unexpected saved revision");},useCallback:fn=>fn,[`${broker}Preparation`]:generation,scoreMatrixFormulaConfig:{},zerodhaBasketBuyThreshold:2.5,indmoneyBasketBuyThreshold:2.5,
+   fetchRebalanceStockFlowSource:()=>new Promise((resolve,reject)=>pending.push({resolve,reject})),scorecardApi:()=>({latestFinal:async()=>final}),apiService:{
+    getRun:async id=>{
+      requestedRuns.push(id);
+      if (id === 99) throw new Error('Source run unavailable');
+      return {id,stock:{symbol:'ONE',exchange:'NSE',representative:{}}};
+    },zerodhaStatus:async()=>({}),zerodhaLoginUrl:async()=>({}),zerodhaEventsLatest:async()=>({analysis:null}),zerodhaThreatsLatest:async()=>({analysis:null}),indmoneyUsEventsLatest:async()=>({analysis:null}),indmoneyUsThreatsLatest:async()=>({analysis:null})},
    getIndiaMarketStatus:()=>({open:false}),getLatestMatchingRebalanceRuns:runs=>runs,buildConsensusRows:runs=>runs,buildTechnicalScanMap:()=>({}),parseTimestampMs:Date.parse,buildDashboardActionRows:stocks=>stocks,buildZerodhaBasketPreviewOrders:rows=>rows.map(row=>({...row,id:`zerodha:${row.id}`})),getZerodhaBasketSelectableOrders:rows=>rows,buildDefaultZerodhaBasketSelection:rows=>new Set(rows.map(row=>row.id)),normalizeError:error=>error.message};
   for(const setter of new Set(body.match(/set[A-Z]\w+/g)))bindings[setter]=value=>{state[setter]=typeof value==='function'?value(state[setter]):value;};
   const prepare=callback(`open${cap}BasketPreview`,bindings);
@@ -152,6 +160,37 @@ test('actual preparation callbacks clear prior display scope on reopen/failure a
   const stale=prepare(),old=pending.shift(),fresh=prepare(),latest=pending.shift();latest.resolve({runs:[{id:'new-scope'}],portfolioSnapshot:{captured_at:'2026-10-29T12:00:00Z',market}});await fresh;old.resolve({runs:[{id:'stale'}],portfolioSnapshot:{captured_at:end,market}});await stale;assert.equal(state[`set${cap}AllocationUniverse`][0].id,'new-scope');
   const cached=prepare();pending.shift().resolve({runs:[{id:'cached'}],portfolioSnapshot:{captured_at:end,market},warning:'fresh source unavailable'});await cached;assert.deepEqual(state[`set${cap}AllocationUniverse`],[]);assert.match(state[`set${cap}BasketError`],/cached source/);
   const closing=prepare(),last=pending.shift();generation.current++;last.resolve({runs:[{id:'dismissed'}],portfolioSnapshot:{captured_at:end,market}});await closing;assert.deepEqual(state[`set${cap}AllocationUniverse`],[]);
+
+  const savedRow = {listing:'NSE:ONE',symbol:'ONE',exchange:'NSE',status:'Provisional',signed:1,price:10};
+  final = {sequence:42,schema:'independent-scorecards-v1',rows:[savedRow],source_runs:{rebalance:51,technical:51,pairwise:null}};
+  const openSaved = async () => {
+    const preview = prepare();
+    pending.shift().resolve({runs:[{id:'unrelated'}],portfolioSnapshot:null});
+    await preview;
+  };
+  const revisionKey = broker === 'zerodha' ? 'setScoreRevision' : 'setUsRevision';
+  await openSaved();
+  assert.deepEqual(requestedRuns,[51]);
+  assert.equal(state[`set${cap}BasketError`],null);
+  assert.equal(state[revisionKey].finalRows.get(savedRow.listing),savedRow);
+  assert.equal(state[`set${cap}AllocationUniverse`][0].independentEligible,false);
+
+  final.source_runs = {pairwise:null,technical:null};
+  await openSaved();
+  assert.deepEqual(requestedRuns,[51]);
+  assert.deepEqual(state[`set${cap}BasketHistoryRuns`],[]);
+  assert.equal(state[revisionKey].finalRows.get(savedRow.listing),savedRow);
+  assert.equal(state[`set${cap}BasketError`],null);
+
+  final.source_runs = {technical:'null'};
+  await openSaved();
+  assert.deepEqual(requestedRuns,[51]);
+  assert.match(state[`set${cap}BasketError`],/invalid source run ID/);
+
+  final.source_runs = {technical:99,pairwise:null};
+  await openSaved();
+  assert.deepEqual(requestedRuns,[51,99]);
+  assert.match(state[`set${cap}BasketError`],/Source run unavailable/);
  }
 });
 

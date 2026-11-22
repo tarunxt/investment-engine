@@ -1,5 +1,5 @@
 "use client";
-import { bindIndependentBasket } from "@/lib/scorecardBasket";
+import { basketSourceRunIds, bindIndependentBasket } from "@/lib/scorecardBasket";
 import { cards, isCard, migratedPolicy, scorecardApi, type FinalRow, type CardKey, type CardPolicy } from "@/lib/independentScorecards";
 import { ScorecardReview } from "./ScorecardReview";
 import { useReviewDialog } from "@/hooks/useReviewDialog";
@@ -4905,7 +4905,10 @@ export function RebalanceWorkflowSections({
       const independent=await scorecardApi(apiService,"india").latestFinal(requested?.sequence);
       if(generation!==zerodhaPreparation.current)return;
       const portfolioSnapshot=stockFlowResult.value.portfolioSnapshot;
-      const runs=independent ? await Promise.all(Object.values(independent.source_runs).map(id=>apiService.getRun(id))) : stockFlowResult.value.runs;
+      const runs = independent
+        ? await Promise.all(basketSourceRunIds(independent).map(id => apiService.getRun(id)))
+        : stockFlowResult.value.runs;
+      if (generation !== zerodhaPreparation.current) return;
       setZerodhaBasketHistoryRuns(runs);
       const status = statusResult.status === "fulfilled" ? statusResult.value : null;
       const login = loginResult.status === "fulfilled" ? loginResult.value : null;
@@ -5017,7 +5020,10 @@ export function RebalanceWorkflowSections({
       const independent=await scorecardApi(apiService,"indmoney_us").latestFinal(requested?.sequence);
       if(generation!==indmoneyPreparation.current)return;
       const portfolioSnapshot=stockFlowSource.portfolioSnapshot;
-      const runs=independent ? await Promise.all(Object.values(independent.source_runs).map(id=>apiService.getRun(id))) : stockFlowSource.runs;
+      const runs = independent
+        ? await Promise.all(basketSourceRunIds(independent).map(id => apiService.getRun(id)))
+        : stockFlowSource.runs;
+      if (generation !== indmoneyPreparation.current) return;
       setIndmoneyBasketHistoryRuns(runs);
       const stocks = buildConsensusRows(
         getLatestMatchingRebalanceRuns(runs, "us"),
