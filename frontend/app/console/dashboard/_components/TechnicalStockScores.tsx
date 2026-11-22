@@ -34,6 +34,7 @@ export function TechnicalStockScores({result,revision,onRecover,onRetryCommentar
   const [busy,setBusy]=useState(false);
   const [message,setMessage]=useState("");
   const current=recovered?.from===result.id?recovered.data:result;
+  const recovery=current.recovery && "state" in current.recovery ? current.recovery : undefined;
   const counts=current.technical_counts;
   const data=selection&&lines(selection);
   const original=selection?.original_annotation as {row:Record<string,string>;job:number}|undefined;
@@ -45,7 +46,7 @@ export function TechnicalStockScores({result,revision,onRecover,onRetryCommentar
   return <div className="space-y-3 py-2 text-sm">
     <p className="font-semibold">{counts?`${counts.source_rows??counts.expected} source rows · ${counts.expected} unique listings · ${counts.complete} complete · ${counts.provisional} provisional · ${counts.insufficient} insufficient · ${counts.commentary} model rows`:
       `${current.rows.length} expected · ${current.rows.length-unfilled} saved scores · ${unfilled} without a score`}</p>
-    {current.recovery?.state&&<p role="status">Evidence recovery · {current.recovery.state}{current.recovery.next_retry&&" · next check "+at(current.recovery.next_retry)}</p>}
+    {recovery?.state&&<p role="status">Evidence recovery · {recovery.state}{recovery.next_retry&&" · next check "+at(recovery.next_retry)}</p>}
     {counts&&<p>20-session direction · Stage 2 #{revision??current.revision_id} · Output #{current.id} · {current.stage4_method==="v3"?"Validated for Stage 4":"Shadow evaluation · Stage 4 uses the legacy score"}</p>}
     <div className="overflow-x-auto"><table className="w-full text-left"><thead className="bg-slate-100"><tr>
       {["Listing","Score /100","Coverage","Setup / entry","Reason"].map(k=><th key={k} className={cell}>{k}</th>)}</tr></thead>

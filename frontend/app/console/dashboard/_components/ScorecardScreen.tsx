@@ -346,7 +346,7 @@ function Evidence({
   const scores = useRead(readResult, !!attempt && (tab === "flow" || tab === "output"));
   const readOutput = useCallback(() => client.getRun(runId!), [client, runId, refresh]);
   const output = useRead(readOutput, !!runId && tab === "output");
-  const watchingRecovery=card==="technical" && ["scheduled","recovering"].includes(published?.technical_recovery?.state??scores.data?.recovery?.state??"");
+  const watchingRecovery=card==="technical" && ["scheduled","recovering"].includes(published?.technical_recovery?.state??(scores.data?.recovery && "state" in scores.data.recovery ? scores.data.recovery.state : ""));
   useEffect(()=>{
     if(!watchingRecovery)return;
     const timer=window.setInterval(()=>{coverage.retry();source.retry();scores.retry();},20000);

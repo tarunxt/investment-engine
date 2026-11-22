@@ -132,7 +132,7 @@ def upstox_daily_bars(payload, cutoff, url, limit=10):
     return [sessions[day] for day in sorted(sessions, reverse=True)[:limit]]
 
 
-async def supplement_indian_bars(client, result, cutoff, notices, owner, *, sessions=5, diagnostics=None, calendars=None):
+async def supplement_indian_bars(client, result, cutoff, notices, owner, *, sessions=5, diagnostics=None, calendars=None, verified_keys=None):
     from app.domains.zerodha.upstox_quote_guard import QuoteGuard, redis_client
     from app.domains.zerodha.upstox_quotes import load_instruments
     missing = [key for key, items in result.items() if len({r["as_of"][:10] for r in items if r["kind"] == "daily_bar"}) < sessions]
@@ -143,7 +143,7 @@ async def supplement_indian_bars(client, result, cutoff, notices, owner, *, sess
     semaphore = asyncio.Semaphore(4)
 
     async def fetch(key, guard):
-        instrument = mapping.get(key)
+        instrument = mapping.get((verified_keys or {}).get(key, key))
         if not instrument:
             if diagnostics is not None:
                 diagnostics[key]={"reason":"Exact venue instrument unavailable"}

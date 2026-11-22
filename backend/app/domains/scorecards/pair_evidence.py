@@ -77,7 +77,7 @@ def reconcile(manifest, history, prior):
 
 
 async def save_history(db, rev, workflow_id, history):
-    identities = sorted((k,v["input_hash"]) for k,v in history["technical"].items())
+    identities = sorted((k,v["input_hash"],v.get("sources",{}).get("stock",{}).get("action_url")) for k,v in history["technical"].items())
     key="historical-bars/"+digest(identities)
     found=await storage.by_key(db,"packet",key,revision_id=rev.id)
     if not found:
@@ -92,7 +92,7 @@ async def attempt_packet(db, original):
     return cfg.get("research",{})
 
 
-async def repair(db, original, owner, username):
+async def repair(db, original, owner, username, *, requested=None):
     from .technical_sources import collect
     old=original.result_json
     rev_id=original.data["revision_id"]
@@ -108,22 +108,28 @@ async def repair(db, original, owner, username):
     # First use any already repaired Technical history before fetching missing listings.
     initial=reconcile(manifest,previous,prior) if previous else prior
     missing={k for k in keys if not ready(initial.get("packets",{}).get(k,{}))}
+    if requested is not None:
+        missing.intersection_update(requested)
     benchmark_missing=not any(p.get("features",{}).get("relative_20_pct") is not None for p in initial.get("packets",{}).values())
     await db.commit()
     updated=previous
     if missing or benchmark_missing:
-        updated=await collect(manifest,username,previous,missing if previous else set(keys))
+        action_only = {k for k in missing if previous and
+                       initial.get("packets",{}).get(k,{}).get("features",{}).get("sessions",0)>=6
+                       and initial["packets"][k]["features"].get("issue")=="Corporate-action history unavailable"}
+        updated=await collect(manifest,username,previous,missing,pair_repair=True,action_only=action_only)
     research=reconcile(manifest,updated,prior) if updated else initial
     signature=digest(research["packets"])
     identity=f"pairwise/evidence/{source_id}/{signature}"
-    if old.get("pair_protocol")==3 and digest(prior_packets)==signature:
-        return old
     rev=await storage.lookup(db,owner,"india","revision",rev_id,lock=True)
+    if updated:
+        await save_history(db,rev,wf,updated)
+    if old.get("pair_protocol")==3 and digest(prior_packets)==signature:
+        await db.commit()
+        return old
     existing=await storage.by_key(db,"attempt",identity,revision_id=rev_id)
     if existing:
         return existing.result_json
-    if updated:
-        await save_history(db,rev,wf,updated)
     packet=await storage.append(db,wf,"packet",identity,{"research":research},revision_id=rev_id)
     mode=settings.get("pair_mode","full")
     result=project_plan(manifest,research,mode,{"errors":[]},old,prior_packets)
@@ -172,19 +178,6 @@ async def news(manifest):
     return {"listings":observations,"notices":[n for n in notices if n]}
 
 
-async def queue_repair(owner, attempt_id):
-    import asyncio
-    import logging
-    from app.core.recovery import recovery_mode
-    if recovery_mode():
-        return
-    from .tasks import recover_pair_history
-    try:
-        await asyncio.to_thread(recover_pair_history.apply_async,args=[owner,attempt_id],countdown=90)
-    except Exception:
-        logging.getLogger(__name__).exception("Could not queue Pairwise evidence repair for %s",attempt_id)
-
-
 async def check_budget(prompts,target,budget):
     from fastapi import HTTPException
     from app.domains.ai_providers.deepseek import DeepSeekProvider
@@ -199,3 +192,4 @@ async def check_budget(prompts,target,budget):
     estimated=sum(provider.estimate_prompt_cost_usd(target.model,p) for p in prompts)*fx.value
     if estimated>budget:
         raise HTTPException(422,f"Estimated INR {estimated:.2f} for {len(prompts)} model calls exceeds the INR {budget:.2f} planning budget")
+    return estimated
