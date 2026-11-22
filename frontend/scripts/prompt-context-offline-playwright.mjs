@@ -13,7 +13,24 @@ import { chromium } from 'playwright';
 const require = createRequire(import.meta.url);
 const frontend = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const temporary = await mkdtemp(path.join(os.tmpdir(), 'saved-output-fixture-'));
-const entry = `import React,{useState} from 'react';import {createRoot} from 'react-dom/client';import {PromptTemplateDialog} from ${JSON.stringify(path.join(frontend,'app/console/automated-rebalance/_components/PromptTemplateDialog.tsx'))};function App(){const [open,setOpen]=useState(false);return <><button onClick={()=>setOpen(true)}>Open preview</button>{open&&<PromptTemplateDialog title="Zerodha Threats Scan prompt" body="TOKEN_FIXTURE_ONLY" onClose={()=>setOpen(false)} onReviewInputs={()=>{window.reviewed=true;setOpen(false)}}/>}</>}createRoot(document.getElementById('root')).render(<App/>);`;
+const entry = `
+import React,{useState} from 'react';
+import {createRoot} from 'react-dom/client';
+import {PromptTemplateDialog} from ${JSON.stringify(path.join(frontend,'app/console/automated-rebalance/_components/PromptTemplateDialog.tsx'))};
+import {readZerodhaSwingSettings,zerodhaSwingSettingsKey} from ${JSON.stringify(path.join(frontend,'lib/swingTrade.ts'))};
+function App(){
+  const [open,setOpen]=useState(null);
+  const [settings,setSettings]=useState(()=>readZerodhaSwingSettings(42));
+  return <>
+    <button onClick={()=>setOpen('threats')}>Open preview</button>
+    <button onClick={()=>setOpen('swing')}>Edit Swing Scan</button>
+    {open&&<PromptTemplateDialog title={'Zerodha '+open+' prompt'} body="TOKEN_FIXTURE_ONLY"
+      swingSettings={open==='swing'?settings:undefined}
+      onSaveSwingSettings={value=>{localStorage.setItem(zerodhaSwingSettingsKey(42),JSON.stringify(value));setSettings(value)}}
+      onClose={()=>setOpen(null)} onReviewInputs={()=>{window.reviewed=true;setOpen(null)}}/>}
+  </>;
+}
+createRoot(document.getElementById('root')).render(<App/>);`;
 let browser, server;
 try {
   await writeFile(path.join(temporary,'entry.tsx'),entry);
@@ -47,6 +64,37 @@ try {
     await page.getByRole('button',{name:'Review selected inputs'}).click();
     await dialog.waitFor({state:'detached'});assert.equal(await page.evaluate(()=>window.reviewed),true);
   }
+  const edit = page.getByRole('button',{name:'Edit Swing Scan'});
+  const count = dialog.getByLabel('Stocks to search');
+  const amount = dialog.getByLabel('Amount to invest');
+  const horizon = dialog.getByLabel('Swing horizon');
+  const save = dialog.getByRole('button',{name:'Save settings'});
+  await edit.click();
+  assert.deepEqual(await Promise.all([count.inputValue(),amount.inputValue(),horizon.inputValue()]),['5','50,000','1–3 months']);
+  await count.fill('1.5');
+  assert.equal(await save.isDisabled(),true);
+  await count.fill('8');
+  await amount.fill('0');
+  assert.equal(await save.isDisabled(),true);
+  await amount.fill('125000');
+  await horizon.fill('6–2 weeks');
+  assert.equal(await save.isDisabled(),true);
+  await horizon.fill('2–6 weeks');
+  const preview = await dialog.locator('pre').innerText();
+  assert.match(preview,/Choose exactly 8 stocks/);
+  assert.match(preview,/INR 1,25,000/);
+  assert.match(preview,/reaching target in 2–6 weeks/);
+  assert.doesNotMatch(preview,/50,000|1–3 months|2–12 weeks/i);
+  await save.click();
+  await dialog.getByText('Saved for your next Zerodha Swing Scan in this browser.').waitFor();
+  await page.reload();
+  await edit.click();
+  assert.deepEqual(await Promise.all([count.inputValue(),amount.inputValue(),horizon.inputValue()]),['8','1,25,000','2–6 weeks']);
+  await count.fill('1');
+  assert.match(await dialog.locator('pre').innerText(),/Choose exactly 1 stock\./);
+  await page.keyboard.press('Escape');
+  await edit.click();
+  assert.equal(await count.inputValue(),'8');
   assert.deepEqual(errors,[]);assert.deepEqual(external,[]);
-  console.log('PASS: desktop/narrow template distinction, collapsed tokens, read-only, review handoff, Escape, zero external requests. Input loading/empty/error/partial inapplicable to synchronous template dialog.');
+  console.log('PASS: template review on desktop and mobile, live Swing inputs, invalid values, save, reload and discard.');
 } finally {await browser?.close();await new Promise(r=>server?server.close(r):r());await rm(temporary,{recursive:true,force:true});}
