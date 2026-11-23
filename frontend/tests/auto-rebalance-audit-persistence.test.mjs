@@ -130,7 +130,7 @@ function harness({ analysisOnly = false, formulaScore = 0, intercept, read, emai
     finalize: async (id,sequence,attempts,policy)=>{finals.push({id,sequence,attempts,policy});return {id:70,schema:"independent-scorecards-v1",rows:[{status:"Complete",action:"Hold",suggested_units:0}]};},
   };
   const bindings = {
-    pairPlanningBudget: "", runSpendLimit: "", scoreSupportedFactors: false,
+    pairSchedule: "balanced", pairPlanningBudget: "", runSpendLimit: "", scoreSupportedFactors: false,
     cards, isCard:key=>cards.includes(key), sourceSelections:{zerodha:17,indmoneyUs:17},setSourceSelections:()=>{},cardPolicies:{},scorecardApi:()=>scorecards,migratedPolicy:()=>({}), isUsableStageJob:()=>true,
     runtimeOwner: { id: 7 }, isCurrentWorkflowOwner: () => true, requireWorkflowOwner: owner => owner,
     actionablesActivityKey: helperModule.exports.actionablesActivityKey, announceActionablesActivity: helperModule.exports.announceActionablesActivity,
@@ -383,7 +383,7 @@ test("workflow card retains pending status and omits the failed-history banner",
       auditStates: { zerodha: { key: "india:42", label: "India 42", status, message: "History not acknowledged" } },
       activeAutoRebalanceMetadata: {}, preflightPortfolio: null, preflightErrors: {}, completionEmailWarnings: {}, runningPortfolio: null, states: { zerodha: workflowStates },
       hasActiveWorkflowStage: () => false, getQueuedStages: () => new Set(),
-      pairPlanningBudget: "", runSpendLimit: "", RunSpendLimitNotice: () => null, scoreSupportedFactors: true,
+      pairSchedule: "balanced", pairPlanningBudget: "", runSpendLimit: "", RunSpendLimitNotice: () => null, scoreSupportedFactors: true,
       analysisOnlyRuns: { zerodha: false }, AnalysisOnlyRunControl: () => createElement("input", { "aria-label": "Analysis only", type: "checkbox" }),
       specificMode: { zerodha: false }, selectedStages: { zerodha: new Set() },
       shouldShowQuotaLlmSwitchWarning: () => false, Link: "a", History: "span", Loader2: "span", Play: "span", Button: "button",

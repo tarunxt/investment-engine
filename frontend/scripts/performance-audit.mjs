@@ -50,7 +50,7 @@ const PROFILES = {
 const TARGETS = {
   login: {
     path: "/login",
-    usableSelector: 'form input[name="email"], form input[type="email"]',
+    usableSelector: 'form input[autocomplete="username"]',
     authenticated: false,
   },
   dashboard: {
@@ -304,6 +304,9 @@ function dashboardSummaryFixture() {
 
 function legacyDashboardFixture(pathname) {
   const now = new Date().toISOString();
+  if (pathname.endsWith("/auth/profile/sidebar-visibility")) {
+    return { visible_ids: null, revision: 1, can_manage: true };
+  }
   const bullpenFixture = bullpenPerformanceFixture(pathname, now);
   if (bullpenFixture !== null) return bullpenFixture;
   if (pathname.endsWith("/zerodha/status")) {
@@ -512,7 +515,7 @@ async function obtainAuthenticatedStorageState(browser, profile) {
       waitUntil: "domcontentloaded",
       timeout: 45_000,
     });
-    await page.locator('input[type="email"]').fill(EMAIL);
+    await page.locator(TARGETS.login.usableSelector).fill(EMAIL);
     await page.locator('input[type="password"]').fill(PASSWORD);
     await Promise.all([
       page.waitForURL(/\/console\//, { timeout: 45_000 }),
@@ -536,7 +539,7 @@ async function waitForUsable(page, selector) {
 
 async function exerciseNonMutatingInteraction(page, targetName) {
   if (targetName === "login") {
-    const input = page.locator('input[type="email"]').first();
+    const input = page.locator(TARGETS.login.usableSelector).first();
     if (await input.isVisible().catch(() => false)) {
       await input.click();
       await input.press("Tab");

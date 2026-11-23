@@ -303,6 +303,10 @@ export function getTileErrorDetail(error?: string | null) {
 /** Execution state and saved result are distinct: an idle page can still show a terminal result. */
 export function getStageOutcome(info: StageInfo) {
   const status = info.runStatus?.trim().toLowerCase() ?? "";
+  const technical = info.published?.technical_counts;
+  if (technical && !info.activeRunId && (info.published?.run_id == null || technical.jobs_dispatched === 0) && !info.published?.preview) {
+    return technical.expected > 0 && technical.complete === technical.expected ? "completed" : technical.complete || technical.provisional ? "partial" : "unassessed";
+  }
   const pair = info.published?.pair_counts;
   if (pair && info.published?.run_id==null && !info.activeRunId && info.published?.recovery?.phase!=="judging") {
     return pair.judged===pair.expected && pair.expected>0 && !pair.errors ? "completed" : pair.judged ? "partial" : "unassessed";
@@ -418,7 +422,7 @@ export function getLlmStageTileRows(info: StageInfo, now: number, stage?: Workfl
   const pairs=info.published?.pair_counts;
   const tech=info.published?.technical_counts;
   const work=info.published?.technical_recovery;
-  const evidenceOnly=Boolean(info.published && (pairs || info.threatCounts || info.published.counts) && info.published.run_id==null && !info.activeRunId);
+  const evidenceOnly=Boolean(info.published && !info.activeRunId && !info.published.preview && ((pairs || tech || info.threatCounts || info.published.counts) && info.published.run_id==null || tech?.jobs_dispatched===0));
   return [
     ...(stage === "rebalance" && info.published?.counts ? [
       {label:"Score coverage",value:`${info.published.counts.assessed}/${info.published.expected} scored · ${info.published.counts.complete} complete · ${info.published.counts.unassessed} unassessed`},
@@ -434,6 +438,13 @@ export function getLlmStageTileRows(info: StageInfo, now: number, stage?: Workfl
     ...(!tech && !(stage === "rebalance" && info.published?.counts) && info.evidenceCoverage ? [{label: "Score coverage", value: info.evidenceCoverage}] : []),
     ...(!evidenceOnly && info.distinctModels != null ? [{label: "Model coverage", value: `${info.totalLlms ?? "?"} jobs · ${info.distinctModels} distinct model${info.distinctModels === 1 ? "" : "s"}`}] : []),
     ...(tech ? [
+      {label:"Current scores",value:`${tech.complete} complete · ${tech.provisional} provisional · ${tech.insufficient} pending`},
+      {label:"Commentary",value:info.published?.preview?"In progress":evidenceOnly?"No jobs dispatched":`${tech.current_commentary??tech.commentary} saved rows`},
+      ...Object.entries(tech.evidence_gaps??{}).map(([reason,listings])=>({label:reason,value:listings.length+" listings",detail:listings.join(", ")})),
+      ...(tech.timing?.evidence_seconds!=null?[{label:"Evidence preparation",value:tech.timing.evidence_seconds+" s"}]:[]),
+      ...(tech.timing?.score_seconds!=null?[{label:"Score calculation",value:tech.timing.score_seconds+" s"}]:[]),
+      ...([["Retrieval started",tech.timing?.retrieval_started],["First numeric score",tech.timing?.first_score],["Last numeric score",tech.timing?.last_score],["Commentary completion observed",tech.timing?.commentary_observed_complete]] as const)
+        .flatMap(([label,stamp])=>stamp?[{label,value:formatCompactStageTime(stamp)}]:[]),
       {label:"Model rows",value:tech.commentary+"/"+(tech.source_rows??tech.expected)},
       {label:"Complete scores",value:tech.complete+"/"+tech.expected+" unique listings"},
       {label:"Missing evidence",value:String(tech.expected-tech.complete)+" listings"},

@@ -106,12 +106,12 @@ async def available(db, owner, portfolio, sequence):
         projections=[func.jsonb_array_length(cast(rows_expr,JSONB)),data["result"]["scored"].as_integer(),valid,returned,complete]
     else:
         projections=[rows_expr]
-    items = (await db.execute(scoped(Stage.id,Stage.run_id,data["card"].as_string(),data["result"]["scoring_version"].as_integer(),data["result"]["pair_counts"],data["result"]["technical_counts"],data["result"]["technical_bullish"].as_integer(),data["result"]["status"].as_string(),data["result"]["threat_diagnostics"],*projections)
+    items = (await db.execute(scoped(Stage.id,Stage.run_id,data["card"].as_string(),data["result"]["scoring_version"].as_integer(),data["result"]["pair_counts"],data["result"]["technical_counts"],data["result"]["technical_bullish"].as_integer(),data["result"]["status"].as_string(),data["result"]["threat_diagnostics"],data["result"]["jobs"].as_integer(),*projections)
              .where(storage.of_kind("attempt",rev),data["card"].as_string().in_(["technical","pairwise","threats"] if portfolio=="india" else ["technical","pairwise"]))
              .order_by(Stage.id.desc()))).all()
     cards = {}
     ranks={}
-    for output,run,card,version,pair_counts,technical_counts,bullish,status,threat_diagnostics,*info in items:
+    for output,run,card,version,pair_counts,technical_counts,bullish,status,threat_diagnostics,jobs,*info in items:
         if not info[0]:
             continue
         if postgres:
@@ -133,7 +133,7 @@ async def available(db, owner, portfolio, sequence):
         cards[card] = {"output_id":output,"run_id":run,"covered":got,"expected":total,
                        "used_output_id":(final[1] or {}).get(card) if final else None,"final_id":final[0] if final else None,**({"pair_counts":pair_counts} if pair_counts else {})}
         if technical_counts and card=="technical":
-            cards[card]["technical_counts"]={**technical_counts,"bullish":bullish}
+            cards[card]["technical_counts"]={**technical_counts,"bullish":bullish, **({"jobs_dispatched":jobs} if jobs is not None else {})}
         if card=="threats":
             cards[card].update(threat_returned=returned,threat_complete=complete,threat_status=status)
             if threat_diagnostics:
@@ -143,6 +143,16 @@ async def available(db, owner, portfolio, sequence):
         from .threat_coverage import diagnostics
         source = await storage.lookup(db,owner,portfolio,"attempt",threats["output_id"])
         threats["threat_diagnostics"] = diagnostics(source.result_json["rows"])
+    if portfolio == "india":
+        newest = (await db.execute(scoped(Stage.id, Stage.run_id, data["technical_preview"], data["result"]["status"].as_string())
+                  .where(storage.of_kind("attempt", rev), data["card"].as_string()=="technical")
+                  .order_by(Stage.id.desc()).limit(1))).first()
+        if newest and newest[1] and newest[2] and not newest[3]:
+            output, run_id, counts, _ = newest
+            cards["technical"] = {"output_id":output, "run_id":run_id, "technical_counts":counts,
+                                  "preview":True, "covered":counts["complete"]+counts["provisional"],
+                                  "expected":counts["expected"], "used_output_id":(final[1] or {}).get("technical") if final else None,
+                                  "final_id":final[0] if final else None}
     technical=cards.get("technical")
     if technical and technical.get("technical_counts"):
         root=await db.scalar(scoped(data["technical_root"].as_integer()).where(Stage.id==technical["output_id"]))

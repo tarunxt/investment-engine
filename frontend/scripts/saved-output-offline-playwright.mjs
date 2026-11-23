@@ -72,7 +72,17 @@ try {
   const link=dialog.getByRole('link');assert.equal(await link.getAttribute('target'),'_blank');assert.equal(await link.getAttribute('rel'),'noopener noreferrer');assert.equal(await link.getAttribute('href'),'/console/zerodha/threats');
   assert.equal(await close.evaluate(e=>e===document.activeElement),true);
   assert.equal(await page.locator('#root').evaluate(e=>e.inert),true);
+  const resizeControls=dialog.getByRole('separator');
+  assert.equal(await resizeControls.count(),4);
+  for (const handle of await resizeControls.all()) {
+    await page.keyboard.press('Tab');
+    assert.equal(await handle.evaluate(e=>e===document.activeElement),true);
+  }
   await page.keyboard.press('Tab');assert.equal(await page.getByText('Retry saved output',{exact:true}).evaluate(e=>e===document.activeElement),true);
+  for (const handle of (await resizeControls.all()).reverse()) {
+    await page.keyboard.press('Shift+Tab');
+    assert.equal(await handle.evaluate(e=>e===document.activeElement),true);
+  }
   await page.keyboard.press('Shift+Tab');assert.equal(await close.evaluate(e=>e===document.activeElement),true);
   await page.keyboard.press('Escape');await dialog.waitFor({state:'detached'});assert.equal(await page.locator('#root').evaluate(e=>e.inert),false);assert.equal(await page.getByText('Open India',{exact:true}).evaluate(e=>e===document.activeElement),true);
   for(const mode of ['empty','failed','jobfailed','structured']){
