@@ -394,7 +394,8 @@ export function getStageTileError(info: StageInfo): StageTileRow {
   if(t && (!error||/partial/i.test(error))) {
     const work=info.published?.technical_recovery;
     const pending=Object.entries(work?.pending??{}).map(([k,v])=>k+" · "+technicalReason(v.reason)).join("\n");
-    return {label:"Evidence status",value:t.complete===t.expected?"Complete":work?.state==="exhausted"?"Retries exhausted":
+    const identities=Object.values(work?.pending??{}).filter(v=>v.reason.includes("Exact venue instrument unavailable")).length;
+    return {label:"Evidence status",value:t.complete===t.expected?"Complete":identities?`${identities} listing ${identities===1?"identity":"identities"} unresolved`:work?.state==="exhausted"?"Retries exhausted":
       work?.state==="scheduled"||work?.state==="recovering"?"Recovering evidence":"Missing verified evidence",
       detail:pending||(t.complete<t.expected?"Open Saved stock scores for individual evidence and recovery controls.":null)};
   }

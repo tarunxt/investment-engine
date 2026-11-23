@@ -34,6 +34,9 @@ def remaining(result, previous, timestamp, attempted=(), immediate=False):
         if "Decision-session candle missing" in reason:
             # Final daily files can arrive hours after close. Preserve bounded retries.
             wait = max(wait, min(4 * 3600, 300 * 2**min(count, 6)))
+        if "Exact venue instrument unavailable" in reason:
+            from app.domains.zerodha.upstox_quotes import MASTER_TTL
+            wait = max(wait, MASTER_TTL)
         due=(timestamp+timedelta(seconds=0 if immediate else wait)).isoformat()
         if prior and key not in attempted:
             due=prior["due"]
