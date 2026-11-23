@@ -2,6 +2,7 @@
 
 import { RebalanceSourceCheck, RebalanceStockScores } from "./RebalanceStockScores";
 import { TechnicalValidation } from "./TechnicalValidation";
+import { PairwiseStockScores } from "./PairwiseStockScores";
 import { PairwiseCoverage } from "./PairwiseCoverage";
 import { ThreatStockScores } from "./ThreatStockScores";
 import { TechnicalStockScores } from "./TechnicalStockScores";
@@ -542,6 +543,7 @@ function Evidence({
       )}
       {tab === "output" && (
         <section className="min-w-0 space-y-3">
+          {card==="pairwise" && <><Feedback query={scores}/>{scores.data && <PairwiseStockScores key={scores.data.id} result={scores.data} stocks={manifest?.stocks}/>}</>}
           <Feedback query={output} />
           {output.data && !(market==="zerodha"&&card==="technical") && renderOutput(output.data, card)}
           {!run && (
@@ -562,7 +564,7 @@ function Evidence({
             </>
           )}
           {card==="pairwise" && scores.data && <PairwiseCoverage result={scores.data}/>}
-          {attempt && (
+          {attempt && card!=="pairwise" && (
             <details className={panel} open={(card==="technical"||card==="threats"||card==="rebalance")&&market==="zerodha"?true:undefined}>
               <summary className="cursor-pointer font-semibold">
                 Saved stock scores · Output #{attempt.id}
@@ -579,11 +581,11 @@ function Evidence({
                 }:undefined} />
               ) : scores.data && (
                 <Table
-                  columns={["Listing", "Score /100", "Coverage", ...(card==="pairwise"?["W / T / L", "Judged / assigned","Unknown"]:card==="technical"?["Setup","Entry at close","Catalogue rating","5-session return %","20-session relative %","Relative volume","20-session volatility %","Distance to SMA50 %","Research score /100"]:[])]}
+                  columns={["Listing", "Score /100", "Coverage", ...(card==="technical"?["Setup","Entry at close","Catalogue rating","5-session return %","20-session relative %","Relative volume","20-session volatility %","Distance to SMA50 %","Research score /100"]:[])]}
                   rows={scores.data.rows.map((r) => ({
                     key: r.listing,
                     cells: [r.listing, r.score == null ? "—" : Number(r.score.toFixed(1)), r.coverage,
-                      ...(card==="pairwise"?[`${r.wins??"—"} / ${r.ties??"—"} / ${r.losses??"—"}`,`${r.valid??"—"} / ${r.expected??"—"}`,typeof r.valid==="number"&&typeof r.expected==="number"?r.expected-r.valid:"—"]:card==="technical"?[
+                      ...(card==="technical"?[
                         ...["setup","entry","catalogue_rating"].map(k=>String((r.readiness as Record<string,unknown>)?.[k]??"—")),
                         ...["return_5_pct","relative_20_pct","relative_volume_20","volatility_20_pct","distance_sma50_pct","shadow_score"].map(k=>{const v=(r.features as Record<string,unknown>)?.[k];return typeof v==="number"?v.toFixed(2):"—";})
                       ]:[])],
