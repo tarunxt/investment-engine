@@ -197,6 +197,7 @@ class ApiAttempt:
                  phase: str = "request", tariff_rates: dict | None = None,
                  instrumentation_scope: str = "sdk_call_hidden_retries_unknown",
                  retry: bool = False, parent_attempt_id: str | None = None):
+        self.operation = (provider, model, phase)
         self.context = get_provider_usage_context()
         context = self.context
         attempt_id = str(uuid4())
@@ -237,6 +238,8 @@ class ApiAttempt:
         self._conflicting_usage_fields: set[str] = set()
 
     def __enter__(self):
+        from app.domains.runs.spend_guard import reserve_transport
+        reserve_transport(*self.operation, self.values["attempt_id"])
         if self.context:
             self.context.last_attempt["attempt_id"] = self.values["attempt_id"]
         self._update_coverage()

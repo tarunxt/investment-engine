@@ -37,7 +37,9 @@ def specialized_context():
 def worker(monkeypatch):
     monkeypatch.setenv('CREDX_RECOVERY_MODE', '0')
     engine = create_engine('sqlite://', poolclass=StaticPool, connect_args={'check_same_thread':False})
-    Job.__table__.create(engine)
+    from app.domains.runs.models import Run, RunJob
+    for table in (Job.__table__, Run.__table__, RunJob.__table__):
+        table.create(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
     monkeypatch.setattr(tasks, 'SyncSessionLocal', sessions)
     monkeypatch.setattr(tasks, '_publish_job_update', MagicMock())
@@ -83,6 +85,17 @@ def test_ordinary_or_nonmatching_stored_kind_requires_durable_owner(worker, cont
     assert current.runtime_metadata_json[KEY]['state'] == 'finished'
     worker.provider.generate.assert_called_once()
     worker.specialized.assert_not_called()
+
+
+def test_first_transport_budget_denial_finishes_job_without_reconciliation(worker):
+    from app.domains.runs.spend_guard import SpendLimitError
+    worker.seed(None)
+    worker.provider.generate.side_effect = SpendLimitError("No verified INR ceiling")
+    tasks.execute_ai_job.run(1)
+    current = worker.row()
+    assert current.status == "failed"
+    assert current.runtime_metadata_json[KEY]["state"] == "finished"
+    assert "No verified INR ceiling" in current.error_message
 
 
 def test_valid_existing_specialized_dispatch_remains_excluded_not_ordinary(worker):

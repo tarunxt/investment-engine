@@ -68,6 +68,9 @@ class Settings(BaseSettings):
     deepseek_api_key: Optional[str] = None
     deepseek_api_base: Optional[str] = None  # e.g., "https://api.deepseek.com/v1"
 
+    # Verified all-inclusive contractual INR bounds for capped dispatches.
+    zerodha_run_charge_ceilings: dict[str, dict] = Field(default_factory=dict)
+
     # Zerodha Kite Connect
     zerodha_api_key: Optional[str] = None
     zerodha_api_secret: Optional[str] = None

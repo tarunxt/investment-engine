@@ -195,7 +195,27 @@ def export_tables(result: NormalizationResult) -> tuple[ExportTable, ...]:
     # Only export copies are minimized. Original/content/blocks/canonical rows
     # retain source bytes and financial provenance for validation and auditing.
     from app.domains.jobs.public_projection import REDACTED, credential_label, public_text, public_value
-    return tuple(ExportTable(table.fragment, tuple(public_text(h) for h in table.headers), tuple(
-        tuple(REDACTED if index < len(table.headers) and credential_label(table.headers[index])
-              else public_value(value) for index, value in enumerate(row))
-        for row in table.rows), table.provenance) for table in exports)
+    projected: list[ExportTable] = []
+    for table in exports:
+        sensitive_columns = {i for i, label in enumerate(table.headers) if credential_label(label)}
+        # Ancillary tables can express the credential label in a row, e.g.
+        # Field | Value. Keep adjacent evidence and non-sensitive rows intact.
+        field_columns: set[int] = set()
+        value_columns: set[int] = set()
+        if table.fragment not in tables:
+            for i, label in enumerate(table.headers):
+                name = label.strip().casefold()
+                if name in {"field", "key", "name", "parameter", "attribute", "property"}:
+                    field_columns.add(i)
+                elif name in {"value", "field value", "parameter value", "setting value"}:
+                    value_columns.add(i)
+        rows = []
+        for row in table.rows:
+            redact = sensitive_columns
+            if value_columns and any(credential_label(str(row[i])) for i in field_columns):
+                redact = sensitive_columns | value_columns
+            rows.append(tuple(REDACTED if i in redact else public_value(value)
+                              for i, value in enumerate(row)))
+        projected.append(ExportTable(table.fragment, tuple(public_text(h) for h in table.headers),
+                                     tuple(rows), table.provenance))
+    return tuple(projected)

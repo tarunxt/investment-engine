@@ -13,7 +13,7 @@ function load(relative, names=[], bindings={}) {
 }
 const date=load('../lib/datetime.ts');
 const workflowPath='../components/shared/WorkflowStageTile.tsx';
-const ui=load(workflowPath,['stageErrorRows','getStageOutcome','hasStagePartialOutput','stageTileBorder','formatLlmCompletion','formatRecommendedStockProgress','getLlmStageTileRows','getActionablesStageTileRows','getIdleStageRows','LLM_STAGE_TILE_KEYS','formatBriefTileError','getStageTileError','getTileErrorDetail','isSheetExportError','isInsufficientBalanceError'],{formatCompactStageTime:date.formatCompactStageTime,formatDuration:()=>null,formatRebalanceCost:load('../lib/rebalanceCost.ts').formatRebalanceCost});
+const ui=load(workflowPath,['stageErrorRows','getStageOutcome','hasStagePartialOutput','stageTileBorder','formatLlmCompletion','formatRecommendedStockProgress','getLlmStageTileRows','getActionablesStageTileRows','getIdleStageRows','LLM_STAGE_TILE_KEYS','formatBriefTileError','getStageTileError','getTileErrorDetail','isSheetExportError','isInsufficientBalanceError'],{technicalReason:load('../lib/technicalReason.ts').technicalReason,formatCompactStageTime:date.formatCompactStageTime,formatDuration:()=>null,formatRebalanceCost:load('../lib/rebalanceCost.ts').formatRebalanceCost});
 
 test('Kite board shows synced holdings and the shared Rebalance count alongside independent score coverage', () => {
   const cards = load('../lib/independentScorecards.ts', ['cards','isCard']);

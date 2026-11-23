@@ -410,3 +410,11 @@ Migration tests record upgrade/rollback operations and compile the PostgreSQL
 column declaration offline; they do not prove a live database upgrade. Rollback
 removes the saved policy, so production rollback requires stopping opted-out
 workflows and their queued exports before downgrading.
+
+### Zerodha whole-run INR spending limit
+
+The optional `max_cost_inr` on workflow reservation accepts a nonnegative INR amount with at most two decimal places. A blank limit preserves the existing uncapped behavior. A zero limit allows saved-only work and blocks priced calls. The reservation and history APIs return both the original limit and the remaining authorizable headroom. A continuation can provide `budget_parent_sequence` to share the original ledger, including its earlier reservations.
+
+Each provider attempt or search in a capped workflow requires an unexpired all-inclusive contractual price ceiling for that exact operation. Worker setting `ZERODHA_RUN_CHARGE_CEILINGS` is a JSON object keyed by `provider:model:operation` (use `-` for a search without a model). Each entry contains a positive integer `max_paise`, an offset-aware ISO timestamp `valid_until`, and an opaque `contract_ref`. Supply only bounds verified for the actual provider account and configured adapter, including all billable input, output, cache/reasoning, exchange conversion, tax, and any hosted tool charges. A token estimate, previous invoice, or Pairwise planning budget is insufficient. The default object is empty and unpriced calls fail closed. No account price agreement or spend allowance is created by deployment.
+
+At the provider boundary the worker locks the root budget, verifies the remaining balance and inserts an attempt-specific receipt in the existing internal workflow-stage ledger. Both the balance change and receipt commit before transport. Concurrent stages, continuation workflows, format repairs, and retries all draw on that same balance. A dispatch with an ambiguous outcome retains its full reservation. Even a successful call retains its worst-case liability until verified billing reconciliation exists; displayed headroom is therefore conservative. The recorded liability is separate from estimated and invoiced spend.

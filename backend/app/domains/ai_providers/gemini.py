@@ -6,6 +6,7 @@ from typing import Any
 from google import genai
 from google.genai import types
 
+from app.domains.runs.spend_guard import budget_active
 from app.domains.api_usage.metering import ApiAttempt
 from app.core.config import get_gemini_api_keys
 from app.domains.ai_providers.base import (
@@ -133,6 +134,13 @@ def _extract_grounding_web_metadata(chunk: object) -> tuple[list[str], list[str]
     return dedupe_strings(queries), dedupe_strings(sources)
 
 
+def _client_for_key(api_key):
+    options = {"api_version": "v1alpha"}
+    if budget_active():
+        options["retry_options"] = {"attempts": 1}
+    return genai.Client(api_key=api_key, http_options=options)
+
+
 class GeminiProvider(BaseAIProvider):
     provider_name = "gemini"
 
@@ -146,10 +154,7 @@ class GeminiProvider(BaseAIProvider):
         self._api_keys = get_gemini_api_keys()
         if not self._api_keys:
             raise ValueError("GEMINI_API_KEY is not configured")
-        self.client = genai.Client(
-            api_key=self._api_keys[0],
-            http_options={"api_version": "v1alpha"},
-        )
+        self.client = _client_for_key(self._api_keys[0])
 
     def generate(
         self,
@@ -171,10 +176,7 @@ class GeminiProvider(BaseAIProvider):
         requested_model = (model or "").strip()
         for key_index, api_key in enumerate(self._api_keys):
             try:
-                self.client = genai.Client(
-                    api_key=api_key,
-                    http_options={"api_version": "v1alpha"},
-                )
+                self.client = _client_for_key(api_key)
                 return self._generate_once(prompt=prompt, model=requested_model, usage_retry=key_index > 0)
             except Exception as exc:
                 last_error = exc

@@ -1,5 +1,7 @@
 "use client";
 
+import { technicalReason } from "@/lib/technicalReason";
+
 import { useState, useCallback, type SVGProps } from "react";
 import { FileSpreadsheet, LoaderCircle } from "lucide-react";
 import { StageErrorDetails } from "@/components/shared/StageErrorDetails";
@@ -370,8 +372,8 @@ export function StageStatusIcon({ info }: { info: StageInfo }) {
     return <span className="ml-1 inline-block align-middle text-xs font-medium">{phase==="needs attention" || phase==="evidence recovery exhausted" ? "Needs attention" : pair.ready<pair.listings ? "Waiting for market evidence" : "Awaiting judgments"}</span>;
   }
   const symbols = {
-    completed: "✅", failed: "❌", partial: "⚠️✅", stale: "⚠️", unconfirmed: "⚠️", unassessed: "○", queued: "⏳",
-    derived: "ℹ️", skipped: "⏭️", paused: "⏸️", idle: "○",
+    completed: "✅", failed: "❌", partial: "⚠️✅", stale: "⚠️", unconfirmed: "⚠️", unassessed: "Unassessed", queued: "⏳",
+    derived: "ℹ️", skipped: "⏭️", paused: "⏸️", idle: "Idle",
   };
   const description = info.published ? `Output #${info.published.output_id} · ${info.published.covered}/${info.published.expected} covered` : info.runStatus || outcome;
   return <span role="img" aria-label={outcome} title={description} className="ml-1 inline-block align-middle text-xs">{symbols[outcome]}</span>;
@@ -388,7 +390,7 @@ export function getStageTileError(info: StageInfo): StageTileRow {
   const t=info.published?.technical_counts;
   if(t && (!error||/partial/i.test(error))) {
     const work=info.published?.technical_recovery;
-    const pending=Object.entries(work?.pending??{}).map(([k,v])=>k+" · "+v.reason).join("\n");
+    const pending=Object.entries(work?.pending??{}).map(([k,v])=>k+" · "+technicalReason(v.reason)).join("\n");
     return {label:"Evidence status",value:t.complete===t.expected?"Complete":work?.state==="exhausted"?"Retries exhausted":
       work?.state==="scheduled"||work?.state==="recovering"?"Recovering evidence":"Missing verified evidence",
       detail:pending||(t.complete<t.expected?"Open Saved stock scores for individual evidence and recovery controls.":null)};

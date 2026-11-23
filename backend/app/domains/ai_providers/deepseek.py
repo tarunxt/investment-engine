@@ -8,6 +8,7 @@ import re
 
 from openai import OpenAI
 
+from app.domains.runs.spend_guard import budget_active
 from app.domains.api_usage.metering import metered_call
 from app.core.config import settings
 from app.domains.api_usage.recorder import record_provider_usage_call
@@ -192,6 +193,7 @@ class DeepSeekProvider(BaseAIProvider):
         if not settings.deepseek_api_key:
             raise ValueError("DEEPSEEK_API_KEY is not configured")
         self.client = OpenAI(
+            **({"max_retries": 0} if budget_active() else {}),
             api_key=settings.deepseek_api_key,
             base_url=settings.deepseek_api_base or "https://api.deepseek.com/v1",
         )

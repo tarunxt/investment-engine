@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 from typing import Any, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -116,6 +117,16 @@ class PreparedPolymarketEventContext(BaseModel):
 
 
 class AutoRebalanceRunReservationRequest(BaseModel):
+    max_cost_inr: Decimal | None = Field(default=None, ge=0, le=100_000, decimal_places=2)
+    budget_parent_sequence: int | None = Field(default=None, strict=True, gt=0)
+
+    @model_validator(mode="after")
+    def validate_zerodha_cap(self):
+        if self.portfolio != "india" and (self.max_cost_inr is not None or self.budget_parent_sequence is not None):
+            raise ValueError("Whole-run spending limits apply to Zerodha workflows only")
+        return self
+
+
     side_effect_policy: RunSideEffectPolicy | None = None
     portfolio: str
 
@@ -130,6 +141,8 @@ class AutoRebalanceRunReservationRequest(BaseModel):
 
 class AutoRebalanceRunReservationResponse(BaseModel):
     side_effect_policy: RunSideEffectPolicy | None = None
+    max_cost_inr: float | None = None
+    headroom_inr: float | None = None
     portfolio: str
     sequence: int
     label: str
@@ -252,8 +265,20 @@ class AutoRebalanceRunDetailResponse(BaseModel):
     jobs: list[AutoRebalanceJobDetailResponse] = Field(default_factory=list)
 
 
+class TechnicalHistoryOutput(BaseModel):
+    output_id: int
+    run_id: int | None
+    expected: int
+    scored: int | None
+    complete: int | None
+    provisional: int | None
+
+
 class AutoRebalanceHistoryItemResponse(BaseModel):
+    technical_output: TechnicalHistoryOutput | None = None
     side_effect_policy: RunSideEffectPolicy | None = None
+    max_cost_inr: float | None = None
+    headroom_inr: float | None = None
     portfolio: str
     sequence: int
     label: str

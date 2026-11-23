@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {readFileSync} from 'node:fs';
+import * as asyncHooks from 'node:async_hooks';
 import * as nodeCrypto from 'node:crypto';
 import ts from 'typescript';
 import {encode, getToken} from '@auth/core/jwt';
@@ -38,6 +39,9 @@ function harness() {
     'node:crypto': nodeCrypto, '@auth/core/jwt': {getToken}, 'next/server': {NextResponse},
     '@/auth': {resolveNextAuthSecret: () => secret, unstable_update: () => assert.fail('no session update')},
     '@/lib/authSessionCookie': helpers, '@/lib/boundedApiTransport': transport,
+    '@/lib/trustedSessionUpdate': compile('../lib/trustedSessionUpdate.ts', {
+      'node:async_hooks': asyncHooks, 'node:crypto': nodeCrypto,
+    }),
     '@/lib/singleFlight': {SingleFlightByKey: class {}},
     './backendBullpenRuntime': {BackendRuntimeHttpError: RuntimeError, fetchBackendRuntimeJson: () => assert.fail('no refresh/dispatch')},
   }, {console: logger});

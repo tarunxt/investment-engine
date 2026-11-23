@@ -17,5 +17,27 @@ test('confirmed policy is forwarded and normal legacy response remains compatibl
   const reserve=new Function('apiService','getAutoRebalancePortfolioKey',code+';return reserveAutoRebalanceRunMetadata;')({reserveAutoRebalanceRunLabel:async(...args)=>{calls.push(args);return {portfolio:'india',sequence:1,label:'Synthetic',...(confirmed?{side_effect_policy:{version:1,mode:'analysis_only'}}:{})}}},()=> 'india');
   assert.equal((await reserve('zerodha',true)).auto_rebalance_sequence,1);
   confirmed=false;assert.equal((await reserve('zerodha')).auto_rebalance_sequence,1);
-  assert.deepEqual(calls,[['india',true],['india',false]]);
+  assert.deepEqual(calls,[['india',true,undefined,undefined],['india',false,undefined,undefined]]);
+});
+
+test('spending-limit receipt binds the exact amount and rejects missing headroom before launch', async () => {
+  let receipt;
+  const reserve = new Function('apiService', 'getAutoRebalancePortfolioKey', code + ';return reserveAutoRebalanceRunMetadata;')({
+    reserveAutoRebalanceRunLabel: async (portfolio, _analysisOnly, limit, parent) => {
+      assert.equal(limit, 10);
+      assert.equal(parent, 42);
+      return { portfolio, sequence: 43, label: 'New sequence', ...receipt };
+    },
+  }, () => 'india');
+  for (const invalid of [{}, {max_cost_inr: null}, {max_cost_inr: 11, headroom_inr: 10},
+    {max_cost_inr: 10, headroom_inr: 11}, {max_cost_inr: 10}, {max_cost_inr: 10, headroom_inr: -1}]) {
+    receipt = invalid;
+    await assert.rejects(() => reserve('zerodha', false, 10, 42), /did not confirm/);
+  }
+  receipt = {max_cost_inr: 10, headroom_inr: 0};
+  let confirmed;
+  const metadata = await reserve('zerodha', false, 10, 42, budget => { confirmed = budget; });
+  assert.deepEqual(confirmed, receipt);
+  assert.equal(metadata.max_cost_inr, undefined);
+  assert.equal(metadata.auto_rebalance_sequence, 43);
 });

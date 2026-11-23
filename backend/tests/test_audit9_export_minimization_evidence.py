@@ -70,12 +70,21 @@ def test_actual_export_task_ignores_nonexport_record_credentials_and_context():
     assert 'SYNTH' in str(append.call_args)
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason='Source-preserving export also retains sensitive values supplied inside ancillary tables; minimization policy/owning lane decision required')
 def test_ancillary_export_must_not_contain_sensitive_synthetic_fields():
-    content = markdown(SWING_COLUMNS, [stock('SYNTH')]) + f'\n\n| token |\n| --- |\n| {SENTINEL} |\n'
-    result, append, _, _ = export_job(job(content, count=1))
+    content = markdown(SWING_COLUMNS, [stock('SYNTH')]) + (
+        f'\n\n| Field | Value | Source | access_token |\n| --- | --- | --- | --- |\n'
+        f'| Private Key | {SENTINEL} | provider | {SENTINEL} |\n'
+        f'| Token ID | 12345 | listing | {SENTINEL} |\n'
+    )
+    source = job(content, count=1)
+    result, append, _, _ = export_job(source)
     assert result['status'] == 'completed'
+    append.assert_called_once()
     assert SENTINEL not in str(append.call_args)
+    rows = append.call_args.args[4]
+    assert any(row[:4] == ['Private Key', '[REDACTED]', 'provider', '[REDACTED]'] for row in rows)
+    assert any(row[:4] == ['Token ID', '12345', 'listing', '[REDACTED]'] for row in rows)
+    assert source.response == content
 
 
 @pytest.mark.anyio

@@ -5,6 +5,7 @@ import math
 import anthropic
 from anthropic.types import TextBlock
 
+from app.domains.runs.spend_guard import budget_active
 from app.domains.api_usage.metering import metered_call
 from app.core.config import settings
 from app.domains.ai_providers.base import AIProviderResponse, BaseAIProvider
@@ -37,7 +38,10 @@ class AnthropicProvider(BaseAIProvider):
     def __init__(self) -> None:
         if not settings.anthropic_api_key:
             raise ValueError("ANTHROPIC_API_KEY is not configured")
-        self.client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+        self.client = anthropic.Anthropic(
+            api_key=settings.anthropic_api_key,
+            **({"max_retries": 0} if budget_active() else {}),
+        )
 
     def generate(self, *, prompt: str, model: str) -> AIProviderResponse:
         response = metered_call(

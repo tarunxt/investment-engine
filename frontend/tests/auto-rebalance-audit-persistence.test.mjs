@@ -127,9 +127,10 @@ function harness({ analysisOnly = false, formulaScore = 0, intercept, read, emai
     start: async (revision,card,body)=>{modelCalls.push({revision,card,...body});return {id:modelCalls.length,run_id:modelCalls.length};},
     result: async id=>({id,status:"completed",scored:1}),
     savedPolicy: async ()=>null,
-    finalize: async (id,sequence,attempts,policy)=>{finals.push({id,sequence,attempts,policy});return {id:70,schema:"independent-scorecards-v1",rows:[{}]};},
+    finalize: async (id,sequence,attempts,policy)=>{finals.push({id,sequence,attempts,policy});return {id:70,schema:"independent-scorecards-v1",rows:[{status:"Complete",action:"Hold",suggested_units:0}]};},
   };
   const bindings = {
+    pairPlanningBudget: "", runSpendLimit: "", scoreSupportedFactors: false,
     cards, isCard:key=>cards.includes(key), sourceSelections:{zerodha:17,indmoneyUs:17},setSourceSelections:()=>{},cardPolicies:{},scorecardApi:()=>scorecards,migratedPolicy:()=>({}), isUsableStageJob:()=>true,
     runtimeOwner: { id: 7 }, isCurrentWorkflowOwner: () => true, requireWorkflowOwner: owner => owner,
     actionablesActivityKey: helperModule.exports.actionablesActivityKey, announceActionablesActivity: helperModule.exports.announceActionablesActivity,
@@ -378,11 +379,12 @@ test("workflow card retains pending status and omits the failed-history banner",
     const bindings = {
       isCard:stage=>["rebalance","technical","threats","pairwise"].includes(stage),exports: {}, technicalInputPlanIssue, selectedInputs: { zerodha: { technical: new Set(["technical:next"]) } },
       require: (name) => { assert.equal(name, "react/jsx-runtime"); return jsxRuntime; },
-      scoreRevision: null, zerodhaBasketOrders: [],
+      scoreRevision: null, zerodhaBasketOrders: [], latestIndiaWorkflow: null, preparedSwing: null, RunSideEffectPolicyNotice: () => null,
       auditStates: { zerodha: { key: "india:42", label: "India 42", status, message: "History not acknowledged" } },
       activeAutoRebalanceMetadata: {}, preflightPortfolio: null, preflightErrors: {}, completionEmailWarnings: {}, runningPortfolio: null, states: { zerodha: workflowStates },
       hasActiveWorkflowStage: () => false, getQueuedStages: () => new Set(),
-      analysisOnlyRuns: { zerodha: false }, AnalysisOnlyRunControl: () => null,
+      pairPlanningBudget: "", runSpendLimit: "", RunSpendLimitNotice: () => null, scoreSupportedFactors: true,
+      analysisOnlyRuns: { zerodha: false }, AnalysisOnlyRunControl: () => createElement("input", { "aria-label": "Analysis only", type: "checkbox" }),
       specificMode: { zerodha: false }, selectedStages: { zerodha: new Set() },
       shouldShowQuotaLlmSwitchWarning: () => false, Link: "a", History: "span", Loader2: "span", Play: "span", Button: "button",
       URLs: { routes: { console: { autoRebalanceRuns: () => "/console/auto-rebalance-runs?portfolio=zerodha" } } },
@@ -397,6 +399,10 @@ test("workflow card retains pending status and omits the failed-history banner",
     const card = new Function(...Object.keys(bindings), source)(...Object.values(bindings));
     const html = renderToStaticMarkup(card({ portfolio: "zerodha", title: "Run Zerodha Auto-Rebalance", buttonLabel: "Run" }));
     if (status === "pending") assert.match(html, /Completed outputs remain available/);
+    const brokerBindings = { ...bindings, surface: { market: "india" } };
+    const brokerCard = new Function(...Object.keys(brokerBindings), source)(...Object.values(brokerBindings));
+    const brokerHtml = renderToStaticMarkup(brokerCard({ portfolio: "zerodha", title: "Run Zerodha Auto-Rebalance", buttonLabel: "Run" }));
+    assert.match(brokerHtml, /aria-label="Analysis only"/);
     const specificBindings = { ...bindings, specificMode: { zerodha: true }, selectedStages: { zerodha: new Set(["technical"]) } };
     const specificCard = new Function(...Object.keys(specificBindings), source)(...Object.values(specificBindings));
     const specificHtml = renderToStaticMarkup(specificCard({ portfolio: "zerodha", title: "Run Zerodha Auto-Rebalance", buttonLabel: "Run" }));
@@ -571,6 +577,7 @@ for (const analysisOnly of [false, true]) {
     const h = harness({ analysisOnly, reserve: async (portfolio, flag) => { reservations.push({ portfolio, flag }); return metadata(); } });
     await h.runWorkflow("zerodha");
     assert.deepEqual(reservations, [{ portfolio: "zerodha", flag: analysisOnly }]);
+    assert.equal(h.emails.length, analysisOnly ? 0 : 1);
   });
 }
 test("a final audit references the exact server calculation and sequence",async()=>{

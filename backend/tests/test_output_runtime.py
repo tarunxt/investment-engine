@@ -160,7 +160,9 @@ def execute_mocked(job, results):
 
     engine = create_engine("sqlite://", poolclass=StaticPool,
                            connect_args={"check_same_thread": False})
-    Job.__table__.create(engine)
+    from app.domains.runs.models import Run, RunJob
+    for table in (Job.__table__, Run.__table__, RunJob.__table__):
+        table.create(engine)
     sessions = sessionmaker(engine, class_=TrackingSession, expire_on_commit=False)
     db = sessions()
     db.add(job); db.commit()

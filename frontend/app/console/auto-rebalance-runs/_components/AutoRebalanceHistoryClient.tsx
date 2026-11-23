@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { RunSpendLimitNotice } from "@/components/shared/RunSpendLimitNotice";
 import { RunSideEffectPolicyNotice } from "@/components/shared/AnalysisOnlyRunControl";
 import { actionablesActivityKey } from "@/lib/autoRebalanceAudit";
 import { captureWorkflowOwner } from "@/lib/workflowOwnerLifetime";
@@ -228,6 +229,7 @@ export function AutoRebalanceHistoryListClient({
                 <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">{index === 0 ? "Latest auto run" : "Auto run"}</p>
                 <h2 className="mt-1 text-xl font-bold text-slate-950">{item.label}</h2>
                 <RunSideEffectPolicyNotice policy={item.side_effect_policy} />
+                <RunSpendLimitNotice budget={item} />
                 <p className="mt-1 text-sm text-slate-600">Started {formatTime(item.created_at)}</p>
               </div>
               <div className="flex max-w-full items-center gap-2"><span className="text-xs text-slate-600">Saved status <StatusBadge status={item.status} workflow /></span><ChevronRight className="size-5 text-slate-400 transition group-hover:translate-x-0.5" /></div>
@@ -344,7 +346,7 @@ export function AutoRebalanceHistoryDetailClient({
       <nav aria-label="Run hierarchy" className="flex flex-wrap gap-2 text-sm"><Link className="text-blue-700 underline" href={URLs.routes.console.runs()}>All runs</Link><span aria-hidden="true">/</span><span aria-current="page">Workflow · {run?.label || `Run #${sequence}`}</span></nav>
       <p className="text-xs text-slate-500">{RUN_HIERARCHY_HELP}</p>
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
-        <div><p className="text-sm font-semibold text-slate-500">{portfolioLabel(portfolio)} Auto-Rebalance · Detailed audit</p><h1 className="mt-1 text-3xl font-bold tracking-tight text-slate-950">{run?.label || `Run #${sequence}`}</h1><RunSideEffectPolicyNotice policy={run?.side_effect_policy} /><p className="mt-2 text-sm text-slate-600">Stage-by-stage saved status, the exact errors, and every saved LLM prompt/output. Saved statuses do not verify current worker activity.</p></div>
+        <div><p className="text-sm font-semibold text-slate-500">{portfolioLabel(portfolio)} Auto-Rebalance · Detailed audit</p><h1 className="mt-1 text-3xl font-bold tracking-tight text-slate-950">{run?.label || `Run #${sequence}`}</h1><RunSideEffectPolicyNotice policy={run?.side_effect_policy} /><RunSpendLimitNotice budget={run} /><p className="mt-2 text-sm text-slate-600">Stage-by-stage saved status, the exact errors, and every saved LLM prompt/output. Saved statuses do not verify current worker activity.</p></div>
         <div className="flex gap-2"><Button asChild variant="outline" className="rounded-full"><Link href={URLs.routes.console.autoRebalanceRuns(portfolio)}><ArrowLeft className="mr-2 size-4" />All runs</Link></Button><Button type="button" onClick={() => void load()} className="rounded-full bg-slate-950 text-white hover:bg-slate-800"><RefreshCw className="mr-2 size-4" />Refresh</Button></div>
       </div>
       {loading ? <div className="flex min-h-56 items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white text-sm text-slate-600"><Loader2 className="size-4 animate-spin" />Loading run detail…</div> : null}

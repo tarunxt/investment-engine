@@ -12,7 +12,8 @@ import type { WorkflowSurface } from "@/app/console/_components/WorkflowSurfaceH
 import { IndMoneySnapshotDialog } from "./IndMoneySnapshotDialog";
 import { readIndmoneySnapshotSource } from "@/lib/indmoneySnapshotSource";
 
-import { AnalysisOnlyRunControl } from "@/components/shared/AnalysisOnlyRunControl";
+import { AnalysisOnlyRunControl, RunSideEffectPolicyNotice } from "@/components/shared/AnalysisOnlyRunControl";
+import { RunSpendLimitNotice } from "@/components/shared/RunSpendLimitNotice";
 
 import { WorkflowStageLedger, WorkflowStageLedgerViews, type WorkflowLedgerView } from "@/components/shared/WorkflowStageLedger";
 import { WorkflowRunBoundary } from "@/app/console/automated-rebalance/_components/WorkflowRunBoundary";
@@ -45,7 +46,7 @@ import { useBasketDisplayQuotes, useBasketDisplayCalculations } from "@/componen
 import { basketActionGroup, indmoneyHolding, actionQuantityMatchesDraft, kiteWeightContext, kiteHoldingQuantity, stockIdentity, validDisplayPrice, verifiedFetchedDisplayQuote, formatBasketDisplayCurrency, displayScoreAccepted, toggleVisibleSelection, verifiedDisplayQuote } from "@/lib/basketDisplayCalculations";
 import { PortfolioParametersTile } from "@/components/PortfolioParametersTile";
 import { portfolioParameterAssets, portfolioParameterMargin } from "@/lib/portfolioParameters";
-import { collectPreflightErrors, type PreflightCheck } from "@/lib/rebalancePreflight";
+import { collectPreflightErrors, parseWorkflowSpendLimit, type PreflightCheck } from "@/lib/rebalancePreflight";
 import { resolveTechnicalPriceEvidence } from "@/lib/technicalPriceEvidence";
 import { auditResponseHashes } from "@/services/recommendationAudit";
 import { WholeShareTrimChoice } from "@/components/WholeShareTrimChoice";
@@ -171,6 +172,7 @@ import type {
   ProviderModelTarget,
   RunCreate,
   AutoRebalanceHistoryItemResponse,
+  WorkflowSpendLimit,
   AutoRebalanceRunMetadata,
   AutoRebalanceStageKey,
   RunResponse,
@@ -333,6 +335,8 @@ function initialWorkflowState(): WorkflowState {
     return acc;
   }, {} as WorkflowState);
 }
+
+type ActiveWorkflowMetadata = AutoRebalanceRunMetadata & { notificationSuppressionConfirmed?: boolean; confirmedBudget?: WorkflowSpendLimit };
 
 type PersistedWorkflow = {
   states: Record<WorkflowPortfolio, WorkflowState>;
@@ -1557,13 +1561,30 @@ function getAutoRebalancePortfolioKey(portfolio: WorkflowPortfolio): AutoRebalan
 async function reserveAutoRebalanceRunMetadata(
   portfolio: WorkflowPortfolio,
   analysisOnly = false,
+  maxCostInr?: number,
+  budgetParentSequence?: number,
+  onBudgetConfirmed?: (budget: WorkflowSpendLimit) => void,
 ): Promise<AutoRebalanceRunMetadata> {
   const reserved = await apiService.reserveAutoRebalanceRunLabel(
     getAutoRebalancePortfolioKey(portfolio),
     analysisOnly,
+    maxCostInr,
+    budgetParentSequence,
   );
   if (analysisOnly && (reserved.side_effect_policy?.version !== 1 || reserved.side_effect_policy.mode !== "analysis_only")) {
     throw new Error("The server did not confirm notification and export suppression. This run has not started.");
+  }
+  if (maxCostInr !== undefined || budgetParentSequence !== undefined) {
+    const limit = reserved.max_cost_inr;
+    const remaining = reserved.headroom_inr;
+    if (limit === undefined || (maxCostInr !== undefined && limit !== maxCostInr) ||
+        (limit !== null && (typeof remaining !== "number" || !Number.isFinite(remaining) ||
+          remaining < 0 || remaining > limit))) {
+      throw new Error("The server did not confirm this run’s spending limit. No stages were started.");
+    }
+  }
+  if (reserved.max_cost_inr != null) {
+    onBudgetConfirmed?.({ max_cost_inr: reserved.max_cost_inr, headroom_inr: reserved.headroom_inr });
   }
   return {
     auto_rebalance_portfolio: reserved.portfolio,
@@ -4367,6 +4388,7 @@ export function RebalanceWorkflowSections({
   const [sourceSelections,setSourceSelections] = useState<Partial<Record<WorkflowPortfolio,number>>>({});
   const [scoreSupportedFactors,setScoreSupportedFactors] = useState(true);
   const [pairPlanningBudget,setPairPlanningBudget] = useState("");
+  const [runSpendLimit, setRunSpendLimit] = useState("");
   const [cardPolicies,setCardPolicies] = useState<Partial<Record<WorkflowPortfolio,CardPolicy>>>({});
   const [preflightPortfolio, setPreflightPortfolio] = useState<WorkflowPortfolio | null>(null);
   const [preflightErrors, setPreflightErrors] = useState<Partial<Record<WorkflowPortfolio, string[]>>>({});
@@ -4510,7 +4532,7 @@ export function RebalanceWorkflowSections({
   }));
   const [savedRunCosts, setSavedRunCosts] = useState<Partial<Record<WorkflowPortfolio, StageCost & { sequence: number }>>>({});
   const [activeAutoRebalanceMetadata, setActiveAutoRebalanceMetadata] = useState<
-    Partial<Record<WorkflowPortfolio, AutoRebalanceRunMetadata>>
+    Partial<Record<WorkflowPortfolio, ActiveWorkflowMetadata>>
   >(() => {
     const restored: Partial<Record<WorkflowPortfolio, AutoRebalanceRunMetadata>> = {};
     if (!initialRunningPortfolio) return restored;
@@ -6862,13 +6884,22 @@ ${zerodhaExecutionMode === "direct_market"
       portfolio: WorkflowPortfolio,
       indmoneyPayload?: IndMoneyUsPortfolioSnapshotCreateRequest,
       savedSnapshot?: IndMoneyUsPortfolioSnapshotDetail,
-      recovery?: { sequence: number; revision: number; analysisOnly: boolean },
+      recovery?: { sequence: number; revision: number; analysisOnly: boolean; maxCostInr?: number | null },
     ) => {
       if (!isCurrentWorkflowOwner(runtimeOwner)) return;
       // Kill may clear the visible running portfolio before its asynchronous
       // work has unwound. Do not let a new run steal that work's identity.
       if (isWorkflowExecutingRef.current) return;
       const market: SwingTradeMarket = portfolio === "zerodha" ? "india" : "us";
+      let maxCostInr: number | undefined;
+      if (market === "india") {
+        try {
+          maxCostInr = parseWorkflowSpendLimit(runSpendLimit) ?? recovery?.maxCostInr ?? undefined;
+        } catch (error) {
+          setPreflightErrors(current => ({ ...current, [portfolio]: [normalizeError(error)] }));
+          return;
+        }
+      }
       const runSpecificMode = Boolean(recovery) || specificMode[portfolio];
       const stagesToRun = new Set<WorkflowStageKey>(recovery ? [...cards, "actionables"] : selectedStages[portfolio]);
       if (runSpecificMode && stagesToRun.size === 0) {
@@ -6978,10 +7009,13 @@ ${zerodhaExecutionMode === "direct_market"
         error: null,
       });
 
+      const suppressRunOutputs = Boolean(recovery?.analysisOnly || analysisOnlyRuns[portfolio]);
       let runMetadata: AutoRebalanceRunMetadata;
+      let confirmedBudget: WorkflowSpendLimit | undefined;
       let auditSession: AutoRebalanceAuditSession;
       try {
-        runMetadata = await reserveAutoRebalanceRunMetadata(portfolio, recovery?.analysisOnly || analysisOnlyRuns[portfolio]);
+        runMetadata = await reserveAutoRebalanceRunMetadata(portfolio, suppressRunOutputs, maxCostInr, recovery?.sequence,
+          budget => { confirmedBudget = budget; });
         assertAutoRebalanceRunMetadata(runMetadata, portfolio === "zerodha" ? "india" : "indmoney_us");
         auditSession = getAuditSession(portfolio, runMetadata);
       } catch (error) {
@@ -7016,7 +7050,7 @@ ${zerodhaExecutionMode === "direct_market"
       activeAutoRebalanceMetadataRef.current[portfolio] = runMetadata;
       setActiveAutoRebalanceMetadata((current) => ({
         ...current,
-        [portfolio]: runMetadata,
+        [portfolio]: { ...runMetadata, notificationSuppressionConfirmed: suppressRunOutputs, confirmedBudget },
       }));
       const finishedStages = new Set<WorkflowStageKey>();
       const stopIfRequested = () => {
@@ -7323,7 +7357,7 @@ ${zerodhaExecutionMode === "direct_market"
         // must wait for every metadata write and matching durable server truth.
         const historySaved = await auditSession.verifyCompletion(STAGE_ORDER);
         if (!historySaved || cancelRequestedRef.current) return;
-        if (shouldRunCurrentStage("actionables") && !recovery?.analysisOnly && !analysisOnlyRuns[portfolio]) {
+        if (shouldRunCurrentStage("actionables") && !suppressRunOutputs) {
           try {
             await apiService.queueAutoRebalanceCompletionEmail({
               portfolio: runMetadata.auto_rebalance_portfolio,
@@ -7483,7 +7517,7 @@ ${zerodhaExecutionMode === "direct_market"
       recordAutoRebalanceStage,
       resetPortfolio,
       selectedInputs,
-      selectedStages, sourceSelections, cardPolicies, pairPlanningBudget, scoreSupportedFactors,
+      selectedStages, sourceSelections, cardPolicies, pairPlanningBudget, scoreSupportedFactors, runSpendLimit,
       specificMode,
       updateStage,
       usdInrRate,
@@ -7735,11 +7769,19 @@ ${zerodhaExecutionMode === "direct_market"
               Last/Current run{displayedWorkflowSequence !== null ? ` #${displayedWorkflowSequence}` : ""}:{" "}
               {formatCompactStageTime(lastRunByPortfolio[section.portfolio])}
             </p>
+            <RunSideEffectPolicyNotice policy={
+              isSectionRunning && activeAutoRebalanceMetadata[section.portfolio]?.notificationSuppressionConfirmed
+                ? { version: 1, mode: "analysis_only" }
+                : !isSectionRunning && section.portfolio === "zerodha" && latestIndiaWorkflow?.sequence === displayedWorkflowSequence
+                  ? latestIndiaWorkflow.side_effect_policy
+                  : null
+            } />
             {recoverable && latestIndiaWorkflow && !isBusy && <div className="mt-3 space-y-1 text-sm">
               {prepared ? <>
                 <p role="status">Stage 2 revision #{prepared.id} · {prepared.listings} merged listings · holdings snapshot #{prepared.snapshot_id} · Swing jobs {prepared.swing_job_ids.map(id => "#"+id).join(", ")}</p>
                 <Button type="button" onClick={() => void runWorkflow("zerodha", undefined, undefined, {
                   revision: prepared.id, sequence: prepared.sequence, analysisOnly: latestIndiaWorkflow.side_effect_policy?.mode === "analysis_only",
+                  maxCostInr: latestIndiaWorkflow.max_cost_inr,
                 })}>Run scorecards from these inputs</Button>
               </> : <Button type="button" disabled={preparingSwing} onClick={async () => {
                 setPreparingSwing(true); setRecoveryIssue("");
@@ -7846,7 +7888,7 @@ ${zerodhaExecutionMode === "direct_market"
                 <ZerodhaRunGate getStatus={getBrokerStatus} connect={connectBroker} disabled={isBusy}>{runButton}</ZerodhaRunGate>
               ) : runButton}
             </div>
-            {!surface && <AnalysisOnlyRunControl checked={analysisOnlyRuns[section.portfolio]} disabled={isBusy}
+            {(!surface || section.portfolio === "zerodha") && <AnalysisOnlyRunControl checked={analysisOnlyRuns[section.portfolio]} disabled={isBusy}
               onChange={checked => setAnalysisOnlyRuns(current => ({ ...current, [section.portfolio]: checked }))} />}
             <button
               type="button"
@@ -7863,6 +7905,20 @@ ${zerodhaExecutionMode === "direct_market"
           </div>
         </div>
 
+        {section.portfolio === "zerodha" && <div className="mt-3 space-y-1">
+          <label className="flex flex-wrap items-center gap-2 text-sm font-semibold text-slate-800">
+            Total model spending limit (₹)
+            <input type="text" inputMode="decimal" value={runSpendLimit} disabled={isBusy}
+              className="w-28 rounded border bg-white px-2 py-1" placeholder="Optional"
+              aria-describedby="zerodha-run-budget-help" onChange={event => setRunSpendLimit(event.target.value)} />
+          </label>
+          <p id="zerodha-run-budget-help" className="text-xs text-slate-600">
+            Covers all stages and retries. Enter 0 for free work only. A blank limit on a new run allows uncapped model spend.
+          </p>
+          <RunSpendLimitNotice budget={latestIndiaWorkflow?.sequence === displayedWorkflowSequence
+            ? latestIndiaWorkflow
+            : isSectionRunning ? activeAutoRebalanceMetadata.zerodha?.confirmedBudget : null} />
+        </div>}
         {section.portfolio === "zerodha" && <details className="mt-2 text-sm">
           <summary className="cursor-pointer">Scorecard run settings</summary>
           <fieldset disabled={isBusy} className="mt-2 space-y-2">

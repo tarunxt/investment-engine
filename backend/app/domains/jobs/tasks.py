@@ -17,6 +17,7 @@ from app.core.logging import WorkerLogHelper, get_logger
 from app.domains.ai_providers.availability import is_provider_capacity_error
 from app.domains.ai_providers.web_metadata import merge_web_metadata
 from app.domains.api_usage.recorder import (
+    get_provider_usage_context,
     reset_provider_usage_context,
     provider_usage_phase,
     set_provider_usage_context,
@@ -37,6 +38,7 @@ from app.domains.jobs.failure_diagnostics import (
 from app.domains.polymarket.bullpen_llm_execution import execute_bullpen_llm_target
 from app.domains.polymarket.event_preflight import prepare_polymarket_event_context
 from app.domains.runs.schemas import PolymarketEventRunContext
+from app.domains.runs.spend_guard import SpendLimitError, bind_job_budget, reset_job_budget
 from app.infrastructure.messaging.task_registry import register_job_task_sync
 from app.domains.jobs.stage_status import aggregate_stage_status
 from app.shared.types import JobStatus
@@ -1208,6 +1210,7 @@ def execute_ai_job(self, job_id: int) -> None:
     web_sources: list[str] | None = None
     runtime_metadata_json: dict | None = None
     job: Job | None = None
+    budget_token = None
     provider_usage_token = None
     output_context_token = None
     execution_token = None
@@ -1271,6 +1274,7 @@ def execute_ai_job(self, job_id: int) -> None:
         if _job_was_cancelled(repo, job_id):
             logger.info("Skipping cancelled job %s", job_id)
             return
+        budget_token = bind_job_budget(db, job)
         output_context_token = configure_output_context(job, usage_dimensions)
         provider_usage_token = set_provider_usage_context(
             user_id=getattr(job, "user_id", None),
@@ -1410,9 +1414,20 @@ def execute_ai_job(self, job_id: int) -> None:
         class OwnedProvider:
             def generate(self, **kwargs):
                 nonlocal returned_response
+                usage = get_provider_usage_context()
+                prior_attempt = usage.last_attempt.get("attempt_id") if usage else None
                 ownership.before_call()
                 try:
                     result = provider_impl.generate(**kwargs)
+                except SpendLimitError:
+                    # A denied first transport has no ambiguous provider liability.
+                    # Preserve reconciliation if an earlier tool/key attempt in
+                    # this generate invocation already crossed the boundary.
+                    if usage and usage.last_attempt.get("attempt_id") == prior_attempt:
+                        ownership.after_call()
+                    else:
+                        ownership.block()
+                    raise
                 except Exception:
                     ownership.block()
                     raise
@@ -1879,6 +1894,8 @@ def execute_ai_job(self, job_id: int) -> None:
             logger.exception("Job %s exhausted all retries after: %s", job_id, exc)
 
     finally:
+        if budget_token is not None:
+            reset_job_budget(budget_token)
         if ownership is not None:
             ownership.close()
         reset_output_context(output_context_token)

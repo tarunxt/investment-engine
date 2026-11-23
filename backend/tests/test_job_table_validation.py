@@ -28,7 +28,9 @@ class ExecuteAIJobTableValidationTests(unittest.TestCase):
                 super().close()
         engine = create_engine("sqlite://", poolclass=StaticPool,
                                connect_args={"check_same_thread": False})
-        Job.__table__.create(engine)
+        from app.domains.runs.models import Run, RunJob
+        for table in (Job.__table__, Run.__table__, RunJob.__table__):
+            table.create(engine)
         sessions = sessionmaker(engine, class_=TrackedSession, expire_on_commit=False)
         fake_db = sessions()
         fake_db.add(job); fake_db.commit()
