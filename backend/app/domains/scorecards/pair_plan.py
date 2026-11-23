@@ -98,5 +98,6 @@ def evidence_detail(packets):
     return [{"listing":k, "ready":ready(v), "sessions":v["features"].get("sessions",0),
              "last_session":v["features"].get("as_of"), "sources":len(v.get("sources",{})),
              "reason":v["features"].get("issue") or ("" if ready(v) else "Missing verified observations"),
+             "volume_note":v["features"].get("volume_note"),
              "benchmark_relative":v["features"].get("relative_20_pct") is not None}
             for k,v in sorted(packets.items())]

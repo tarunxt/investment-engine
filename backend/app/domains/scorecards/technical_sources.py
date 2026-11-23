@@ -117,7 +117,7 @@ def extract_archive(data, venue, day, close, wanted, url):
                     matches.add(aliases[0])
                 for key in matches:
                     values=[row.get(k) for k in ("OpnPric","HghPric","LwPric","ClsPric","TtlTradgVol")]
-                    item=bar(date.fromisoformat(day),INDIA,values,url,datetime.max.replace(tzinfo=timezone.utc))
+                    item=bar(date.fromisoformat(day),INDIA,values,url,datetime.max.replace(tzinfo=timezone.utc),optional_volume=True)
                     if item:
                         item.update(as_of=close,isin=row.get("ISIN"),basis="venue-raw")
                         found.setdefault(key,[]).append(item)
@@ -209,7 +209,7 @@ def resolve_history_instruments(stocks, master, previous):
 async def collect(manifest, username, previous=None, requested=None, *, sessions=60, pair_repair=False, action_only=(), recovery_as_of=None):
     cutoff=datetime.fromisoformat(manifest["as_of"])
     receipt=datetime.now(timezone.utc)
-    availability_cutoff = recovery_as_of or cutoff
+    availability_cutoff = recovery_as_of or (receipt if pair_repair else cutoff)
     ids=[s["listing"] for s in manifest["stocks"]]
     keys=set(requested if requested is not None else ids)|{BENCHMARK}
     venues={k.split(":")[0] for k in keys}
@@ -436,7 +436,7 @@ async def collect(manifest, username, previous=None, requested=None, *, sessions
             if supplement:
                 try:
                     await asyncio.wait_for(supplement_indian_bars(client,supplement,cutoff,notices,manifest["owner_id"],sessions=sessions,diagnostics=provider_status,
-                        **({"verified_keys":pair_aliases} if pair_aliases else {}), **({"calendars":calendars} if sessions>60 else {})),25 if sessions>60 else 10)
+                        **({"optional_volume":True} if pair_repair else {}), **({"verified_keys":pair_aliases} if pair_aliases else {}), **({"calendars":calendars} if sessions>60 or pair_repair else {})),25 if sessions>60 else 10)
                 except (*ERRORS,TimeoutError):
                     notices.append("Alternate history unavailable")
                 for k,rows in supplement.items():
