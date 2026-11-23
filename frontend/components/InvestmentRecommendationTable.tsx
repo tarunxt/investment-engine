@@ -744,6 +744,10 @@ export default function InvestmentRecommendationTable({
     return <MarkdownRenderer content={content} />;
   }
 
+  return <CanonicalRecommendationTable canonicalTable={canonicalTable} />;
+}
+
+export function CanonicalRecommendationTable({canonicalTable}: {canonicalTable: CanonicalTable}) {
   return (
     <div className="space-y-4">
       {canonicalTable.title ? (
