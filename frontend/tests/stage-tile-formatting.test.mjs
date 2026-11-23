@@ -30,6 +30,12 @@ test('Kite board shows synced holdings and the shared Rebalance count alongside 
   for (const stage of cards.cards) {
     const info = {state:'failed', workflowSequence:244, recommendedStocks:0, evidenceCoverage:'0/16 scored', error:'Provider timeout'};
     const rows = values(stage, info);
+    if (stage === 'technical') {
+      assert.deepEqual(rows, values(stage, info, {...rebalance, recommendedStocks:0}));
+      assert.equal(rows['Stocks recommended'], '0');
+      assert.equal(rows.Error, 'Request timed out');
+      continue;
+    }
     assert.equal(rows['Stocks recommended'], '16');
     assert.equal(rows['Score coverage'], '0/16 scored');
     assert.equal(rows.Error, 'Request timed out');
@@ -188,17 +194,20 @@ test('a repaired Pairwise packet displays its own zero model cost and pending ve
   assert.equal(values['Model coverage'],undefined);
 });
 
-test('Technical coverage distinguishes successful annotations, unique prices, cross-stage recommendations and retries',()=>{
-  const info={state:'completed',runStatus:'completed',partialNotice:'LLM output partial',rebalanceReportedCount:19,
+test('Technical coverage distinguishes successful annotations, unique prices, bullish scores and retries',()=>{
+  const info={state:'completed',runStatus:'completed',partialNotice:'LLM output partial',
     published:{output_id:491,run_id:551,covered:18,expected:34,technical_counts:{expected:33,source_rows:34,
       complete:18,provisional:0,insufficient:15,commentary:34,bullish:6},technical_recovery:{state:'scheduled',next_retry:'2026-11-22T15:30:00Z',pending:{}}}};
   const rows=Object.fromEntries(ui.getLlmStageTileRows(info,0).map(r=>[r.label,r.value]));
   assert.equal(rows['Model rows'],'34/34');
   assert.equal(rows['Complete scores'],'18/33 unique listings');
-  assert.equal(rows['Stocks recommended (Rebalance)'],'19');
+  assert.equal(rows['Stocks recommended (Rebalance)'],undefined);
+  assert.equal(rows['Stage 4 used'],undefined);
+  assert.equal(rows['Bullish Technical scores'],'6 · complete score >55');
   assert.equal(rows['Evidence status'],'Recovering evidence');
   assert.equal(rows['Error'],undefined);
   info.published.technical_counts.complete=33;
+  assert.equal(ui.getIdleStageRows('technical',info,0).some(row=>row.detail),false);
   assert.equal(ui.getStageOutcome(info),'completed');
 });
 

@@ -67,7 +67,6 @@ export type StageInfo = StageCost & {
   sourceRevision?: number;
   sourceListingCount?: number;
   finalInputs?: Record<string, unknown>;
-  rebalanceReportedCount?: number | null;
   published?: import("@/lib/independentScorecards").AvailableOutput;
   evidenceCoverage?: string;
   threatCounts?: {diagnostics?:import("@/lib/independentScorecards").ThreatDiagnostics;expected:number;returned:number;scored:number;complete:number;status:string};
@@ -414,7 +413,7 @@ function stageErrorRows(info: StageInfo): StageTileRow[] {
   return row.detail ? [row] : [];
 }
 
-export function getLlmStageTileRows(info: StageInfo, now: number): StageTileRow[] {
+export function getLlmStageTileRows(info: StageInfo, now: number, stage?: WorkflowStageKey): StageTileRow[] {
   const cost = formatRebalanceCost(info);
   const pairs=info.published?.pair_counts;
   const tech=info.published?.technical_counts;
@@ -426,7 +425,7 @@ export function getLlmStageTileRows(info: StageInfo, now: number): StageTileRow[
     ...(info.published ? [
       {label:"Available output",value:`#${info.published.output_id} · ${info.published.run_id ? "run #"+info.published.run_id : "evidence only"}`},
       {label:"Recorded execution",value:evidenceOnly ? "Evidence only" : `${info.lastRunId ? "#"+info.lastRunId+" · " : ""}${info.runStatus || info.state}`},
-      {label:"Stage 4 used",value:info.published.used_output_id ? `Output #${info.published.used_output_id} · final #${info.published.final_id}` : "No saved reference"},
+      ...(stage === "technical" || tech ? [] : [{label:"Stage 4 used",value:info.published.used_output_id ? `Output #${info.published.used_output_id} · final #${info.published.final_id}` : "No saved reference"}]),
     ] : []),
     ...(!tech && info.evidenceCoverage ? [{label: "Score coverage", value: info.evidenceCoverage}] : []),
     ...(!evidenceOnly && info.distinctModels != null ? [{label: "Model coverage", value: `${info.totalLlms ?? "?"} jobs · ${info.distinctModels} distinct model${info.distinctModels === 1 ? "" : "s"}`}] : []),
@@ -435,7 +434,6 @@ export function getLlmStageTileRows(info: StageInfo, now: number): StageTileRow[
       {label:"Complete scores",value:tech.complete+"/"+tech.expected+" unique listings"},
       {label:"Missing evidence",value:String(tech.expected-tech.complete)+" listings"},
       ...(tech.source_rows && tech.source_rows!==tech.expected?[{label:"Source references",value:String(tech.source_rows)}]:[]),
-      ...(info.rebalanceReportedCount!=null?[{label:"Stocks recommended (Rebalance)",value:String(info.rebalanceReportedCount),detail:"Number reported by the Rebalance stage for this workflow, across its assessed actions. Includes holds and trims."}]:[]),
       ...(tech.bullish!=null?[{label:"Bullish Technical scores",value:tech.bullish+" · complete score >55"}]:[]),
       ...(work?.next_retry?[{label:"Next evidence retry",value:new Date(work.next_retry).toLocaleTimeString("en-IN",{timeZone:"Asia/Kolkata"})+" IST"}]:[]),
     ] : pairs ? [
@@ -507,7 +505,7 @@ export function getIdleStageRows(stage: WorkflowStageKey, info: StageInfo, now: 
     return rows;
   }
   if (LLM_STAGE_TILE_KEYS.has(stage)) {
-    return getLlmStageTileRows(info, now);
+    return getLlmStageTileRows(info, now, stage);
   }
   return getActionablesStageTileRows(info);
 }
@@ -681,7 +679,7 @@ export function WorkflowStageTile({
     info.state === "idle" || info.state === "queued"
       ? getIdleStageRows(stage, info, now)
       : LLM_STAGE_TILE_KEYS.has(stage)
-        ? getLlmStageTileRows(info, now)
+        ? getLlmStageTileRows(info, now, stage)
         : stage === "actionables"
           ? getActionablesStageTileRows(info)
           : getIdleStageRows(stage, info, now);
