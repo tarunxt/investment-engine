@@ -1,4 +1,4 @@
-"""Plan paid assessments only when their accepted and available categories can yield a score."""
+"""Plan supported category assessments independently of consolidated score eligibility."""
 from .prompts import CATEGORIES
 
 CODES = tuple(f"C{n}" for n in range(1, 9))
@@ -40,7 +40,7 @@ def plan(packet, prior_rows=()):
         accepted = verified(row)
         possible = available_categories(packet, key)
         available = [cat for cat in targets if cat not in accepted and cat in possible]
-        if available and len(accepted.union(available)) >= 3:
+        if available:
             ready[key] = available
     return ready
 

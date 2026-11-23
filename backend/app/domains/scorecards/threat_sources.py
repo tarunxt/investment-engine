@@ -16,6 +16,7 @@ from xml.etree import ElementTree
 import httpx
 from lxml import html
 
+from app.domains.zerodha.upstox_quotes import technical_instruments
 from . import threat_archive
 from .research import INDIA, BSE_NEWS, NSE_NEWS, download, indian_news, supplement_indian_bars
 from redis.exceptions import RedisError
@@ -138,6 +139,35 @@ def filings(data, stock, cutoff):
     return sorted(result, key=lambda item:item[1]["as_of"], reverse=True)[:3]
 
 
+def bse_announcements(data, stock, code, cutoff):
+    """Read attachments published by this exact BSE scrip before decision time."""
+    try:
+        payload = json.loads(data)
+    except (ValueError, UnicodeError):
+        return []
+    records = []
+    rows = payload.get("Table") if isinstance(payload, dict) else None
+    for row in rows if isinstance(rows, list) else []:
+        if not isinstance(row, dict) or str(row.get("SCRIP_CD")) != code:
+            continue
+        filename = str(row.get("ATTACHMENTNAME") or "")
+        if not re.fullmatch(r"[A-Za-z0-9_.-]+\.pdf", filename, re.I):
+            continue
+        try:
+            stamp = datetime.fromisoformat(str(row.get("DissemDT") or row.get("NEWS_DT")))
+        except ValueError:
+            continue
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=INDIA)
+        if not cutoff-timedelta(days=90) <= stamp <= cutoff:
+            continue
+        folder = "AttachHis" if str(row.get("OLD")) == "1" else "AttachLive"
+        url = f"https://www.bseindia.com/xml-data/corpfiling/{folder}/{filename}"
+        records.append((stock["listing"], {"kind":"exchange_notice", "url":url, "as_of":stamp.isoformat(),
+                        "title":str(row.get("NEWSSUB") or row.get("HEADLINE") or stock["symbol"])[:280]}))
+    return sorted(records, key=lambda item:item[1]["as_of"], reverse=True)[:3]
+
+
 def fx_observation(data, cutoff):
     observations = []
     for group in ElementTree.fromstring(data).iter():
@@ -214,14 +244,14 @@ async def collect(manifest, username, wanted=None, *, previous=None, venue_histo
                 add(prior["sources"][sid], [key], [])
     async with httpx.AsyncClient(timeout=4, follow_redirects=False, headers={"User-Agent":"Cred-X research (https://cred-x.in)"}) as client:
         gate = asyncio.Semaphore(6)
-        async def fetch(url, limit):
+        async def fetch(url, limit, source_client=client):
             for attempt in range(2):
                 try:
                     async with gate:
                         current = url
                         for _ in range(4):
                             try:
-                                return await download(client, current, limit)
+                                return await download(source_client, current, limit)
                             except httpx.HTTPStatusError as exc:
                                 if not exc.response.is_redirect:
                                     raise
@@ -321,7 +351,31 @@ async def collect(manifest, username, wanted=None, *, previous=None, venue_histo
             async def dated():
                 await asyncio.gather(*(lookup(s) for s in stocks if s["exchange"]=="NSE"
                                        and set(targets[s["listing"]])-{"C8"} and not issuer_ids[s["listing"]]))
-            await asyncio.gather(recent(), dated())
+            async def dated_bse():
+                missing = [s for s in stocks if s["exchange"] == "BSE" and
+                           set(targets[s["listing"]]) - {"C8"} and not issuer_ids[s["listing"]]]
+                if not missing:
+                    return
+                try:
+                    master = await technical_instruments(client)
+                except ERRORS + (RuntimeError,):
+                    notices.add("BSE issuer identifiers unavailable")
+                    return
+                async def by_scrip(stock, bse_client):
+                    code = master.get(stock["listing"], {}).get("exchange_token", "")
+                    if not re.fullmatch(r"\d{6}", code):
+                        notices.add("BSE issuer identifier unavailable for "+stock["listing"])
+                        return
+                    params = {"pageno":1, "strCat":-1, "subcategory":-1, "strSearch":"P", "strType":"C",
+                              "strScrip":code, "strPrevDate":(cutoff-timedelta(days=90)).astimezone(INDIA).strftime("%Y%m%d"),
+                              "strToDate":cutoff.astimezone(INDIA).strftime("%Y%m%d")}
+                    url = "https://api.bseindia.com/BseIndiaAPI/api/AnnSubCategoryGetData/w?"+urlencode(params)
+                    for key, rec in bse_announcements(await fetch(url, 2_000_000, bse_client), stock, code, cutoff):
+                        await filing(rec, {key})
+                headers = {"Referer":"https://www.bseindia.com/", "Origin":"https://www.bseindia.com"}
+                async with httpx.AsyncClient(timeout=4, headers=headers) as bse_client:
+                    await asyncio.gather(*(by_scrip(stock, bse_client) for stock in missing))
+            await asyncio.gather(recent(), dated(), dated_bse())
         async def bars():
             found = history
             async def day(venue, date, close, keys):

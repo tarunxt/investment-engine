@@ -7,6 +7,19 @@ const categories = ["Geopolitics/trade","Global financial conditions","Domestic 
 const control = "rounded-md border border-slate-300 px-3 py-1.5 text-sm disabled:opacity-50";
 const value = (n:unknown) => typeof n === "number" ? Number(n.toFixed(2)).toString() : "—";
 
+function assessment(row: CardRow) {
+  if (row.score != null) return row.coverage;
+  const verified = Number(row.assessed ?? 0);
+  if (verified > 0 && verified < 3) return `${verified} verified · ${3 - verified} more needed for a consolidated score`;
+  if (!Array.isArray(row.sourced_categories)) return row.coverage;
+  const usable = row.sourced_categories.length;
+  if (usable) return `${usable} supported · awaiting verified assessment`;
+  const references = Object.values((row.source_ids ?? {}) as Record<string, string[]>);
+  return references.some(ids => ids.length)
+    ? "Source references found · missing usable issuer evidence"
+    : "No source references assigned";
+}
+
 export function ThreatStockScores({ result, onRecover, onRefresh, onRetry }: {
   result:CardResult; onRecover:(id:number)=>Promise<CardResult>; onRefresh:(id:number)=>Promise<CardResult>; onRetry?:(id:number)=>Promise<void>;
 }) {
@@ -66,7 +79,7 @@ export function ThreatStockScores({ result, onRecover, onRefresh, onRetry }: {
               onClick={() => {setActive(row); dialog.current?.showModal();}}>{row.listing}</button></th>
             {view === "Sub-scores" ? categories.map(name => <td key={name} className="px-2">{value(categoryScores[name])}</td>) :
               <><td>{value(row.stock_threat)}</td><td>{value(row.score)}</td></>}
-            <td>{Number(row.assessed ?? 0)}/8</td><td>{row.coverage}</td>
+            <td>{Number(row.assessed ?? 0)}/8</td><td>{assessment(row)}</td>
           </tr>;
         })}</tbody>
       </table>
@@ -83,7 +96,7 @@ export function ThreatStockScores({ result, onRecover, onRefresh, onRetry }: {
           const audit=evidence.filter(e=>String(e["Category ID"]??e.Category??"").replace(/^C/i,"")===String(i+1));
           const reported=raw.map(r=>r[cat]).filter(v=>v!=null && v!=="—");
           return <section className="mt-3 border-t pt-2" key={cat}><h4 className="font-semibold">{cat} · {name} · {value(values[name])}</h4>
-            <p>Model reported {reported.map(String).join(", ")||"—"}. {values[name]==null ? (audit.length?"No accepted score.":(candidates[cat]?.length?"Source available, no verified assessment.":"No verified supporting evidence recorded.")) : "Verified category score."}</p>
+            <p>Model reported {reported.map(String).join(", ")||"—"}. {values[name]==null ? (audit.length?"No accepted score.":(candidates[cat]?.length?(Array.isArray(active.sourced_categories) && !active.sourced_categories.includes(cat) ? "Source assigned but missing usable issuer evidence." : "Source assigned, no verified assessment."):"No verified supporting evidence recorded.")) : "Verified category score."}</p>
             {audit.map((e,j)=><div className="mt-1 text-sm" key={j}><strong>{String(e.Disposition)}</strong> · {String(e.Scenario??"")} · {String(e["Publication timestamp"]??e["As of"]??"Date unavailable")} {e.Likelihood!=null && e.Impact!=null && <>· likelihood {String(e.Likelihood)}, impact {String(e.Impact)}</>}<p>{String(e.Rationale??"")}</p>{Boolean(e["Confidence normalized"]) && <p>Reported confidence {String(e["Confidence reported"])} · accepted as {String(e.Confidence)}</p>}{typeof e.exposure_quote==="string" && <p>Issuer exposure · {e.exposure_quote} {typeof e.exposure_url==="string" && <a href={e.exposure_url} target="_blank" rel="noreferrer">Issuer filing</a>}</p>}{typeof e.excerpt==="string" && <details><summary>{String(e.source_title??"Source excerpt")}</summary><p>{e.excerpt}</p></details>}{typeof e.Source==="string" && /^https?:\/\//i.test(e.Source) && <a className="text-blue-700 underline" href={e.Source} target="_blank" rel="noreferrer">Source document</a>}</div>)}
           </section>;
         })}
