@@ -63,3 +63,41 @@ async def closing_display(db, owner, result):
     return {**result, "rows":[{**r, "closing_pending":pending[r["listing"]]["session"],
                                "previous_close_score":previous.get(r["listing"])}
                               if r["listing"] in pending else r for r in result["rows"]]}
+
+
+async def pairwise_prior_bars(db, manifest, keys):
+    """Find this owner's earlier raw session histories, even if Technical lacked other factors."""
+    from .technical_sources import session_calendar
+    cutoff = datetime.fromisoformat(manifest["as_of"])
+    boundary = cutoff.astimezone(timezone.utc).replace(tzinfo=None)
+    wanted = set(keys)
+    venues = {key.split(":")[0] for key in wanted}
+    sessions = {venue: set(session_calendar(cutoff, venue, [], 6)) for venue in venues}
+    data = storage.Stage.summary_json["research"]
+    query = (select(Workflow.sequence, data["technical"], data["listings"])
+             .select_from(storage.Stage).join(Workflow)
+             .where(Workflow.user_id == manifest["owner_id"], Workflow.portfolio == "india",
+                    Workflow.sequence < manifest["sequence"], storage.of_kind("packet"),
+                    data["version"].as_integer() == 3, storage.Stage.created_at <= boundary,
+                    storage.Stage.created_at >= boundary - timedelta(days=7))
+             .order_by(storage.Stage.id.desc()).limit(36).execution_options(yield_per=2))
+    result = {}
+    async for sequence, ledgers, listings in await db.stream(query):
+        for key in wanted:
+            source = (ledgers or {}).get(key, {}).get("sources", {}).get("stock", {})
+            instrument = source.get("instrument")
+            if not instrument or not source.get("action_url"):
+                continue
+            bars = [dict(row, reused_workflow=sequence) for row in (listings or {}).get(key, [])
+                    if row.get("kind") == "daily_bar" and row.get("url")
+                    and row.get("isin", instrument) == instrument and datetime.fromisoformat(row["as_of"]) <= cutoff]
+            days = {row["as_of"][:10] for row in bars}
+            required = sessions[key.split(":")[0]]
+            coverage = len(days & required)
+            if coverage > result.get(key, {}).get("matched", 0):
+                result[key] = {"instrument": instrument, "stock": source, "bars": bars,
+                               "matched": coverage, "as_of": (ledgers or {})[key].get("as_of")}
+        wanted -= {key for key in wanted if result.get(key, {}).get("matched") == 6}
+        if not wanted:
+            break
+    return result

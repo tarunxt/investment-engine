@@ -162,7 +162,8 @@ async def step(db, work, now, work_id, token):
         return "completed", 0
     refresh_gaps(work,out.get("evidence_readiness",[]),now)
     wanted = pending(work,now)
-    if wanted:
+    eligible_now = out["pair_counts"]["eligible"] > out["pair_counts"]["judged"]
+    if wanted and not (work["budget"] and eligible_now):
         out = await pair_evidence.repair(db,current,owner,user.username,requested=set(wanted))
         work["current"] = out["id"]
         refresh_gaps(work,out["evidence_readiness"],now,wanted,out.get("retry_after",0))

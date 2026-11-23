@@ -26,7 +26,7 @@ export function ScorecardReview({portfolio,stage:initial,revisionId,initialAttem
   portfolio:"zerodha"|"indmoneyUs";stage:CardKey|"source"|"actionables";revisionId?:number;initialAttempt?:number;fallbackPolicy:CardPolicy;previousFormula:ScoreMatrixFormulaConfig;
   onRevision:(id:number)=>void;onPolicy:(p:CardPolicy)=>void;onClose:()=>void;
 }) {
-  const [pairMode,setPairMode]=useState<"full"|"balanced">("full");
+  const [pairMode,setPairMode]=useState<"full"|"balanced">("balanced");
   const [pairTrials,setPairTrials]=useState<Record<string,unknown>[]|null>(null);
   const [pairBudget,setPairBudget]=useState("");
   const broker=portfolio==="zerodha"?"india":"indmoney_us";
