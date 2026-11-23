@@ -140,6 +140,12 @@ async def recover(db, original, owner, username):
     rev=await storage.lookup(db,owner,"india","revision",rev_id)
     settings=dict(original.data["settings"])
     parent=original.result_json
+    if "unassessed_trace" not in parent and original.row.run_id and not original.data.get("data_recovery"):
+        from .router import observations
+        from .rebalance_output import project
+        jobs = await observations(db, original, owner, "india")
+        historical = project(rev.manifest, jobs)["unassessed_trace"]
+        parent = {**parent, "unassessed_trace":historical}
     orig_id,workflow_id=original.id,original.row.workflow_id
     prior=await storage.lookup(db,owner,"india","packet",settings.get("packet_id")) if settings.get("packet_id") else None
     packet=await prepare(db,rev,owner,username,prior.data["research"] if prior else {},refresh=True)

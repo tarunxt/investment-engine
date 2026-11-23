@@ -101,6 +101,11 @@ celery.conf.update(
     enable_utc=True
 )
 celery.conf.beat_schedule = {
+    "india-rebalance-issuer-statements": {
+        "task":"app.domains.scorecards.tasks.refresh_rebalance_filing_archive",
+        "schedule":crontab(minute=28,hour="*/4"),
+        "options":{"queue":"beat","expires":600},
+    },
     "india-threats-public-releases": {
         "task": "app.domains.scorecards.tasks.refresh_threat_archive",
         "schedule": crontab(minute=17,hour="*/4"),

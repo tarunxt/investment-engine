@@ -26,7 +26,8 @@ def published(value):
 
 
 def recent(rows, cutoff):
-    return [r for r in rows if cutoff-timedelta(days=185) <= datetime.fromisoformat(r["as_of"]) <= cutoff]
+    return [r for r in rows if cutoff-timedelta(days=185) <= datetime.fromisoformat(r["as_of"]) <= cutoff
+            and datetime.fromisoformat((r.get("comparison_source") or r)["as_of"]) <= cutoff]
 
 
 def comparable(facts):
@@ -138,6 +139,8 @@ async def issuer_results(client, cache, isin, nse, bse, cutoff):
             reasons.append(source+" filing request timed out")
         except (ValueError,TypeError,KeyError,ElementTree.ParseError,httpx.HTTPError,OSError) as exc:
             reasons.append(f"{source} filing unavailable ({type(exc).__name__})")
+    from .filing_archive import lookup
+    docs.extend(await lookup(cache, isin, cutoff))
     docs=sorted({d["url"]:d for d in recent(docs,cutoff)}.values(),key=lambda d:(comparable(d["facts"]),d["as_of"]),reverse=True)[:3]
     docs=period_documents(docs)
     if docs and cache:

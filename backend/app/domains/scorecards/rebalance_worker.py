@@ -34,6 +34,7 @@ def execute(provider, model, prompt, batch, save, previous=None):
         with provider_usage_phase("row_repair" if repair else "initial_generation"):
             response=provider.generate(model=model,prompt=contract.instructions(revision,packet,repair))
         elapsed = round(monotonic() - started, 3)
+        parsed=contract.read_records(response.content,packet["listings"])
         accepted=contract.validated(response.content,packet["listings"])
         if repair and scope and not retry:
             for k,fields in repair.items():
@@ -44,7 +45,7 @@ def execute(provider, model, prompt, batch, save, previous=None):
         else:
             rows.update(accepted)
             first_rows.update({k:dict(v) for k,v in accepted.items()})
-        receipts.append({"seconds":elapsed,"phase":"repair" if retry else "targeted" if repair else "initial","listings":page,"requested":repair,
+        receipts.append({"seconds":elapsed,"parsed_listings":sorted(parsed),"phase":"repair" if retry else "targeted" if repair else "initial","listings":page,"requested":repair,
                          "hash":contract.digest_text(response.content or ""),"model":response.model,
                          "tokens_in":response.tokens_in,"tokens_out":response.tokens_out,"cost":response.cost})
         save(snapshot())
