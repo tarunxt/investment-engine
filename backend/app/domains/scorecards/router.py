@@ -648,12 +648,12 @@ async def attempt_result(portfolio:Portfolio,attempt_id:int,db:AsyncSession=Depe
         work=await technical_queue.enqueue(db,a,out)
         if work:
             out["recovery"]=technical_queue.summary(work)
-    if result.get("scoring_version")==3:
-        from .technical_history import closing_display
-        out = await closing_display(db, user.id, out)
     a.row.summary_json={**a.data,"result":out}
     a.row.status=out["status"]
     await db.commit()
+    if result.get("scoring_version")==3:
+        from .technical_history import closing_display
+        return await closing_display(db, user.id, out)
     return replay(out) if portfolio=="india" else out
 
 
@@ -746,11 +746,13 @@ async def recover_pairs(portfolio:Portfolio,attempt_id:int,db:AsyncSession=Depen
         return out
     if portfolio=="india" and original.data["card"]=="technical" and original.result_json:
         from .technical_recovery import recover
+        from .technical_history import closing_display
         if original.result_json.get("scoring_version")==3:
             work=await technical_queue.enqueue(db,original,original.result_json,immediate=True)
             if work:
                 await db.commit()
-                return await technical_queue.process(db,work.id,user.id,user.username,manual=True)
+                result = await technical_queue.process(db,work.id,user.id,user.username,manual=True)
+                return await closing_display(db, user.id, result)
         result=await recover(db, original, user.id, user.username)
         if result.get("scoring_version")==3 and result["id"]!=original.id:
             new=await owned(db,user.id,portfolio,"attempt",result["id"])
@@ -758,7 +760,7 @@ async def recover_pairs(portfolio:Portfolio,attempt_id:int,db:AsyncSession=Depen
             if work:
                 result={**result,"recovery":technical_queue.summary(work)}
             await db.commit()
-        return result
+        return await closing_display(db, user.id, result)
     if original.data["card"]!="pairwise" or not original.result_json:
         raise HTTPException(409,"A terminal Pairwise output is required")
     rev_id=original.data["revision_id"]
