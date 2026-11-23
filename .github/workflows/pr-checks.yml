@@ -50,6 +50,8 @@ jobs:
           backend/tests/test_indmoney_alpaca_quotes.py
           backend/tests/test_upstox_quotes.py
           backend/tests/test_upstox_quote_guard.py
+          backend/tests/test_technical_scorecard_v3.py::test_pending_close_keeps_verified_zero_separate_from_current_score
+          backend/tests/test_technical_scorecard_v3.py::test_route_keeps_data_without_available_provider_and_recovers_without_mutating_output
           backend/tests/test_upstox_request_contract.py
           backend/tests/test_auth_signing_config.py
           backend/tests/test_email_config.py
