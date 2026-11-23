@@ -102,7 +102,7 @@ async def _collect_packet(db, rev, owner, username, previous, refresh):
             return ready
     history=await latest_history(db,revision_id)
     await db.commit()
-    research=await collect(manifest,username,history)
+    research=await collect(manifest,username,history,refresh=refresh)
     if previous:
         research=merge_sources(previous,research)
     identity="rebalance-preflight-v1" if not refresh else "rebalance-source/"+digest(research["packets"])

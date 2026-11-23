@@ -101,7 +101,7 @@ def build(stocks, history, news, long_history, reports, as_of, diagnostics=None)
                 days = sorted(by_day)[-count:]
                 day_counts[factor]=max(day_counts[factor],len(days))
                 if len(days) == count and days[-1] != last_session:
-                    reasons[factor] = "Missing latest completed venue session"
+                    reasons[factor] = f"Missing latest completed venue session · required {last_session}, latest saved {days[-1]}"
                 if len(days)<count or days[-1]!=last_session:
                     continue
                 if diagnostics is not None and (not src.get("instrument") or not src.get("action_url")):
@@ -122,6 +122,8 @@ def build(stocks, history, news, long_history, reports, as_of, diagnostics=None)
                 refs[factor] = {"kind":"history","as_of":last["as_of"],"url":last["url"],"start_url":first["url"],
                                 "sessions":count,"from":days[0],"start":prices[0],"close":prices[-1],
                                 "high_close":max(prices),"low_close":min(prices),"mean_close":round(sum(prices)/count,3)}
+                if last.get("recovered_close"):
+                    refs[factor]["close_recovered_at"] = last["received_at"]
                 break
         docs = reports.get(key,[]) or issuer_reports.get(src.get("instrument"),[])
         for i,item in enumerate(docs[:2]):
@@ -159,7 +161,7 @@ def build(stocks, history, news, long_history, reports, as_of, diagnostics=None)
     return packets
 
 
-async def collect(manifest, username, cached_history=None):
+async def collect(manifest, username, cached_history=None, *, refresh=False):
     cutoff = datetime.fromisoformat(manifest["as_of"])
     stocks = manifest["stocks"]
     try:
@@ -197,6 +199,8 @@ async def collect(manifest, username, cached_history=None):
                 return dict(await asyncio.gather(*(fetch(k,v) for k,v in issuers.items())))
             history,news,reports=await asyncio.gather(collect_history(history_manifest,username,previous=cached_history,sessions=210),
                                                     collect_news(history_manifest),get_reports())
+            from .rebalance_close import recover_closes
+            await recover_closes(client, cache, history_manifest, username, history, master, refresh=refresh)
             diagnostics,filings_by_key={},{}
             for k in listing_stocks:
                 data,reasons=reports.get(master.get(k,{}).get("isin") or k,([],[]))
