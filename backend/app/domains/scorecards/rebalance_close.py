@@ -13,7 +13,7 @@ from .technical_sources import ERRORS, archive_url, extract_archive
 QUOTE_URL = "https://api.upstox.com/v3/market-quote/ohlc"
 
 
-async def recover_closes(client, cache, manifest, username, history, master, *, refresh):
+async def recover_closes(client, cache, manifest, username, history, master, *, refresh, optional_volume=False):
     if not refresh:
         return
     cutoff = datetime.fromisoformat(manifest["as_of"])
@@ -87,7 +87,7 @@ async def recover_closes(client, cache, manifest, username, history, master, *, 
                     if session.isoformat() != day:
                         continue
                     url = QUOTE_URL + "?" + urlencode({"instrument_key": instrument, "interval": "1d"})
-                    item = bar(session, INDIA, [candle.get(k) for k in ("open","high","low","close","volume")], url, cutoff)
+                    item = bar(session, INDIA, [candle.get(k) for k in ("open","high","low","close","volume")], url, cutoff, optional_volume=optional_volume)
                     if item and datetime.now(timezone.utc) >= datetime.fromisoformat(close):
                         retain(key, dict(item, as_of=close, basis="unverified-provider", recovered_close=True))
                         break
