@@ -13,12 +13,15 @@ async def saved_inputs(db, revision):
     # Exact-listing candles are validated by the consumer against the decision time.
     history = {}
     listings = {}
-    packets = await db.scalars(select(research["listings"]).where(
+    packets = await db.execute(select(research["listings"], research["technical"]).where(
         storage.of_kind("packet", revision), research["version"].as_integer()==3
     ).order_by(storage.Stage.id.desc()).limit(5))
-    for rows in packets:
+    for rows, ledgers in packets:
         for key, candles in (rows or {}).items():
-            listings.setdefault(key, []).extend(candles)
+            ledger = (ledgers or {}).get(key) or {}
+            source = ledger.get("sources", {}).get("stock", {})
+            for candle in candles:
+                listings.setdefault(key, []).append((candle, source, ledger.get("canonical_listing", key)))
     history["listings"] = listings
     reports = await db.scalars(select(research["packets"]).where(
         storage.of_kind("packet", revision), research["version"].as_integer()==4
@@ -33,6 +36,47 @@ async def saved_inputs(db, revision):
                     filings.setdefault(key, {})[doc["url"]] = doc
     history["issuer_filings"] = filings
     return history
+
+
+def technical_sessions(records, key, days, cutoff):
+    """Return unambiguous same-venue raw observations and a reason for every missing day."""
+    candidates, reasons = {}, {}
+    for item in records:
+        row, source, canonical = item if isinstance(item, tuple) else (item, {}, key)
+        day = str(row.get("as_of", ""))[:10]
+        if row.get("kind") != "daily_bar" or day not in days:
+            continue
+        try:
+            if canonical.split(":")[0] != key.split(":")[0] or row.get("isin") and source.get("instrument") and row["isin"] != source["instrument"]:
+                raise ValueError("instrument mismatch")
+            if not row.get("url") or datetime.fromisoformat(row["as_of"]) > cutoff:
+                raise ValueError("missing source or post-cutoff session")
+            vintage = row.get("published_at") or row.get("received_at")
+            if vintage and datetime.fromisoformat(vintage) > cutoff:
+                raise ValueError("observation after cutoff")
+            if row.get("basis") not in (None, "venue-raw"):
+                if (row.get("basis") != "unverified-provider" or not vintage or not source.get("instrument")
+                        or not source.get("action_url") or not isinstance(source.get("actions"), list)
+                        or any(days[0] < a["date"] <= days[-1] for a in source["actions"])):
+                    raise ValueError("price basis unverified")
+            values = tuple(float(row[k]) for k in ("open", "high", "low", "close", "volume"))
+            op, hi, lo, cl, vol = values
+            if not all(map(math.isfinite, values)) or not 0 < lo <= min(op, cl) <= max(op, cl) <= hi or vol < 0:
+                raise ValueError("invalid price or volume")
+            candidates.setdefault(day, {})[values] = row
+        except (ValueError, TypeError, KeyError) as error:
+            reasons[day] = str(error) if isinstance(error, ValueError) else "incomplete observation"
+    accepted = {}
+    for day in days:
+        options = candidates.get(day, {})
+        if len(options) == 1:
+            accepted[day] = next(iter(options.values()))
+            reasons.pop(day, None)
+        elif options:
+            reasons[day] = "conflicting observations"
+        else:
+            reasons.setdefault(day, "no saved Technical observation")
+    return accepted, reasons
 
 
 def filing_facts(doc, cutoff):

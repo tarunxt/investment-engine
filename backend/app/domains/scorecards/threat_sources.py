@@ -10,7 +10,7 @@ import zipfile
 from datetime import datetime, timedelta
 from email.utils import parsedate_to_datetime
 from zoneinfo import ZoneInfo
-from urllib.parse import urlencode, urljoin, urlsplit
+from urllib.parse import quote, urlencode, urljoin, urlsplit
 from xml.etree import ElementTree
 
 import httpx
@@ -18,7 +18,8 @@ from lxml import html
 
 from app.domains.zerodha.upstox_quotes import technical_instruments
 from . import threat_archive
-from .threat_recovery import filing_facts
+from .threat_recovery import filing_facts, technical_sessions
+from .threat_issuer import indexed_filings, primary_filing
 from .research import INDIA, BSE_NEWS, NSE_NEWS, download, indian_bars, indian_news, supplement_indian_bars
 from redis.exceptions import RedisError
 from .technical_sources import archive_url, extract_archive, session_calendar
@@ -234,19 +235,21 @@ async def collect(manifest, username, wanted=None, *, previous=None, venue_histo
                 if cat in targets[key] and sid not in matrix[key][cat]:
                     docs[sid] = doc
                     matrix[key][cat].append(sid)
-    for key, records in (venue_history or {}).get("listings", {}).items():
-        if key in history:
-            for row in records:
-                if row.get("kind")=="daily_bar" and row.get("basis") in (None,"venue-raw") and row.get("url") and datetime.fromisoformat(row["as_of"]) <= cutoff:
-                    vintage = row.get("published_at") or row.get("received_at")
-                    if vintage and datetime.fromisoformat(vintage) > cutoff:
-                        continue
-                    history[key].setdefault(row["as_of"][:10], row)
+    for key in targets:
+        if "C8" in targets[key]:
+            days = list(session_calendar(cutoff, key.partition(":")[0], []))[-5:]
+            records = (venue_history or {}).get("listings", {}).get(key, [])
+            accepted, rejected = technical_sessions(records, key, days, cutoff)
+            history[key].update(accepted)
+            trace[key]["technical_history"] = f"{len(accepted)}/{len(days)} sessions reused" + "".join(
+                f" · {day}: {reason}" for day, reason in rejected.items())
     for scope, item in await threat_archive.load(scopes, cutoff):
         doc = item["doc"]
         kind, key = scope.split(":",1)
         if kind == "bars":
-            history[key][doc["as_of"][:10]] = doc
+            vintage = doc.get("published_at") or doc.get("received_at")
+            if doc.get("volume") is not None and (not vintage or datetime.fromisoformat(vintage) <= cutoff):
+                history[key].setdefault(doc["as_of"][:10], doc)
         else:
             add(doc, targets if kind == "official" else [key], item["categories"])
     for key in targets:
@@ -281,6 +284,9 @@ async def collect(manifest, username, wanted=None, *, previous=None, venue_histo
                         raise ValueError("Redirect limit exceeded")
                 except ERRORS as exc:
                     failures[url] = f"HTTP {exc.response.status_code}" if isinstance(exc,httpx.HTTPStatusError) else type(exc).__name__
+                    if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code in (401, 403, 404, 429):
+                        notices.add("Source unavailable: " + urlsplit(url).hostname)
+                        break
                     if attempt:
                         notices.add("Source unavailable: " + urlsplit(url).hostname)
             return b""
@@ -349,7 +355,11 @@ async def collect(manifest, username, wanted=None, *, previous=None, venue_histo
                     await filing(rec,{key})
             async def read_attachment(record):
                 data = await fetch(record["url"],2_500_000)
-                return await asyncio.to_thread(excerpt,data,record["title"]), hashlib.sha256(data).hexdigest(), bool(data)
+                body = await asyncio.to_thread(excerpt, data, record["title"])
+                fingerprint = hashlib.sha256(data).hexdigest()
+                if body:
+                    await asyncio.to_thread(threat_archive.store_attachment, data, fingerprint)
+                return body, fingerprint, bool(data)
             async def filing(record,keys):
                 key = (record["url"], record["title"])
                 if key not in attachments:
@@ -377,8 +387,7 @@ async def collect(manifest, username, wanted=None, *, previous=None, venue_histo
                 await asyncio.gather(*(lookup(s) for s in stocks if s["exchange"]=="NSE"
                                        and set(targets[s["listing"]])-{"C8"} and not issuer_ids[s["listing"]]))
             async def dated_bse():
-                missing = [s for s in stocks if set(targets[s["listing"]]) - {"C8"} and not issuer_ids[s["listing"]]]
-                if not missing:
+                if not any(set(categories) - {"C8"} for categories in targets.values()):
                     return
                 try:
                     master = await technical_instruments(client)
@@ -399,6 +408,19 @@ async def collect(manifest, username, wanted=None, *, previous=None, venue_histo
                 for group in issuers.values():
                     for key in group:
                         peers[key].update(group)
+                for isin, group in issuers.items():
+                    document = primary_filing(isin, cutoff)
+                    if document:
+                        add(document, group, ["C6"])
+                for scope, entry in await threat_archive.load(["isin:"+isin for isin in issuers], cutoff):
+                    add(entry["doc"], issuers[scope.removeprefix("isin:")], entry["categories"])
+                async def alternate(code, recipients):
+                    stock = by_key[sorted(recipients)[0]]
+                    raw = await fetch("https://www.screener.in/company/"+quote(stock["symbol"], safe="")+"/", 1_500_000, lane=index_gate)
+                    records = indexed_filings(raw, code, cutoff)
+                    for record in records:
+                        await filing(record, recipients)
+                index_gate = asyncio.Semaphore(3)
                 async def by_scrip(stock, bse_client):
                     codes = bse_codes.get(master.get(stock["listing"], {}).get("isin"), set())
                     code = next(iter(codes)) if len(codes)==1 else ""
@@ -416,7 +438,16 @@ async def collect(manifest, username, wanted=None, *, previous=None, venue_histo
                         await filing(rec, {key})
                 headers = {"Referer":"https://www.bseindia.com/", "Origin":"https://www.bseindia.com"}
                 async with httpx.AsyncClient(timeout=4, headers=headers) as bse_client:
-                    await asyncio.gather(*(by_scrip(stock, bse_client) for stock in missing))
+                    searches = []
+                    for isin, group in issuers.items():
+                        if not any(set(targets[k]) - {"C8"} for k in group):
+                            continue
+                        stock = by_key[sorted(group)[0]]
+                        searches.append(by_scrip(stock, bse_client))
+                        codes = bse_codes[isin]
+                        if len(codes) == 1 and re.fullmatch(r"\d{6}", str(next(iter(codes)))):
+                            searches.append(alternate(str(next(iter(codes))), group))
+                    await asyncio.gather(*searches)
             await asyncio.gather(recent(), dated(), dated_bse())
         async def bars():
             found = history
@@ -428,7 +459,7 @@ async def collect(manifest, username, wanted=None, *, previous=None, venue_histo
                 try:
                     rows = await asyncio.to_thread(extract_archive, await fetch(url,6_000_000,lane=price_gate),venue,date,close,keys,url)
                     for key, values in rows.items():
-                        if len(values)==1:
+                        if len(values)==1 and values[0].get("volume") is not None:
                             found[key][date] = values[0]
                 except (OSError, ValueError, zipfile.BadZipFile):
                     pass
@@ -490,7 +521,6 @@ async def collect(manifest, username, wanted=None, *, previous=None, venue_histo
             gap = gaps.setdefault(key, {"reason":"Collection deadline" if "Price history recovery deadline" in notices
                                         else "Missing completed venue sessions"})
             gap["missing_sessions"] = [d for d in days if d not in series]
-    await threat_archive.save(archived)
     # Keep the model request bounded even when the rolling archive is full.
     def recent(ids, limit):
         return sorted(set(ids), key=lambda sid:(docs[sid]["as_of"],sid), reverse=True)[:limit]
@@ -499,6 +529,11 @@ async def collect(manifest, username, wanted=None, *, previous=None, venue_histo
         issuer_ids[key] = recent(issuer_ids[key],3)
         retained.update(issuer_ids[key])
         if issuer_ids[key]:
+            isin = trace[key]["identity"]
+            if re.fullmatch(r"IN[A-Z0-9]{10}", isin):
+                for sid in issuer_ids[key]:
+                    cats = [cat for cat, ids in categories.items() if sid in ids]
+                    archived["isin:"+isin].append({"doc":docs[sid],"categories":cats})
             doc = docs[issuer_ids[key][0]]
             trace[key].update(lookup="Dated filing located",attachment="Available",excerpt="Extracted",
                               url=doc["url"],as_of=doc["as_of"],text=doc["excerpt"])
@@ -509,6 +544,7 @@ async def collect(manifest, username, wanted=None, *, previous=None, venue_histo
             issuer = [sid for sid in ids if docs[sid]["kind"]=="exchange_notice"]
             categories[cat] = list(dict.fromkeys(recent(issuer,1)+recent(ids,3)))[:3]
             retained.update(categories[cat])
+    await threat_archive.save(archived)
     docs = {sid:docs[sid] for sid in sorted(retained)}
     return {"threat_version":2,"exposure_required":True,"issuer_sources":dict(issuer_ids),
             "issuer_trace":trace,"history_gaps":gaps,"sources":docs,"matrix":matrix,"targets":targets,"notices":sorted(notices)}

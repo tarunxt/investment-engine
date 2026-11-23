@@ -67,7 +67,8 @@ def test_source_scope_and_historical_cutoff_are_enforced():
     assert feed_items(feed,datetime.fromisoformat(CUTOFF),("C3",))==[]
 
 
-def test_collects_dated_official_release_and_scopes_issuer_documents(monkeypatch):
+def test_collects_dated_official_release_and_scopes_issuer_documents(monkeypatch, tmp_path):
+    monkeypatch.setenv("THREATS_FILING_CACHE_DIR", str(tmp_path))
     import asyncio
     from app.domains.scorecards import threat_sources as src
 
@@ -87,6 +88,7 @@ def test_collects_dated_official_release_and_scopes_issuer_documents(monkeypatch
     monkeypatch.setattr(src,"technical_instruments",AsyncMock(return_value={k:{"isin":"INE000000001"} for k in ("BSE:ABC","NSE:ABC")}))
     stocks=[dict(listing=k,exchange=k.split(":")[0],symbol=k.split(":")[1],name="ABC Limited" if k.endswith(":ABC") else "DD Limited") for k in ("BSE:ABC","NSE:ABC","NSE:DD")]
     packet=asyncio.run(src.collect({"as_of":CUTOFF,"stocks":stocks,"owner_id":1},None,{s["listing"]:["C3","C6"] for s in stocks}))
+    assert (tmp_path / next(doc["document_hash"] for doc in packet["sources"].values() if doc["kind"]=="exchange_notice")).read_bytes() == payloads[filing]
     assert len(packet["sources"])==2
     assert all(v["C3"] for v in packet["matrix"].values())
     assert packet["matrix"]["BSE:ABC"]["C6"]==packet["matrix"]["NSE:ABC"]["C6"]
@@ -194,3 +196,47 @@ def test_saved_filing_facts_have_dated_provenance_and_no_future_comparison():
     assert "TotalIncome = 250 INR" in filing_facts(filing, cutoff)["excerpt"]
     assert filing_facts({**filing, "as_of":"2026-11-24T12:00:00+05:30"}, cutoff) is None
     assert filing_facts({**filing,"comparison_source":{"url":"other"}}, cutoff) is None
+
+
+def test_primary_issuer_filings_expire_and_match_exact_isin():
+    from app.domains.scorecards.threat_issuer import primary_filing
+    from datetime import datetime, timedelta
+    cutoff = datetime.fromisoformat("2026-11-23T19:10:00+00:00")
+    for isin in ("INE066F01020", "INE090A01021"):
+        doc = primary_filing(isin, cutoff)
+        assert len(doc["document_hash"]) == 64 and doc["excerpt"]
+        assert primary_filing(isin, cutoff + timedelta(days=95)) is None
+        assert primary_filing(isin, cutoff - timedelta(days=45)) is None
+    assert primary_filing("unverified", cutoff) is None
+
+
+def test_technical_reuse_checks_vintage_volume_basis_and_conflicts():
+    from datetime import datetime
+    from app.domains.scorecards.threat_recovery import technical_sessions
+    cutoff = datetime.fromisoformat("2026-11-23T19:10:00+00:00")
+    key = "NSE:HAL"
+    days = ["2026-11-20", "2026-11-23"]
+    row = dict(kind="daily_bar", as_of=days[-1]+"T15:30:00+05:30", received_at=cutoff.isoformat(),
+               basis="unverified-provider", url="https://api.upstox.com/history", volume=100, open=3, low=2, high=4, close=3)
+    source = dict(instrument="INE066F01020", actions=[], action_url="exchange-actions")
+    def check(*records):
+        return technical_sessions([(r,s,key) for r,s in records],key,days,cutoff)
+    accepted, rejected = check((row,source))
+    assert days[-1] in accepted and days[0] in rejected
+    for item, meta in [(dict(row, volume=None), source), (dict(row, received_at="2026-11-24T00:00:00Z"), source),
+                       (row,dict(source,actions=[{"date":days[-1]}]))]:
+        assert days[-1] in check((item,meta))[1]
+    assert check((row,source),(dict(row,close=4),source))[1][days[-1]] == "conflicting observations"
+
+
+def test_secondary_index_requires_exact_scrip_and_timestamp():
+    from datetime import datetime
+    from app.domains.scorecards.threat_issuer import indexed_filings
+    url = "https://www.bseindia.com/stockinfo/AnnPdfOpen.aspx?Pname=93bc4901-a0dd-4c78-894f-74203cfdc6ab.pdf"
+    body = f"""<div id="company-announcements-tab">
+        <a href="https://www.bseindia.com/stock-share-price/issuer/HAL/541154/corp-announcements/">All</a>
+        <a href="{url}">Audited results<time datetime="2026-11-12T13:22:11+05:30"></time></a></div>"""
+    cutoff = datetime.fromisoformat("2026-11-23T12:00:00Z")
+    assert indexed_filings(body, "541154", cutoff)[0]["url"] == url
+    assert not indexed_filings(body, "541155", cutoff)
+    assert not indexed_filings(body.replace("2026-11-12", "2026-11-24"), "541154", cutoff)
