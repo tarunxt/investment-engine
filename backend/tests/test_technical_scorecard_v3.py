@@ -340,8 +340,9 @@ async def test_pending_close_keeps_verified_zero_separate_from_current_score(aud
     async with audit_db.sessions() as db:
         ledger = {"score": 0, "coverage": "Complete", "session": "2026-11-20",
                   "sources": {"stock": {"instrument": "verified-id"}}}
-        packet = await storage.append(db, 7001, "packet", "dated-close-test",
-                                      {"research": {"technical": {KEY: ledger}}})
+        packet = await storage.append(db, 7001, "attempt", "dated-close-test",
+                                      {"card": "technical", "result": {"rows": [{"listing": KEY, "score": 0,
+                                       "coverage": "Complete", "technical_v3": ledger}]}})
         result = {"id": packet.id + 1, "rows": [{"listing": KEY, "score": None, "technical_v3": {
             **ledger, "session": "2026-11-23", "score": None, "reason": "Decision-session candle missing"}}]}
         displayed = (await closing_display(db, 7, result))["rows"][0]

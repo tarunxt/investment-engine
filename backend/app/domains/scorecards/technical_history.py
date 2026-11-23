@@ -1,6 +1,6 @@
 """Bootstrap a cold Technical cache from this owner's already frozen evidence."""
 from datetime import datetime, timedelta, timezone
-from sqlalchemy import literal, select, union_all
+from sqlalchemy import select
 from app.domains.runs.models import AutoRebalanceWorkflow as Workflow
 from . import storage
 from .technical_v3 import BENCHMARK
@@ -36,25 +36,30 @@ async def closing_display(db, owner, result):
             pending[row["listing"]] = ledger
     if not pending:
         return result
-    queries = []
-    for key, ledger in pending.items():
-        isin = ledger.get("sources", {}).get("stock", {}).get("instrument")
-        if not isin:
-            continue
-        source = storage.Stage.summary_json["research"]["technical"][key]
-        session = source["session"].as_string()
-        candidate = (select(literal(key).label("listing"), session.label("session"),
-                            source["score"].as_float().label("score"))
-                     .select_from(storage.Stage).join(Workflow)
+    # Load saved score rows once per output. Raw candle packets are much larger
+    # and querying their JSON separately for every symbol timed out on live runs.
+    wanted = {k: v for k, v in pending.items() if v.get("sources", {}).get("stock", {}).get("instrument")}
+    previous = {}
+    if wanted:
+        stage = storage.Stage
+        documents = (select(stage.summary_json["result"]["rows"]).select_from(stage).join(Workflow)
                      .where(Workflow.user_id == owner, Workflow.portfolio == "india",
-                            storage.of_kind("packet"), storage.Stage.id < result["id"],
-                            source["coverage"].as_string() == "Complete",
-                            source["sources"]["stock"]["instrument"].as_string() == isin,
-                            session < ledger["session"], source["score"].as_float().is_not(None))
-                     .order_by(session.desc(), storage.Stage.id.desc()).limit(1).subquery())
-        queries.append(select(candidate))
-    records = await db.execute(union_all(*queries)) if queries else []
-    previous = {key: {"session":session, "score":value} for key, session, value in records}
+                            storage.of_kind("attempt"), stage.id < result["id"],
+                            stage.summary_json["card"].as_string() == "technical")
+                     .order_by(stage.id.desc()).execution_options(yield_per=4))
+        async for rows in await db.stream_scalars(documents):
+            for prior in rows or ():
+                key = prior["listing"]
+                if key not in wanted or prior.get("coverage") != "Complete" or prior.get("score") is None:
+                    continue
+                old = prior.get("technical_v3") or {}
+                session = old.get("session")
+                if not session or session >= wanted[key]["session"]:
+                    continue
+                if old.get("sources", {}).get("stock", {}).get("instrument") != wanted[key]["sources"]["stock"]["instrument"]:
+                    continue
+                if key not in previous or session > previous[key]["session"]:
+                    previous[key] = {"session": session, "score": prior["score"]}
     return {**result, "rows":[{**r, "closing_pending":pending[r["listing"]]["session"],
                                "previous_close_score":previous.get(r["listing"])}
                               if r["listing"] in pending else r for r in result["rows"]]}
