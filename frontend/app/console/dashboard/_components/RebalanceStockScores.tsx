@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { CanonicalRecommendationTable, REBALANCE_HEADER_ORDER } from "@/components/InvestmentRecommendationTable";
 import type { CardResult, CardRow, RebalanceReadiness } from "@/lib/independentScorecards";
 
 const labels:Record<string,string> = {cruxx:"Core thesis","technical-short":"Short-term technicals",
@@ -40,6 +41,8 @@ export function RebalanceStockScores({result:original,onRecover}:{result:CardRes
     }}>{busy?"Checking sources…":"Refresh source evidence · no model charge"}</button>}
     {error && <p role="alert">{error}</p>}
     <p>{counts.assessed} assessed · {counts.complete} complete · {counts.provisional} provisional · {counts.unassessed} unassessed</p>
+    <RebalanceOutputTables result={result}/>
+    <details><summary className="cursor-pointer font-semibold">Score calculations by listing</summary>
     <table className="w-full text-left text-sm">
       <thead><tr>{["Listing","Score /100","Supported weight","Coverage","Action"].map(h=><th key={h} scope="col" className="p-2">{h}</th>)}</tr></thead>
       <tbody>{result.rows.map(row=><tr key={row.listing} className="border-t">
@@ -49,6 +52,7 @@ export function RebalanceStockScores({result:original,onRecover}:{result:CardRes
         <td>{String(row.available_weight??0)}/{totalWeight}</td><td>{row.coverage==="Partial"?"Provisional":row.coverage}</td>
         <td>{String(row.action??"—")}</td></tr>)}</tbody>
     </table>
+    </details>
     <details><summary className="cursor-pointer font-semibold">Field review by model job</summary>
       {audit.jobs.map(job=><details className="ml-3 mt-2" key={job.job_id}><summary className="cursor-pointer">
         Job #{job.job_id} · {job.model} · {job.listings} listings · {Object.entries(job.counts).map(([k,v])=>v+" "+k).join(" · ")||"All applicable fields present"}
@@ -64,4 +68,24 @@ export function RebalanceStockScores({result:original,onRecover}:{result:CardRes
       <p>{available ? `Score = ((${Number(weighted.toFixed(3))} ÷ ${available}) + 3) × 100 ÷ 6 = ${current?.score?.toFixed(2)}` : "No supported factor weight."}</p>
     </dialog>
   </section>;
+}
+
+export function RebalanceOutputTables({result}: {result: CardResult}) {
+  const tables = (result.model_tables ?? []).filter(table => table.rows.length);
+  const renderRows = (rows: Record<string, unknown>[], title?: string) => (
+    <CanonicalRecommendationTable canonicalTable={{
+      title, headers: REBALANCE_HEADER_ORDER,
+      rows: rows.map(row => Object.fromEntries(REBALANCE_HEADER_ORDER.map(header =>
+        [header, String(row[header] ?? "—")]))),
+    }} />
+  );
+  if (tables.length) return <>{tables.map(table =>
+    <section key={table.job_id}>{renderRows(table.rows, `Slot ${table.slot} · ${table.model} · Job #${table.job_id}`)}</section>
+  )}</>;
+  const rows = result.rows.flatMap(row => {
+    if (Array.isArray(row.raw_rows) && row.raw_rows.length) return row.raw_rows;
+    const [exchange, symbol] = row.listing.split(":");
+    return [{"Exchange Symbol": symbol ? exchange : "—", "Stock Symbol": symbol ?? exchange}];
+  });
+  return renderRows(rows);
 }
