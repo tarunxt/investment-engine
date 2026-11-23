@@ -223,6 +223,10 @@ class ExecutionHarness:
             MaxRetriesExceededError=MaxRetriesExceededError,
             logger=logging.getLogger('a11.synthetic'), WorkerLogHelper=MagicMock(),
             resolve_job_usage_identity=lambda *args: {},
+            # These isolated claim fixtures have no workflow ledger or cap.
+            bind_job_budget=lambda db, job: None, reset_job_budget=MagicMock(),
+            SpendLimitError=type("SpendLimitError", (RuntimeError,), {}),
+            get_provider_usage_context=lambda: None,
             configure_output_context=lambda *args: None,
             set_provider_usage_context=lambda **kwargs: None,
             reset_output_context=MagicMock(), reset_provider_usage_context=MagicMock(),

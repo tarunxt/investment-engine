@@ -1,6 +1,7 @@
 """Offline contracts for the format-only path; no provider or database calls."""
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -10,7 +11,7 @@ from app.domains.jobs.output_contracts import (
     normalize_output, parse_markdown, render_document, source_hash,
 )
 from app.domains.jobs.output_contracts.document import cell_text
-from app.domains.jobs.output_contracts.validation import number
+from app.domains.jobs.output_contracts.validation import aliases, header_key, number
 
 
 def swing_row(symbol="ABC", **overrides):
@@ -51,7 +52,17 @@ def test_contract_columns_match_frontend_exactly():
     root = Path(__file__).resolve().parents[2]
     swing = (root / "frontend/lib/swingTrade.ts").read_text()
     rebalance = (root / "frontend/lib/rebalance.ts").read_text()
-    for columns, source, size in [(SWING_COLUMNS, swing, 31), (REBALANCE_COLUMNS, rebalance, 29)]:
+    header = next(line for line in swing.splitlines() if line.startswith("| LLM Name + Model |"))
+    short_term = re.search(r"const shortTermColumn = selection \? '([^']+)' : '([^']+)'", swing)
+    assert short_term
+    selected_label, default_label = short_term.groups()
+    selected_header = header.replace("${shortTermColumn}", selected_label)
+    selected_keys = aliases(SWING_COLUMNS)
+    assert [selected_keys[header_key(cell)] for cell in selected_header.strip("|").split("|")] == [
+        column.key for column in SWING_COLUMNS
+    ]
+    swing_header = header.replace("${shortTermColumn}", default_label)
+    for columns, source, size in [(SWING_COLUMNS, swing_header, 31), (REBALANCE_COLUMNS, rebalance, 29)]:
         assert len(columns) == size
         assert "| " + " | ".join(column.label for column in columns) + " |" in source
         assert len({column.key for column in columns}) == size
