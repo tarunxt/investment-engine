@@ -300,3 +300,32 @@ def test_missing_listings_with_recovered_bars_can_be_repaired_without_filings():
     assert annotate({"rows": rows}, research)["rebalance_readiness"]["repairable"] == 0
     result = annotate({"rows": rows}, research, score_supported_factors=True)
     assert result["rebalance_readiness"]["repairable"] == 13
+
+
+@pytest.mark.anyio
+async def test_rebalance_close_fallback_matches_instrument_and_frozen_session(monkeypatch):
+    from unittest.mock import AsyncMock
+    import httpx
+    from app.domains.scorecards import rebalance_close as closing
+    day = "2026-08-14"
+    close = day + "T15:30:00+05:30"
+    key = "NSE:EXAMPLE"
+    instrument = "NSE_EQ|INE123456789"
+    manifest = {"as_of": AS_OF, "owner_id": 7, "stocks": [{"listing": key, "exchange":"NSE"}]}
+    history = {"calendars":{"NSE":{day:close}}, "listings":{key:[]}}
+    master = {key:{"isin": "INE123456789"}}
+    monkeypatch.setattr(closing, "download", AsyncMock(side_effect=httpx.ReadTimeout("unavailable")))
+    monkeypatch.setattr(closing, "configured_for", lambda *args: True)
+    monkeypatch.setattr(closing.QuoteGuard, "admit", AsyncMock(return_value=True))
+    monkeypatch.setenv("UPSTOX_ANALYTICS_TOKEN", "fixture")
+    candle = {"ts": int(datetime.fromisoformat(close).timestamp()*1000), "open":10, "high":12,
+              "low":9, "close":11, "volume":310}
+    later = dict(candle, ts=candle["ts"]+86400000, close=12)
+    payload = {"data":{"other":{"instrument_token":"BSE_EQ|INE123456789","live_ohlc":candle},
+                       "stock":{"instrument_token":instrument,"live_ohlc":later,"prev_ohlc":candle}}}
+    async with httpx.AsyncClient(transport=httpx.MockTransport(lambda req:httpx.Response(200,json=payload))) as client:
+        for refresh in [False, True, True]:
+            await closing.recover_closes(client, object(), manifest, "fixture", history, master, refresh=refresh)
+            assert len(history["listings"][key]) == int(refresh)
+    assert history["listings"][key][0]["as_of"] == close
+    assert history["listings"][key][0]["close"] == 11
