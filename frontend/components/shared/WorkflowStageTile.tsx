@@ -372,7 +372,7 @@ export function StageStatusIcon({ info }: { info: StageInfo }) {
   const pair=info.published?.pair_counts;
   if (pair && info.published?.run_id==null && outcome!=="queued" && pair.judged<pair.expected) {
     const phase=info.published?.recovery?.phase;
-    return <span className="ml-1 inline-block align-middle text-xs font-medium">{phase==="needs attention" || phase==="evidence recovery exhausted" ? "Needs attention" : pair.ready<pair.listings ? "Waiting for market evidence" : "Awaiting judgments"}</span>;
+    return <span className="ml-1 inline-block align-middle text-xs font-medium">{phase==="judging blocked" ? "Judging blocked" : phase==="needs attention" || phase==="evidence recovery exhausted" ? "Needs attention" : pair.eligible>pair.judged ? "Awaiting judgments" : pair.ready<pair.listings ? "Waiting for market evidence" : "Awaiting judgments"}</span>;
   }
   const symbols = {
     completed: "✅", failed: "❌", partial: "⚠️✅", stale: "⚠️", unconfirmed: "⚠️", unassessed: "Unassessed", queued: "⏳",
@@ -491,8 +491,9 @@ export function getLlmStageTileRows(info: StageInfo, now: number, stage?: Workfl
       ).join(" · ") || "Unavailable for this output",detail:"Model times are summed across calls and may overlap across jobs."}] : []),
     ...(!evidenceOnly ? [{ label: "Duration", value: formatDuration(info.startedAt, info.endedAt, now) ?? "n/a" }] : []),
     { label: "Cost incurred", value: evidenceOnly ? "₹0.00 · evidence only" : cost === "Usage unavailable" && getStageOutcome(info) === "running" ? "Task running" : cost },
+    ...(pairs && info.published?.recovery?.error ? [{label:"Judgment blocker",value:info.published.recovery.error}] : []),
     ...(pairs && pairs.ready<pairs.listings && !getTileErrorDetail(info.error)
-      ? [{label:"Coverage issue",value:"Missing market evidence",detail:"Open Scorecard controls to repair missing evidence."}]
+      ? [{label:"Coverage issue",value:`${pairs.eligible-pairs.judged} ready · ${pairs.one_missing+pairs.both_missing} blocked · ${pairs.judged} judged`,detail:info.published?.recovery?.error ?? "Open Scorecard controls for the missing listings."}]
       : evidenceOnly && pairs ? [{label:"Assessment",value:pairs.judged<pairs.expected ? "Awaiting judgments" : pairs.expected ? "All pairs judged" : "No pairs assigned"}]
       : evidenceOnly && info.threatCounts ? [{label:"Assessment",value:info.threatCounts.scored ? "Saved risk assessments" : "No consolidated scores yet · see category evidence"}]
       : evidenceOnly && info.published?.counts ? [{label:"Assessment",value:info.published.covered ? "Saved factor scores" : "No verified factor scores recorded"}] : stageErrorRows(info)),

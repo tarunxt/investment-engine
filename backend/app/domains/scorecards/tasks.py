@@ -80,7 +80,7 @@ def warm_rebalance_sources(owner, revision_id):
     return asyncio.run(run())
 
 
-async def _refresh_threat_archive():
+async def _refresh_threat_archive(*, filings=False):
     """Collect public releases for the current Indian listing universe between runs."""
     from datetime import datetime, timezone
     from app.infrastructure.database.session import AsyncSessionLocal, async_engine
@@ -94,6 +94,9 @@ async def _refresh_threat_archive():
                       .distinct(Workflow.user_id).order_by(Workflow.user_id,stage.id.desc()).subquery())
             manifests = (await db.scalars(select(stage.summary_json["manifest"]).join(latest, stage.id==latest.c.id))).all()
         stocks = {s["listing"]:s for manifest in manifests for s in manifest.get("stocks", [])}
+        if stocks and filings:
+            from .filing_archive import refresh
+            return await refresh(list(stocks.values()))
         if stocks:
             packet = await threat_sources.collect({"stocks":list(stocks.values()), "as_of":datetime.now(timezone.utc).isoformat()},
                                                   None,{k:list(threat_sources.CATEGORIES[:-1]) for k in stocks})
@@ -106,3 +109,8 @@ async def _refresh_threat_archive():
 @celery.task(soft_time_limit=90,time_limit=110)
 def refresh_threat_archive():
     return asyncio.run(_refresh_threat_archive())
+
+
+@celery.task(soft_time_limit=240,time_limit=270)
+def refresh_rebalance_filing_archive():
+    return asyncio.run(_refresh_threat_archive(filings=True))
