@@ -34,7 +34,7 @@ def missing_items(rows):
     return gaps
 
 
-async def register(db, attempt, owner, sequence, budget=None):
+async def register(db, attempt, owner, sequence, budget=None, *, judge_ready=False, admission_error=None):
     """Called under the revision lock, in the same transaction as the first attempt."""
     identity = f"pairwise/work/{attempt.id}"
     revision = attempt.data["revision_id"]
@@ -48,7 +48,7 @@ async def register(db, attempt, owner, sequence, budget=None):
     now = int(time.time())
     record = await storage.append(db, attempt.row.workflow_id, "pair_work", identity, {
         "owner": owner, "sequence": sequence, "root": attempt.id, "current": attempt.id,
-        "budget": budget, "target": digest(attempt.data["settings"]["targets"]),
+        "budget": budget, "judge_ready": judge_ready, "target": digest(attempt.data["settings"]["targets"]),
         "mode":attempt.data["settings"].get("pair_mode","full"), "spent_estimate": 0, "model_retries": 0,
         "gaps": {}, "next_at": now, "phase": "queued", "started": now,
     }, revision_id=revision)
@@ -65,6 +65,8 @@ async def register(db, attempt, owner, sequence, budget=None):
         if state["gaps"]:
             state["phase"] = "waiting for market evidence"
         record.row.summary_json = state
+    if admission_error:
+        record.row.summary_json = {**record.data, "phase":"judging blocked", "admission_error":admission_error}
     record.row.status = "queued"
     return record
 
@@ -163,15 +165,16 @@ async def step(db, work, now, work_id, token):
     refresh_gaps(work,out.get("evidence_readiness",[]),now)
     wanted = pending(work,now)
     eligible_now = out["pair_counts"]["eligible"] > out["pair_counts"]["judged"]
-    if wanted and not (work["budget"] and eligible_now):
+    can_judge = not work.get("admission_error") and bool(work["budget"] or work.get("judge_ready"))
+    if wanted and not (can_judge and eligible_now):
         out = await pair_evidence.repair(db,current,owner,user.username,requested=set(wanted))
         work["current"] = out["id"]
         refresh_gaps(work,out["evidence_readiness"],now,wanted,out.get("retry_after",0))
     counts = out["pair_counts"]
-    if work["budget"] and counts["eligible"] > counts["judged"]:
+    if can_judge and counts["eligible"] > counts["judged"]:
         # Reserve the larger of estimated and recorded cost for each finished wave.
-        remaining = work["budget"] - work["spent_estimate"]
-        if remaining <= 0:
+        remaining = work["budget"] - work["spent_estimate"] if work["budget"] is not None else None
+        if remaining is not None and remaining <= 0:
             raise HTTPException(422,"Pairwise planning budget exhausted")
         if current.row.run_id and work["current"] == current.id:
             if work["model_retries"] >= 2:
@@ -191,9 +194,12 @@ async def step(db, work, now, work_id, token):
     if work["gaps"]:
         remaining = [v["next_retry"] for v in work["gaps"].values() if v["attempts"] < MAX_PASSES]
         if remaining:
-            work["phase"] = "waiting for market evidence"
+            work["phase"] = "judging blocked" if work.get("admission_error") else "waiting for market evidence"
             return "queued", max(15, min(remaining)-now)
         work["phase"] = "evidence recovery exhausted"
+        return "failed", 0
+    if work.get("admission_error"):
+        work["phase"] = "judging blocked"
         return "failed", 0
     work["phase"] = "awaiting judgments" if counts["judged"]<counts["expected"] else "complete"
     return "completed", 0
@@ -220,6 +226,6 @@ async def progress(db, revision, workflow_id):
         return None
     w = row.summary_json
     return {"output":w["current"],"root":w["root"],"phase":w["phase"],"next_at":w["next_at"],
-            "error":w.get("error"),"listings":{
+            "error":w.get("error") or w.get("admission_error"),"listings":{
                 k:{**v,"next_retry":v["next_retry"] if v["attempts"]<MAX_PASSES and row.status!="failed" else None}
                 for k,v in w["gaps"].items()}}

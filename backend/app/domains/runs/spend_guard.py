@@ -168,6 +168,22 @@ def _quote(ceilings, provider, model, phase):
     return amount, reference
 
 
+async def request_capacity(db, workflow, provider, model):
+    """Preview first-call admission. Transport reservations still enforce the shared limit."""
+    receipt = (await history_budgets(db, [workflow])).get(workflow.id)
+    if not receipt:
+        return None, None
+    from app.core.config import settings
+    try:
+        amount, _ = _quote(settings.zerodha_run_charge_ceilings, provider, model, "request")
+    except SpendLimitError as exc:
+        return 0, str(exc)
+    available = round(receipt["headroom_inr"] * 100)
+    if available < amount:
+        return 0, f"Run has INR {available/100:.2f} available; one request requires INR {amount/100:.2f}."
+    return available // amount, None
+
+
 def reserve_transport(provider, model, phase, attempt_id, *, session_factory=None):
     context = _active.get()
     if context is None:

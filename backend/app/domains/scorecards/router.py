@@ -337,7 +337,7 @@ async def start_scorecard(portfolio,revision_id,card,body,db,user,*,managed=Fals
     if pair_v3 and not managed and not body.evidence_only:
         active = await db.scalar(select(Stage.id).where(storage.of_kind("pair_work",rev.id),
             Stage.workflow_id==w.id,Stage.status.in_(("queued","processing")),
-            Stage.summary_json["budget"].as_float()>0,Stage.summary_json["mode"].as_string()==body.pair_mode,
+            ((Stage.summary_json["budget"].as_float()>0) | (Stage.summary_json["judge_ready"].as_boolean()==True)),Stage.summary_json["mode"].as_string()==body.pair_mode,
             Stage.summary_json["target"].as_string()==digest(config["targets"])).limit(1))
         if active:
             raise HTTPException(409,"A budgeted Pairwise schedule is already active for this model and revision")
@@ -459,8 +459,16 @@ async def start_scorecard(portfolio,revision_id,card,body,db,user,*,managed=Fals
         previous=research["packets"] if parent else None
         selected,carried=pair_plan.plan(keys,research,body.pair_mode,parent.result_json if parent else None,previous)
         complete_inputs=all(pair_plan.ready(research["packets"].get(k,{})) for k in keys)
-        dispatch = not body.evidence_only and (body.estimated_budget_inr is not None or complete_inputs or parent)
-        assignments=list(pair_plan.assigned_batches(selected)) if dispatch else []
+        assignments = list(pair_plan.assigned_batches(selected)) if not body.evidence_only else []
+        admission_error = None
+        if assignments:
+            from app.domains.runs.spend_guard import request_capacity
+            target = body.targets[0]
+            capacity, admission_error = await request_capacity(db, w, target.provider, target.model)
+            if capacity is not None:
+                assignments = assignments[:capacity]
+            if admission_error and managed:
+                raise HTTPException(422, admission_error)
         config["pair_protocol"]=3
         if parent and not selected:
             raise HTTPException(422,"No new eligible pairs. Repair the remaining evidence first.")
@@ -494,8 +502,9 @@ async def start_scorecard(portfolio,revision_id,card,body,db,user,*,managed=Fals
                                     parent.result_json if parent else None,previous)
         pair_evidence.finish(data,attempt,research,rev.id)
         attempt.row.summary_json={**attempt.data,"data_recovery":True}
-        if not managed and len(keys)>1 and not complete_inputs:
-            await pair_work.register(db,attempt,owner,w.sequence,None if body.evidence_only else body.estimated_budget_inr)
+        if not managed and len(keys)>1 and (not complete_inputs or admission_error):
+            await pair_work.register(db,attempt,owner,w.sequence,None if body.evidence_only else body.estimated_budget_inr,
+                                     judge_ready=not body.evidence_only, admission_error=admission_error)
         await db.commit()
         return {"id":attempt.id,"run_id":None}
     if india_threats and not assignments:
@@ -542,8 +551,8 @@ async def start_scorecard(portfolio,revision_id,card,body,db,user,*,managed=Fals
     if pair_v3 and body.estimated_budget_inr is not None:
         estimate = await pair_evidence.check_budget(prompts,body.targets[0],body.estimated_budget_inr)
         attempt.row.summary_json = {**attempt.data,"settings":{**config,"wave_estimate":estimate}}
-        if not managed:
-            await pair_work.register(db,attempt,owner,w.sequence,body.estimated_budget_inr)
+    if pair_v3 and not managed and (not complete_inputs or body.estimated_budget_inr is not None or capacity is not None):
+        await pair_work.register(db,attempt,owner,w.sequence,body.estimated_budget_inr,judge_ready=True)
     if technical_v3:
         from .technical_output import saved_rows
         initial=saved_rows(rev.manifest,research,research.get("carried_comments",{}),[],[])
@@ -654,6 +663,9 @@ async def attempt_result(portfolio:Portfolio,attempt_id:int,db:AsyncSession=Depe
         if jobs and all(j.created_at and j.updated_at for j,*_ in jobs):
             result["attempt_elapsed_seconds"]=max(0,(max(j.updated_at for j,*_ in jobs)-min(j.created_at for j,*_ in jobs)).total_seconds())
         out=pair_evidence.finish(result,a,packet,rev.id)
+        if out["pair_counts"]["judged"] and parent:
+            from .final_recovery import refresh_pair_final
+            await refresh_pair_final(db, user, a, rev)
         await db.commit()
         return out
     if a.data["settings"].get("repair_fields"):
