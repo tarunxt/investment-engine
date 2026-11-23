@@ -75,6 +75,23 @@ try {
  await page.goto(origin+'?board=1');
  const board=page.getByLabel('Rebalance workflow');
  await board.waitFor();
+ const expandTiles=board.getByRole('button',{name:/^Expand .+ details$/});
+ const tileNames=await expandTiles.evaluateAll(buttons=>buttons.map(button=>button.getAttribute('aria-label')));
+ assert.equal(tileNames.length,8);
+ for(const name of tileNames){
+   const toggle=board.getByRole('button',{name,exact:true});
+   const region=page.locator('[id="'+await toggle.getAttribute('aria-controls')+'"]');
+   const summary=await region.innerText();
+   assert.equal(await toggle.getAttribute('aria-expanded'),'false');
+   assert.match(await toggle.evaluate(el=>el.nextElementSibling.getAttribute('aria-label')),/ actions$/);
+   await toggle.press('Enter');
+   const minimise=board.getByRole('button',{name:name.replace('Expand','Minimise'),exact:true});
+   assert.equal(await minimise.getAttribute('aria-expanded'),'true');
+   assert.notEqual(await region.innerText(),summary);
+   assert.equal(await expandTiles.count(),7);
+   await minimise.press('Space');
+   assert.equal(await region.innerText(),summary);
+ }
  const connectButton=page.getByRole('button',{name:'Connect Broker',exact:true});
  await connectButton.waitFor();
  assert.equal(await page.getByRole('button',{name:'Run',exact:true}).count(),0);
