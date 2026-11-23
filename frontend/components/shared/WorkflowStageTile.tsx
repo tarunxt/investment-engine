@@ -469,7 +469,7 @@ export function getLlmStageTileRows(info: StageInfo, now: number, stage?: Workfl
     ...(pairs && pairs.ready<pairs.listings && !getTileErrorDetail(info.error)
       ? [{label:"Coverage issue",value:"Missing market evidence",detail:"Open Scorecard controls to repair missing evidence."}]
       : evidenceOnly && pairs ? [{label:"Assessment",value:pairs.judged<pairs.expected ? "Awaiting judgments" : pairs.expected ? "All pairs judged" : "No pairs assigned"}]
-      : evidenceOnly && info.threatCounts ? [{label:"Assessment",value:info.threatCounts.scored ? "Saved risk assessments" : "Awaiting evidence for three risk categories"}]
+      : evidenceOnly && info.threatCounts ? [{label:"Assessment",value:info.threatCounts.scored ? "Saved risk assessments" : "No consolidated scores yet · see category evidence"}]
       : evidenceOnly && info.published?.counts ? [{label:"Assessment",value:info.published.covered ? "Saved factor scores" : "No verified factor scores recorded"}] : stageErrorRows(info)),
   ];
 }

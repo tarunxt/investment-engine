@@ -227,7 +227,7 @@ test('Pairwise workflow 247 distinguishes blocked inputs and eligible unjudged p
 test('an evidence-only Threats attempt explains its own threshold and a saved final reports numeric coverage',()=>{
   const published={output_id:533,run_id:null,covered:0,expected:34};
   const rows=ui.getLlmStageTileRows({state:'idle',published,threatCounts:{expected:34,returned:0,scored:0,complete:0,status:'unassessed'}},0);
-  assert.equal(rows.find(r=>r.label==='Assessment').value,'Awaiting evidence for three risk categories');
+  assert.equal(rows.find(r=>r.label==='Assessment').value,'No consolidated scores yet · see category evidence');
   const final=ui.getActionablesStageTileRows({state:'completed',finalSummary:{assessed:34,complete:0,scored:32,blocked:34}});
   assert.equal(final.find(r=>r.label==='Listings with a final score').value,'32/34');
   assert.equal(final.find(r=>r.label==='Fully assessed').value,'0/34');

@@ -420,7 +420,9 @@ async def start_scorecard(portfolio,revision_id,card,body,db,user,*,managed=Fals
         research = packet.data["research"]
         config["packet_id"] = packet.id
         ready = threat_coverage.plan(research)
-        assignments = [(sorted(ready),[])] if ready else []
+        config["threat_targets"] = ready
+        research = {**research, "targets": ready}
+        assignments = [(sorted(ready),[])] if ready and not body.evidence_only else []
     elif shared and research.get("version") in (2,3,4):
         packet = (packet if rebalance_v2 and packet else await owned(db,owner,portfolio,"packet",config["packet_id"]) if config.get("packet_id") else
                   await storage.by_key(db,"packet",packet_key,revision_id=rev.id))
@@ -481,7 +483,7 @@ async def start_scorecard(portfolio,revision_id,card,body,db,user,*,managed=Fals
         from .threat_output import project as empty_threats
         out = {**threat_coverage.annotate(empty_threats(rev.manifest,[]),research),"id":attempt.id,"revision_id":rev.id,"card":card,
                "status":"unassessed","scored":0,"jobs":0,"completed":0,"source_hashes":{},
-               "research_notices":[*research["notices"],"No listing has three evidence-backed categories. Collect missing sources before scoring."]}
+               "research_notices":[*research["notices"],"Evidence-only request. No model job started." if body.evidence_only else "No unverified category has usable evidence. Collect missing sources before scoring."]}
         attempt.row.summary_json = {**attempt.data,"result":out}
         attempt.row.status = "unassessed"
         await db.commit()
@@ -559,6 +561,8 @@ async def observations(db, attempt, uid, portfolio):
         if settings.get("packet_id"):
             packet = await owned(db,uid,portfolio,"packet",settings["packet_id"])
             research = packet.data["research"]
+        if "threat_targets" in settings:
+            research = {**research, "targets": settings["threat_targets"]}
         evidence.extend((job,settings.get("vote_slot", i%count),*assignments[i//count],
                          {**research,"order_check":True} if research and i//count>=settings.get("primary_batches",len(assignments)) else research) for i,job in enumerate(jobs))
     return evidence
@@ -829,7 +833,8 @@ async def prompt_preview(portfolio:Portfolio,revision_id:int,card:Card,db:AsyncS
     if portfolio=="india" and card=="threats" and research and research.get("exposure_required"):
         ready = threat_coverage.plan(research)
         if not ready:
-            return {"prompt":"Awaiting sources for at least three categories on a listing."}
+            return {"prompt":"Awaiting usable sources for at least one risk category."}
+        research = {**research, "targets": ready}
         first = (sorted(ready), [])
     if research is None and portfolio=="india" and card=="technical":
         research={"version":3,"technical":{},"listings":{}}
