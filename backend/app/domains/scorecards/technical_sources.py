@@ -494,8 +494,9 @@ async def collect(manifest, username, previous=None, requested=None, *, sessions
                       tick=sources[k]["tick"],sources={"stock":sources[k],"benchmark":sources[BENCHMARK]},
                       issues=per_key[k],benchmark_sessions=list(calendars["NSE"]))
         row["provider_status"]=provider_status.get(k, {})
-        if row["score"] is None and row["provider_status"]:
-            row["reason"]+=" · "+row["provider_status"]["reason"]
+        provider_reason = row["provider_status"].get("reason")
+        if row["score"] is None and provider_reason and provider_reason not in per_key[k]:
+            row["reason"] = " · ".join(filter(None, (row["reason"], provider_reason)))
         row["observed_at"]=receipt.isoformat()
         # A later history download without a pre-cutoff vintage remains a reconstruction.
         stock_bars=records[k]

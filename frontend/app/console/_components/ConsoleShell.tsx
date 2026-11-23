@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { SidebarPolicyContext, useSidebarPolicy } from '@/hooks/useSidebarPolicy';
@@ -56,6 +56,42 @@ export function ConsoleShell({
     const searchParamString = searchParams.toString();
     const hasRedirectToParam = searchParams.has('redirectTo');
     const [sidebarOpen, setSidebarOpen] = useState(false);
+    const navigationTrigger = useRef<HTMLButtonElement>(null);
+    const navigationClose = useRef<HTMLButtonElement>(null);
+    function dismissNavigation() {
+        setSidebarOpen(false);
+        requestAnimationFrame(() => navigationTrigger.current?.focus());
+    }
+    function handleDrawerKey(event: KeyboardEvent<HTMLDivElement>) {
+        const drawer = event.currentTarget;
+        if (!sidebarOpen || event.defaultPrevented || !drawer.contains(event.target as Node)) return;
+        if (drawer.querySelector('[role="dialog"], [role="menu"]')) return;
+        if (event.key === 'Escape' && !drawer.querySelector('details[open]')) {
+            dismissNavigation();
+        }
+        if (event.key !== 'Tab') return;
+        const controls = Array.from(drawer.querySelectorAll<HTMLElement>('a[href], button, input, select, textarea, summary, [tabindex]'))
+            .filter(el => el.tabIndex >= 0 && !el.matches(':disabled, [inert], [inert] *') && el.getClientRects().length > 0);
+        const first = controls[0], last = controls.at(-1);
+        if (event.shiftKey && event.target === first) {
+            event.preventDefault();
+            last?.focus();
+        } else if (!event.shiftKey && event.target === last) {
+            event.preventDefault();
+            first?.focus();
+        }
+    }
+    useEffect(() => {
+        if (!sidebarOpen) return;
+        navigationClose.current?.focus();
+        const desktop = window.matchMedia('(min-width: 64rem)');
+        const resetMobileDrawer = () => {
+            if (desktop.matches) setSidebarOpen(false);
+        };
+        desktop.addEventListener('change', resetMobileDrawer);
+        return () => desktop.removeEventListener('change', resetMobileDrawer);
+    }, [sidebarOpen]);
+
     useEffect(() => {
         performance.mark('console-shell-rendered');
     }, []);
@@ -80,13 +116,18 @@ export function ConsoleShell({
             {sidebarOpen && (
                 <div
                     className="fixed inset-0 z-20 bg-black bg-opacity-50 transition-opacity lg:hidden"
-                    onClick={() => setSidebarOpen(false)}
+                    onClick={dismissNavigation}
                 />
             )}
 
             {/* Sidebar */}
             <div
-                className={`fixed inset-y-0 left-0 z-30 w-[min(92vw,var(--console-sidebar-width))] border-r border-border bg-sidebar text-sidebar-foreground shadow-lg transform transition-transform duration-300 ease-in-out lg:w-[var(--console-sidebar-width)] lg:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'
+                id="console-navigation-drawer"
+                role={sidebarOpen ? 'dialog' : undefined}
+                aria-modal={sidebarOpen || undefined}
+                aria-label={sidebarOpen ? 'Navigation' : undefined}
+                onKeyDown={handleDrawerKey}
+                className={`fixed inset-y-0 left-0 z-30 w-[min(92vw,var(--console-sidebar-width))] border-r border-border bg-sidebar text-sidebar-foreground shadow-lg transform transition-transform duration-300 ease-in-out lg:w-[var(--console-sidebar-width)] lg:translate-x-0 ${sidebarOpen ? 'translate-x-0' : 'hidden lg:block'
                     }`}
             >
                 <div className="flex flex-col h-full">
@@ -102,11 +143,13 @@ export function ConsoleShell({
                                         Investment Engine
                                     </div>
                             </div>
-                            {dashboardVisible && <Link href={URLs.routes.console.dashboard()} prefetch={false} aria-label="Dashboard" className="absolute inset-0 rounded-md" />}
+                            {dashboardVisible && <Link href={URLs.routes.console.dashboard()} prefetch={false} aria-label="Dashboard" onClick={sidebarOpen ? dismissNavigation : undefined} className="absolute inset-0 rounded-md" />}
                         </div>
                         <button
                             type="button"
-                            onClick={() => setSidebarOpen(false)}
+                            ref={navigationClose}
+                            aria-label="Close navigation"
+                            onClick={dismissNavigation}
                             className="absolute right-4 rounded-md p-2 text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground lg:hidden"
                         >
                             <HiOutlineX />
@@ -122,7 +165,7 @@ export function ConsoleShell({
                             user={user}
                             userId={user?.id}
                             onLogout={logout}
-                            onNavigate={() => setSidebarOpen(false)}
+                            onNavigate={() => { if (sidebarOpen) dismissNavigation(); }}
                         /> : <div className="space-y-3 px-5 text-sm text-muted-foreground" role="status">
                             {policy === null ? <><p>Couldn’t load navigation.</p><button onClick={retry} className="underline">Retry</button></> : <p>Loading navigation…</p>}
                             {user && <button onClick={() => void logout()} className="block underline">Sign out</button>}
@@ -133,9 +176,12 @@ export function ConsoleShell({
             </div>
 
             {/* Main content area */}
-            <div className="lg:pl-[var(--console-sidebar-width)]">
+            <div className="lg:pl-[var(--console-sidebar-width)]" inert={sidebarOpen}>
                 <button
                     type="button"
+                    ref={navigationTrigger}
+                    aria-controls="console-navigation-drawer"
+                    aria-expanded={sidebarOpen}
                     onClick={() => setSidebarOpen(true)}
                     className="fixed left-4 top-4 z-10 rounded-full border border-border bg-background p-2 text-muted-foreground shadow-sm hover:bg-muted hover:text-foreground lg:hidden"
                     aria-label="Open navigation"

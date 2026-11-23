@@ -68,7 +68,7 @@ def test_empty_horizons_remain_unknown_and_costs_reduce_portfolio_returns():
 
 from test_auto_rebalance_audit_durability import audit_db, anyio_backend
 from app.domains.scorecards import storage
-from app.domains.scorecards.coverage import available
+from app.domains.scorecards.coverage import available, technical_catalogue
 import pytest
 
 
@@ -87,6 +87,20 @@ async def test_saved_output_and_consumed_output_have_separate_identities(audit_d
         assert saved["cards"]["technical"]=={"covered":2,"expected":2,"output_id":complete.id,
                  "used_output_id":empty.id,"run_id":None,"final_id":final.id}
         assert (await available(db,8,"india",42))["cards"]=={}
+        catalogue = await technical_catalogue(db, 7, "india", [42])
+        assert catalogue[42]["output_id"] == complete.id
+        assert (catalogue[42]["scored"], catalogue[42]["expected"]) == (2, 2)
+        assert await technical_catalogue(db, 8, "india", [42]) == {}
+        assert await technical_catalogue(db, 7, "indmoney_us", [42]) == {}
+        counts = {"expected": 34, "complete": 30, "provisional": 2, "insufficient": 2}
+        partial = await storage.append(db, 7001, "attempt", "partial-v3", {
+            "card": "technical", "result": {"rows": [{"score": 80}], "scoring_version": 3, "technical_counts": counts}
+        }, revision_id=rev.id)
+        catalogue = await technical_catalogue(db, 7, "india", [42])
+        assert catalogue[42] == dict(output_id=partial.id, run_id=None, expected=34, scored=32, complete=30, provisional=2)
+        await storage.append(db, 7001, "revision", "new inputs", {"manifest": {}})
+        assert await technical_catalogue(db, 7, "india", [42]) == {}
+
 
 
 def test_single_job_assignments_cover_full_universe_and_only_unresolved_pairs():

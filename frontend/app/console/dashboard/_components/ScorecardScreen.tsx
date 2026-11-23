@@ -173,13 +173,28 @@ function Feedback({ query }: { query: { loading: boolean; error?: string; retry:
   return null;
 }
 
+function TechnicalCoverage({ item, market }: { item: AutoRebalanceHistoryItemResponse; market: ScorecardMarket }) {
+  const output = item.technical_output;
+  if (!output) return <p className="mt-1 text-sm">Score coverage unavailable</p>;
+  return (
+    <div className="mt-1 text-sm">
+      <p>{output.scored === null ? "Score coverage unavailable" :
+        `${output.scored < output.expected ? "Partial score coverage" : "Score coverage"} · ${output.scored}/${output.expected} stocks scored`}</p>
+      {Boolean(output.provisional) && <p>{output.provisional} provisional</p>}
+      <Link className="font-semibold underline" href={scorecardHref(market, "technical", item.sequence, "output", output.run_id)}>
+        Saved output #{output.output_id}
+      </Link>
+    </div>
+  );
+}
+
 function Catalogue({ market, card, client }: Pick<Base, "market" | "client"> & { card?: CardKey }) {
   const { rate } = useRebalanceCostQuote();
   const [page, setPage] = useState(0);
   const size = 25;
   const read = useCallback(
-    () => client.getAutoRebalanceHistory(brokerKey(market), { limit: size, offset: page * size }),
-    [client, market, page],
+    () => client.getAutoRebalanceHistory(brokerKey(market), { limit: size, offset: page * size, technicalCoverage: !card || card === "technical" }),
+    [client, market, page, card],
   );
   const result = useRead(read);
   const items = result.data?.items ?? [];
@@ -193,27 +208,25 @@ function Catalogue({ market, card, client }: Pick<Base, "market" | "client"> & {
       {!card && (
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           {cards.map((c) => {
-            const stage = items
-              .find((i) => i.stages.some((s) => s.stage === c))
-              ?.stages.find((s) => s.stage === c);
+            const item = items.find((i) => i.stages.some((s) => s.stage === c));
+            const stage = item?.stages.find((s) => s.stage === c);
             const Icon = icons[c];
             return (
-              <Link
-                key={c}
-                href={scorecardHref(market, c)}
-                className={"rounded-2xl border p-5 shadow-sm hover:shadow-md " + tones[c]}
-              >
-                <Icon className="mb-4 size-6" />
-                <h2 className="flex items-center justify-between text-lg font-semibold">
-                  {title(c)}
-                  <ArrowUpRight className="size-4" />
-                </h2>
-                {stage && (
-                  <p className="mt-2 text-sm">
-                    {formatCompactStageTime(stage.started_at)} · {stage.status}
-                  </p>
-                )}
-              </Link>
+              <div key={c} className={"rounded-2xl border p-5 shadow-sm hover:shadow-md " + tones[c]}>
+                <Link href={scorecardHref(market, c)} className="block">
+                  <Icon className="mb-4 size-6" />
+                  <h2 className="flex items-center justify-between text-lg font-semibold">
+                    {title(c)}
+                    <ArrowUpRight className="size-4" />
+                  </h2>
+                  {stage && (
+                    <p className="mt-2 text-sm">
+                      {formatCompactStageTime(stage.started_at)} · {c === "technical" && "Execution "}{stage.status}
+                    </p>
+                  )}
+                </Link>
+                {c === "technical" && item && <TechnicalCoverage item={item} market={market} />}
+              </div>
             );
           })}
         </div>
@@ -249,7 +262,8 @@ function Catalogue({ market, card, client }: Pick<Base, "market" | "client"> & {
                           cells: [
                             link(c, item),
                             cardNames[c],
-                            <Status key="status" value={stage.status} />,
+                            c === "technical" ? <div key="status">Execution <Status value={stage.status} />
+                              <TechnicalCoverage item={item} market={market} /></div> : <Status key="status" value={stage.status} />,
                             formatCompactStageTime(stage.started_at),
                             stage.provider_count,
                             elapsed(stage.started_at, stage.completed_at),
@@ -397,7 +411,7 @@ function Evidence({
   return (
     <div className="min-w-0 space-y-4">
       <div className="flex flex-wrap items-center gap-3 text-sm">
-        <Status value={run?.status ?? stage.status} />
+        <span>{card === "technical" && "Execution "}<Status value={run?.status ?? stage.status} /></span>
         {runs.length > 0 && (
           <label className="font-medium">
             Execution{" "}
@@ -423,7 +437,7 @@ function Evidence({
           </button>
         )}
       </div>
-      {published && <p className="text-sm">Available output #{published.output_id} · {published.covered}/{published.expected} {card==="pairwise"?"pairs judged":"stocks scored"} · Stage 4 {published.used_output_id ? `used output #${published.used_output_id} in final #${published.final_id}` : "has no saved reference"}</p>}
+      {published && <p className="text-sm">Available output #{published.output_id} · {published.technical_counts ? published.technical_counts.complete + published.technical_counts.provisional : published.covered}/{published.technical_counts?.expected ?? published.expected} {card==="pairwise"?"pairs judged":"stocks scored"} · Stage 4 {published.used_output_id ? `used output #${published.used_output_id} in final #${published.final_id}` : "has no saved reference"}</p>}
       {run && ["failed","partial","cancelled","canceled"].includes(run.status) && jobs.some(j=>j.error_message) && <details className={panel}><summary>Execution #{run.id} diagnostics</summary>{jobs.filter(j=>j.error_message).map(j=><p key={j.id}>Job #{j.id} · {j.error_message}</p>)}</details>}
       {stage.error_message && (!run || (stage.run_id===run.id && !jobs.length)) && (
         <p role="status" className="rounded-xl bg-amber-50 p-3 text-sm text-amber-950">

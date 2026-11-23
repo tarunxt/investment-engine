@@ -1,6 +1,6 @@
 """Read only saved outputs from one workflow and Stage 2 revision."""
 from collections import Counter
-from sqlalchemy import Integer, cast, func, select, true
+from sqlalchemy import Integer, case, cast, func, select, true
 from sqlalchemy.dialects.postgresql import JSONB
 from app.domains.runs.models import AutoRebalanceWorkflow as Workflow
 from . import storage
@@ -12,6 +12,67 @@ def summary(card, rows):
         return sum(r.get("score") is not None for r in rows),len(rows)
     # Each verdict appears once on each side of its pair.
     return sum(r.get("valid",0) for r in rows)//2, len(rows)*(len(rows)-1)//2
+
+
+def output_rank(version, counts, scored, output):
+    """Shared by the live board and the paginated Technical catalogue."""
+    rank = (counts["complete"], -counts["insufficient"], output) if counts else (scored, 0, output)
+    return (version, rank)
+
+
+async def technical_catalogue(db, owner, portfolio, sequences):
+    """Read only compact saved projections for this owner's visible history page."""
+    if not sequences:
+        return {}
+    data = Stage.summary_json
+    result = data["result"]
+    rows = result["rows"]
+    postgres = db.get_bind().dialect.name == "postgresql"
+    length = func.jsonb_array_length(cast(rows, JSONB)) if postgres else func.json_array_length(rows)
+    if postgres:
+        stocks = func.jsonb_array_elements(cast(rows, JSONB)).table_valued("value").alias("stock")
+        numeric_score = cast(stocks.c.value, JSONB)["score"].as_string().is_not(None)
+    else:
+        stocks = func.json_each(rows).table_valued("value").alias("stock")
+        numeric_score = func.json_extract(stocks.c.value, "$.score").is_not(None)
+    legacy_scored = select(func.count()).select_from(stocks).where(numeric_score).correlate(Stage).scalar_subquery()
+    scored = case((data["card"].as_string() == "technical", func.coalesce(
+        result["scored"].as_integer(), result["technical_counts"]["complete"].as_integer(), legacy_scored
+    )))
+    # Use the exact revision policy of available(): newest published revision or
+    # revision referenced by the last attempt of ANY card for this workflow.
+    docs = (await db.execute(select(
+        Workflow.sequence, Stage.stage, Stage.id, Stage.run_id,
+        data["revision_id"].as_integer(), data["card"].as_string(),
+        result["scoring_version"].as_integer(), result["technical_counts"],
+        scored, length,
+    ).select_from(Stage).join(Workflow).where(
+        Workflow.user_id == owner, Workflow.portfolio == portfolio, Workflow.sequence.in_(sequences),
+        storage.of_kind("attempt") | storage.of_kind("revision"),
+    ).order_by(Stage.id.desc()))).all()
+    revision_ids = {}
+    latest_attempts = {}
+    for sequence, stage, output, _, revision, *_ in docs:
+        if stage.startswith(storage.prefix("revision")):
+            revision_ids.setdefault(sequence, output)
+        else:
+            latest_attempts.setdefault(sequence, revision or 0)
+    ranks, summaries = {}, {}
+    for sequence, _, output, run, revision, card, version, counts, scored, length in docs:
+        if card != "technical" or not length or revision != max(revision_ids.get(sequence, 0), latest_attempts.get(sequence, 0)):
+            continue
+        rank = output_rank(version == 3, counts, scored or 0, output)
+        if sequence in ranks and ranks[sequence] >= rank:
+            continue
+        ranks[sequence] = rank
+        summaries[sequence] = {
+            "output_id": output, "run_id": run,
+            "expected": counts["expected"] if counts else length,
+            "scored": counts["complete"] + counts["provisional"] if counts else scored,
+            "complete": counts["complete"] if counts else None,
+            "provisional": counts["provisional"] if counts else None,
+        }
+    return summaries
 
 
 async def available(db, owner, portfolio, sequence):
@@ -49,7 +110,6 @@ async def available(db, owner, portfolio, sequence):
              .where(storage.of_kind("attempt",rev),data["card"].as_string().in_(["technical","pairwise","threats"] if portfolio=="india" else ["technical","pairwise"]))
              .order_by(Stage.id.desc()))).all()
     cards = {}
-    versions={}
     ranks={}
     for output,run,card,version,pair_counts,technical_counts,bullish,status,threat_diagnostics,*info in items:
         if not info[0]:
@@ -66,11 +126,10 @@ async def available(db, owner, portfolio, sequence):
         if pair_counts:
             got,total=pair_counts["judged"],pair_counts["expected"]
         v3=(card=="technical" and version==3) or bool(pair_counts)
-        rank=(technical_counts["complete"],-technical_counts["insufficient"],output) if technical_counts else (got,0,output)
-        if card in cards and (versions[card] and not v3 or versions[card]==v3 and ranks[card]>=rank):
+        rank=output_rank(v3,technical_counts,got,output)
+        if card in cards and ranks[card]>=rank:
             continue
         ranks[card]=rank
-        versions[card]=v3
         cards[card] = {"output_id":output,"run_id":run,"covered":got,"expected":total,
                        "used_output_id":(final[1] or {}).get(card) if final else None,"final_id":final[0] if final else None,**({"pair_counts":pair_counts} if pair_counts else {})}
         if technical_counts and card=="technical":

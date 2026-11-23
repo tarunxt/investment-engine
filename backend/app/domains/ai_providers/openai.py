@@ -7,6 +7,7 @@ import re
 
 from openai import OpenAI
 
+from app.domains.runs.spend_guard import budget_active
 from app.domains.api_usage.metering import metered_call
 from app.core.config import settings
 from app.domains.ai_providers.base import (
@@ -59,6 +60,7 @@ class OpenAIProvider(BaseAIProvider):
             raise ValueError("OPENAI_API_KEY is not configured")
 
         self.client = OpenAI(
+            **({"max_retries": 0} if budget_active() else {}),
             api_key=settings.openai_api_key,
         )
 

@@ -53,3 +53,13 @@ test('Run checks and handles errors before resetting stages or reserving a workf
   assert.match(source, /Pre-run checks found issues/);
   assert.match(source, /preflightPortfolio === section.portfolio \? "Checking…"/);
 });
+
+test('a blank budget remains optional and zero explicitly requests free work', () => {
+  const {parseWorkflowSpendLimit} = load('../lib/rebalancePreflight.ts');
+  assert.equal(parseWorkflowSpendLimit('  '), undefined);
+  assert.equal(parseWorkflowSpendLimit('0.00'), 0);
+  assert.equal(parseWorkflowSpendLimit('10.50'), 10.5);
+  for (const invalid of ['-1', '0.001', '10x', '1e2', '100000.01', 'NaN']) {
+    assert.throws(() => parseWorkflowSpendLimit(invalid), /run spending limit/);
+  }
+});

@@ -28,6 +28,7 @@ const parser = load('../components/InvestmentRecommendationTable.tsx', colors);
 const imported = {
   ...React, ...parser, ...colors,
   ...load("../components/CollapsedSection.tsx", React),
+  ...load("../components/BasketResizeHandles.tsx", React),
   ...load("../components/StockScanHistory.tsx"),
   ...load('../lib/technicalSetups.ts'), ...load('../lib/scoreMatrixMath.ts'),
   ...load('../lib/rebalanceRunIdentity.ts'), ...load('../lib/runPresentation.ts'),

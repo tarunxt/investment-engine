@@ -1,5 +1,7 @@
 "use client";
 
+import { technicalReason } from "@/lib/technicalReason";
+
 import { useEffect, useRef, useState } from "react";
 import type { CardResult, CardRow } from "@/lib/independentScorecards";
 
@@ -54,7 +56,7 @@ export function TechnicalStockScores({result,revision,onRecover,onRetryCommentar
         return <tr key={r.listing}><th scope="row" className={cell}>{r.listing}</th><td className={cell}><button type="button" className={link}
           aria-label={`Show calculation for ${r.listing}`} onClick={()=>setSelection(r)}>{fmt(r.score)} ↗</button></td>
           <td className={cell}>{r.coverage}{v&&` · ${v.coverage_pct}%`}</td><td className={cell}>{ready?.setup??"—"} · {ready?.entry??"—"}</td>
-          <td className={cell}>{v?.reason||String(r.reason??v?.direction??"—")}</td></tr>;})}</tbody></table></div>
+          <td className={cell}>{technicalReason(v?.reason||String(r.reason??v?.direction??"—"))}</td></tr>;})}</tbody></table></div>
     {onRecover&&(!counts||counts.provisional+counts.insufficient>0)&&<button className={link} disabled={busy} onClick={async()=>{
       setBusy(true);try{const next=await onRecover(current.id);setRecovered({from:result.id,data:next});setMessage(next.id===current.id?"No new verified evidence available.":`Showing recovered output #${next.id}.`);}catch(e){setMessage(String(e));}finally{setBusy(false);}
     }}>{busy?"Checking history…":"Recover missing evidence · no model call"}</button>}
@@ -76,14 +78,14 @@ export function TechnicalStockScores({result,revision,onRecover,onRetryCommentar
         {selection.score!=null&&<p className="rounded-lg bg-sky-50 p-3 font-mono">50 {Object.values(data.factors).filter(f=>f.points!=null).map(f=>(f.points!<0?"− ":"+ ")+fmt(Math.abs(f.points!),3)).join(" ")} ≈ {fmt(selection.score)} /100</p>}
         <p>Factor coverage {data.coverage_pct}% · possible full score {data.range?.map(x=>fmt(x)).join("–")??"—"}</p>
         <p>{Object.entries(data.readiness).filter(([,v])=>v!=null).map(([k,v])=>k+" "+v).join(" · ")}</p>
-        {data.reason&&<p>{data.reason}</p>}{data.flags.length>0&&<p>{data.flags.join(" · ")}</p>}
+        {data.reason&&<p>{technicalReason(data.reason)}</p>}{data.flags.length>0&&<p>{data.flags.join(" · ")}</p>}
         <p>Legacy comparison {fmt(selection.legacy_score)} /100 · model annotation {selection.commentary_job?"job #"+selection.commentary_job:"unavailable"}{selection.model_disagreement?" · model value disagreed with the backend":""}</p>
         {annotation&&<dl>{["Strongest driver","Contrary evidence or missing input","Trigger / invalidation","Evidence IDs"].map(k=><div key={k}><dt className="font-semibold">{k}</dt><dd>{annotation[k]??"—"}</dd></div>)}</dl>}
         <Evidence name="Stock" source={data.sources.stock}/><Evidence name="Benchmark" source={data.sources.benchmark}/>
         <p className="break-all text-xs">Calculation input hash {data.input_hash}</p></>:
         <><p>Score = (mean accepted last-five-candle trend + 3) × 100 ÷ 6.</p><p>Mean trend {fmt((selection.signed_terms as {candles?:number}|undefined)?.candles,2)} · saved score {fmt(selection.score)}. Catalogue ratings have zero weight in this saved score.</p>
         {selection.features!=null&&<details><summary>Saved technical indicators</summary><dl>{Object.entries(selection.features).map(([key,value])=><div key={key}><dt className="font-semibold">{key.replaceAll("_"," ")}</dt><dd>{typeof value==="number"?fmt(value,3):JSON.stringify(value)??"—"}</dd></div>)}</dl></details>}
-        {selection.reason!=null&&<p>{String(selection.reason)}</p>}</>}
+        {selection.reason!=null&&<p>{technicalReason(String(selection.reason))}</p>}</>}
       </div></dialog>}
   </div>;
 }

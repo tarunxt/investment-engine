@@ -8,7 +8,7 @@ export function AnalysisOnlyRunControl({ checked, disabled, onChange }: {
   return <label className="flex items-center gap-2 text-xs text-slate-700">
     <input type="checkbox" checked={checked} disabled={disabled}
       onChange={event => onChange(event.target.checked)} />
-    Suppress notifications and Sheets exports for this run
+    Analysis only (suppress notifications and Sheets exports)
   </label>;
 }
 

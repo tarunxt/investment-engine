@@ -15,6 +15,7 @@ from app.domains.ai_providers.factory import ProviderFactory
 from app.domains.auth.dependencies import get_current_user
 from app.domains.auth.models import ActivityLog, User
 from app.domains.jobs.models import Job
+from app.domains.runs import spend_guard
 from app.domains.runs.side_effect_policy import permits_side_effects, require_workflow_policy_schema
 from app.domains.runs.models import (
     AutoRebalanceWorkflow,
@@ -27,6 +28,7 @@ from app.domains.runs.auto_rebalance_audit import LLM_STAGES, validate_execution
 from app.domains.runs.swing_reconciliation import reconcile_swing
 from app.domains.runs.run_identity import analysis_run_identity
 from app.domains.runs.schemas import (
+    TechnicalHistoryOutput,
     AutoRebalanceCompletionEmailRequest,
     AutoRebalanceHistoryDetailResponse,
     AutoRebalanceHistoryItemResponse,
@@ -395,6 +397,7 @@ async def _build_auto_rebalance_history(
     runs = list((await db.execute(run_query)).scalars().all())
     jobs = list((await db.execute(job_query)).scalars().all())
 
+    budgets = await spend_guard.history_budgets(db, workflows)
     grouped: dict[int, dict] = {}
     for workflow in workflows:
         grouped[workflow.sequence] = {
@@ -487,6 +490,7 @@ async def _build_auto_rebalance_history(
                 sequence=sequence,
                 label=label,
                 side_effect_policy=workflow.side_effect_policy_json if workflow else None,
+                **(budgets.get(workflow.id, {}) if workflow else {}),
                 # A subset of finished child jobs is not a finished workflow.
                 # Preserve the durable parent's lifecycle; derivation is only
                 # a compatibility fallback for runs predating workflow audits.
@@ -626,8 +630,18 @@ async def reserve_auto_rebalance_label(
         side_effect_policy_json=body.side_effect_policy.model_dump() if body.side_effect_policy else None,
     )
     db.add(workflow)
+    try:
+        receipt = await spend_guard.attach_budget(
+            db, workflow,
+            limit_paise=int(body.max_cost_inr * 100) if body.max_cost_inr is not None else None,
+            parent_sequence=body.budget_parent_sequence,
+        )
+    except spend_guard.SpendLimitError as exc:
+        await db.rollback()
+        raise HTTPException(422, str(exc)) from exc
     await db.commit()
     return AutoRebalanceRunReservationResponse(
+        **receipt,
         portfolio=body.portfolio,
         sequence=sequence,
         label=workflow.label,
@@ -642,6 +656,7 @@ async def list_auto_rebalance_history(
     limit: int = Query(default=100, ge=1, le=250),
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
+    technical_coverage: bool = False,
 ):
     await require_workflow_policy_schema(db)
     # Include legacy run/job sequences as well as durable workflow rows. All
@@ -670,6 +685,12 @@ async def list_auto_rebalance_history(
     history = await _build_auto_rebalance_history(
         db, user_id=current_user.id, portfolio=portfolio, sequences=set(sequences),
     )
+    if technical_coverage:
+        from app.domains.scorecards.coverage import technical_catalogue
+        summaries = await technical_catalogue(db, current_user.id, portfolio, sequences)
+        for item, _, _ in history:
+            if item.sequence in summaries:
+                item.technical_output = TechnicalHistoryOutput(**summaries[item.sequence])
     return AutoRebalanceHistoryListResponse(
         items=[item for item, _, _ in history], total=total,
     )

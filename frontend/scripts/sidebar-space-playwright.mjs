@@ -44,7 +44,20 @@ try {
     await nav.waitFor({state:'attached'});
     // Emulate browser zoom through its equivalent CSS viewport dimensions.
     const open=page.getByRole('button',{name:'Open navigation'});
-    if(await open.isVisible())await open.click();
+    if(await open.isVisible()) {
+      await page.keyboard.press('Tab');
+      assert.ok(await open.evaluate(el => el === document.activeElement), 'closed navigation must not intercept Tab');
+      await page.keyboard.press('Enter');
+      const close = page.getByRole('button', {name:'Close navigation'});
+      await close.waitFor();
+      assert.ok(await close.evaluate(el => el === document.activeElement));
+      await page.keyboard.press('Tab');
+      assert.ok(await page.getByRole('dialog', {name:'Navigation', exact:true}).evaluate(el => el.contains(document.activeElement)));
+      await page.keyboard.press('Escape');
+      await page.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === 'Open navigation');
+      assert.ok(await nav.isHidden(), 'dismissed mobile drawer is absent from keyboard navigation');
+      await open.click();
+    }
     await nav.waitFor();
     assert.equal(await nav.locator('a[href="/console/google-sheets"]').count(),0);
     const storageBefore=await page.evaluate(()=>({...localStorage}));

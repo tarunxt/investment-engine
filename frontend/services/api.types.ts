@@ -172,7 +172,7 @@ export interface IApiService {
     queueFinalActionableHistoryBackfill(): Promise<FinalActionableHistoryBackfillResponse>;
     getAutoRebalanceHistory(
         portfolio: AutoRebalancePortfolioKey,
-        params?: { limit?: number },
+        params?: { limit?: number; offset?: number; technicalCoverage?: boolean },
     ): Promise<AutoRebalanceHistoryListResponse>;
     getAutoRebalanceHistoryDetail(
         portfolio: AutoRebalancePortfolioKey,

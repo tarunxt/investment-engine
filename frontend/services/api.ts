@@ -1052,8 +1052,18 @@ class apiServiceClass implements IApiService {
     return this.post<RunResponse>(URLs.runs.create(), data);
   }
 
-  reserveAutoRebalanceRunLabel(portfolio: AutoRebalancePortfolioKey, analysisOnly = false): Promise<AutoRebalanceRunReservationResponse> {
-    return this.post<AutoRebalanceRunReservationResponse>(URLs.runs.autoRebalanceLabel(), { portfolio, ...(analysisOnly ? { side_effect_policy: { version: 1, mode: "analysis_only" } } : {}) });
+  reserveAutoRebalanceRunLabel(
+    portfolio: AutoRebalancePortfolioKey,
+    analysisOnly = false,
+    maxCostInr?: number,
+    budgetParentSequence?: number,
+  ): Promise<AutoRebalanceRunReservationResponse> {
+    return this.post<AutoRebalanceRunReservationResponse>(URLs.runs.autoRebalanceLabel(), {
+      portfolio,
+      ...(analysisOnly ? { side_effect_policy: { version: 1, mode: "analysis_only" } } : {}),
+      ...(maxCostInr !== undefined ? { max_cost_inr: maxCostInr } : {}),
+      ...(budgetParentSequence !== undefined ? { budget_parent_sequence: budgetParentSequence } : {}),
+    });
   }
 
   queueAutoRebalanceCompletionEmail(data: AutoRebalanceCompletionEmailRequest): Promise<{ status: string }> {
@@ -1123,11 +1133,11 @@ class apiServiceClass implements IApiService {
 
   getAutoRebalanceHistory(
     portfolio: AutoRebalancePortfolioKey,
-    params?: { limit?: number; offset?: number },
+    params?: { limit?: number; offset?: number; technicalCoverage?: boolean },
     options: ApiRequestControl = {},
   ): Promise<AutoRebalanceHistoryListResponse> {
     const suffix = (params?.limit ? `&limit=${params.limit}` : "") +
-      (params?.offset ? `&offset=${params.offset}` : "");
+      (params?.offset ? `&offset=${params.offset}` : "") + (params?.technicalCoverage ? "&technical_coverage=true" : "");
     return this.getPortfolioHistory<AutoRebalanceHistoryListResponse>(
       `${URLs.runs.autoRebalanceHistory(portfolio)}${suffix}`,
       options,

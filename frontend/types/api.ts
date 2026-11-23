@@ -797,7 +797,12 @@ export interface RunSideEffectPolicy {
   mode: "existing_preferences" | "analysis_only";
 }
 
-export interface AutoRebalanceRunReservationResponse {
+export interface WorkflowSpendLimit {
+  max_cost_inr?: number | null;
+  headroom_inr?: number | null;
+}
+
+export interface AutoRebalanceRunReservationResponse extends WorkflowSpendLimit {
   side_effect_policy?: RunSideEffectPolicy | null;
   portfolio: AutoRebalancePortfolioKey;
   sequence: number;
@@ -900,7 +905,11 @@ export interface AutoRebalanceRunDetailResponse {
   jobs: AutoRebalanceJobDetailResponse[];
 }
 
-export interface AutoRebalanceHistoryItemResponse {
+export interface AutoRebalanceHistoryItemResponse extends WorkflowSpendLimit {
+  technical_output?: {
+    output_id: number; run_id: number | null; expected: number; scored: number | null;
+    complete: number | null; provisional: number | null;
+  } | null;
   side_effect_policy?: RunSideEffectPolicy | null;
   portfolio: AutoRebalancePortfolioKey;
   sequence: number;

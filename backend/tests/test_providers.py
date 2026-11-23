@@ -331,7 +331,9 @@ class ExecuteAIJobTests(unittest.TestCase):
                 self.closed = True
                 super().close()
         engine = create_engine('sqlite://', poolclass=StaticPool, connect_args={'check_same_thread':False})
-        Job.__table__.create(engine)
+        from app.domains.runs.models import Run, RunJob
+        for table in (Job.__table__, Run.__table__, RunJob.__table__):
+            table.create(engine)
         factory = sessionmaker(engine, class_=TrackingSession, expire_on_commit=False)
         db = factory()
         job = Job(id=ident, prompt=prompt, provider='openai', model='gpt-4o-mini', status=JobStatus.PENDING)

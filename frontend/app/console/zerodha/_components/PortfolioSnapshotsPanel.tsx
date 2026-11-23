@@ -611,7 +611,7 @@ export function PortfolioSnapshotsPanel({
             </div>
           )}
 
-          <div className="p-5">
+          <div className="px-1 py-5 sm:px-5">
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
