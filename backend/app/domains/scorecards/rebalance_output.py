@@ -189,6 +189,7 @@ def project(manifest, jobs):
     observations={s["listing"]:{} for s in manifest["stocks"]}
     errors, tables=[],[]
     timing = {}
+    trace = {key:[] for key in observations}
     for job,slot,keys,_,research in jobs:
         if "collection_seconds" in research:
             timing["sources"] = research["collection_seconds"]
@@ -203,6 +204,17 @@ def project(manifest, jobs):
         packets=research["packets"]
         views=[]
         for k in keys:
+            calls = [c for c in saved.get("calls", []) if k in c.get("listings", [])]
+            parsed = [k in c["parsed_listings"] for c in calls if "parsed_listings" in c]
+            if not calls:
+                reason = "No checkpointed model call"
+            elif len(parsed) == len(calls) and not any(parsed):
+                reason = "No unique readable response row"
+            elif any(parsed):
+                reason = "Response row received; no accepted score"
+            else:
+                reason = "No accepted score; legacy response presence unknown"
+            trace[k].append(f"Job #{job.id}: {reason}")
             if k in records:
                 row=records[k]
                 view=display_row(k,row,packets[k])
@@ -231,4 +243,4 @@ def project(manifest, jobs):
                         "signed_terms":terms,"action":action,"available_weight":weight,"model_count":len(slots),
                         "coverage":"Complete" if weight==sum(R_WEIGHTS.values()) and plan_complete else "Partial" if weight else "Unassessed",
                         "raw_rows":[view for _,view in slots.values()],"trade_gaps":trade_gaps})
-    return {"phase_seconds":timing,"rows":results,"rebalance_version":2,"errors":errors,"job_ids":[job.id for job,*_ in jobs],"model_tables":tables}
+    return {"unassessed_trace":{r["listing"]:trace[r["listing"]] or ["Outside model assignment"] for r in results if r["score"] is None},"phase_seconds":timing,"rows":results,"rebalance_version":2,"errors":errors,"job_ids":[job.id for job,*_ in jobs],"model_tables":tables}

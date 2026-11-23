@@ -329,3 +329,15 @@ async def test_rebalance_close_fallback_matches_instrument_and_frozen_session(mo
             assert len(history["listings"][key]) == int(refresh)
     assert history["listings"][key][0]["as_of"] == close
     assert history["listings"][key][0]["close"] == 11
+
+
+@pytest.mark.anyio
+async def test_reviewed_statement_respects_issuer_and_frozen_publication_cutoff():
+    from app.domains.scorecards.filing_archive import lookup
+    from app.domains.scorecards.rebalance_filings import comparable
+    before=datetime.fromisoformat("2026-10-17T10:00:00+05:30")
+    after=datetime.fromisoformat("2026-11-24T00:00:00+05:30")
+    assert not await lookup(None,"INE090A01021",before)
+    assert not await lookup(None,"unverified",after)
+    docs=await lookup(None,"INE090A01021",after)
+    assert comparable(docs[0]["facts"])

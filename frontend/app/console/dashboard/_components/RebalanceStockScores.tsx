@@ -54,7 +54,10 @@ export function RebalanceStockScores({result:original,onRecover}:{result:CardRes
     {error && <p role="alert">{error}</p>}
     <p>{counts.assessed} assessed · {counts.complete} complete · {counts.provisional} provisional · {counts.unassessed} unassessed</p>
     {counts.unassessed > 0 && <details><summary className="cursor-pointer">Unassessed listings ({counts.unassessed})</summary>
-      <p>{result.rows.filter(row=>row.score == null).map(row=>row.listing).join(", ")}</p></details>}
+      <ul>{result.rows.filter(row=>row.score == null).map(row=><li key={row.listing}>{row.listing}
+        {result.unassessed_trace?.[row.listing]?.map(reason=><span key={reason}> · {reason}</span>)}
+        {result.rebalance_readiness?.rows.find(item=>item.listing===row.listing)?.state==="awaiting" && " · Awaiting eligible source evidence"}
+      </li>)}</ul></details>}
     <RebalanceOutputTables result={result}/>
     <details><summary className="cursor-pointer font-semibold">Score calculations by listing</summary>
     <table className="w-full text-left text-sm">
