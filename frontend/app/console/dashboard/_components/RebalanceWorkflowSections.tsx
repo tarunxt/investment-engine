@@ -7927,7 +7927,7 @@ ${zerodhaExecutionMode === "direct_market"
             <label className="block"><input type="checkbox" checked={scoreSupportedFactors} onChange={e=>setScoreSupportedFactors(e.target.checked)} /> Score available Rebalance factors when a filing or price history is missing</label>
             <label className="block">Pairwise schedule <select value={pairSchedule} onChange={e=>setPairSchedule(e.target.value as "balanced"|"full")}><option value="balanced">Balanced · up to 8 opponents per listing</option><option value="full">Full round robin</option></select></label>
             <label className="block">Pairwise budget for early judgments (₹) <input className="w-24 rounded border p-1" type="number" min="0.01" max="100000" step="0.01" value={pairPlanningBudget} onChange={e=>setPairPlanningBudget(e.target.value)} /></label>
-            <p>Leave the budget blank to wait for all listings. A positive budget lets Pairwise judge ready pairs within the planning estimate.</p>
+            <p>Ready pairs can be judged while other listings recover. Enter an optional planning budget to limit the estimated cost. The total run spending limit applies to every request.</p>
           </fieldset>
         </details>}
         {preflightPortfolio === section.portfolio && <p role="status" className="mt-4 text-sm text-blue-800">Checking configuration, stage dependencies and saved inputs before starting…</p>}

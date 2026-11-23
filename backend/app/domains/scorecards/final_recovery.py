@@ -46,3 +46,25 @@ async def recovered_outputs(db, workflow_id, revision, selected):
         if doc.result_json and preserves_scores(best[card].result_json, doc.result_json):
             best[card] = doc
     return best
+
+
+async def refresh_pair_final(db, user, attempt, revision):
+    """Recalculate only a saved final whose pinned Pairwise input this judgment advances."""
+    from .router import Finalize, finalize
+    await db.flush()
+    workflow = await db.scalar(select(storage.Workflow).where(
+        storage.Workflow.id == attempt.row.workflow_id).with_for_update())
+    prior = await storage.latest_final(db, user.id, "india", workflow.sequence)
+    if not prior or prior.data["revision_id"] != revision.id:
+        return
+    result = prior.result_json
+    pinned_id = result["attempts"].get("pairwise")
+    if not pinned_id:
+        return
+    pinned = await storage.lookup(db, user.id, "india", "attempt", pinned_id)
+    best = (await recovered_outputs(db, workflow.id, revision.id, {"pairwise": pinned}))["pairwise"]
+    if best.id != attempt.id or best.result_json["pair_counts"]["judged"] <= (pinned.result_json.get("pair_counts") or {}).get("judged", 0):
+        return
+    request = Finalize(sequence=workflow.sequence, attempts={**result["attempts"], "pairwise":best.id},
+                       **result["policy"])
+    await finalize("india", revision.id, request, db, user)

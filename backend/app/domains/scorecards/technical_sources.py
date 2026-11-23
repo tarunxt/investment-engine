@@ -116,6 +116,8 @@ def extract_archive(data, venue, day, close, wanted, url):
                 if len(aliases)==1:
                     matches.add(aliases[0])
                 for key in matches:
+                    if isinstance(wanted, dict) and wanted.get(key) and wanted[key] != row.get("ISIN"):
+                        continue
                     values=[row.get(k) for k in ("OpnPric","HghPric","LwPric","ClsPric","TtlTradgVol")]
                     item=bar(date.fromisoformat(day),INDIA,values,url,datetime.max.replace(tzinfo=timezone.utc),optional_volume=True)
                     if item:
@@ -192,6 +194,19 @@ def resolve_history_instruments(stocks, master, previous):
         if verified and (not known or known == {master[verified]["isin"]}):
             aliases[key] = verified
             continue
+        # Swing descriptive tickers require corroboration from the frozen issuer or ISIN.
+        canonical = {
+            "NSE:ICICIBC": ("NSE:ICICIBANK", "INE090A01021", "icicibank"),
+            "NSE:PBFINTECH": ("NSE:POLICYBZR", "INE417T01026", "pbfintech"),
+            "NSE:RIL": ("NSE:RELIANCE", "INE002A01018", "relianceindustries"),
+        }.get(key)
+        if canonical:
+            candidate, isin, issuer = canonical
+            if master.get(candidate, {}).get("isin") == isin and (
+                known == {isin} or (not known and name(stock.get("name")) == issuer)
+            ):
+                aliases[key] = candidate
+                continue
         matches = []
         for candidate, meta in master.items():
             if not candidate.startswith(venue + ":") or not meta.get("isin"):
