@@ -353,8 +353,9 @@ async def start_scorecard(portfolio,revision_id,card,body,db,user,*,managed=Fals
                 raise HTTPException(422,"No new evidence can produce or improve a stock score yet. Refresh missing sources. No model job started.")
             research["targets"] = eligible
         elif rebalance_v2:
-            from .rebalance_recovery import with_evidence
+            from .rebalance_recovery import exclude_exhausted, with_evidence
             repair_fields=with_evidence(repair_fields,research["packets"])
+            repair_fields=await exclude_exhausted(db,parent,repair_fields,research["packets"],owner,portfolio)
             if not repair_fields:
                 raise HTTPException(422,"No new source evidence for the missing fields. No model jobs were queued.")
             config["repair_fields"]=repair_fields

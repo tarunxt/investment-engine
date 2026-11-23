@@ -20,7 +20,12 @@ def checklist(research):
         state = "ready" if not missing else "provisional" if any(allowed.get(f) for f in FACTORS) else "awaiting"
         rows.append({"listing":key,"verified_listing":packet.get("verified_listing",key),"state":state,
                      "sessions":packet.get("history_sessions") or {f:max((packet["refs"][r].get("sessions",0) for r in refs if r in packet.get("refs",{})),default=0) for f,refs in allowed.items() if f.startswith("technical-")},"missing":missing})
-    return {"rows":rows, **{s:sum(r["state"]==s for r in rows) for s in ("ready","provisional","awaiting")}}
+    counts = {}
+    for row in rows:
+        for factor in row["missing"]:
+            counts[factor] = counts.get(factor, 0) + 1
+    leading = max(counts, key=counts.get) if counts else None
+    return {"leading_factor":leading, "affected":counts.get(leading, 0), "rows":rows, **{s:sum(r["state"]==s for r in rows) for s in ("ready","provisional","awaiting")}}
 
 
 def supported_listings(research):
@@ -102,7 +107,9 @@ async def _collect_packet(db, rev, owner, username, previous, refresh):
             return ready
     history=await latest_history(db,revision_id)
     await db.commit()
+    started = monotonic()
     research=await collect(manifest,username,history,refresh=refresh)
+    research['collection_seconds'] = round(monotonic() - started, 3)
     if previous:
         research=merge_sources(previous,research)
     identity="rebalance-preflight-v1" if not refresh else "rebalance-source/"+digest(research["packets"])
@@ -150,7 +157,7 @@ async def recover(db, original, owner, username):
     settings.update(packet_id=packet.id,assignments=[],parent=None)
     child=await storage.append(db,workflow_id,"attempt",identity,{"card":"rebalance","settings":settings,
         "data_recovery":True,"recovered_from":orig_id},revision_id=rev_id)
-    result=refreshed({**parent,"id":child.id,"recovered_from":orig_id,"evidence_only":True,"jobs":0,"completed":0})
+    result=refreshed({**parent,"phase_seconds":{"sources":packet.data["research"]["collection_seconds"]} if "collection_seconds" in packet.data["research"] else {},"id":child.id,"recovered_from":orig_id,"evidence_only":True,"jobs":0,"completed":0})
     child.row.summary_json={**child.data,"result":result}
     child.row.status=result["status"]
     await db.commit()

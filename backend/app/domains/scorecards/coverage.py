@@ -188,7 +188,7 @@ async def rebalance_summary(db, scoped, revision, postgres, owner, portfolio):
     data = Stage.summary_json
     result = data["result"]
     readiness=result["rebalance_readiness"]
-    latest = (await db.execute(scoped(Stage.id,Stage.run_id, *(readiness[k].as_integer().label(k) for k in ("ready","provisional","awaiting"))).where(storage.of_kind("attempt",revision),
+    latest = (await db.execute(scoped(Stage.id,Stage.run_id, result["phase_seconds"].label("phase_seconds"),readiness["leading_factor"].as_string().label("leading_factor"),readiness["affected"].as_integer().label("affected"), *(readiness[k].as_integer().label(k) for k in ("ready","provisional","awaiting"))).where(storage.of_kind("attempt",revision),
               data["card"].as_string()=="rebalance", result["status"].as_string().in_(["completed","partial","unassessed"]))
               .order_by(Stage.id.desc()).limit(1))).first()
     final = (await db.execute(scoped(Stage.id,result["attempts"]["rebalance"].as_integer()).where(storage.of_kind("final",revision))
@@ -212,6 +212,17 @@ async def rebalance_summary(db, scoped, revision, postgres, owner, portfolio):
         has_output={"output_id":latest.id,"run_id":latest.run_id,"covered":counts["assessed"],"expected":len(rows),
                     "used_output_id":final[1] if final else None,"final_id":final[0] if final else None,
                     "counts":counts,"actions":dict(Counter(r.get("action") or "Unavailable" for r in rows))}
+        if latest.phase_seconds:
+            has_output["phase_seconds"] = latest.phase_seconds
+        if latest.leading_factor:
+            has_output["leading_factor"] = latest.leading_factor
+            has_output["affected"] = latest.affected
+        elif latest.ready is not None and (latest.provisional or latest.awaiting):
+            # Historical snapshots predate the compact leading-factor summary.
+            saved = await db.scalar(scoped(readiness["rows"]).where(Stage.id == latest.id))
+            blockers = Counter(f for row in saved or [] for f in row.get("missing", {}))
+            if blockers:
+                has_output["leading_factor"], has_output["affected"] = blockers.most_common(1)[0]
         if latest.ready is not None:
             has_output["readiness"]={k:getattr(latest,k) for k in ("ready","provisional","awaiting")}
     summary=None

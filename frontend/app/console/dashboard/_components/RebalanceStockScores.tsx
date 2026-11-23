@@ -9,8 +9,20 @@ const labels:Record<string,string> = {cruxx:"Core thesis","technical-short":"Sho
   "fundamentals-short":"Short-term fundamentals","fundamentals-medium-long":"Medium/long-term fundamentals",action:"Consensus action"};
 
 export function RebalanceSourceCheck({data}:{data:RebalanceReadiness}) {
+  const blockers = new Map<string, {listing:string; reason:string}[]>();
+  for (const row of data.rows) {
+    for (const [factor, reason] of Object.entries(row.missing)) {
+      const entries = blockers.get(factor) ?? [];
+      entries.push({listing:row.listing, reason});
+      blockers.set(factor, entries);
+    }
+  }
   return <section aria-label="Rebalance source readiness" className="space-y-2">
     <p><strong>Source readiness</strong> · {data.ready} ready for full scoring · {data.provisional} provisional inputs · {data.awaiting} awaiting evidence</p>
+    {[...blockers].sort((a,b)=>b[1].length-a[1].length).map(([factor, entries])=>
+      <details key={factor}><summary className="cursor-pointer">{labels[factor] ?? factor} · {entries.length} missing</summary>
+        <ul>{entries.map(entry=><li key={entry.listing}>{entry.listing} · {entry.reason}</li>)}</ul>
+      </details>)}
     <details><summary className="cursor-pointer">Evidence by listing ({data.rows.length})</summary>
       <table className="w-full text-left text-sm"><thead><tr><th>Listing</th><th>Verified listing</th><th>Price sessions (20 / 60 / 200)</th><th>Missing evidence</th></tr></thead>
         <tbody>{data.rows.map(row=><tr key={row.listing}><td>{row.listing}</td><td>{row.verified_listing}</td>
@@ -41,6 +53,8 @@ export function RebalanceStockScores({result:original,onRecover}:{result:CardRes
     }}>{busy?"Checking sources…":"Refresh source evidence · no model charge"}</button>}
     {error && <p role="alert">{error}</p>}
     <p>{counts.assessed} assessed · {counts.complete} complete · {counts.provisional} provisional · {counts.unassessed} unassessed</p>
+    {counts.unassessed > 0 && <details><summary className="cursor-pointer">Unassessed listings ({counts.unassessed})</summary>
+      <p>{result.rows.filter(row=>row.score == null).map(row=>row.listing).join(", ")}</p></details>}
     <RebalanceOutputTables result={result}/>
     <details><summary className="cursor-pointer font-semibold">Score calculations by listing</summary>
     <table className="w-full text-left text-sm">
