@@ -18,8 +18,27 @@ SIEMENS_ALIAS = "NSE:SIEMENSENRGY"
 SIEMENS_IDENTITY = ("NSE:ENRIN", "INE1NPP01017", "https://nsearchives.nseindia.com/web/pressrelease/2025-06/PR_List_17062025_20250617191748.pdf")
 
 
+# Reported Swing symbols are hints. The frozen issuer and a current NSE EQ
+# instrument must corroborate the exchange's published canonical identity.
+SWING_IDENTITIES = {
+    "NSE:ICICIBC": ("NSE:ICICIBANK", "INE090A01021", "https://nsearchives.nseindia.com/content/circulars/CML74453.pdf"),
+    "NSE:PBFINTECH": ("NSE:POLICYBZR", "INE417T01026", "https://nsearchives.nseindia.com/content/circulars/CML77493.pdf"),
+    "NSE:RIL": ("NSE:RELIANCE", "INE002A01018", "https://nsearchives.nseindia.com/content/circulars/CML61328.pdf"),
+}
+
+
 def documented_alias(stock, master):
     key = stock["listing"]
+    if key in SWING_IDENTITIES:
+        target, isin, _ = SWING_IDENTITIES[key]
+        instrument = master.get(target, {})
+        if (key in master or stock.get("origin") != "contender" or instrument.get("isin") != isin
+                or instrument.get("series") != "EQ" or stock.get("isin") not in (None, "", isin)):
+            return None
+        reported = issuer_name(stock.get("name"))
+        if stock.get("isin") == isin or (reported and reported == issuer_name(instrument.get("name"))):
+            return target
+        return None
     target, isin, _ = SIEMENS_IDENTITY
     if key != SIEMENS_ALIAS or key in master or master.get(target, {}).get("isin") != isin:
         return None
@@ -51,7 +70,7 @@ def aliases(stocks, master):
 
 
 async def publication_aliases(listings, evidence):
-    if not any("_" in k or k == SIEMENS_ALIAS for k in listings):
+    if not any("_" in k or k == SIEMENS_ALIAS or k in SWING_IDENTITIES for k in listings):
         return {}
     try:
         async with httpx.AsyncClient(timeout=4) as client:

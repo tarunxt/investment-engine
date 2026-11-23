@@ -354,3 +354,43 @@ async def test_pending_close_keeps_verified_zero_separate_from_current_score(aud
         assert displayed["closing_pending"] == "2026-11-23"
         assert displayed["previous_close_score"] == {"session": "2026-11-20", "score": 0}
         assert (await closing_display(db, 8, result))["rows"][0]["previous_close_score"] is None
+
+
+@pytest.mark.parametrize(("raw","name"), [("NSE:ICICIBC","ICICI Bank"),("NSE:PBFINTECH","PB Fintech"),("NSE:RIL","Reliance Industries")])
+def test_reported_swing_identity_requires_verified_issuer_equity_and_venue(raw, name):
+    from app.domains.scorecards import rebalance_identity as identity
+    target, isin, _ = identity.SWING_IDENTITIES[raw]
+    stock = {"listing":raw,"origin":"contender","name":name}
+    master = {target:{"name":name+" Limited","series":"EQ","isin":isin}}
+    assert identity.aliases([stock],master) == {raw:target}
+    assert sources.resolve_aliases([raw],master,[stock]) == {raw:target}
+    for invalid in ({target:{**master[target],"isin":"wrong"}}, {target:{**master[target],"series":"BE"}},
+                    {target.replace("NSE:","BSE:"):master[target]}, {**master,raw:master[target]}):
+        assert sources.resolve_aliases([raw],invalid,[stock]) == {}
+    for changed in ({"name":"Different issuer"},{"isin":"wrong"},{"origin":"holding"}):
+        assert identity.aliases([{**stock,**changed}],master) == {}
+
+
+@pytest.mark.anyio
+async def test_identity_repair_reuses_the_frozen_complete_score_without_archives(monkeypatch):
+    from unittest.mock import AsyncMock
+    raw, target, isin = "NSE:ICICIBC", "NSE:ICICIBANK", "INE090A01021"
+    complete = {"listing":target,"score":0,"coverage":"Complete","as_of":CUT,"input_hash":"original",
+                "sources":{"stock":{"instrument":isin}}}
+    stock = {"listing":raw,"origin":"contender","name":"ICICI Bank"}
+    previous = {"technical":{target:complete,raw:{"reason":"Exact venue instrument unavailable"}},
+                "listings":{target:[{"kind":"daily_bar"}],raw:[]}}
+    master = {target:{"name":"ICICI Bank Ltd","isin":isin,"series":"EQ"}}
+    monkeypatch.setattr(sources,"technical_instruments",AsyncMock(return_value=master))
+    redis = AsyncMock()
+    redis.get.return_value = "[]"
+    monkeypatch.setattr(sources,"redis_client",lambda:redis)
+    monkeypatch.setattr(sources,"configured_for",lambda *args:False)
+    download = AsyncMock(side_effect=AssertionError("unexpected candle fetch"))
+    monkeypatch.setattr(sources,"supplement_indian_bars",download)
+    packet = await sources.collect({"as_of":CUT,"stocks":[stock,{"listing":target}],"owner_id":1},"owner",previous,{raw})
+    assert packet["technical"][raw]["canonical_listing"] == target
+    assert packet["technical"][raw]["score"] == 0 and packet["technical"][target] == complete
+    assert packet["listings"][raw] == previous["listings"][target]
+    assert "score" not in previous["technical"][raw]
+    download.assert_not_awaited()

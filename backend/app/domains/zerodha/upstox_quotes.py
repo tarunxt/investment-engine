@@ -90,7 +90,7 @@ async def load_instruments(client):
                 tick = row.get("tick_size")
                 details[key] = {"isin": mapping[key].split("|")[1],
                                 "exchange_token": str(row.get("exchange_token") or ""),
-                                "name": row.get("name"), "listed_on": row.get("listing_date"),
+                                "series": row.get("instrument_type"), "name": row.get("name"), "listed_on": row.get("listing_date"),
                                 "tick": tick / 100 if type(tick) in (int, float) and tick > 0 else None}
         return mapping, details
     mapping, _technical_instruments = await asyncio.to_thread(decode)

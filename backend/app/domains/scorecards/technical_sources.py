@@ -15,7 +15,7 @@ from statistics import mean
 import httpx
 from redis.exceptions import RedisError
 
-from .rebalance_identity import SIEMENS_ALIAS, SIEMENS_IDENTITY, documented_alias
+from .rebalance_identity import SIEMENS_ALIAS, SIEMENS_IDENTITY, SWING_IDENTITIES, documented_alias
 from .research import INDIA, bar, download, supplement_indian_bars
 from .technical_v3 import BENCHMARK, calculate, normalise
 from .universe import digest
@@ -62,14 +62,14 @@ def session_calendar(cutoff, venue, holidays, sessions=60):
 # Legacy Swing exports used the escaped ticker M_M. The NSE filing identifies the
 # ordinary equity share class; a current, matching same-venue master is required.
 FILING = "https://nsearchives.nseindia.com/corporate/ixbrl/INTEGRATED_FILING_INDAS_180552_30072026161119_iXBRL_WEB.html"
-VERIFIED_ALIASES = {"NSE:M_M": ("NSE:M&M", "INE101A01026", FILING), SIEMENS_ALIAS: SIEMENS_IDENTITY}
+VERIFIED_ALIASES = {"NSE:M_M": ("NSE:M&M", "INE101A01026", FILING), SIEMENS_ALIAS: SIEMENS_IDENTITY, **SWING_IDENTITIES}
 
 
 def resolve_aliases(keys, master, stocks=()):
     identity = {s["listing"]: s for s in stocks}
     aliases={}
     for key in keys:
-        if key == SIEMENS_ALIAS and not documented_alias(identity.get(key, {"listing": key}), master):
+        if (key == SIEMENS_ALIAS or key in SWING_IDENTITIES) and not documented_alias(identity.get(key, {"listing": key}), master):
             continue
         if key not in VERIFIED_ALIASES:
             continue
@@ -77,6 +77,11 @@ def resolve_aliases(keys, master, stocks=()):
         if master.get(target,{}).get("isin")==isin and (key not in master or master[key]["isin"]==isin):
             aliases[key]=target
     return aliases
+
+
+def alias_ledger(raw, target, verified):
+    return {**verified, "listing":raw, "canonical_listing":target, "identity_source":VERIFIED_ALIASES[raw][2],
+            "input_hash":digest([verified["input_hash"], raw, target, VERIFIED_ALIASES[raw]])}
 
 
 def eligible_vintage(row,cutoff):
@@ -267,6 +272,37 @@ async def collect(manifest, username, previous=None, requested=None, *, sessions
                 notices.append("Instrument master unavailable")
         await asyncio.gather(calendar(),instruments())
         aliases={} if pair_repair else resolve_aliases(ids,master,manifest["stocks"])
+        # For identity-only repairs, reuse the verified same-revision evidence.
+        # An unresolved alias cannot benefit from another candle download.
+        if requested and not pair_repair and previous.get("technical"):
+            frozen = previous["technical"]
+            pending = set(requested)
+            copied = {}
+            copied_bars = {}
+            for raw in requested:
+                old = frozen.get(raw, {})
+                if "Exact venue instrument unavailable" not in (old.get("reason") or ""):
+                    continue
+                target = aliases.get(raw)
+                if not target and raw not in master:
+                    pending.discard(raw)
+                    continue
+                verified = frozen.get(target, {})
+                if (target and verified.get("coverage") == "Complete" and verified.get("as_of") == manifest["as_of"]
+                        and verified.get("sources", {}).get("stock", {}).get("instrument") == master[target]["isin"]
+                        and target in previous.get("listings", {})):
+                    copied[raw] = alias_ledger(raw, target, verified)
+                    copied_bars[raw] = previous["listings"][target]
+                    pending.discard(raw)
+            if not pending:
+                if redis is not None:
+                    await redis.aclose()
+                return {**previous, "technical":{**frozen, **copied},
+                        "listings":{**previous.get("listings", {}), **copied_bars}}
+            previous = {**previous, "technical":{**frozen, **copied},
+                        "listings":{**previous.get("listings", {}), **copied_bars}}
+            records.update(copied_bars)
+            keys = pending | {BENCHMARK}
         original_keys=keys.copy()
         keys={aliases.get(k,k) for k in keys}
         for key in keys:
@@ -545,8 +581,7 @@ async def collect(manifest, username, previous=None, requested=None, *, sessions
         if raw in original_keys and target in ledgers:
             prior=previous.get("technical",{}).get(target,{})
             verified=prior if prior.get("coverage")=="Complete" and prior.get("as_of")==manifest["as_of"] and prior.get("sources",{}).get("stock",{}).get("instrument")==VERIFIED_ALIASES[raw][1] else ledgers[target]
-            ledgers[raw]={**verified,"listing":raw,"canonical_listing":target,"identity_source":VERIFIED_ALIASES[raw][2],
-                          "input_hash":digest([verified["input_hash"],raw,target,VERIFIED_ALIASES[raw]])}
+            ledgers[raw]=alias_ledger(raw,target,verified)
             records[raw]=previous["listings"][target] if verified is prior else records[target]
             if target not in original_keys and prior:
                 ledgers[target]=prior
