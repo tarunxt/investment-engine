@@ -24,23 +24,33 @@ def reconcile(manifest, history, prior):
     original = prior.get("packets", {})
     packets = {}
     issues = {}
+    gaps = {}
     normalized = {}
     for key in dict.fromkeys([*keys,BENCHMARK]):
         ledger = history.get("technical",{}).get(key,{})
         identity = ledger.get("sources",{}).get("stock",{})
         if key == BENCHMARK and not identity:
             identity = next((v.get("sources",{}).get("benchmark",{}) for v in history.get("technical",{}).values()),{})
-        dates = list(history.get("calendars",{}).get(key.split(":")[0],{}))
+        venue = key.split(":")[0]
+        calendar = history.get("calendars", {}).get(venue, {})
+        dates = sorted(day for day, end in calendar.items() if datetime.fromisoformat(end) <= datetime.fromisoformat(cutoff))
         raw = history.get("listings",{}).get(key,[])
         series, faults = normalise(raw, dates, identity.get("actions",[]), cutoff)
         by_day = {r["as_of"][:10]: r for r in raw if r.get("kind")=="daily_bar"}
         # Never bridge an absent session with an older close. Optional longer factors stay null.
         tail = []
         for day in reversed(dates):
-            if day not in series or day in faults or series[day][4] is None:
+            if day not in series or day in faults:
+                if len(tail) < 6:
+                    from .technical_sources import archive_url
+                    source = by_day.get(day, {}).get("url") or archive_url(venue, day)
+                    reason = faults.get(day, "No valid closed-session bar")
+                    gaps[key] = f"{day} · {reason} · {source}"
                 break
             op, hi, lo, close, volume = series[day]
             tail.append({**by_day[day],"open":op,"high":hi,"low":lo,"close":close,"volume":volume})
+        if not dates:
+            gaps[key] = f"{venue} completed-session calendar unavailable at {cutoff}"
         normalized[key] = list(reversed(tail))
         if any(r.get("isin") and r["isin"]!=identity.get("instrument") for r in raw):
             issues[key]="Unverified venue instrument"
@@ -60,12 +70,14 @@ def reconcile(manifest, history, prior):
             # An archived validated packet is still usable when recovery returns no new evidence.
             packet=old
             if benchmark and prior.get("listings",{}).get(key):
-                metrics=features(prior["listings"][key],cutoff,benchmark)
+                metrics=features(prior["listings"][key],cutoff,benchmark,optional_volume=True)
                 if metrics.get("relative_20_pct") is not None:
                     packet={**old,"features":{**old["features"],"relative_20_pct":metrics["relative_20_pct"]}}
         diagnostic=history.get("provider_status",{}).get(key,{}).get("reason")
-        if diagnostic and not ready(packet):
-            packet["features"]["issue"]=" · ".join(filter(None,[packet["features"].get("issue"),diagnostic]))
+        if not ready(packet):
+            packet["features"]["issue"]=" · ".join(filter(None,[packet["features"].get("issue"),gaps.get(key),diagnostic]))
+        if rows and any(r["volume"] is None for r in rows[-21:]):
+            packet["features"]["volume_note"] = "Volume unavailable for one or more recent sessions"
         packets[key]=packet
     return {"version":2,"pair_protocol":3,"packets":packets,
             "listings":{k:[*normalized[k],*(r for r in prior.get("listings",{}).get(k,[])

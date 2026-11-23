@@ -44,7 +44,7 @@ def price(value):
     return result
 
 
-def bar(day, zone, values, url, cutoff):
+def bar(day, zone, values, url, cutoff, *, optional_volume=False):
     # Daily bars become usable only after that trading session has closed.
     close_time = time(15, 30) if zone == INDIA else time(16)
     stamp = datetime.combine(day, close_time, tzinfo=zone)
@@ -54,8 +54,9 @@ def bar(day, zone, values, url, cutoff):
         op, hi, lo, cl = map(price, values[:4])
         if not (lo <= min(op, cl) <= max(op, cl) <= hi):
             return None
-        volume = int(str(values[4]).strip().replace(",", ""))
-        if volume < 0:
+        raw_volume = values[4] if len(values) > 4 else None
+        volume = None if optional_volume and raw_volume in (None, "") else int(str(raw_volume).strip().replace(",", ""))
+        if volume is not None and volume < 0:
             return None
     except (ValueError, TypeError):
         return None
@@ -114,10 +115,10 @@ def indian_news(data, venue, stocks, cutoff):
     return matches
 
 
-def upstox_daily_bars(payload, cutoff, url, limit=10):
+def upstox_daily_bars(payload, cutoff, url, limit=10, *, optional_volume=False):
     sessions = {}
     for row in (payload.get("data") or {}).get("candles") or []:
-        if not isinstance(row, list) or len(row) < 6:
+        if not isinstance(row, list) or len(row) < (5 if optional_volume else 6):
             continue
         try:
             stamp = datetime.fromisoformat(row[0])
@@ -126,13 +127,13 @@ def upstox_daily_bars(payload, cutoff, url, limit=10):
         if stamp.tzinfo is None:
             continue
         day = stamp.astimezone(INDIA).date()
-        item = bar(day, INDIA, row[1:6], url, cutoff)
+        item = bar(day, INDIA, row[1:6], url, cutoff, optional_volume=optional_volume)
         if item:
             sessions[day] = item
     return [sessions[day] for day in sorted(sessions, reverse=True)[:limit]]
 
 
-async def supplement_indian_bars(client, result, cutoff, notices, owner, *, sessions=5, diagnostics=None, calendars=None, verified_keys=None):
+async def supplement_indian_bars(client, result, cutoff, notices, owner, *, sessions=5, diagnostics=None, calendars=None, verified_keys=None, optional_volume=False):
     from app.domains.zerodha.upstox_quote_guard import QuoteGuard, redis_client
     from app.domains.zerodha.upstox_quotes import load_instruments
     missing = [key for key, items in result.items() if len({r["as_of"][:10] for r in items if r["kind"] == "daily_bar"}) < sessions]
@@ -180,7 +181,7 @@ async def supplement_indian_bars(client, result, cutoff, notices, owner, *, sess
                         from app.domains.zerodha.upstox_quote_guard import retry_after_seconds
                         diagnostics[key]={"reason":"Upstox HTTP 429","retry_after":retry_after_seconds(response.headers.get("Retry-After"))}
                 response.raise_for_status()
-                bars = upstox_daily_bars(response.json(), cutoff, url, limit=max(10,sessions))
+                bars = upstox_daily_bars(response.json(), cutoff, url, limit=max(10,sessions),optional_volume=optional_volume)
                 if expected:
                     dated = {r["as_of"][:10]:r for r in bars if r["as_of"][:10] in expected}
                     result[key] = list((cached | dated).values())

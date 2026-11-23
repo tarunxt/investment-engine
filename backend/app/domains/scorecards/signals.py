@@ -7,7 +7,7 @@ from statistics import mean, pstdev
 from .prompts import CATALOGUE
 
 
-def daily_series(records, cutoff):
+def daily_series(records, cutoff, *, optional_volume=False):
     """Conflicting observations or a likely change of price scale need verification."""
     by_day = {}
     boundary = datetime.fromisoformat(cutoff)
@@ -18,9 +18,13 @@ def daily_series(records, cutoff):
             stamp = datetime.fromisoformat(bar["as_of"])
             if not stamp.tzinfo or stamp > boundary:
                 continue
-            values = tuple(float(bar[key]) for key in ("open", "high", "low", "close", "volume"))
-            op, hi, lo, close, volume = values
-            if not all(map(math.isfinite, values)) or not (0 < lo <= min(op, close) <= max(op, close) <= hi) or volume < 0:
+            prices = tuple(float(bar[key]) for key in ("open", "high", "low", "close"))
+            op, hi, lo, close = prices
+            volume = None if optional_volume and bar.get("volume") is None else float(bar["volume"])
+            values = (*prices, volume)
+            if not all(map(math.isfinite, prices)) or not (0 < lo <= min(op, close) <= max(op, close) <= hi):
+                continue
+            if volume is not None and (not math.isfinite(volume) or volume < 0):
                 continue
         except (KeyError, TypeError, ValueError):
             continue
@@ -34,9 +38,9 @@ def daily_series(records, cutoff):
     return series, None
 
 
-def features(records, cutoff, benchmark=()):
-    bars, issue = daily_series(records, cutoff)
-    index, _ = daily_series(benchmark, cutoff)
+def features(records, cutoff, benchmark=(), *, optional_volume=False):
+    bars, issue = daily_series(records, cutoff, optional_volume=optional_volume)
+    index, _ = daily_series(benchmark, cutoff, optional_volume=optional_volume)
     out = {"sessions":len(bars), "issue":issue, "as_of":None, "close":None,
            "return_5_pct":None, "relative_20_pct":None, "relative_volume_20":None,
            "volatility_20_pct":None, "distance_sma50_pct":None, "shadow_score":None}
@@ -59,8 +63,10 @@ def features(records, cutoff, benchmark=()):
     if len(bars) >= 21:
         closes = [r["close"] for r in bars[-21:]]
         returns = [b/a-1 for a,b in zip(closes,closes[1:])]
-        vol = mean(r["volume"] for r in bars[-21:-1])
-        out["relative_volume_20"] = bars[-1]["volume"]/vol if vol else None
+        volumes = [r["volume"] for r in bars[-21:]]
+        if all(v is not None for v in volumes):
+            average = mean(volumes[:-1])
+            out["relative_volume_20"] = volumes[-1]/average if average else None
         out["volatility_20_pct"] = 100*pstdev(returns)
         sessions = [r["as_of"][:10] for r in bars[-21:]]
         index_dates = [r["as_of"][:10] for r in index[-21:]]

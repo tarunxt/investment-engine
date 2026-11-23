@@ -61,6 +61,6 @@ def evidence_packets(research, cutoff):
         for obs in [*daily[-1:], *(r for r in observations if r["kind"] in ("exchange_notice","filing_excerpt"))]:
             if obs.get("url") and stamped(obs.get("as_of"),cutoff):
                 sources[str(len(sources)+1)] = {k:obs[k] for k in ("url","as_of","title","summary","text","kind") if k in obs}
-        metric = features(observations,cutoff,research.get("benchmark",[]))
+        metric = features(observations,cutoff,research.get("benchmark",[]),optional_volume=True)
         packets[listing] = {"features":{k:v for k,v in metric.items() if k!="shadow_score"},"sources":sources}
     return packets
