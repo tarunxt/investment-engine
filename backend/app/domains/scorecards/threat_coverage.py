@@ -46,22 +46,28 @@ def plan(packet, prior_rows=()):
 
 
 def diagnostics(rows):
-    rejected = normalized = scoreable = without_sources = 0
+    rejected = normalized = scoreable = without_sources = usable = assessed = 0
     for row in rows:
         sources = row.get("source_ids", {})
         available = {cat for cat, ids in sources.items() if ids}
         without_sources += not available
-        scoreable += len(verified(row) | set(row.get("sourced_categories", available))) >= 3
+        accepted = verified(row)
+        supported = accepted | set(row.get("sourced_categories", available))
+        usable += bool(supported)
+        assessed += bool(accepted)
+        scoreable += len(supported) >= 3
         for event in row.get("evidence", []):
             rejected += event.get("Disposition") == "Excluded: Confidence unavailable"
             normalized += event.get("Disposition") == "Accepted" and event.get("Confidence normalized", False)
-    return dict(without_sources=without_sources, scoreable=scoreable, confidence_rejected=rejected,
+    return dict(usable=usable, assessed=assessed, without_sources=without_sources, scoreable=scoreable, confidence_rejected=rejected,
                 confidence_recovered=normalized)
 
 
 def annotate(result, packet):
     for row in result["rows"]:
         key = row["listing"]
+        if key in packet.get("issuer_trace", {}):
+            row["issuer_trace"] = packet["issuer_trace"][key]
         sources = row.setdefault("source_ids", {})
         for cat, ids in packet.get("matrix", {}).get(key, {}).items():
             if ids:

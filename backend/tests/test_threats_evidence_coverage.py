@@ -84,7 +84,7 @@ def test_collects_dated_official_release_and_scopes_issuer_documents(monkeypatch
     from functools import partial
     monkeypatch.setattr(src.httpx,"AsyncClient",partial(src.httpx.AsyncClient,trust_env=False))
     monkeypatch.setattr(src,"download",download)
-    monkeypatch.setattr(src,"technical_instruments",AsyncMock(return_value={}))
+    monkeypatch.setattr(src,"technical_instruments",AsyncMock(return_value={k:{"isin":"INE000000001"} for k in ("BSE:ABC","NSE:ABC")}))
     stocks=[dict(listing=k,exchange=k.split(":")[0],symbol=k.split(":")[1],name="ABC Limited" if k.endswith(":ABC") else "DD Limited") for k in ("BSE:ABC","NSE:ABC","NSE:DD")]
     packet=asyncio.run(src.collect({"as_of":CUTOFF,"stocks":stocks,"owner_id":1},None,{s["listing"]:["C3","C6"] for s in stocks}))
     assert len(packet["sources"])==2
@@ -99,7 +99,7 @@ def test_run_247_scores_supported_cells_once_without_inventing_consolidated_scor
     job = batch(mappings)
     job[0].response = job[0].response.replace('"confidence": "medium"', '"confidence": 0.80')
     saved = project({"stocks":[{"listing":k} for k in mappings],"as_of":CUTOFF},[job])
-    assert saved["threat_diagnostics"] == dict(without_sources=14,scoreable=0,confidence_rejected=0,confidence_recovered=20)
+    assert saved["threat_diagnostics"] == dict(usable=20,assessed=20,without_sources=14,scoreable=0,confidence_rejected=0,confidence_recovered=20)
     assert saved["threat_counts"]["verified_cells"] == 20 and saved["threat_counts"]["scored"] == 0
     assert plan(job[-1]) == {key: cats for key, cats in mappings.items() if cats}
     assert plan(job[-1], saved["rows"]) == {}
@@ -184,3 +184,13 @@ def test_dated_bse_announcement_requires_matching_scrip_and_decision_time():
             {**record,"ATTACHMENTNAME":"../wrong.pdf"}]
     [(listing, doc)] = bse_announcements(json.dumps({"Table":rows}), stock, "123456", datetime.fromisoformat(CUTOFF))
     assert listing == stock["listing"] and doc["url"].endswith("/AttachHis/report.pdf")
+
+
+def test_saved_filing_facts_have_dated_provenance_and_no_future_comparison():
+    from app.domains.scorecards.threat_recovery import filing_facts
+    cutoff = datetime.fromisoformat(CUTOFF)
+    filing = {"as_of":"2026-11-10T13:00:00+05:30", "url":"https://www.bseindia.com/XBRLFILES/results.xml",
+              "facts":[{"period":["2026-07-01","2026-09-30"],"values":{"TotalIncome":[250,"INR"]}}]}
+    assert "TotalIncome = 250 INR" in filing_facts(filing, cutoff)["excerpt"]
+    assert filing_facts({**filing, "as_of":"2026-11-24T12:00:00+05:30"}, cutoff) is None
+    assert filing_facts({**filing,"comparison_source":{"url":"other"}}, cutoff) is None

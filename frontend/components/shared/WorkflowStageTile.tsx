@@ -452,6 +452,11 @@ export function getLlmStageTileRows(info: StageInfo, now: number, stage?: Workfl
       {label:"Listings in scope",value:String(info.threatCounts.expected)},
       {label:"Listings returned",value:`${info.threatCounts.returned}/${info.threatCounts.expected}`},
       ...(info.threatCounts.diagnostics ? [
+        ...(info.threatCounts.diagnostics.usable != null ? [
+          {label:"With usable category evidence",value:`${info.threatCounts.diagnostics.usable}/${info.threatCounts.expected}`},
+          {label:"With verified sub-scores",value:`${info.threatCounts.diagnostics.assessed ?? 0}/${info.threatCounts.expected}`},
+          {label:"With consolidated scores",value:`${info.threatCounts.scored}/${info.threatCounts.expected}`},
+        ] : []),
         {label:"Sources for ≥3 categories",value:`${info.threatCounts.diagnostics.scoreable}/${info.threatCounts.expected} listings`},
         {label:"No assigned sources",value:String(info.threatCounts.diagnostics.without_sources)},
         ...(info.threatCounts.diagnostics.confidence_rejected ? [{label:"Confidence format rejected",value:`${info.threatCounts.diagnostics.confidence_rejected} assessments · recheck saved evidence`}] : []),
