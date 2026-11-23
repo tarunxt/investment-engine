@@ -13,12 +13,9 @@ import { cardNames, scorecardHref } from "@/lib/scorecardNavigation";
 
 type Stage = ComponentProps<typeof WorkflowStageTile>;
 function kiteBoardRows(item: Stage, rebalance: Stage["info"] | undefined) {
-  if (isCard(item.stage)) {
+  if (item.stage !== "technical" && isCard(item.stage)) {
     const sameWorkflow = item.info.workflowSequence === rebalance?.workflowSequence;
     const recommendedStocks = sameWorkflow ? rebalance?.recommendedStocks : null;
-    if(item.stage==="technical" && item.info.published?.technical_counts) {
-      return getIdleStageRows(item.stage,{...item.info,rebalanceReportedCount:recommendedStocks},item.now);
-    }
     return getIdleStageRows(item.stage, { ...item.info, recommendedStocks }, item.now);
   }
   const rows = getIdleStageRows(item.stage, item.info, item.now);
@@ -127,7 +124,7 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
           let title = getStageTileLabel(item.stage);
           if (market === "zerodha") {
             if (item.stage === "sync") title = "Sync Kite Portfolio";
-            if (isCard(item.stage)) title = cardNames[item.stage];
+            if (item.stage !== "technical" && isCard(item.stage)) title = cardNames[item.stage];
           }
           const ranking = item.info.frozenFinal?.actionable_ranking as { rows?: RankedListing[] } | undefined;
           const label = evidenceLabel(item);
