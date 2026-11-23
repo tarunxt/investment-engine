@@ -424,6 +424,10 @@ export function getLlmStageTileRows(info: StageInfo, now: number, stage?: Workfl
   const work=info.published?.technical_recovery;
   const evidenceOnly=Boolean(info.published && !info.activeRunId && !info.published.preview && ((pairs || tech || info.threatCounts || info.published.counts) && info.published.run_id==null || tech?.jobs_dispatched===0));
   return [
+    ...(stage === "rebalance" && info.published?.counts ? [
+      {label:"Score coverage",value:`${info.published.counts.assessed}/${info.published.expected} scored · ${info.published.counts.complete} complete · ${info.published.counts.unassessed} unassessed`},
+      ...(info.published.leading_factor ? [{label:"Leading blocker",value:info.published.leading_factor+" · "+info.published.affected+" listings"}] : []),
+    ] : []),
     { label: evidenceOnly ? "Last evidence update" : "Last Scan", value: formatCompactStageTime(info.completedAt ?? info.startedAt) },
     ...(evidenceOnly ? [{ label:"Model jobs",value:"0 · evidence only" }] : [{ label: "LLMs Used", value: formatLlmCompletion(info) }]),
     ...(info.published ? [
@@ -431,7 +435,7 @@ export function getLlmStageTileRows(info: StageInfo, now: number, stage?: Workfl
       {label:"Recorded execution",value:evidenceOnly ? "Evidence only" : `${info.lastRunId ? "#"+info.lastRunId+" · " : ""}${info.runStatus || info.state}`},
       ...(stage === "technical" || tech ? [] : [{label:"Stage 4 used",value:info.published.used_output_id ? `Output #${info.published.used_output_id} · final #${info.published.final_id}` : "No saved reference"}]),
     ] : []),
-    ...(!tech && info.evidenceCoverage ? [{label: "Score coverage", value: info.evidenceCoverage}] : []),
+    ...(!tech && !(stage === "rebalance" && info.published?.counts) && info.evidenceCoverage ? [{label: "Score coverage", value: info.evidenceCoverage}] : []),
     ...(!evidenceOnly && info.distinctModels != null ? [{label: "Model coverage", value: `${info.totalLlms ?? "?"} jobs · ${info.distinctModels} distinct model${info.distinctModels === 1 ? "" : "s"}`}] : []),
     ...(tech ? [
       {label:"Current scores",value:`${tech.complete} complete · ${tech.provisional} provisional · ${tech.insufficient} pending`},
@@ -463,6 +467,11 @@ export function getLlmStageTileRows(info: StageInfo, now: number, stage?: Workfl
       {label:"Listings in scope",value:String(info.threatCounts.expected)},
       {label:"Listings returned",value:`${info.threatCounts.returned}/${info.threatCounts.expected}`},
       ...(info.threatCounts.diagnostics ? [
+        ...(info.threatCounts.diagnostics.usable != null ? [
+          {label:"With usable category evidence",value:`${info.threatCounts.diagnostics.usable}/${info.threatCounts.expected}`},
+          {label:"With verified sub-scores",value:`${info.threatCounts.diagnostics.assessed ?? 0}/${info.threatCounts.expected}`},
+          {label:"With consolidated scores",value:`${info.threatCounts.scored}/${info.threatCounts.expected}`},
+        ] : []),
         {label:"Sources for ≥3 categories",value:`${info.threatCounts.diagnostics.scoreable}/${info.threatCounts.expected} listings`},
         {label:"No assigned sources",value:String(info.threatCounts.diagnostics.without_sources)},
         ...(info.threatCounts.diagnostics.confidence_rejected ? [{label:"Confidence format rejected",value:`${info.threatCounts.diagnostics.confidence_rejected} assessments · recheck saved evidence`}] : []),
@@ -473,8 +482,12 @@ export function getLlmStageTileRows(info: StageInfo, now: number, stage?: Workfl
       ...(info.published.readiness ? [{label:"Source readiness",value:info.published.readiness.ready+" full · "+info.published.readiness.provisional+" partial · "+info.published.readiness.awaiting+" awaiting evidence"}] : []),
       {label:"Listings assessed",value:String(info.published.counts.assessed)},
       {label:"Score quality",value:`${info.published.counts.complete} complete · ${info.published.counts.provisional} provisional · ${info.published.counts.unassessed} unassessed`},
-      {label:"Actions",value:Object.entries(info.published.actions ?? {}).map(([k,v])=>`${k} ${v}`).join(" · ")||"—"},
+      {label:info.published.counts.provisional ? "Provisional actions" : "Actions",value:Object.entries(info.published.actions ?? {}).map(([k,v])=>`${k} ${v}`).join(" · ")||"—"},
     ] : [{ label: "Stocks recommended", value: formatRecommendedStockProgress(info) }]),
+    ...(stage === "rebalance" && info.published ? [{label:"Recorded phase times",value:
+      Object.entries(info.published.phase_seconds ?? {}).map(([phase,seconds])=>
+        `${({sources:"Evidence collection",model:"Initial model calls",retry:"Retry calls"} as Record<string,string>)[phase]} ${seconds}s`
+      ).join(" · ") || "Unavailable for this output",detail:"Model times are summed across calls and may overlap across jobs."}] : []),
     ...(!evidenceOnly ? [{ label: "Duration", value: formatDuration(info.startedAt, info.endedAt, now) ?? "n/a" }] : []),
     { label: "Cost incurred", value: evidenceOnly ? "₹0.00 · evidence only" : cost === "Usage unavailable" && getStageOutcome(info) === "running" ? "Task running" : cost },
     ...(pairs && pairs.ready<pairs.listings && !getTileErrorDetail(info.error)

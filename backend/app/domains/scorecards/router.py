@@ -19,7 +19,7 @@ from app.domains.runs.router import _get_redis
 from app.shared.types import UserId
 from app.shared.exceptions import AppException
 from . import technical_queue
-from . import storage, pair_evidence, pair_plan, pair_work, threat_coverage
+from . import threat_recovery, storage, pair_evidence, pair_plan, pair_work, threat_coverage
 from .storage import Stage
 from .prompts import build_prompt, batches, CARDS, single_job_card
 from .scoring import project
@@ -277,7 +277,10 @@ async def start_scorecard(portfolio,revision_id,card,body,db,user,*,managed=Fals
             wanted = target_gaps(prior.result_json["rows"])
             if not wanted:
                 raise HTTPException(422,"All Threats categories are resolved")
-        history = await pair_evidence.latest_history(db,rev.id) if shared or india_threats else None
+        if india_threats:
+            history = await threat_recovery.saved_inputs(db,rev.id)
+        elif shared:
+            history = await pair_evidence.latest_history(db,rev.id)
         seed=None
         if technical_v3 and not history:
             from .technical_history import prior_bars
@@ -353,8 +356,9 @@ async def start_scorecard(portfolio,revision_id,card,body,db,user,*,managed=Fals
                 raise HTTPException(422,"No new evidence can produce or improve a stock score yet. Refresh missing sources. No model job started.")
             research["targets"] = eligible
         elif rebalance_v2:
-            from .rebalance_recovery import with_evidence
+            from .rebalance_recovery import exclude_exhausted, with_evidence
             repair_fields=with_evidence(repair_fields,research["packets"])
+            repair_fields=await exclude_exhausted(db,parent,repair_fields,research["packets"],owner,portfolio)
             if not repair_fields:
                 raise HTTPException(422,"No new source evidence for the missing fields. No model jobs were queued.")
             config["repair_fields"]=repair_fields
@@ -706,11 +710,11 @@ async def repair_threat_evidence(attempt_id:int, db:AsyncSession=Depends(get_asy
     prior = await pair_evidence.attempt_packet(db,original)
     wf, parent, settings, manifest = original.row.workflow_id, original.id, dict(original.data["settings"]), revision.manifest
     owner, username = user.id,user.username
-    history = await pair_evidence.latest_history(db,revision_id)
+    history = await threat_recovery.saved_inputs(db,revision_id)
     await db.commit()
     packet = await collect(manifest,username,wanted,previous=prior,venue_history=history)
-    identity = f"threats/evidence/{parent}/"+digest([packet["matrix"],packet.get("issuer_sources"),packet["history_gaps"]])
-    if all(packet.get(k)==prior.get(k) for k in ("matrix","issuer_sources","history_gaps","targets","exposure_required")):
+    identity = f"threats/evidence/{parent}/"+digest([packet["matrix"],packet.get("issuer_sources"),packet["history_gaps"],packet.get("issuer_trace")])
+    if all(packet.get(k)==prior.get(k) for k in ("matrix","issuer_sources","history_gaps","targets","exposure_required","issuer_trace")):
         return result
     await owned(db,owner,"india","revision",revision_id,lock=True)
     found = await storage.by_key(db,"attempt",identity,revision_id=revision_id)

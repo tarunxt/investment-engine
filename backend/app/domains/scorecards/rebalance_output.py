@@ -188,8 +188,15 @@ def digest_text(text):
 def project(manifest, jobs):
     observations={s["listing"]:{} for s in manifest["stocks"]}
     errors, tables=[],[]
+    timing = {}
     for job,slot,keys,_,research in jobs:
+        if "collection_seconds" in research:
+            timing["sources"] = research["collection_seconds"]
         saved=(job.runtime_metadata_json or {}).get("rebalance_records",{})
+        for receipt in saved.get("calls", []):
+            if "seconds" in receipt:
+                phase = "model" if receipt["phase"] == "initial" else "retry"
+                timing[phase] = round(timing.get(phase, 0) + receipt["seconds"], 3)
         records=saved.get("rows",{})
         if records and job.status not in ("completed","partial"):
             errors.append({"job_id":job.id,"reason":"Accepted fields recovered from checkpoint; execution ended "+str(job.status)})
@@ -224,4 +231,4 @@ def project(manifest, jobs):
                         "signed_terms":terms,"action":action,"available_weight":weight,"model_count":len(slots),
                         "coverage":"Complete" if weight==sum(R_WEIGHTS.values()) and plan_complete else "Partial" if weight else "Unassessed",
                         "raw_rows":[view for _,view in slots.values()],"trade_gaps":trade_gaps})
-    return {"rows":results,"rebalance_version":2,"errors":errors,"job_ids":[job.id for job,*_ in jobs],"model_tables":tables}
+    return {"phase_seconds":timing,"rows":results,"rebalance_version":2,"errors":errors,"job_ids":[job.id for job,*_ in jobs],"model_tables":tables}

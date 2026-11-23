@@ -31,6 +31,39 @@ def with_evidence(requests,packets):
     return eligible
 
 
+def source_signature(packet, field):
+    from .universe import digest
+    factor = field if field in FACTORS else "cruxx"
+    refs = packet.get("refs", {})
+    sources = [digest({k:v for k,v in refs[r].items() if k != "received_at"}) for r in packet.get("allowed", {}).get(factor, []) if r in refs]
+    return digest([sorted(sources), *([packet.get(k) for k in ("units", "settled", "price")]
+                                      if field not in FACTORS else [])])
+
+
+async def exclude_exhausted(db, original, eligible, packets, owner, portfolio):
+    from .router import observations, owned
+    remaining = {key:list(fields) for key,fields in eligible.items()}
+    seen = set()
+    while original and remaining and original.id not in seen:
+        seen.add(original.id)
+        if not original.data.get("data_recovery"):
+            for job, _, _, _, previous in await observations(db, original, owner, portfolio):
+                records = (job.runtime_metadata_json or {}).get("rebalance_records", {})
+                for call in records.get("calls", []):
+                    if call.get("phase") != "repair":
+                        continue
+                    for key, attempted in (call.get("requested") or {}).items():
+                        if key not in remaining or key not in previous.get("packets", {}):
+                            continue
+                        remaining[key] = [f for f in remaining[key] if f not in attempted or
+                            source_signature(previous["packets"][key], f) != source_signature(packets[key], f)]
+                        if not remaining[key]:
+                            del remaining[key]
+        parent = original.result_json.get("recovered_from") if original.data.get("data_recovery") else original.result_json.get("repaired_from")
+        original = await owned(db,owner,portfolio,"attempt",parent) if parent and remaining else None
+    return remaining
+
+
 def combine(parent, child, requested):
     rows=[]
     repairs={r["listing"]:r for r in child["rows"]}
