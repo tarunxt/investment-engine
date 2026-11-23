@@ -44,3 +44,45 @@ async def save(entries):
                 await pipeline.execute()
     except (RedisError, OSError, RuntimeError):
         pass  # Live collection remains available during a cache outage.
+
+
+def store_attachment(data, fingerprint):
+    """Retain inspected primary documents by hash across API and scheduled collections."""
+    import logging
+    import os
+    import tempfile
+    import time
+    from pathlib import Path
+
+    directory = Path(os.getenv("THREATS_FILING_CACHE_DIR", "data/threat-filings"))
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+        destination = directory / fingerprint
+        if destination.is_file():
+            return
+        # Each download is already bounded. Limit the entire cache and expire old files.
+        files = []
+        for path in directory.iterdir():
+            if len(path.name) != 64:
+                continue
+            try:
+                info = path.stat()
+            except FileNotFoundError:
+                continue
+            files.append((info.st_mtime, info.st_size, path))
+        total = len(data) + sum(size for _, size, _ in files)
+        expires = time.time() - TTL
+        for modified, size, path in sorted(files):
+            if modified >= expires and total <= 256 * 1024**2:
+                break
+            path.unlink(missing_ok=True)
+            total -= size
+        with tempfile.NamedTemporaryFile(dir=directory, delete=False) as output:
+            try:
+                output.write(data)
+                output.flush()
+                os.replace(output.name, destination)
+            finally:
+                Path(output.name).unlink(missing_ok=True)
+    except OSError:
+        logging.getLogger(__name__).warning("Unable to archive primary filing %s", fingerprint, exc_info=True)

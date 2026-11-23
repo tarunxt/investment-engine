@@ -92,7 +92,7 @@ export function ThreatStockScores({ result, onRecover, onRefresh, onRetry }: {
         {ranked.length<3 ? <p>{3-ranked.length} more verified {3-ranked.length===1?"category":"categories"} needed to calculate a stock score.</p> :
           <p>Top three risks · {ranked.slice(0,3).map((v,i)=>[70,20,10][i]+"% × "+value(v)).join(" + ")}. Saved threat risk {value(active.stock_threat)}. Basket score = 100 − {value(active.stock_threat)} = {value(active.score)}.</p>}
         {trace && <section className="mt-3"><h4 className="font-semibold">Issuer filing recovery</h4>
-          <dl>{[["Issuer identity","identity"],["Filing lookup","lookup"],["BSE lookup","bse_lookup"],["Attachment","attachment"],["Excerpt","excerpt"]].map(([label,key]) => trace[key] && <div key={key}><dt className="inline font-medium">{label} · </dt><dd className="inline">{trace[key]}</dd></div>)}</dl>
+          <dl>{[["Issuer identity","identity"],["Filing lookup","lookup"],["BSE lookup","bse_lookup"],["Technical session reuse","technical_history"],["Attachment","attachment"],["Excerpt","excerpt"]].map(([label,key]) => trace[key] && <div key={key}><dt className="inline font-medium">{label} · </dt><dd className="inline">{trace[key]}</dd></div>)}</dl>
           {trace.url && <details><summary>Filing dated {trace.as_of}</summary><p>{trace.text}</p><a className="text-blue-700 underline" href={trace.url} target="_blank" rel="noreferrer">Open issuer filing</a></details>}
         </section>}
         {Boolean(active.history_gap) && <p>Venue history · {String((active.history_gap as {reason?:string}).reason)} · {((active.history_gap as {missing_sessions?:string[]}).missing_sessions??[]).join(", ")}</p>}
