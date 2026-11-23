@@ -35,6 +35,7 @@ export function ThreatStockScores({ result, onRecover, onRefresh, onRetry }: {
   const values = (active?.categories??{}) as Record<string,number|null>;
   const raw = (active?.raw_rows??[]) as Record<string,unknown>[];
   const evidence = (active?.evidence??[]) as Record<string,unknown>[];
+  const trace = active?.issuer_trace as Record<string,string> | undefined;
   const candidates = (active?.source_ids??{}) as Record<string,string[]>;
   const ranked = Object.values(values).filter((v):v is number=>typeof v==="number").sort((a,b)=>b-a);
   async function act(action:"score"|"refresh"|"replay") {
@@ -90,6 +91,10 @@ export function ThreatStockScores({ result, onRecover, onRefresh, onRetry }: {
         <p>Event risk = 4 × likelihood × impact. Each category uses its highest accepted event.</p>
         {ranked.length<3 ? <p>{3-ranked.length} more verified {3-ranked.length===1?"category":"categories"} needed to calculate a stock score.</p> :
           <p>Top three risks · {ranked.slice(0,3).map((v,i)=>[70,20,10][i]+"% × "+value(v)).join(" + ")}. Saved threat risk {value(active.stock_threat)}. Basket score = 100 − {value(active.stock_threat)} = {value(active.score)}.</p>}
+        {trace && <section className="mt-3"><h4 className="font-semibold">Issuer filing recovery</h4>
+          <dl>{[["Issuer identity","identity"],["Filing lookup","lookup"],["BSE lookup","bse_lookup"],["Attachment","attachment"],["Excerpt","excerpt"]].map(([label,key]) => trace[key] && <div key={key}><dt className="inline font-medium">{label} · </dt><dd className="inline">{trace[key]}</dd></div>)}</dl>
+          {trace.url && <details><summary>Filing dated {trace.as_of}</summary><p>{trace.text}</p><a className="text-blue-700 underline" href={trace.url} target="_blank" rel="noreferrer">Open issuer filing</a></details>}
+        </section>}
         {Boolean(active.history_gap) && <p>Venue history · {String((active.history_gap as {reason?:string}).reason)} · {((active.history_gap as {missing_sessions?:string[]}).missing_sessions??[]).join(", ")}</p>}
         {categories.map((name,i)=>{
           const cat="C"+(i+1);
