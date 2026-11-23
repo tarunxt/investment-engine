@@ -418,6 +418,12 @@ async def collect(manifest, username, previous=None, requested=None, *, sessions
             outcomes=await asyncio.gather(*tasks,return_exceptions=True)
             if pending or any(isinstance(v,Exception) for v in outcomes):
                 notices.append("Exchange history or actions incomplete within the retrieval window")
+        if pair_repair:
+            from .rebalance_close import recover_closes
+            selected = [stock for stock in manifest["stocks"] if stock["listing"] in keys - set(action_only)]
+            await recover_closes(client, redis, {**manifest, "stocks": selected}, username,
+                                 {"calendars": calendars, "listings": records}, master,
+                                 refresh=True, optional_volume=True)
         if eligible_token:
             def broker_key(k):
                 return f"broker-bars:v1:{manifest['owner_id']}:{k}:{master[k]['isin']}"
