@@ -114,13 +114,15 @@ async def _collect_packet(db, rev, owner, username, previous, refresh):
     return ready
 
 
-def annotate(result,research):
+def annotate(result,research, *, score_supported_factors=False):
     from .rebalance_recovery import gaps, with_evidence
     state=checklist(research)
     gaps_by_key=gaps(result)
     eligible=with_evidence(gaps_by_key,research["packets"])
-    full_keys={r["listing"] for r in state["rows"] if r["state"]=="ready"}
-    state["repairable"]=sum(k in full_keys for k in eligible)
+    scorable_keys={r["listing"] for r in state["rows"] if r["state"]=="ready"}
+    if score_supported_factors:
+        scorable_keys.update(supported_listings(research))
+    state["repairable"]=len(scorable_keys.intersection(eligible))
     result["rebalance_readiness"]=state
     return result
 
@@ -134,17 +136,21 @@ async def recover(db, original, owner, username):
     orig_id,workflow_id=original.id,original.row.workflow_id
     prior=await storage.lookup(db,owner,"india","packet",settings.get("packet_id")) if settings.get("packet_id") else None
     packet=await prepare(db,rev,owner,username,prior.data["research"] if prior else {},refresh=True)
+    def refreshed(result):
+        return annotate(dict(result), packet.data["research"],
+                        score_supported_factors=settings.get("score_supported_factors", False))
+
     if original.data.get("data_recovery") and settings.get("packet_id")==packet.id:
-        return replay(parent)
+        return replay(refreshed(parent))
     await storage.lookup(db,owner,"india","revision",rev_id,lock=True)
     identity=f"rebalance/evidence/{orig_id}/{packet.id}"
     exists=await storage.by_key(db,"attempt",identity,revision_id=rev_id)
     if exists:
-        return replay(exists.result_json)
+        return replay(refreshed(exists.result_json))
     settings.update(packet_id=packet.id,assignments=[],parent=None)
     child=await storage.append(db,workflow_id,"attempt",identity,{"card":"rebalance","settings":settings,
         "data_recovery":True,"recovered_from":orig_id},revision_id=rev_id)
-    result=annotate({**parent,"id":child.id,"recovered_from":orig_id,"evidence_only":True,"jobs":0,"completed":0},packet.data["research"])
+    result=refreshed({**parent,"id":child.id,"recovered_from":orig_id,"evidence_only":True,"jobs":0,"completed":0})
     child.row.summary_json={**child.data,"result":result}
     child.row.status=result["status"]
     await db.commit()
