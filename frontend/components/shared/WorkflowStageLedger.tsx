@@ -1,6 +1,7 @@
 "use client";
 
 import { useId, useState, type ComponentProps, type ReactElement } from "react";
+import { Maximize2, Minimize2 } from "lucide-react";
 import type { RankedListing } from "@/lib/workflowScorecardRanking";
 import { StageDurationBreakdownDialog } from "@/app/console/dashboard/_components/StageDurationBreakdownDialog";
 import { WorkflowTileMenu, type TileAction } from "./WorkflowTileMenu";
@@ -12,6 +13,13 @@ import { isCard, type CardKey } from "@/lib/independentScorecards";
 import { cardNames, scorecardHref } from "@/lib/scorecardNavigation";
 
 type Stage = ComponentProps<typeof WorkflowStageTile>;
+const compactFields = new Set([
+  "Latest sync", "Stocks synced", "Last Scan", "Last evidence update", "Last update",
+  "Workflow", "Model jobs launched", "LLMs Used", "Model jobs", "Model coverage", "Score coverage",
+  "Complete scores", "Rebalance inputs", "Stocks recommended", "Duration", "Cost incurred",
+  "Error", "Assessment", "Evidence status", "Coverage issue",
+]);
+
 function kiteBoardRows(item: Stage, rebalance: Stage["info"] | undefined) {
   if (item.stage !== "technical" && isCard(item.stage)) {
     const sameWorkflow = item.info.workflowSequence === rebalance?.workflowSequence;
@@ -23,6 +31,17 @@ function kiteBoardRows(item: Stage, rebalance: Stage["info"] | undefined) {
     rows.splice(1, 0, { label: "Stocks synced", value: String(item.info.portfolioStockCount ?? "n/a") });
   }
   return rows;
+}
+
+function mergeSummary(info: Stage["info"], kite: boolean, expanded: boolean) {
+  if (kite && info.sourceRevision != null) {
+    if (info.sourceListingCount == null) return `Revision #${info.sourceRevision}`;
+    return expanded
+      ? `Revision #${info.sourceRevision} · ${info.sourceListingCount} merged listings`
+      : `${info.sourceListingCount} unique listings`;
+  }
+  if (info.recommendedStocks == null) return "Awaiting scan evidence";
+  return kite ? `${info.recommendedStocks} Swing listings · Stage 2 inputs pending` : `${info.recommendedStocks} unique listings`;
 }
 
 function evidenceLabel(item: Stage) {
@@ -73,6 +92,7 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
 }) {
   const [selectedStage, setSelectedStage] = useState("sync");
   const [durationStage, setDurationStage] = useState<Stage | null>(null);
+  const [expandedTiles, setExpandedTiles] = useState<Record<string, boolean>>({});
   const detailId = useId();
   if (!enabled) return <div className="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{children}</div>;
   const stages = children.map(child => {
@@ -103,9 +123,23 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
     if (!item.selectable && item.onClick) actions.push({ label: "Open stage", onSelect: item.onClick });
     return actions;
   };
-  const tileHeader = (title: string, actions: TileAction[], info?: Stage["info"]) => <div className="flex items-start justify-between gap-2">
-    <h4 className="font-semibold">{title}{info && <StageStatusIcon info={info} />}</h4><WorkflowTileMenu title={title} actions={actions} />
-  </div>;
+  const tileHeader = (key: string, title: string, actions: TileAction[], info: Stage["info"]) => {
+    const expanded = Boolean(expandedTiles[key]);
+    const toggleLabel = `${expanded ? "Minimise" : "Expand"} ${title} details`;
+    const Icon = expanded ? Minimize2 : Maximize2;
+    return <div className="flex items-start justify-between gap-2">
+      <h4 className="min-w-0 font-semibold">{title}<StageStatusIcon info={info} /></h4>
+      <div className="flex shrink-0 items-center">
+        {market === "zerodha" && <button type="button" aria-label={toggleLabel} title={toggleLabel}
+          aria-expanded={expanded} aria-controls={`${detailId}-${key}`}
+          onClick={() => setExpandedTiles(previous => ({ ...previous, [key]: !previous[key] }))}
+          className="-my-1 inline-flex size-9 items-center justify-center rounded-lg text-slate-700 hover:bg-white/80 focus-visible:ring-2 focus-visible:ring-indigo-600">
+          <Icon aria-hidden="true" className="size-4" />
+        </button>}
+        <WorkflowTileMenu title={title} actions={actions} />
+      </div>
+    </div>;
+  };
   if (board && view === "ledger") {
     const rebalance = stages.find(item => item.stage === "rebalance")?.info;
     const lanes = [
@@ -121,6 +155,8 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
           const item = stages.find(stage => stage.stage === key);
           if (!item) return null;
           const rows = market === "zerodha" ? kiteBoardRows(item, rebalance) : getIdleStageRows(item.stage, item.info, item.now);
+          const compact = market === "zerodha" && !expandedTiles[key];
+          const visibleRows = compact ? rows.filter(row => compactFields.has(row.label)) : rows;
           let title = getStageTileLabel(item.stage);
           if (market === "zerodha") {
             if (item.stage === "sync") title = "Sync Kite Portfolio";
@@ -133,36 +169,43 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
           if (item.onSyncNowClick) actions.push({ label: "Sync Now", onSelect: item.onSyncNowClick });
           return <div key={key} className="mb-3">
             <article className={`rounded-lg p-3 ${stageTileBorder(item.info, "border border-slate-200")} ${getStageLedgerTone(item.info)}`}>
-              {tileHeader(title, actions, item.info)}
+              {tileHeader(key, title, actions, item.info)}
               {item.selectable && <label className="text-xs"><input type="checkbox" checked={Boolean(item.selected)} onChange={item.onClick} /> Select for next run</label>}
-              {!upcoming && <>{label && <p className="text-xs">{label}</p>}
-                <dl className="mt-2 text-xs">{rows.map(row => <div key={row.label} className="flex justify-between gap-2">
-                  <dt>{row.label}</dt><dd>{row.label === "LLMs Used" && market ? <button type="button"
-                    data-auto-rebalance-llm-metric="true" data-workflow-stage={item.stage}
-                    data-workflow-portfolio={market === "zerodha" ? "india" : "indmoney_us"}
-                    data-workflow-total={item.info.totalLlms ?? undefined} data-workflow-run-id={item.info.activeRunId ?? item.info.lastRunId ?? undefined}
-                    data-workflow-job-id={item.info.jobId ?? undefined} data-workflow-sequence={item.info.workflowSequence ?? undefined}
-                    data-workflow-passed={item.info.passedLlms ?? undefined} data-workflow-partial={item.info.partialLlms ?? undefined}
-                    data-workflow-failed={item.info.failedLlms ?? undefined} className="text-indigo-700 underline">{row.value}</button> : row.value}{row.detail && <StageErrorDetails stageLabel={title} info={item.info} row={row} />}</dd>
-                </div>)}</dl></>}
-              {item.stage === "actionables" && ranking?.rows && <details className="mt-2 text-xs">
-                <summary>Final scores · {ranking.rows.length} stocks</summary>
-                <table className="my-2 w-full text-left"><thead><tr><th>Listing</th><th>Pairwise</th><th>Threat</th><th>Final /100</th></tr></thead>
-                  <tbody>{ranking.rows.map(row => <tr key={row.listing}><th>{row.listing}</th><td>{row.pairwise?.toFixed(1) ?? "—"}</td>
-                    <td>{row.stock_threat?.toFixed(1) ?? "—"}</td><td>{row.score?.toFixed(2) ?? "—"}</td></tr>)}</tbody></table>
-              </details>}
-              {item.info.portfolioThreat && <p className="mt-2 text-sm">Portfolio Threat · {item.info.portfolioThreat}</p>}
+              <div id={`${detailId}-${key}`}>
+                {!upcoming && <>{label && <p className="text-xs">{label}</p>}
+                  <dl className="mt-2 text-xs">{visibleRows.map(row => <div key={row.label} className="flex justify-between gap-2">
+                    <dt>{row.label}</dt><dd>{row.label === "LLMs Used" && market ? <button type="button"
+                      data-auto-rebalance-llm-metric="true" data-workflow-stage={item.stage}
+                      data-workflow-portfolio={market === "zerodha" ? "india" : "indmoney_us"}
+                      data-workflow-total={item.info.totalLlms ?? undefined} data-workflow-run-id={item.info.activeRunId ?? item.info.lastRunId ?? undefined}
+                      data-workflow-job-id={item.info.jobId ?? undefined} data-workflow-sequence={item.info.workflowSequence ?? undefined}
+                      data-workflow-passed={item.info.passedLlms ?? undefined} data-workflow-partial={item.info.partialLlms ?? undefined}
+                      data-workflow-failed={item.info.failedLlms ?? undefined} className="text-indigo-700 underline">{row.value}</button> : row.value}{row.detail && <StageErrorDetails stageLabel={title} info={item.info} row={row} />}</dd>
+                  </div>)}</dl></>}
+                {market === "zerodha" && !compact && !rows.some(row => row.label === "Recorded execution") && <dl className="mt-1 text-xs">
+                  <div className="flex justify-between gap-2"><dt>Stage status</dt><dd>{item.info.runStatus ?? item.info.state}</dd></div>
+                  {item.info.workflowSequence != null && <div className="flex justify-between gap-2"><dt>Workflow run</dt><dd>#{item.info.workflowSequence}</dd></div>}
+                </dl>}
+                {!compact && item.stage === "actionables" && ranking?.rows && <details className="mt-2 text-xs">
+                  <summary>Final scores · {ranking.rows.length} stocks</summary>
+                  <table className="my-2 w-full text-left"><thead><tr><th>Listing</th><th>Pairwise</th><th>Threat</th><th>Final /100</th></tr></thead>
+                    <tbody>{ranking.rows.map(row => <tr key={row.listing}><th>{row.listing}</th><td>{row.pairwise?.toFixed(1) ?? "—"}</td>
+                      <td>{row.stock_threat?.toFixed(1) ?? "—"}</td><td>{row.score?.toFixed(2) ?? "—"}</td></tr>)}</tbody></table>
+                </details>}
+                {!compact && item.info.portfolioThreat && <p className="mt-2 text-sm">Portfolio Threat · {item.info.portfolioThreat}</p>}
+              </div>
             </article>
             {item.onPlaceOrderClick && <button type="button" onClick={item.onPlaceOrderClick}
               className={`mx-auto mt-3 block min-h-12 max-w-full rounded-lg px-8 text-base font-semibold text-white ${basketReady && !active ? "bg-green-700 hover:bg-green-800" : "bg-blue-700 hover:bg-blue-800"}`}>
               {item.placeOrderLabel ?? "Place Order"}
             </button>}
             {item.stage === "swing" && <div className="mt-2 rounded-lg border p-3 text-sm">
-              {tileHeader("Merge contenders", [...(onManageSource ? [{label:"Manage Stage 2 inputs",onSelect:onManageSource}] : []), { label: "Stock Flow", onSelect: onStockFlowClick }, { label: "History", href: historyHref }], (market === "zerodha" ? item.info.sourceRevision != null : item.info.recommendedStocks != null) ? {state:"completed"} : { state: "idle" })}
-              <p>{market === "zerodha"
-                ? item.info.sourceRevision ? `Revision #${item.info.sourceRevision}${item.info.sourceListingCount != null ? " · " + item.info.sourceListingCount + " merged listings" : ""}`
-                  : item.info.recommendedStocks != null ? `${item.info.recommendedStocks} Swing listings · Stage 2 inputs pending` : "Awaiting scan evidence"
-                : item.info.recommendedStocks != null ? item.info.recommendedStocks + " unique listings" : "Awaiting scan evidence"}</p></div>}
+              {tileHeader("merge", "Merge contenders", [...(onManageSource ? [{label:"Manage Stage 2 inputs",onSelect:onManageSource}] : []), { label: "Stock Flow", onSelect: onStockFlowClick }, { label: "History", href: historyHref }], (market === "zerodha" ? item.info.sourceRevision != null : item.info.recommendedStocks != null) ? {state:"completed"} : { state: "idle" })}
+              <div id={`${detailId}-merge`}>
+                <p>{mergeSummary(item.info, market === "zerodha", Boolean(expandedTiles.merge))}</p>
+                {market === "zerodha" && expandedTiles.merge && <p className="text-xs">Swing listings · {item.info.recommendedStocks ?? "Not available"}</p>}
+              </div>
+            </div>}
 
           </div>;
         })}
