@@ -4,10 +4,13 @@ import {Grid} from "./ScorecardResultGrid";
 export function PairwiseCoverage({result}:{result:CardResult}) {
   const c=result.pair_counts;
   if (!c) return null;
+  const sources = (result.evidence_readiness ?? []).filter(row => typeof row.closing_candle === "string");
   return <section aria-label="Pairwise evidence coverage" className="space-y-2 rounded-lg border p-3 text-sm">
     <h3 className="font-semibold">{c.mode==="balanced" ? "Balanced trial" : "Full round robin"} · {c.judged}/{c.expected} pairs judged</h3>
     <p>{c.ready}/{c.listings} listings have usable evidence. {c.complete_stocks}/{c.listings} have all scheduled opponents judged.</p>
     <p>{c.eligible-c.judged} eligible pairs await a judgment. {c.one_missing} pairs lack evidence on one side and {c.both_missing} on both. {c.benchmark_ready}/{c.listings} have benchmark-relative returns.</p>
+    {!!sources.length && <p>Closing candles · {sources.filter(row=>String(row.closing_candle).startsWith("Reused from")).length} reused from earlier runs · {sources.filter(row=>row.closing_candle==="Verified in this run").length} verified in this run · {sources.filter(row=>row.closing_candle==="Still missing").length} missing.</p>}
+    {c.jobs===0 && c.eligible>0 && <p>{result.recovery && "phase" in result.recovery && result.recovery.phase==="judging" ? "Judgment dispatch is in progress." : "Ready pairs have no recorded job. Check the Pairwise planning budget and recovery status under Scorecard controls."}</p>}
     <p>{c.returned} pairs have a recorded response. {c.jobs} model jobs in this attempt{c.carried ? ` · ${c.carried} previous judgments retained` : ""}.</p>
     {result.attempt_cost_inr!=null && <p>Attempt cost ₹{result.attempt_cost_inr.toFixed(2)}{result.attempt_elapsed_seconds!=null ? ` · ${Math.round(result.attempt_elapsed_seconds)} seconds` : ""}.</p>}
     {!!result.observed_at && <p>Decision cutoff {result.as_of} · evidence retrieved {result.observed_at}</p>}

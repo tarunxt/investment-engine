@@ -4387,6 +4387,7 @@ export function RebalanceWorkflowSections({
   const [recoveryIssue, setRecoveryIssue] = useState("");
   const [sourceSelections,setSourceSelections] = useState<Partial<Record<WorkflowPortfolio,number>>>({});
   const [scoreSupportedFactors,setScoreSupportedFactors] = useState(true);
+  const [pairSchedule,setPairSchedule] = useState<"balanced"|"full">("balanced");
   const [pairPlanningBudget,setPairPlanningBudget] = useState("");
   const [runSpendLimit, setRunSpendLimit] = useState("");
   const [cardPolicies,setCardPolicies] = useState<Partial<Record<WorkflowPortfolio,CardPolicy>>>({});
@@ -7289,6 +7290,7 @@ ${zerodhaExecutionMode === "direct_market"
               const budget = broker === "india" && card === "pairwise" && pairPlanningBudget !== "" ? Number(pairPlanningBudget) : null;
               let queued=await api.start(source.id,card,{sequence, request_key:"workflow-"+sequence,targets:targets[card] ?? [],
                 ...(scoreSupported ? {score_supported_factors:true} : {}),
+                ...(broker === "india" && card === "pairwise" ? {pair_mode:pairSchedule} : {}),
                 ...(budget !== null ? {estimated_budget_inr:budget} : {})});
               let run=queued.run_id==null?null:await waitForRunWithStageHandling(portfolio,card,queued.run_id,queued.scoring_version===3 || card==="pairwise");
               let result=await api.result(queued.id);
@@ -7517,7 +7519,7 @@ ${zerodhaExecutionMode === "direct_market"
       recordAutoRebalanceStage,
       resetPortfolio,
       selectedInputs,
-      selectedStages, sourceSelections, cardPolicies, pairPlanningBudget, scoreSupportedFactors, runSpendLimit,
+      selectedStages, sourceSelections, cardPolicies, pairSchedule, pairPlanningBudget, scoreSupportedFactors, runSpendLimit,
       specificMode,
       updateStage,
       usdInrRate,
@@ -7923,6 +7925,7 @@ ${zerodhaExecutionMode === "direct_market"
           <summary className="cursor-pointer">Scorecard run settings</summary>
           <fieldset disabled={isBusy} className="mt-2 space-y-2">
             <label className="block"><input type="checkbox" checked={scoreSupportedFactors} onChange={e=>setScoreSupportedFactors(e.target.checked)} /> Score available Rebalance factors when a filing or price history is missing</label>
+            <label className="block">Pairwise schedule <select value={pairSchedule} onChange={e=>setPairSchedule(e.target.value as "balanced"|"full")}><option value="balanced">Balanced · up to 8 opponents per listing</option><option value="full">Full round robin</option></select></label>
             <label className="block">Pairwise budget for early judgments (₹) <input className="w-24 rounded border p-1" type="number" min="0.01" max="100000" step="0.01" value={pairPlanningBudget} onChange={e=>setPairPlanningBudget(e.target.value)} /></label>
             <p>Leave the budget blank to wait for all listings. A positive budget lets Pairwise judge ready pairs within the planning estimate.</p>
           </fieldset>

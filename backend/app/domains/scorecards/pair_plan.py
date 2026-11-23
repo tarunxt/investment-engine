@@ -94,8 +94,8 @@ def project_plan(manifest, research, mode, fresh, parent=None, previous=None, jo
             "balanced_schedule":sparse_agreement(rows) if mode=="full" else None}
 
 
-def evidence_detail(packets):
-    return [{"listing":k, "ready":ready(v), "sessions":v["features"].get("sessions",0),
+def evidence_detail(packets, candle_sources=None):
+    return [{"listing":k, "ready":ready(v), **({"closing_candle":candle_sources[k]} if candle_sources and k in candle_sources else {}), "sessions":v["features"].get("sessions",0),
              "last_session":v["features"].get("as_of"), "sources":len(v.get("sources",{})),
              "reason":v["features"].get("issue") or ("" if ready(v) else "Missing verified observations"),
              "volume_note":v["features"].get("volume_note"),

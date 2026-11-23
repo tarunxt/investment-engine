@@ -279,6 +279,9 @@ async def start_scorecard(portfolio,revision_id,card,body,db,user,*,managed=Fals
                 raise HTTPException(422,"All Threats categories are resolved")
         history = await pair_evidence.latest_history(db,rev.id) if shared or india_threats else None
         seed=None
+        if pair_v3:
+            from .technical_history import pairwise_prior_bars
+            seed = await pairwise_prior_bars(db, manifest, [s["listing"] for s in manifest["stocks"]])
         if technical_v3 and not history:
             from .technical_history import prior_bars
             seed=await prior_bars(db,manifest,[s["listing"] for s in manifest["stocks"]])
@@ -296,12 +299,20 @@ async def start_scorecard(portfolio,revision_id,card,body,db,user,*,managed=Fals
             else:
                 packet=await prepare(db,rev,owner,username,previous,refresh=bool(body.retry_attempt_id))
             research=packet.data["research"]
+        elif pair_v3:
+            from .technical_sources import collect
+            base = history or {}
+            news = await pair_evidence.news(manifest)
+            initial = pair_evidence.reconcile(manifest, base, news)
+            missing = {k for k, packet in initial["packets"].items() if not pair_plan.ready(packet)}
+            if missing:
+                history = await collect(manifest, username, {**base, "prior_bars": seed}, missing, pair_repair=True)
+                research = pair_evidence.reconcile(manifest, history, news)
+            else:
+                research = initial
         elif shared:
             history = history or (await shared_history(revision_id,manifest,username,seed) if seed else await shared_history(revision_id,manifest,username))
-            if pair_v3:
-                research = pair_evidence.reconcile(manifest,history,await pair_evidence.news(manifest))
-            else:
-                research = history
+            research = history
         else:
             research = await collect_research(manifest,card,username=username)
     w=await workflow(db,owner,portfolio,body.sequence)

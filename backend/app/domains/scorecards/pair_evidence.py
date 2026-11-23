@@ -23,6 +23,7 @@ def reconcile(manifest, history, prior):
     keys = [s["listing"] for s in manifest["stocks"]]
     original = prior.get("packets", {})
     packets = {}
+    candle_sources = {}
     issues = {}
     gaps = {}
     normalized = {}
@@ -79,7 +80,13 @@ def reconcile(manifest, history, prior):
         if rows and any(r["volume"] is None for r in rows[-21:]):
             packet["features"]["volume_note"] = "Volume unavailable for one or more recent sessions"
         packets[key]=packet
-    return {"version":2,"pair_protocol":3,"packets":packets,
+        if rows and ready(packet):
+            source_run = rows[-1].get("reused_workflow")
+            candle_sources[key] = f"Reused from run #{source_run}" if source_run else "Verified in this run"
+        else:
+            candle_sources[key] = "Previously verified" if ready(packet) else "Still missing"
+
+    return {"version":2,"pair_protocol":3,"packets":packets,"candle_sources":candle_sources,
             "listings":{k:[*normalized[k],*(r for r in prior.get("listings",{}).get(k,[])
                          if r.get("kind")!="daily_bar")] if ready(packets[k]) and normalized[k]
                          else prior.get("listings",{}).get(k,[]) for k in keys},
@@ -123,20 +130,22 @@ async def repair(db, original, owner, username, *, requested=None):
     if requested is not None:
         missing.intersection_update(requested)
     benchmark_missing=not any(p.get("features",{}).get("relative_20_pct") is not None for p in initial.get("packets",{}).values())
+    from .technical_history import pairwise_prior_bars
+    seed = await pairwise_prior_bars(db, manifest, missing) if missing else {}
     await db.commit()
     updated=previous
     if missing or benchmark_missing:
         action_only = {k for k in missing if previous and
                        initial.get("packets",{}).get(k,{}).get("features",{}).get("sessions",0)>=6
                        and initial["packets"][k]["features"].get("issue")=="Corporate-action history unavailable"}
-        updated=await collect(manifest,username,previous,missing,pair_repair=True,action_only=action_only)
+        updated=await collect(manifest,username,{**(previous or {}), "prior_bars":seed},missing,pair_repair=True,action_only=action_only)
     research=reconcile(manifest,updated,prior) if updated else initial
     signature=digest(research["packets"])
     identity=f"pairwise/evidence/{source_id}/{signature}"
     rev=await storage.lookup(db,owner,"india","revision",rev_id,lock=True)
     if updated:
         await save_history(db,rev,wf,updated)
-    if old.get("pair_protocol")==3 and digest(prior_packets)==signature:
+    if old.get("pair_protocol")==3 and digest(prior_packets)==signature and prior.get("candle_sources")==research.get("candle_sources"):
         await db.commit()
         return old
     existing=await storage.by_key(db,"attempt",identity,revision_id=rev_id)
@@ -163,7 +172,7 @@ def finish(result,attempt,research,revision_id):
          "scored":scored,"jobs":counts["jobs"],"completed":counts["jobs"],"source_hashes":result.get("source_hashes",{}),
          "retry_after":max((v.get("retry_after") or 0 for v in research.get("provider_status",{}).values()),default=0),
          "as_of":research.get("as_of"),"observed_at":research.get("observed_at"),
-         "research_notices":research.get("notices",[]),"evidence_readiness":evidence_detail(research["packets"])}
+         "research_notices":research.get("notices",[]),"evidence_readiness":evidence_detail(research["packets"],research.get("candle_sources"))}
     attempt.row.status=status
     attempt.row.summary_json={**attempt.data,"result":out}
     return out
