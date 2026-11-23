@@ -9,7 +9,7 @@ type Factor = {weight:number; value:number|null; points:number|null; reason:stri
 type Source = {instrument?:string; history_hash?:string; tick?:number; master?:string; calendar?:string; action_url?:string;
   actions?: {date:string; kind:string; multiplier:number|null}[]; last_bar?:{as_of:string; url:string; received_at?:string; published_at?:string}};
 type Ledger = {canonical_listing?:string;identity_source?:string;version:number; direction:string; coverage_pct:number; range:[number,number]|null; as_of:string; session:string|null;
-  input_hash:string; vintage:string; flags:string[]; reason:string; readiness:Record<string,string|number|null>;
+  input_hash:string; observed_at?:string; vintage:string; flags:string[]; reason:string; readiness:Record<string,string|number|null>;
   factors:Record<string,Factor>; sources:{stock:Source; benchmark:Source}};
 const fmt = (n:unknown, digits=1) => typeof n==="number" && Number.isFinite(n) ? n.toFixed(digits) : "—";
 const at = (s?:string) => s ? new Intl.DateTimeFormat("en-IN",{dateStyle:"medium",timeStyle:"short",timeZone:"Asia/Kolkata"}).format(new Date(s))+" IST" : "—";
@@ -52,15 +52,16 @@ export function TechnicalStockScores({result,revision,onRecover,onRetryCommentar
     {counts&&<p>20-session direction · Stage 2 #{revision??current.revision_id} · Output #{current.id} · {current.stage4_method==="v3"?"Validated for Stage 4":"Shadow evaluation · Stage 4 uses the legacy score"}</p>}
     <div className="overflow-x-auto"><table className="w-full text-left"><thead className="bg-slate-100"><tr>
       {["Listing","Score /100","Coverage","Setup / entry","Reason"].map(k=><th key={k} className={cell}>{k}</th>)}</tr></thead>
-      <tbody>{ordered.map(r=>{const v=lines(r);const ready=r.readiness as {setup?:string;entry?:string}|undefined;
+      <tbody>{ordered.map(r=>{const v=lines(r);const previous=r.previous_close_score as {score:number;session:string}|undefined;const ready=r.readiness as {setup?:string;entry?:string}|undefined;
         return <tr key={r.listing}><th scope="row" className={cell}>{r.listing}</th><td className={cell}><button type="button" className={link}
-          aria-label={`Show calculation for ${r.listing}`} onClick={()=>setSelection(r)}>{fmt(r.score)} ↗</button></td>
-          <td className={cell}>{r.coverage}{v&&` · ${v.coverage_pct}%`}</td><td className={cell}>{ready?.setup??"—"} · {ready?.entry??"—"}</td>
+          aria-label={`Show calculation for ${r.listing}`} onClick={()=>setSelection(r)}>{fmt(r.score)} ↗</button>
+          {previous&&<div>Last verified {fmt(previous.score)} /100 · {previous.session}</div>}</td>
+          <td className={cell}>{typeof r.closing_pending==="string" ? `${r.closing_pending} closing data pending` : r.coverage}{v&&` · ${v.coverage_pct}%`}</td><td className={cell}>{ready?.setup??"—"} · {ready?.entry??"—"}</td>
           <td className={cell}>{technicalReason(v?.reason||String(r.reason??v?.direction??"—"))}</td></tr>;})}</tbody></table></div>
     {onRecover&&(!counts||counts.provisional+counts.insufficient>0)&&<button className={link} disabled={busy} onClick={async()=>{
       setBusy(true);try{const next=await onRecover(current.id);setRecovered({from:result.id,data:next});setMessage(next.id===current.id?"No new verified evidence available.":`Showing recovered output #${next.id}.`);}catch(e){setMessage(String(e));}finally{setBusy(false);}
     }}>{busy?"Checking history…":"Recover missing evidence · no model call"}</button>}
-    {onRetryCommentary&&counts&&(counts.current_commentary??counts.commentary)<(counts.source_rows??counts.expected)&&<button className={link} disabled={busy} onClick={async()=>{
+    {onRetryCommentary&&current.rows.some(r=>r.score!=null)&&counts&&(counts.current_commentary??counts.commentary)<(counts.source_rows??counts.expected)&&<button className={link} disabled={busy} onClick={async()=>{
       setBusy(true);try{await onRetryCommentary();setMessage("Commentary retry queued.");}catch(e){setMessage(String(e));}finally{setBusy(false);}
     }}>Retry missing model commentary</button>}
     {message&&<p role="status">{message}</p>}
@@ -71,7 +72,7 @@ export function TechnicalStockScores({result,revision,onRecover,onRetryCommentar
       <div className="space-y-3 p-3 text-sm"><p>Output #{current.id} · Stage 2 #{current.revision_id??revision} · {selection.coverage}</p>
       {original&&<p>Original commentary from job #{original.job} refers to the earlier evidence revision.</p>}
       {data?.canonical_listing&&<p>Verified source alias for {data.canonical_listing}. <a href={data.identity_source} className={link}>Exchange identity record</a></p>}
-      {data?<><p>{data.direction} · Cutoff {at(data.as_of)} · Decision session {data.session??"—"} · {data.vintage}</p>
+      {data?<><p>{data.direction} · Cutoff {at(data.as_of)} · Decision session {data.session??"—"} · {data.vintage}{data.observed_at&&" · Evidence checked "+at(data.observed_at)}</p>
         <div className="overflow-x-auto"><table className="w-full text-left"><thead><tr>{["Factor","Score /100","Weight","Points from 50","Inputs"].map(k=><th key={k} className={cell}>{k}</th>)}</tr></thead>
         <tbody>{Object.entries(data.factors).map(([name,f])=><tr key={name}><th className={cell}>{name}</th><td className={cell}>{fmt(f.value)}</td><td className={cell}>{fmt(100*f.weight,0)}%</td>
           <td className={cell}>{fmt(f.points,2)}</td><td className={cell}>{f.reason||Object.entries(f.inputs).map(([k,v])=>k.replaceAll("_"," ")+" = "+Number(v.toPrecision(6))).join(" · ")}</td></tr>)}</tbody></table></div>

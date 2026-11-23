@@ -31,6 +31,9 @@ def remaining(result, previous, timestamp, attempted=(), immediate=False):
         reason=row.get("reason") or "Incomplete Technical evidence"
         provider=(row.get("technical_v3") or {}).get("provider_status",{})
         wait=max(30*2**min(count,5), int(provider.get("retry_after") or 0))
+        if "Decision-session candle missing" in reason:
+            # Final daily files can arrive hours after close. Preserve bounded retries.
+            wait = max(wait, min(4 * 3600, 300 * 2**min(count, 6)))
         due=(timestamp+timedelta(seconds=0 if immediate else wait)).isoformat()
         if prior and key not in attempted:
             due=prior["due"]
