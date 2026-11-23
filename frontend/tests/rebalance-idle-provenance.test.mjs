@@ -19,15 +19,16 @@ const record = (status, count) => ({ portfolio: 'india', sequence: 7, created_at
 async function hydrate({ runs = [], histories = [], initial, historyFailure, snapshot, runningPortfolio = null, executing = false, readBarrier, generation = {current:0}, onError = () => {} } = {}) {
   let states = initial ?? Object.fromEntries(['zerodha', 'indmoneyUs'].map(market => [market, Object.fromEntries(stages.map(stage => [stage, { state: 'idle' }]))]));
   const apiService = Object.fromEntries(['zerodhaPortfolioOverview', 'indmoneyUsPortfolioOverview', 'zerodhaThreatsLatest', 'indmoneyUsThreatsLatest'].map(key => [key, async () => ({})]));
-  apiService.zerodhaPortfolioOverview = async () => ({latest: snapshot});
+  apiService.zerodhaPortfolioOverview = apiService.indmoneyUsPortfolioOverview = async () => ({latest: snapshot});
   apiService.getAutoRebalanceHistory = async market => { await readBarrier; if (historyFailure) throw historyFailure; return { items: market === 'india' ? histories : [] }; };
   const context = {
-    setSavedRunCosts: () => {}, setWorkflowHistoryError: onError, normalizeError: error => error.message,
+    scorecardApi: () => ({ coverage: async () => ({ cards: {} }) }),
+    setLatestIndiaWorkflow: () => {}, setSavedRunCosts: () => {}, setWorkflowHistoryError: onError, normalizeError: error => error.message,
     runningPortfolio, isWorkflowExecutingRef: {current: executing},
     runtimeOwner: {}, isCurrentWorkflowOwner: () => true, savedStageReadGeneration: generation,
     apiService, fetchDashboardRecentFullRuns: async () => runs, useCallback: fn => fn, usdInrRate: 1,
-    getLatestStageRun: (rows, stage, market) => market === 'india' ? rows.find(row => row.stage === stage) : undefined,
-    getLatestMatchingRebalanceRuns: (rows, market) => market === 'india' ? rows.filter(row => row.stage === 'rebalance') : [],
+    getLatestStageRun: (rows, stage, market) => rows.find(row => row.stage === stage && row.market === market),
+    getLatestMatchingRebalanceRuns: (rows, market) => rows.filter(row => row.stage === 'rebalance' && row.market === market),
     getLatestRunTimestamp: run => run.updated_at, parseTimestampMs: time => Date.parse(time ?? '') || 0,
     buildConsensusRows: rows => rows.flatMap(row => Array.from({length: row.stocks ?? 0}, () => ({}))),
     swingRecommendationCounts: () => ({recommendedStocks:2,commonStocks:1}), countUniqueStocksFromRun: run => run.stocks,
@@ -40,8 +41,8 @@ async function hydrate({ runs = [], histories = [], initial, historyFailure, sna
   return states;
 }
 test('failed technical timestamp and historical count sources remain explicit after repeated hydration', async () => {
-  const runs = [{id: 101, stage: 'rebalance', status: 'completed', updated_at: oldTime, stocks: 11}, {id: 102, stage: 'technical', status: 'failed', updated_at: newTime, stocks: null}];
-  const before = structuredClone(runs), result = await hydrate({runs}), summary = result.zerodha.actionables;
+  const runs = [{id: 101, market: 'us', stage: 'rebalance', status: 'completed', updated_at: oldTime, stocks: 11}, {id: 102, market: 'us', stage: 'technical', status: 'failed', updated_at: newTime, stocks: null}];
+  const before = structuredClone(runs), result = await hydrate({runs}), summary = result.indmoneyUs.actionables;
   assert.equal(summary.state, 'idle');
   assert.equal(summary.evidence.kind, 'derived');
   assert.equal(summary.recommendedStocks, 11);
@@ -49,6 +50,12 @@ test('failed technical timestamp and historical count sources remain explicit af
   assert.ok(summary.evidence.references.some(value => value.includes('Stock-count source: run #101 · completed')));
   assert.deepEqual(runs, before);
   assert.deepEqual(await hydrate({runs}), result);
+});
+test('Zerodha tiles require saved workflow history before showing standalone model runs', async () => {
+  const run = {id: 105, market: 'india', stage: 'technical', status: 'completed', updated_at: newTime, stocks: 4};
+  const { zerodha } = await hydrate({runs: [run]});
+  assert.equal(zerodha.technical.lastRunId, undefined);
+  assert.equal(zerodha.actionables.evidence, undefined);
 });
 test('saved final record preserves its own workflow, job, zero, partial and terminal status', async () => {
   for (const [status, count] of [['completed', 0], ['partial', 3], ['failed', null], ['interrupted', null]]) {
@@ -92,16 +99,16 @@ test('history read failure is unavailable and cannot replace saved evidence with
 
 test('a newer successful stage replaces old errors, but stale evidence does not', async () => {
   const initial = await hydrate();
-  initial.zerodha.technical = {state:'failed', completedAt:oldTime, runStatus:'failed', partialNotice:'old partial', error:'old failure', errorDetails:[{ message:'old failure' }], lastRunId:15};
-  const run = {id:16, stage:'technical', status:'completed', updated_at:newTime};
+  initial.indmoneyUs.technical = {state:'failed', completedAt:oldTime, runStatus:'failed', partialNotice:'old partial', error:'old failure', errorDetails:[{ message:'old failure' }], lastRunId:15};
+  const run = {id:16, market:'us', stage:'technical', status:'completed', updated_at:newTime};
   const result = await hydrate({initial, runs:[run], snapshot:{holdings_count:0, captured_at:newTime}});
-  assert.equal(result.zerodha.technical.lastRunId, 16);
-  assert.equal(result.zerodha.technical.error, undefined);
-  assert.equal(result.zerodha.technical.errorDetails, undefined);
-  assert.equal(result.zerodha.technical.partialNotice, undefined);
-  assert.equal(result.zerodha.sync.portfolioStockCount, 0);
+  assert.equal(result.indmoneyUs.technical.lastRunId, 16);
+  assert.equal(result.indmoneyUs.technical.error, undefined);
+  assert.equal(result.indmoneyUs.technical.errorDetails, undefined);
+  assert.equal(result.indmoneyUs.technical.partialNotice, undefined);
+  assert.equal(result.indmoneyUs.sync.portfolioStockCount, 0);
   const stale = await hydrate({initial: result, runs:[{...run, id:15, status:'failed', updated_at:oldTime}]});
-  assert.deepEqual(stale.zerodha.technical, result.zerodha.technical);
+  assert.deepEqual(stale.indmoneyUs.technical, result.indmoneyUs.technical);
 });
 
 
