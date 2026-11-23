@@ -16,7 +16,7 @@ type Stage = ComponentProps<typeof WorkflowStageTile>;
 const compactFields = new Set([
   "Latest sync", "Stocks synced", "Last Scan", "Last evidence update", "Last update",
   "Workflow", "Model jobs launched", "LLMs Used", "Model jobs", "Model coverage", "Score coverage",
-  "Complete scores", "Rebalance inputs", "Stocks recommended", "Duration", "Cost incurred",
+  "Current scores", "Commentary", "Rebalance inputs", "Stocks recommended", "Duration", "Cost incurred",
   "Error", "Assessment", "Evidence status", "Coverage issue",
 ]);
 

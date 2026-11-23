@@ -532,6 +532,7 @@ async def start_scorecard(portfolio,revision_id,card,body,db,user,*,managed=Fals
     if technical_v3:
         from .technical_output import saved_rows
         initial=saved_rows(rev.manifest,research,research.get("carried_comments",{}),[],[])
+        attempt.row.summary_json = {**attempt.data, "technical_preview": initial["technical_counts"]}
         await technical_queue.enqueue(db,attempt,initial)
     redis=_get_redis()
     try:
@@ -611,6 +612,14 @@ async def attempt_result(portfolio:Portfolio,attempt_id:int,db:AsyncSession=Depe
     done=sum(j.status in ("partial","completed","failed","cancelled") for j,*_ in jobs)
     base={"id":a.id,"revision_id":a.data["revision_id"],"card":a.data["card"],"jobs":len(jobs),"completed":done}
     if done!=len(jobs):
+        if portfolio == "india" and a.data["card"] == "technical" and jobs[-1][-1].get("technical"):
+            from .technical_output import saved_rows
+            from .technical_history import closing_display
+            rev = await owned(db,user.id,portfolio,"revision",a.data["revision_id"])
+            packet = jobs[-1][-1]
+            preview = saved_rows(rev.manifest,packet,packet.get("carried_comments",{}),[],[j.id for j,*_ in jobs])
+            return await closing_display(db,user.id,{**base,**preview,"status":"processing",
+                                         "scored":sum(r["score"] is not None for r in preview["rows"])})
         return {**base,"status":"processing","rows":[]}
     rev=await owned(db,user.id,portfolio,"revision",a.data["revision_id"])
     result=project(a.data["card"],rev.manifest,jobs)
@@ -647,6 +656,7 @@ async def attempt_result(portfolio:Portfolio,attempt_id:int,db:AsyncSession=Depe
         out["stage4_method"] = "v3" if a.data["settings"].get("technical_validated") else "legacy"
     if result.get("scoring_version")==3:
         counts=out["technical_counts"]
+        counts.setdefault("timing", {})["commentary_observed_complete"] = datetime.now(timezone.utc).isoformat()
         if counts["complete"]==counts["expected"]:
             out["status"]="completed"
         work=await technical_queue.enqueue(db,a,out)

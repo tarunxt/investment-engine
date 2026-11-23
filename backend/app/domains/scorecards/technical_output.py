@@ -112,6 +112,25 @@ def saved_rows(manifest,research,accepted,errors,job_ids):
                   for rows in groups.values())
     counts={"expected":len(groups),"complete":count["Complete"],"provisional":count["Provisional"],
             "insufficient":count["Insufficient data"],"commentary":len(accepted)}
+    counts["jobs_dispatched"] = len(set(job_ids))
+    counts["timing"] = research.get("timing", {})
+    gaps = {}
+    for row in results:
+        listing, ledger = row["listing"], row["technical_v3"]
+        if ledger["coverage"] == "Complete":
+            continue
+        session = ledger.get("session") or "Unknown session"
+        reason = (ledger.get("provider_status") or {}).get("reason")
+        if ledger.get("stock_close_missing"):
+            gaps.setdefault(f"Stock close · {session}", []).append(listing)
+        missing = ledger.get("benchmark_missing_sessions")
+        if missing:
+            gaps.setdefault(f"NIFTYBEES · {len(missing)} missing sessions · latest {missing[-1]}", []).append(listing)
+        if ledger.get("stock_close_missing") and ledger.get("archive_status"):
+            gaps.setdefault(f"{listing.partition(':')[0]} archive · {ledger['archive_status']}", []).append(listing)
+        if reason:
+            gaps.setdefault(reason, []).append(listing)
+    counts["evidence_gaps"] = gaps
     if len(groups)!=len(results):
         counts["source_rows"]=len(results)
     return {"scoring_version":3,"rows":results,"errors":errors,"model_tables":[],"recovered_pairs":[],

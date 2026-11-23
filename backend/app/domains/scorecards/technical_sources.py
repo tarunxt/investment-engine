@@ -296,6 +296,7 @@ async def collect(manifest, username, previous=None, requested=None, *, sessions
                 if source.get("action_url"):
                     actions[isin] = source["actions"]
                     action_urls[isin] = source["action_url"]
+        archive_status = {}
         semaphore=asyncio.Semaphore(8)
         async def history(venue,day,close):
             subset={k:master.get(k,{}).get("isin") for k in keys if k.startswith(venue+":")}
@@ -330,6 +331,17 @@ async def collect(manifest, username, previous=None, requested=None, *, sessions
                             stamp=saved["received_at"]
                             published=saved.get("published_at")
                         else:
+                            # Only one worker downloads this public venue/session file at a time.
+                            # The short lease also bounds repeat requests after an exchange error.
+                            if redis is not None:
+                                try:
+                                    acquired = await redis.set("tech3:fetch:"+file_key, "1", nx=True, ex=25)
+                                except RedisError:
+                                    acquired = True
+                                if not acquired:
+                                    if day == max(calendars[venue]):
+                                        archive_status[venue] = "Archive fetch already requested"
+                                    return
                             async with client.stream("GET",url) as response:
                                 response.raise_for_status()
                                 modified=response.headers.get("last-modified")
@@ -341,6 +353,8 @@ async def collect(manifest, username, previous=None, requested=None, *, sessions
                             compressed=bytes(chunks)
                             stamp=datetime.now(timezone.utc).isoformat()
                             published=parsedate_to_datetime(modified).isoformat() if modified else None
+                        if day == max(calendars[venue]):
+                            archive_status[venue] = "Cached daily file" if saved else "Daily file received"
                         downloaded=await asyncio.to_thread(extract_archive,compressed,venue,day,close,subset,url)
                         if not saved:
                             await cache(file_key,{"zip":base64.b64encode(compressed).decode("ascii"),"received_at":stamp,
@@ -354,8 +368,10 @@ async def collect(manifest, username, previous=None, requested=None, *, sessions
                                 pipe.hset(ck,mapping={fields[k]:json.dumps(rows) for k,rows in downloaded.items()})
                                 pipe.expire(ck,86400*(400 if sessions>60 else 7))
                                 await pipe.execute()
-                    except ERRORS:
-                        pass
+                    except ERRORS as exc:
+                        if day == max(calendars[venue]):
+                            archive_status[venue] = (f"Exchange HTTP {exc.response.status_code}"
+                                if isinstance(exc,httpx.HTTPStatusError) else type(exc).__name__)
             for key,rows in found.items():
                 rows=[r for r in rows if not r.get("published_at") or datetime.fromisoformat(r["published_at"])<=availability_cutoff]
                 by_day={r["as_of"][:10] for r in rows}
@@ -493,6 +509,7 @@ async def collect(manifest, username, previous=None, requested=None, *, sessions
                     "action_url":action_urls.get(isin),
                     "actions":events,"history_hash":digest(sorted(({a:b for a,b in r.items() if a!="received_at"} for r in records[k]),key=lambda r:(r["as_of"],r["url"]))),
                     "last_bar":max(records[k],key=lambda r:r["as_of"],default=None)}
+    scoring_started = datetime.now(timezone.utc)
     index_prices=series[BENCHMARK][0]
     index_dates=list(calendars["NSE"])[-50:]
     if not per_key[BENCHMARK] and len(index_dates)==50 and all(d in index_prices for d in index_dates):
@@ -507,6 +524,9 @@ async def collect(manifest, username, previous=None, requested=None, *, sessions
                       tick=sources[k]["tick"],sources={"stock":sources[k],"benchmark":sources[BENCHMARK]},
                       issues=per_key[k],benchmark_sessions=list(calendars["NSE"]))
         row["provider_status"]=provider_status.get(k, {})
+        row["benchmark_missing_sessions"] = [d for d in list(calendars["NSE"])[-41:] if d not in index_prices]
+        row["archive_status"] = archive_status.get(k.split(":")[0])
+        row["stock_close_missing"] = bool(dates and dates[-1] not in series[k][0])
         provider_reason = row["provider_status"].get("reason")
         if row["score"] is None and provider_reason and provider_reason not in per_key[k]:
             row["reason"] = " · ".join(filter(None, (row["reason"], provider_reason)))
@@ -531,5 +551,11 @@ async def collect(manifest, username, previous=None, requested=None, *, sessions
             if target not in original_keys and prior:
                 ledgers[target]=prior
                 records[target]=previous["listings"][target]
-    return {"version":3,"technical":ledgers,"notices":sorted(set(notices)),"calendars":calendars,"provider_status":provider_status,
+    finished = datetime.now(timezone.utc)
+    score_times = [row["observed_at"] for row in ledgers.values() if row.get("score") is not None and row.get("observed_at")]
+    timing = {"retrieval_started": receipt.isoformat(), "scoring_started": scoring_started.isoformat(),
+              "first_score": min(score_times, default=None), "last_score": max(score_times, default=None),
+              "evidence_seconds": round((scoring_started-receipt).total_seconds(), 2),
+              "score_seconds": round((finished-scoring_started).total_seconds(), 3)}
+    return {"version":3,"timing":timing,"technical":ledgers,"notices":sorted(set(notices)),"calendars":calendars,"provider_status":provider_status,
             "listings":{**previous.get("listings",{}),**records},"benchmark":records[BENCHMARK]}

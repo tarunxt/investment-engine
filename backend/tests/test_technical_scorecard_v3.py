@@ -85,7 +85,7 @@ def test_runtime_projection_full_manifest_without_llm_and_pairwise_compatibility
     j=SimpleNamespace(id=7,response=None,status="failed")
     res=project("technical",manifest,[(j,0,keys,[],packet)])
     assert [r["listing"] for r in res["rows"]]==keys
-    assert res["technical_counts"]=={"complete":5,"provisional":0,"insufficient":29,"expected":34,"commentary":0}
+    assert res["technical_counts"]=={"complete":5,"provisional":0,"insufficient":29,"expected":34,"commentary":0,"jobs_dispatched":1,"evidence_gaps":{},"timing":{}}
     key=keys[0]
     def text(k,ids):
         return "| "+" | ".join([k,"100","Complete","Range","Held","Trend","Volume","105",""+ids,"+1"])+" |"
@@ -299,7 +299,11 @@ async def test_venue_archive_reused_when_second_run_adds_a_stock(monkeypatch):
     data={}
     redis=MagicMock()
     async def get(k): return data.get(k)
-    async def put(k,v,ex): data[k]=v
+    async def put(k,v,ex,nx=False):
+        if nx and k in data:
+            return False
+        data[k]=v
+        return True
     redis.get=get
     redis.set=put
     redis.aclose=AsyncMock()

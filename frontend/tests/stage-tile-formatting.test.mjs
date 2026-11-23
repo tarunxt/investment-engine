@@ -194,6 +194,16 @@ test('a repaired Pairwise packet displays its own zero model cost and pending ve
   assert.equal(values['Model coverage'],undefined);
 });
 
+test('Technical evidence recovery uses the saved job count even when a model was configured',()=>{
+  const info={state:'running',totalLlms:1,published:{output_id:711,run_id:null,covered:0,expected:40,
+    technical_counts:{expected:40,complete:0,provisional:0,insufficient:40,commentary:0}}};
+  const rows=Object.fromEntries(ui.getLlmStageTileRows(info,0).map(r=>[r.label,r.value]));
+  assert.equal(ui.getStageOutcome(info),'unassessed');
+  assert.equal(rows['LLMs Used'],undefined);
+  assert.equal(rows.Commentary,'No jobs dispatched');
+  assert.equal(rows['Current scores'],'0 complete · 0 provisional · 40 pending');
+});
+
 test('Technical coverage distinguishes successful annotations, unique prices, bullish scores and retries',()=>{
   const info={state:'completed',runStatus:'completed',partialNotice:'LLM output partial',
     published:{output_id:491,run_id:551,covered:18,expected:34,technical_counts:{expected:33,source_rows:34,
