@@ -235,7 +235,17 @@ async def collect(manifest, username, wanted=None, *, previous=None, venue_histo
                 if cat in targets[key] and sid not in matrix[key][cat]:
                     docs[sid] = doc
                     matrix[key][cat].append(sid)
+    frozen_issuers = defaultdict(set)
     for key in targets:
+        identities = {value for value in (by_key[key].get("isin"), prior.get("issuer_trace", {}).get(key, {}).get("identity"))
+                      if isinstance(value, str) and re.fullmatch(r"IN[A-Z0-9]{10}", value)}
+        if len(identities) == 1:
+            isin = identities.pop()
+            frozen_issuers[isin].add(key)
+            trace[key]["identity"] = isin
+            doc = primary_filing(isin, cutoff)
+            if doc:
+                add(doc, [key], ["C6"])
         if "C8" in targets[key]:
             days = list(session_calendar(cutoff, key.partition(":")[0], []))[-5:]
             records = (venue_history or {}).get("listings", {}).get(key, [])
@@ -243,10 +253,13 @@ async def collect(manifest, username, wanted=None, *, previous=None, venue_histo
             history[key].update(accepted)
             trace[key]["technical_history"] = f"{len(accepted)}/{len(days)} sessions reused" + "".join(
                 f" · {day}: {reason}" for day, reason in rejected.items())
+    scopes.extend("isin:"+isin for isin in frozen_issuers)
     for scope, item in await threat_archive.load(scopes, cutoff):
         doc = item["doc"]
         kind, key = scope.split(":",1)
-        if kind == "bars":
+        if kind == "isin":
+            add(doc, frozen_issuers[key], item["categories"])
+        elif kind == "bars":
             vintage = doc.get("published_at") or doc.get("received_at")
             if doc.get("volume") is not None and (not vintage or datetime.fromisoformat(vintage) <= cutoff):
                 history[key].setdefault(doc["as_of"][:10], doc)
@@ -401,6 +414,9 @@ async def collect(manifest, username, wanted=None, *, previous=None, venue_histo
                     if not re.fullmatch(r"IN[A-Z0-9]{10}", isin or ""):
                         continue
                     if key in targets:
+                        if trace[key]["identity"] not in ("Exchange symbol", isin):
+                            notices.add("Current issuer identity differs from the frozen revision for "+key)
+                            continue
                         issuers[isin].add(key)
                         trace[key]["identity"] = isin
                     if key.startswith("BSE:") and meta.get("exchange_token"):
