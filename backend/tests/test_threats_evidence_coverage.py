@@ -240,3 +240,20 @@ def test_secondary_index_requires_exact_scrip_and_timestamp():
     assert indexed_filings(body, "541154", cutoff)[0]["url"] == url
     assert not indexed_filings(body, "541155", cutoff)
     assert not indexed_filings(body.replace("2026-11-12", "2026-11-24"), "541154", cutoff)
+
+
+@pytest.mark.anyio
+async def test_saved_revision_identity_can_recover_without_live_master(monkeypatch):
+    from app.domains.scorecards import threat_sources as src
+    from functools import partial
+    monkeypatch.setattr(src.httpx, "AsyncClient", partial(src.httpx.AsyncClient, trust_env=False))
+    monkeypatch.setattr(src, "technical_instruments", AsyncMock(side_effect=OSError("offline")))
+    monkeypatch.setattr(src, "download", AsyncMock(return_value=b""))
+    monkeypatch.setattr(src.threat_archive, "load", AsyncMock(return_value=[]))
+    monkeypatch.setattr(src.threat_archive, "save", AsyncMock())
+    stocks = [{"listing":"BSE:HAL", "symbol":"HAL", "name":"HAL", "exchange":"BSE", "isin":"INE066F01020"},
+              {"listing":"NSE:ICICIBANK", "symbol":"ICICIBANK", "name":"ICICI Bank", "exchange":"NSE"}]
+    prior = {"issuer_trace":{"NSE:ICICIBANK":{"identity":"INE090A01021"}}}
+    packet = await src.collect({"stocks":stocks, "as_of":"2026-11-23T23:59:00+05:30"}, None,
+                               {s["listing"]:["C6"] for s in stocks}, previous=prior)
+    assert all(packet["matrix"][s["listing"]]["C6"] for s in stocks)
