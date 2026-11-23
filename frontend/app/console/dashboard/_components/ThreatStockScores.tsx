@@ -11,6 +11,7 @@ export function ThreatStockScores({ result, onRecover, onRefresh, onRetry }: {
   result:CardResult; onRecover:(id:number)=>Promise<CardResult>; onRefresh:(id:number)=>Promise<CardResult>; onRetry?:(id:number)=>Promise<void>;
 }) {
   const [saved,setSaved] = useState(result);
+  const [view, setView] = useState<"Consolidated scores" | "Sub-scores">("Consolidated scores");
   const [active,setActive] = useState<CardRow|null>(null);
   const [busy,setBusy] = useState(false);
   const [message,setMessage] = useState("");
@@ -40,9 +41,36 @@ export function ThreatStockScores({ result, onRecover, onRefresh, onRetry }: {
     </div>
     {saved.threat_diagnostics && <p>{saved.threat_diagnostics.scoreable}/{saved.rows.length} listings have sources for at least three categories · {saved.threat_diagnostics.without_sources} without sources · {saved.threat_diagnostics.confidence_rejected} confidence rejections · {saved.threat_diagnostics.confidence_recovered} confidence conversions accepted</p>}
     {message && <p role="status">{message}</p>}
-    <table className="w-full text-left text-sm"><thead><tr><th>Listing</th><th>Score /100</th><th>Verified categories</th><th>Assessment</th></tr></thead>
-      <tbody>{saved.rows.map(row=><tr className="border-t" key={row.listing}><td>{row.listing}</td><td><button type="button" aria-label={"Explain Threats score for "+row.listing} className="rounded px-2 py-1 text-blue-700 underline" onClick={()=>{setActive(row);dialog.current?.showModal();}}>{value(row.score)}</button></td><td>{Number(row.assessed??0)}/8</td><td>{row.coverage}</td></tr>)}</tbody>
-    </table>
+    <div role="group" aria-label="Threats score view" className="flex gap-2">
+      {(["Consolidated scores", "Sub-scores"] as const).map(label => (
+        <button key={label} type="button" aria-pressed={view === label} onClick={() => setView(label)}
+          className={control + (view === label ? " bg-slate-900 text-white" : "")}>{label}</button>
+      ))}
+    </div>
+    <div className="overflow-x-auto">
+      <table aria-label={view} className="w-full border-collapse text-left text-sm">
+        <caption className="pb-2 text-left">{view === "Sub-scores"
+          ? "Category risk /100 · Higher means greater risk. A dash means the category has no verified score."
+          : "Threat risk and safety /100 · Higher safety means lower risk. A dash means the score is unavailable."}</caption>
+        <thead><tr>
+          <th scope="col">Listing</th>
+          {view === "Sub-scores" ? categories.map(name => <th scope="col" key={name} className="min-w-28 px-2">{name}</th>) :
+            <><th scope="col">Threat risk /100</th><th scope="col">Safety /100</th></>}
+          <th scope="col">Verified categories</th><th scope="col">Assessment</th>
+        </tr></thead>
+        <tbody>{saved.rows.map(row => {
+          const categoryScores = (row.categories ?? {}) as Record<string, number | null>;
+          return <tr key={row.listing} className="border-t">
+            <th scope="row"><button type="button" aria-label={"Explain Threats score for "+row.listing}
+              className="whitespace-nowrap py-1 text-blue-700 underline"
+              onClick={() => {setActive(row); dialog.current?.showModal();}}>{row.listing}</button></th>
+            {view === "Sub-scores" ? categories.map(name => <td key={name} className="px-2">{value(categoryScores[name])}</td>) :
+              <><td>{value(row.stock_threat)}</td><td>{value(row.score)}</td></>}
+            <td>{Number(row.assessed ?? 0)}/8</td><td>{row.coverage}</td>
+          </tr>;
+        })}</tbody>
+      </table>
+    </div>
     <dialog ref={dialog} aria-label="Threats score calculation" className="m-auto max-h-[85vh] w-[min(58rem,94vw)] overflow-auto rounded-xl border p-5 backdrop:bg-black/40">
       {active && <><button type="button" className={control+" float-right"} onClick={()=>dialog.current?.close()}>Close</button>
         <h3 className="text-lg font-semibold">{active.listing} · Threats score {value(active.score)}</h3>
