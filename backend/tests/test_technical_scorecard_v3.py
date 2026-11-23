@@ -149,6 +149,7 @@ async def test_route_keeps_data_without_available_provider_and_recovers_without_
         owner=SimpleNamespace(id=7,username="owner")
         req=router.Start(request_key="technical",sequence=42,targets=[{"provider":"deepseek","model":"deepseek-v4-flash"}])
         queued=await router.start("india",rev.id,"technical",req,db,owner)
+        router.CreateRunUseCase.execute.assert_not_awaited()
         assert queued["run_id"] is None and queued["scoring_version"]==3
         saved=await router.attempt_result("india",queued["id"],db,owner)
         assert saved["status"]=="unassessed" and len(saved["rows"])==1
@@ -331,3 +332,20 @@ def test_siemens_energy_uses_only_the_verified_nse_equity():
     for instrument, stocks in (({target:{"isin":"OTHER"}},[row]), (master,[{**row,"name":"Siemens Ltd."}]),
                               ({**master,raw:{"isin":"OTHER"}},[row]), (master,[{**row,"isin":"OTHER"}])):
         assert sources.resolve_aliases([raw],instrument,stocks) == {}
+
+
+@pytest.mark.anyio
+async def test_pending_close_keeps_verified_zero_separate_from_current_score(audit_db):
+    from app.domains.scorecards.technical_history import closing_display
+    async with audit_db.sessions() as db:
+        ledger = {"score": 0, "coverage": "Complete", "session": "2026-11-20",
+                  "sources": {"stock": {"instrument": "verified-id"}}}
+        packet = await storage.append(db, 7001, "packet", "dated-close-test",
+                                      {"research": {"technical": {KEY: ledger}}})
+        result = {"id": packet.id + 1, "rows": [{"listing": KEY, "score": None, "technical_v3": {
+            **ledger, "session": "2026-11-23", "score": None, "reason": "Decision-session candle missing"}}]}
+        displayed = (await closing_display(db, 7, result))["rows"][0]
+        assert displayed["score"] is None
+        assert displayed["closing_pending"] == "2026-11-23"
+        assert displayed["previous_close_score"] == {"session": "2026-11-20", "score": 0}
+        assert (await closing_display(db, 8, result))["rows"][0]["previous_close_score"] is None

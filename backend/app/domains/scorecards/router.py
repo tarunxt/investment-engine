@@ -451,6 +451,10 @@ async def start_scorecard(portfolio,revision_id,card,body,db,user,*,managed=Fals
             raise HTTPException(422,"No new eligible pairs. Repair the remaining evidence first.")
     if technical_v3:
         from .technical_validation import stage4_validated
+        assignments = [(ready, []) for keys, _ in assignments
+                       if (ready := [k for k in keys if research["technical"][k]["score"] is not None])]
+        if body.retry_attempt_id and not assignments:
+            raise HTTPException(422, "No scored listings are ready for commentary. Recover missing evidence first.")
         config["technical_validated"] = await stage4_validated(db, owner, rev.manifest["as_of"])
     config["assignments"]=assignments
     if india_threats and body.retry_attempt_id:
@@ -488,6 +492,22 @@ async def start_scorecard(portfolio,revision_id,card,body,db,user,*,managed=Fals
         attempt.row.status = "unassessed"
         await db.commit()
         return {"id":attempt.id,"run_id":None}
+    async def save_technical_evidence(message):
+        from .technical_output import saved_rows
+        data=saved_rows(rev.manifest,research,research.get("carried_comments",{}),[],[])
+        counts=data["technical_counts"]
+        status="completed" if counts["complete"]==counts["expected"] else "partial" if counts["complete"]+counts["provisional"] else "unassessed"
+        out={**data,"id":attempt.id,"revision_id":rev.id,"card":card,"status":status,
+             "jobs":0,"completed":0,"scored":sum(r["score"] is not None for r in data["rows"]),"source_hashes":{},
+             "stage4_method":"v3" if config["technical_validated"] else "legacy","research_notices":[*research.get("notices",[]),message]}
+        attempt.row.summary_json={**attempt.data,"settings":{**config,"assignments":[]},"result":out,"data_recovery":True}
+        attempt.row.status=status
+        await technical_queue.enqueue(db,attempt,out)
+        await db.commit()
+        return {"id":attempt.id,"run_id":None,"scoring_version":3}
+
+    if technical_v3 and not assignments:
+        return await save_technical_evidence("Waiting for verified market data. No model commentary requested.")
     absent = {r["listing"] for r in rev.manifest["stocks"] if r["origin"] == "contender" and r["units"] == 0}
     batch_contexts = tuple({
         "kind": SOURCE_CONTEXT_KIND,
@@ -522,18 +542,7 @@ async def start_scorecard(portfolio,revision_id,card,body,db,user,*,managed=Fals
             auto_rebalance_label=f"{w.label} ({card.title()} Scan)"))
     except AppException as exc:
         if technical_v3 and exc.code=="VALIDATION_ERROR" and exc.message=="A selected scorecard model is temporarily unavailable":
-            from .technical_output import saved_rows
-            data=saved_rows(rev.manifest,research,research.get("carried_comments",{}),[],[])
-            counts=data["technical_counts"]
-            status="completed" if counts["complete"]==counts["expected"] else "partial" if counts["complete"]+counts["provisional"] else "unassessed"
-            out={**data,"id":attempt.id,"revision_id":rev.id,"card":card,"status":status,
-                 "jobs":0,"completed":0,"scored":sum(r["score"] is not None for r in data["rows"]),"source_hashes":{},
-                 "stage4_method":"v3" if config["technical_validated"] else "legacy","research_notices":[*research.get("notices",[]),exc.message]}
-            attempt.row.summary_json={**attempt.data,"settings":{**config,"assignments":[]},"result":out,"data_recovery":True}
-            attempt.row.status=status
-            await technical_queue.enqueue(db,attempt,out)
-            await db.commit()
-            return {"id":attempt.id,"run_id":None,"scoring_version":3}
+            return await save_technical_evidence(exc.message)
         raise HTTPException(exc.status_code,exc.message) from exc
     finally:
         await redis.aclose()
@@ -575,8 +584,9 @@ async def attempt_result(portfolio:Portfolio,attempt_id:int,db:AsyncSession=Depe
     if a.result_json:
         if portfolio=="india" and a.result_json.get("scoring_version")==3:
             work=await technical_queue.work_for(db,a)
-            if work:
-                return {**a.result_json,"recovery":technical_queue.summary(work)}
+            from .technical_history import closing_display
+            result = await closing_display(db, user.id, a.result_json)
+            return {**result, "recovery": technical_queue.summary(work)}
         if portfolio=="india" and a.data["card"]=="pairwise" and not a.result_json.get("pair_counts"):
             packet=await pair_evidence.attempt_packet(db,a)
             if packet.get("packets"):
@@ -645,6 +655,9 @@ async def attempt_result(portfolio:Portfolio,attempt_id:int,db:AsyncSession=Depe
     a.row.summary_json={**a.data,"result":out}
     a.row.status=out["status"]
     await db.commit()
+    if result.get("scoring_version")==3:
+        from .technical_history import closing_display
+        return await closing_display(db, user.id, out)
     return replay(out) if portfolio=="india" else out
 
 
@@ -737,11 +750,13 @@ async def recover_pairs(portfolio:Portfolio,attempt_id:int,db:AsyncSession=Depen
         return out
     if portfolio=="india" and original.data["card"]=="technical" and original.result_json:
         from .technical_recovery import recover
+        from .technical_history import closing_display
         if original.result_json.get("scoring_version")==3:
             work=await technical_queue.enqueue(db,original,original.result_json,immediate=True)
             if work:
                 await db.commit()
-                return await technical_queue.process(db,work.id,user.id,user.username,manual=True)
+                result = await technical_queue.process(db,work.id,user.id,user.username,manual=True)
+                return await closing_display(db, user.id, result)
         result=await recover(db, original, user.id, user.username)
         if result.get("scoring_version")==3 and result["id"]!=original.id:
             new=await owned(db,user.id,portfolio,"attempt",result["id"])
@@ -749,7 +764,7 @@ async def recover_pairs(portfolio:Portfolio,attempt_id:int,db:AsyncSession=Depen
             if work:
                 result={**result,"recovery":technical_queue.summary(work)}
             await db.commit()
-        return result
+        return await closing_display(db, user.id, result)
     if original.data["card"]!="pairwise" or not original.result_json:
         raise HTTPException(409,"A terminal Pairwise output is required")
     rev_id=original.data["revision_id"]

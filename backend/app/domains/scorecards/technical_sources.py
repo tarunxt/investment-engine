@@ -206,9 +206,10 @@ def resolve_history_instruments(stocks, master, previous):
     return aliases
 
 
-async def collect(manifest, username, previous=None, requested=None, *, sessions=60, pair_repair=False, action_only=()):
+async def collect(manifest, username, previous=None, requested=None, *, sessions=60, pair_repair=False, action_only=(), recovery_as_of=None):
     cutoff=datetime.fromisoformat(manifest["as_of"])
     receipt=datetime.now(timezone.utc)
+    availability_cutoff = recovery_as_of or cutoff
     ids=[s["listing"] for s in manifest["stocks"]]
     keys=set(requested if requested is not None else ids)|{BENCHMARK}
     venues={k.split(":")[0] for k in keys}
@@ -277,7 +278,7 @@ async def collect(manifest, username, previous=None, requested=None, *, sessions
             known={r["as_of"][:10] for r in records[key]}
             schedule=calendars.get(key.partition(":")[0],{})
             records[key].extend(r for r in evidence["bars"] if r.get("kind")=="daily_bar" and r["as_of"][:10] in schedule
-                                and r["as_of"][:10] not in known and eligible_vintage(r,cutoff))
+                                and r["as_of"][:10] not in known and eligible_vintage(r,availability_cutoff))
             stock=evidence["stock"]
             if (evidence.get("as_of") and datetime.fromisoformat(evidence["as_of"]).astimezone(INDIA).date()==cutoff.astimezone(INDIA).date()
                     and stock.get("action_url")):
@@ -356,7 +357,7 @@ async def collect(manifest, username, previous=None, requested=None, *, sessions
                     except ERRORS:
                         pass
             for key,rows in found.items():
-                rows=[r for r in rows if not r.get("published_at") or datetime.fromisoformat(r["published_at"])<=cutoff]
+                rows=[r for r in rows if not r.get("published_at") or datetime.fromisoformat(r["published_at"])<=availability_cutoff]
                 by_day={r["as_of"][:10] for r in rows}
                 records[key]=[r for r in records[key] if r["as_of"][:10] not in by_day]+rows
         start_day=cutoff.astimezone(INDIA).date()-timedelta(days=max(105, sessions * 2))
@@ -428,7 +429,7 @@ async def collect(manifest, username, previous=None, requested=None, *, sessions
                 existing={r["as_of"][:10] for r in records[k]}
                 schedule=calendars[k.partition(":")[0]]
                 records[k].extend(r for r in saved if r["as_of"][:10] in schedule
-                                  and r["as_of"][:10] not in existing and eligible_vintage(r,cutoff))
+                                  and r["as_of"][:10] not in existing and eligible_vintage(r,availability_cutoff))
             await asyncio.gather(*(reuse(k) for k in keys))
             supplement={k:[] for k in sorted(keys) if k not in action_only and set(list(calendars[k.partition(":")[0]])[-(sessions if sessions>60 else 55):])-
                          {r["as_of"][:10] for r in records[k]}}
@@ -470,7 +471,13 @@ async def collect(manifest, username, previous=None, requested=None, *, sessions
             action_urls[isin]=prior_stock["action_url"]
             per_key[k].remove("Corporate-action history unavailable for this instrument")
         events=actions.get(isin,[])
-        series[k]=normalise(records[k],days,events,manifest["as_of"])
+        scoring_bars = records[k]
+        if days and not pair_repair:
+            # Keep the raw archive for provenance. A final candle first observed after
+            # the decision cutoff becomes eligible in a separate recovery revision.
+            scoring_bars = [bar for bar in scoring_bars if bar["as_of"][:10] != days[-1]
+                            or eligible_vintage(bar, datetime.now(timezone.utc) if recovery_as_of else cutoff)]
+        series[k]=normalise(scoring_bars,days,events,manifest["as_of"])
         # A large unaccounted change of share basis must be reviewed before scoring.
         observed=[series[k][0][d] for d in days if d in series[k][0]]
         if (any(max(a[3],b[0])/min(a[3],b[0])>1.45 for a,b in zip(observed,observed[1:]))
@@ -497,7 +504,7 @@ async def collect(manifest, username, previous=None, requested=None, *, sessions
         provider_reason = row["provider_status"].get("reason")
         if row["score"] is None and provider_reason and provider_reason not in per_key[k]:
             row["reason"] = " · ".join(filter(None, (row["reason"], provider_reason)))
-        row["observed_at"]=receipt.isoformat()
+        row["observed_at"]=datetime.now(timezone.utc).isoformat()
         # A later history download without a pre-cutoff vintage remains a reconstruction.
         stock_bars=records[k]
         latest_source=all(

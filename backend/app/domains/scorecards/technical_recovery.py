@@ -1,4 +1,5 @@
 """Append an evidence-only revision; historical outputs and baskets are immutable."""
+from datetime import datetime, timezone
 from fastapi import HTTPException
 from . import storage
 from .technical_output import saved_rows
@@ -33,7 +34,7 @@ async def recover(db, original, owner, username, only=None, commit=True):
             return [{**bar,"basis":"venue-raw" if "nseindia.com/" in bar.get("url","") or "bseindia.com/" in bar.get("url","") else "unverified-provider"}
                     for bar in rows if bar.get("kind")=="daily_bar"]
         previous={"listings":{key:frozen_bars(rows) for key,rows in previous.get("listings",{}).items()}}
-    updated=await collect(manifest,username,{**previous,"prior_bars":prior},requested)
+    updated=await collect(manifest,username,{**previous,"prior_bars":prior},requested, recovery_as_of=datetime.now(timezone.utc))
     refs={}
     baselines={}
     annotations=dict(previous.get("original_annotations",{}))
