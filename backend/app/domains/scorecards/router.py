@@ -463,7 +463,7 @@ async def start_scorecard(portfolio,revision_id,card,body,db,user,*,managed=Fals
         from .rebalance_readiness import annotate
         empty=project_records(rev.manifest,[])
         result=annotate({**empty,"id":attempt.id,"card":card,"revision_id":rev.id,"status":"unassessed",
-            "jobs":0,"completed":0,"scored":0,"source_hashes":{},"research_notices":research["notices"]},research)
+            "jobs":0,"completed":0,"scored":0,"source_hashes":{},"research_notices":research["notices"]},research, score_supported_factors=body.score_supported_factors)
         attempt.row.summary_json={**attempt.data,"result":result,"data_recovery":True}
         attempt.row.status="unassessed"
         await db.commit()
@@ -587,7 +587,7 @@ async def attempt_result(portfolio:Portfolio,attempt_id:int,db:AsyncSession=Depe
             from .rebalance_readiness import annotate
             frozen=await pair_evidence.attempt_packet(db,a) if a.data.get("settings") else {}
             if frozen.get("packets") and frozen.get("version")==4:
-                return replay(annotate(dict(a.result_json),frozen))
+                return replay(annotate(dict(a.result_json),frozen, score_supported_factors=a.data["settings"].get("score_supported_factors",False)))
         if portfolio=="india" and a.data["card"]=="threats":
             targets = a.data["settings"]["targets"]
             return {**a.result_json, "threat_target":targets[0] if targets else None,
@@ -628,7 +628,7 @@ async def attempt_result(portfolio:Portfolio,attempt_id:int,db:AsyncSession=Depe
                    "research_notices":(research or {}).get("notices",[]),"scored":scored,"source_hashes":{str(j.id):digest(j.response or "") for j,*_ in jobs}}
     if a.data["card"]=="rebalance" and portfolio=="india" and research and research.get("readiness_version"):
         from .rebalance_readiness import annotate
-        annotate(out,research)
+        annotate(out,research, score_supported_factors=a.data["settings"].get("score_supported_factors",False))
     if result.get("scoring_version")==3:
         out["stage4_method"] = "v3" if a.data["settings"].get("technical_validated") else "legacy"
     if result.get("scoring_version")==3:

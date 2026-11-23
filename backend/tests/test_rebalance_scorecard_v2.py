@@ -286,3 +286,17 @@ async def test_saved_final_follows_only_non_regressing_descendants(audit_db):
         pins = {"technical":root}
         assert (await recovered_outputs(db,7001,revision.id,pins))["technical"].id == good.id
         assert pins["technical"].id == root.id and root.result_json["rows"][0]["score"] is None
+
+def test_missing_listings_with_recovered_bars_can_be_repaired_without_filings():
+    from app.domains.scorecards.rebalance_readiness import annotate
+    packets = {str(i): packet() for i in range(37)}
+    rows = []
+    for i, (key, source) in enumerate(packets.items()):
+        for factor in ("fundamentals-short", "fundamentals-medium-long"):
+            source["allowed"][factor] = []
+        terms = {f: 1 for f in out.R_WEIGHTS if not f.startswith("fundamentals")} if i < 24 else {}
+        rows.append({"listing": key, "signed_terms": terms})
+    research = {"packets": packets}
+    assert annotate({"rows": rows}, research)["rebalance_readiness"]["repairable"] == 0
+    result = annotate({"rows": rows}, research, score_supported_factors=True)
+    assert result["rebalance_readiness"]["repairable"] == 13
