@@ -240,7 +240,12 @@ test('actual broker preview renders US copy and labels without India routing con
    const review=result.exports.ScopedZerodhaBasketPreviewDialog({...props,orders:[],tradingViewMarket:market,onPlaceOrder,scoreRevision:{finalRows,divisors:[],differences:[],saved:new Map()}});
    const reviewHtml=renderToStaticMarkup(review);
    assert.match(reviewHtml,/73.53 \/ 100/); assert.match(reviewHtml,/0.00 \/ 100/); assert.match(reviewHtml,/Unassessed/);
-   assert.equal((reviewHtml.match(/data-display-only="true"/g)??[]).length,3);
+   assert.equal((reviewHtml.match(/data-display-only="true"/g)??[]).length,market==='us'?3:0);
+   for (const row of finalRows.values()) {
+     const label = market === 'india' ? 'Select NSE ' + row.symbol : row.listing + ' review only';
+     const checkbox = find(review, n => n.props?.['aria-label'] === label);
+     assert.equal(checkbox.props.disabled, market === 'us');
+   }
    assert.doesNotMatch(reviewHtml,/No basket rows available/);
    assert.equal(find(review,n=>n.type===Button&&n.props.children==='Place Order').props.disabled,true);
  }
@@ -248,7 +253,7 @@ test('actual broker preview renders US copy and labels without India routing con
  const reviewStocks = ['ONE','TWO','ZERO','UNKNOWN'].map(symbol=>({
    listing:'NSE:'+symbol,symbol,exchange:'NSE',status:'Provisional',scores:{},
  }));
- const scoreRevision={finalRows:new Map(reviewStocks.map(row=>[row.listing,row])),divisors:[],differences:[],saved:new Map()};
+ const scoreRevision={finalRows:new Map(reviewStocks.map(row=>[row.listing,row])),divisors:[],differences:[],saved:new Map(),originals:new Map()};
  const sizedReview=renderToStaticMarkup(result.exports.ScopedZerodhaBasketPreviewDialog({...props,orders:[],tradingViewMarket:'india',onPlaceOrder,scoreRevision}));
  for (const [symbol, expected] of [['ONE','97'],['TWO','13'],['ZERO','0'],['UNKNOWN','Unavailable']]) {
    assert.ok(sizedReview.includes(`aria-label="${symbol} Units action calculation">${expected}</button>`));
@@ -269,6 +274,36 @@ test('actual broker preview renders US copy and labels without India routing con
    assert.ok(after.includes('aria-label="ONE Units action calculation">'+units+'</button>'));
    assert.ok(after.includes('INR '+(units*432)));
  }
+ // A saved listing can be selected before it has a quote or an executable order.
+ let selectedIds = new Set();
+ const toggle = ids => {
+   const remove = ids.every(id => selectedIds.has(id));
+   for (const id of ids) remove ? selectedIds.delete(id) : selectedIds.add(id);
+ };
+ const selectPreview = () => result.exports.ScopedZerodhaBasketPreviewDialog({
+   ...props, tradingViewMarket:'india', orders:props.orders, scoreRevision, selectedIds, onPlaceOrder,
+   onToggle:id=>toggle([id]), onToggleSection:(_action,ids)=>toggle(ids), onToggleAll:toggle,
+ });
+ const checkbox = label => find(selectPreview(), n=>n.props?.['aria-label']===label);
+ checkbox('Select NSE ONE').props.onChange();
+ assert.equal(checkbox('Select NSE ONE').props.checked,true);
+ let selectedHtml = renderToStaticMarkup(selectPreview());
+ assert.match(selectedHtml,/1 selected/);
+ assert.match(selectedHtml,/Buy Basket<[^>]+><div[^>]*>INR 41904/);
+ assert.match(selectedHtml,/No executable order draft/);
+ assert.doesNotMatch(selectedHtml,/Select at least one stock/);
+ assert.equal(find(selectPreview(),n=>n.type===Button&&n.props.children==='Place Order').props.disabled,true);
+ checkbox('Select or deselect Trim Zerodha basket orders').props.onChange();
+ assert.equal(checkbox('Select NSE TWO').props.checked,true);
+ assert.equal(checkbox('Select NSE ONE').props.checked,true);
+ checkbox('Select or deselect all basket rows').props.onChange();
+ assert.equal(selectedIds.size,5);
+ assert.equal(checkbox('Select NSE UNKNOWN').props.checked,true);
+ assert.equal(checkbox('Select or deselect all basket rows').props.checked,true);
+ assert.equal(find(selectPreview(),n=>n.type===Button&&n.props.children==='Place Order').props.disabled,true);
+ checkbox('Select or deselect all basket rows').props.onChange();
+ assert.equal(selectedIds.size,0);
+ assert.equal(executions,0);
  const usReview=renderToStaticMarkup(result.exports.ScopedZerodhaBasketPreviewDialog({...props,orders:[],tradingViewMarket:'us',onPlaceOrder,scoreRevision}));
  assert.doesNotMatch(usReview,/draft Units/);
  reviewDeltas.clear();
@@ -323,7 +358,7 @@ test('actual broker preview renders US copy and labels without India routing con
  assert.deepEqual(headings,['Unavailable']); // No weight comparison is available in this fixture.
  for (const row of savedListings) {
    const section = reviewHtml.split('<tbody')[1];
-   assert.ok(section.includes(row.listing+' review only'));
+   assert.ok(section.includes('aria-label="Select NSE '+row.symbol+'"'));
    assert.ok(section.includes('0.00 / 100'));
  }
 
@@ -664,7 +699,7 @@ test('Action New group identity is independent of original Side/action and misma
  assert.equal(math.basketActionGroup('Add More'),'Add more');assert.equal(math.basketActionGroup(null),'Unavailable');
  for(const [current,target,group]of[[500,0,'Sell All'],[500,.1,'Trim'],[0,.1,'Buy New'],[10,.1,'Add more'],[100,.1,'Hold']])assert.equal(math.basketActionGroup(math.weightComparison(current,1000,target).action),group);
  assert.equal(math.actionQuantityMatchesDraft(-5,'SELL',5),true);assert.equal(math.actionQuantityMatchesDraft(25,'BUY',25),true);for(const args of [[-5,'BUY',5],[25,'BUY',7],[null,'SELL',5],[0,'BUY',0],[-5,'SELL',2]])assert.equal(math.actionQuantityMatchesDraft(...args),false);
- const source=readFileSync(new URL('../app/console/dashboard/_components/RebalanceWorkflowSections.tsx',import.meta.url),'utf8');assert.match(source,/groupForOrder\(order\) === action/);assert.match(source,/Boolean\(orderSubmissionBlockedReason\) \|\| selectedDraftIssues.length > 0/);assert.match(source,/After sales: <strong>/);
+ const source=readFileSync(new URL('../app/console/dashboard/_components/RebalanceWorkflowSections.tsx',import.meta.url),'utf8');assert.match(source,/groupForOrder\(order\) === action/);assert.match(source,/disabled=\{orderBlockers.length > 0\}/);assert.match(source,/After sales: <strong>/);
 });
 
 test('reordered and renamed table uses stable IDs for every cell and preserves selection controls',()=>{
