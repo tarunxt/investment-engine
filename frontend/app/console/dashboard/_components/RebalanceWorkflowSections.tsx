@@ -3349,7 +3349,18 @@ function ScopedZerodhaBasketPreviewDialog({
                                     representative: {"Stock Symbol":row.symbol, "Stock Name":row.name, "Exchange Symbol":row.exchange},
                                   }} savedFinal={row} formulaConfig={formulaConfig} market={tradingViewMarket} technicalScan={null}
                                     detailsData={detailsData} historicalRows={historicalRows} />}
-                                  <div><strong>{row.listing}</strong><small className="block">{row.name}</small></div></div></td>
+                                  <div>
+                                    <TradingViewSymbolLink
+                                      symbol={row.symbol}
+                                      market={tradingViewMarket}
+                                      exchange={row.exchange}
+                                      className="font-bold underline-offset-4 hover:text-blue-700 hover:underline"
+                                    >
+                                      {row.listing}
+                                    </TradingViewSymbolLink>
+                                    <small className="block">{row.name}</small>
+                                  </div>
+                                </div></td>
                                 <td className="whitespace-nowrap px-4 py-3">{renderSavedScore(row)}</td>
                                 <td>—</td><td>{row.action ?? "Unavailable"}</td><td>{draftDirection(action) ?? (action === "Hold" ? "Hold" : "—")}</td>
                                 {displayCalculations.cells(stock)}
