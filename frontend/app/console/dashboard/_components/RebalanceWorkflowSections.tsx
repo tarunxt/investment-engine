@@ -1,5 +1,8 @@
 "use client";
 import { basketSourceRunIds, bindIndependentBasket } from "@/lib/scorecardBasket";
+import { boardApi, boardWeights, type BoardRunChoices } from "@/lib/scorecardBoard";
+import { useScorecardBoard } from "@/components/scorecards/useScorecardBoard";
+import { CustomBoardTiles } from "@/components/scorecards/CustomBoardTiles";
 import { cards, isCard, migratedPolicy, scorecardApi, type FinalRow, type CardKey, type CardPolicy } from "@/lib/independentScorecards";
 import { ScorecardReview } from "./ScorecardReview";
 import { useReviewDialog } from "@/hooks/useReviewDialog";
@@ -4435,6 +4438,9 @@ export function RebalanceWorkflowSections({
     indmoneyUs: buildSwingTradePrompt("us"),
   }), [zerodhaSwingSettings]);
   const apiService = useMemo(() => workflowOwnedApi(workflowApiService, runtimeOwner), [runtimeOwner]);
+  const {board:indiaBoard, issue:boardIssue, reload:reloadBoard} = useScorecardBoard(apiService);
+  const [customSelection,setCustomSelection] = useState<string[]>([]);
+  const [customStatus,setCustomStatus] = useState<Record<string,string>>({});
   const { rate: usdInrRate, verifiedRate, label: costRateLabel } = useRebalanceCostQuote();
   const { user: basketOwner } = useAuth();
   const basketSafety = useBasketSubmissionSafety(basketOwner?.id ?? null);
@@ -6938,12 +6944,23 @@ ${zerodhaExecutionMode === "direct_market"
       }
       const runSpecificMode = Boolean(recovery) || specificMode[portfolio];
       const stagesToRun = new Set<WorkflowStageKey>(recovery ? [...cards, "actionables"] : selectedStages[portfolio]);
-      if (runSpecificMode && stagesToRun.size === 0) {
+      const board = market === "india" ? indiaBoard : null;
+      if (market === "india" && !board) {
+        setPreflightErrors(current=>({...current,[portfolio]:[boardIssue || "The Stage 3 board is loading. Try again when it is ready."]}));
+        reloadBoard();
+        return;
+      }
+      const customToRun = board?.custom.filter(d=>!runSpecificMode || recovery || customSelection.includes(d.id)) ?? [];
+      if (board && !board.enabled.length && (!runSpecificMode || stagesToRun.has("actionables"))) {
+        setPreflightErrors(current=>({...current,[portfolio]:["Add a scorecard in Stage 3 before running Final Actionables."]}));
+        return;
+      }
+      if (runSpecificMode && stagesToRun.size === 0 && !customToRun.length) {
         window.alert("Select at least one stage to run.");
         return;
       }
       const shouldRunCurrentStage = (stage: WorkflowStageKey) =>
-        !runSpecificMode || stagesToRun.has(stage);
+        (!runSpecificMode || stagesToRun.has(stage)) && (!board || !isCard(stage) || board.enabled.includes(stage));
       let currentStage: WorkflowStageKey = "sync";
 
       // Zerodha authentication must be opened synchronously from the Run click.
@@ -6983,13 +7000,19 @@ ${zerodhaExecutionMode === "direct_market"
           if (issues.length) throw new Error(issues.join("\n"));
         } },
       ];
+      if (board) checks.push({label:"Stage 3 board",run:async()=>{
+        const fresh=await boardApi(apiService).read();
+        if (fresh.version!==board.version || fresh.enabled.join()!==board.enabled.join()) {
+          reloadBoard();throw new Error("Your scorecard board changed. Review the updated board and run again.");
+        }
+      }});
       if (market === "india" && shouldRunCurrentStage("pairwise") && pairPlanningBudget !== "") {
         checks.push({label:"Pairwise budget",run:async()=>{
           const budget = Number(pairPlanningBudget);
           if (!Number.isFinite(budget) || budget < 0.01 || budget > 100000) throw new Error("Enter a Pairwise planning budget between ₹0.01 and ₹100,000, or leave it blank.");
         }});
       }
-      if (!shouldRunCurrentStage("swing") && (cards.some(shouldRunCurrentStage) || shouldRunCurrentStage("actionables"))) {
+      if (!shouldRunCurrentStage("swing") && (customToRun.length || cards.some(shouldRunCurrentStage) || shouldRunCurrentStage("actionables"))) {
         checks.push({label:"Stage 2 publication", run:async()=>{
           const id=recovery?.revision ?? sourceSelections[portfolio];
           if (id) { await scorecardApi(apiService, portfolio==="zerodha"?"india":"indmoney_us").read(id); return; }
@@ -7288,7 +7311,7 @@ ${zerodhaExecutionMode === "direct_market"
         const sequence = runMetadata.auto_rebalance_sequence;
         const api = scorecardApi(apiService, broker);
         const selectedCards = cards.filter(shouldRunCurrentStage);
-        if (generatedSwingRun || selectedCards.length || shouldRunCurrentStage("actionables")) {
+        if (generatedSwingRun || selectedCards.length || customToRun.length || shouldRunCurrentStage("actionables")) {
           if (selectedCards.length) currentStage = selectedCards[0];
           else if (shouldRunCurrentStage("actionables")) currentStage = "actionables";
           let revision = recovery?.revision ?? sourceSelections[portfolio];
@@ -7311,8 +7334,8 @@ ${zerodhaExecutionMode === "direct_market"
           const source = await api.read(revision);
           if (stopIfRequested()) return;
           updateStage(portfolio, "swing", {sourceRevision: source.id, sourceListingCount: source.manifest.stocks.length});
-          const chosen: Partial<Record<CardKey,number>> = {};
-          for (const item of source.attempts) if (!chosen[item.card]) chosen[item.card]=item.id;
+          const chosen: BoardRunChoices = {};
+          for (const item of source.attempts) if ((!board || board.enabled.includes(item.card)) && !chosen[item.card]) chosen[item.card]=item.id;
           const runCard = async (card:CardKey) => {
             if (!shouldRunCurrentStage(card)) { completeSkippedStage(portfolio,card,"Using selected Stage 2 revision"); finishedStages.add(card); return; }
             markRunning(portfolio,card,{totalLlms:targets[card]?.length});
@@ -7369,13 +7392,37 @@ ${zerodhaExecutionMode === "direct_market"
               await recordAutoRebalanceStage(portfolio,card,"failed",{error:normalizeError(error),finalInputs:{stage2_revision:source.id}});
             } finally { finishedStages.add(card); }
           };
-          await Promise.allSettled(cards.map(runCard));
+          const runCustom = async (definition: NonNullable<typeof board>["custom"][number]) => {
+            const id = definition.id;
+            delete chosen[id];
+            const setStatus = (text:string) => {
+              if(isCurrentWorkflowOwner(runtimeOwner)) setCustomStatus(old=>({...old,[id]:text}));
+            };
+            try {
+              if (!board || cancelRequestedRef.current || !isCurrentWorkflowOwner(runtimeOwner)) return;
+              setStatus("Running");
+              const queued = await boardApi(apiService).start(source.id,id,sequence,board.version);
+              const stopped = () => cancelRequestedRef.current || !isCurrentWorkflowOwner(runtimeOwner);
+              const read = () => retryWorkflowRead(()=>api.result(queued.id),definition.name+" output",stopped);
+              let result = await read();
+              while(result.status==="processing" && !stopped()) {
+                await sleep(POLL_INTERVAL_MS);
+                result=await read();
+              }
+              if(stopped()) return;
+              chosen[id]=queued.id;
+              setStatus(result.status+" · "+(result.scored??0)+" listings scored");
+            } catch(error) {setStatus(normalizeError(error));}
+          };
+          await Promise.allSettled([...cards.map(runCard),...customToRun.map(runCustom)]);
+          if (customToRun.length) reloadBoard();
           if (stopIfRequested()) return;
           currentStage="actionables";
           if (shouldRunCurrentStage("actionables")) {
             markRunning(portfolio,"actionables");
             const previous = source.finals[0] ? await api.final(source.finals[0].id) : null;
-            const config = cardPolicies[portfolio] ?? previous?.policy ?? await api.savedPolicy() ?? migratedPolicy(scoreMatrixFormulaConfig);
+            const priorPolicy = cardPolicies[portfolio] ?? previous?.policy ?? await api.savedPolicy() ?? migratedPolicy(scoreMatrixFormulaConfig);
+            const config = board?.version ? {...priorPolicy,weights:boardWeights(board)} : priorPolicy;
             const final=await api.finalize(source.id,sequence,chosen,config,broker==="india");
             const frozenCoverage = portfolio === "zerodha" ? await api.coverage?.(sequence).catch(() => null) : null;
             const finalSummary=frozenCoverage?.final_summary?.id===final.id?frozenCoverage.final_summary:undefined;
@@ -7554,7 +7601,7 @@ ${zerodhaExecutionMode === "direct_market"
       recordAutoRebalanceStage,
       resetPortfolio,
       selectedInputs,
-      selectedStages, sourceSelections, cardPolicies, pairSchedule, pairPlanningBudget, scoreSupportedFactors, runSpendLimit,
+      selectedStages, sourceSelections, cardPolicies, indiaBoard, boardIssue, reloadBoard, customSelection, pairSchedule, pairPlanningBudget, scoreSupportedFactors, runSpendLimit,
       specificMode,
       updateStage,
       usdInrRate,
@@ -7976,7 +8023,10 @@ ${zerodhaExecutionMode === "direct_market"
           </div>
         )}
 
-        <WorkflowStageLedger basketReady={basketReady} active={runningPortfolio === section.portfolio} market={section.portfolio} board enabled={stageLedger} view={ledgerView} historyHref={URLs.routes.console.autoRebalanceRuns(section.portfolio)} onStockFlowClick={() => setStockFlowPortfolio(section.portfolio)} onManageSource={() => setCardReview({portfolio:section.portfolio,stage:"source"})} onManageCard={stage => setCardReview({portfolio:section.portfolio,stage})}>
+        <WorkflowStageLedger scorecardBoard={section.portfolio==="zerodha"?indiaBoard:undefined}
+          customTiles={section.portfolio==="zerodha" ? <CustomBoardTiles board={indiaBoard} issue={boardIssue} reload={reloadBoard}
+            client={apiService} status={customStatus} selectable={specificMode.zerodha && !isBusy} selected={customSelection}
+            toggle={id=>setCustomSelection(old=>old.includes(id)?old.filter(key=>key!==id):[...old,id])}/> : null} basketReady={basketReady} active={runningPortfolio === section.portfolio} market={section.portfolio} board enabled={stageLedger} view={ledgerView} historyHref={URLs.routes.console.autoRebalanceRuns(section.portfolio)} onStockFlowClick={() => setStockFlowPortfolio(section.portfolio)} onManageSource={() => setCardReview({portfolio:section.portfolio,stage:"source"})} onManageCard={stage => setCardReview({portfolio:section.portfolio,stage})}>
           {STAGE_ORDER.map((stage) => (
             <WorkflowStageTile
               key={stage}

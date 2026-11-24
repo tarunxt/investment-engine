@@ -18,7 +18,7 @@ from app.infrastructure.locks.redis_lock import RedisLock
 from app.domains.runs.router import _get_redis
 from app.shared.types import UserId
 from app.shared.exceptions import AppException
-from . import technical_queue
+from . import board, custom, technical_queue
 from . import threat_recovery, storage, pair_evidence, pair_plan, pair_work, threat_coverage
 from .storage import Stage
 from .prompts import build_prompt, batches, CARDS, single_job_card
@@ -84,8 +84,8 @@ class Start(Request):
 class Finalize(Request):
     include_recoveries: bool = False
     sequence: int = Field(gt=0)
-    attempts: dict[Card,int]
-    weights: dict[Card,float]
+    attempts: dict[board.CardId,int]
+    weights: dict[board.CardId,float]
     factors: dict[Card,dict[str,float]] = Field(default_factory=dict)
     actions: dict[str,float] | None = None
     compare_with: Formula | None = None
@@ -103,6 +103,27 @@ async def owned(db, uid, portfolio, kind, record_id, *, lock=False):
     if not record:
         raise HTTPException(404, "Scorecard record not found")
     return record
+
+
+@router.get("/india/board")
+async def scorecard_board(db:AsyncSession=Depends(get_async_db),user:User=Depends(get_current_user)):
+    return await board.present(db, user.id, await board.read_board(db, user.id))
+
+
+@router.post("/india/board")
+async def update_board(body:board.BoardChange,db:AsyncSession=Depends(get_async_db),user:User=Depends(get_current_user)):
+    return await board.present(db, user.id, await board.save_board(db, user.id, body))
+
+
+@router.get("/india/methodology/{card}")
+async def card_methodology(card:Card, user:User=Depends(get_current_user)):
+    return board.methodology(card)
+
+
+@router.post("/india/revisions/{revision_id}/custom/{card}/start")
+async def start_custom(revision_id:int,card:board.CustomKey,body:custom.Launch,
+                       db:AsyncSession=Depends(get_async_db),user:User=Depends(get_current_user)):
+    return await custom.start(db, user, revision_id, card, body)
 
 
 @router.get("/{portfolio}/research-performance")
@@ -646,7 +667,8 @@ async def attempt_result(portfolio:Portfolio,attempt_id:int,db:AsyncSession=Depe
                                          "scored":sum(r["score"] is not None for r in preview["rows"])})
         return {**base,"status":"processing","rows":[]}
     rev=await owned(db,user.id,portfolio,"revision",a.data["revision_id"])
-    result=project(a.data["card"],rev.manifest,jobs)
+    definition = a.data["settings"].get("definition")
+    result = custom.project(definition, rev.manifest, jobs) if definition else project(a.data["card"],rev.manifest,jobs)
     if a.data["settings"].get("pair_protocol")==3:
         settings=a.data["settings"]
         packet=await pair_evidence.attempt_packet(db,a)
@@ -837,7 +859,12 @@ async def finalize(portfolio:Portfolio,revision_id:int,body:Finalize,db:AsyncSes
     w=await workflow(db,user.id,portfolio,body.sequence)
     rev=await owned(db,user.id,portfolio,"revision",revision_id)
     try:
-        cfg=policy(body.weights,body.factors,body.actions)
+        extra = set(body.weights) - set(CARDS)
+        if extra:
+            installed = await board.read_board(db, user.id, portfolio)
+            if not extra.issubset(installed["enabled"]):
+                raise ValueError("Unknown custom scorecard in final weights")
+        cfg=policy(body.weights,body.factors,body.actions,custom_cards=extra)
     except ValueError as exc:
         raise HTTPException(422,str(exc)) from exc
     selected={}
@@ -904,7 +931,12 @@ async def prompt_preview(portfolio:Portfolio,revision_id:int,card:Card,db:AsyncS
 @router.get("/{portfolio}/saved-policy")
 async def saved_policy(portfolio:Portfolio,db:AsyncSession=Depends(get_async_db),user:User=Depends(get_current_user)):
     item=await storage.latest_final(db,user.id,portfolio)
-    return item.result_json["policy"] if item else None
+    saved = item.result_json["policy"] if item else None
+    if portfolio == "india":
+        current = await board.read_board(db, user.id)
+        if current["version"]:
+            return {**(saved or {"factors": {}}), "weights": {**dict.fromkeys(CARDS, 0), **current["weights"]}}
+    return saved
 
 
 @router.get("/{portfolio}/latest-final")

@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState, type ComponentProps, type ReactElement } from "react";
+import { useId, useState, type ComponentProps, type ReactElement, type ReactNode } from "react";
 import { Maximize2, Minimize2 } from "lucide-react";
 import type { RankedListing } from "@/lib/workflowScorecardRanking";
 import { StageDurationBreakdownDialog } from "@/app/console/dashboard/_components/StageDurationBreakdownDialog";
@@ -10,6 +10,7 @@ import { StageStatusIcon, stageTileBorder, getStageLedgerTone, getIdleStageRows,
 
 import Link from "next/link";
 import { isCard, type CardKey } from "@/lib/independentScorecards";
+import { libraryPath, type Board } from "@/lib/scorecardBoard";
 import { cardNames, scorecardHref } from "@/lib/scorecardNavigation";
 
 type Stage = ComponentProps<typeof WorkflowStageTile>;
@@ -78,11 +79,13 @@ export function WorkflowStageLedgerViews({ market, view, onChange, portfolioOnly
 const control = "inline-flex min-h-9 items-center rounded-lg border border-indigo-200 bg-white px-3 py-1.5 text-sm font-medium text-indigo-800 hover:bg-indigo-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600 focus-visible:ring-offset-2";
 
 /** Presentation adapter: the workflow continues to own every value and callback. */
-export function WorkflowStageLedger({ children, enabled, view = "ledger", historyHref, onStockFlowClick, onManageSource, onManageCard, market, active = false, basketReady = false, board = false }: {
+export function WorkflowStageLedger({ children, enabled, view = "ledger", historyHref, onStockFlowClick, onManageSource, onManageCard, market, active = false, basketReady = false, board = false, scorecardBoard, customTiles }: {
   children: ReactElement<Stage>[];
   enabled: boolean;
   basketReady?: boolean;
   board?: boolean;
+  scorecardBoard?: Board | null;
+  customTiles?: ReactNode;
   active?: boolean;
   view?: WorkflowLedgerView;
   market?: "zerodha" | "indmoneyUs";
@@ -153,6 +156,7 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
       {lanes.map((lane, index) => <section key={lane.title} className="min-w-0 rounded-xl border border-slate-200 bg-white p-3">
         <h3 className="mb-3 font-semibold">{index + 1} · {lane.title === "Scorecards" && market ? <Link className="text-indigo-800 underline-offset-4 hover:underline" href={scorecardHref(market)}>Scorecards</Link> : lane.title}</h3>
         {lane.keys.map(key => {
+          if (market === "zerodha" && isCard(key) && scorecardBoard !== undefined && !scorecardBoard?.enabled.includes(key)) return null;
           const item = stages.find(stage => stage.stage === key);
           if (!item) return null;
           const rows = market === "zerodha" ? kiteBoardRows(item, rebalance) : getIdleStageRows(item.stage, item.info, item.now);
@@ -210,6 +214,10 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
 
           </div>;
         })}
+        {lane.title === "Scorecards" && market === "zerodha" && <>
+          {customTiles}
+          <Link href={libraryPath} className={control}>Add Scorecard</Link>
+        </>}
       </section>)}
       <StageDurationBreakdownDialog open={Boolean(durationStage)} stageLabel={durationStage ? STAGE_METADATA[durationStage.stage].idle : ""} info={durationStage?.info ?? { state: "idle" }} now={durationStage?.now ?? 0} onClose={() => setDurationStage(null)} />
     </div>;

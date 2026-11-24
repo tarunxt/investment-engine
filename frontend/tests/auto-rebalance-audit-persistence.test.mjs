@@ -71,7 +71,7 @@ async function until(check) {
   assert.ok(check(), "expected asynchronous checkpoint was reached");
 }
 
-function harness({ analysisOnly = false, formulaScore = 0, intercept, read, email, reserve, quoteRead, snapshot = holdingsSnapshot, selection = ["swing", "rebalance", "technical", "actionables"] } = {}) {
+function harness({ boardOverride, analysisOnly = false, formulaScore = 0, intercept, read, email, reserve, quoteRead, snapshot = holdingsSnapshot, selection = ["swing", "rebalance", "technical", "actionables"] } = {}) {
   const durable = new Map();
   const auditWrites = [];
   const emails = [];
@@ -121,6 +121,7 @@ function harness({ analysisOnly = false, formulaScore = 0, intercept, read, emai
   };
   const publications = [], finals = [];
   const cards = ["rebalance","technical","threats","pairwise"];
+  const indiaBoard = boardOverride ?? {version:0,enabled:cards,custom:[]};
   const scorecards = {
     publish: async body=>{publications.push(body);return {id:17};},
     read: async id=>({id,attempts:[],finals:[],manifest:{stocks:[{listing:"NSE:TEST"}]}}),
@@ -131,6 +132,9 @@ function harness({ analysisOnly = false, formulaScore = 0, intercept, read, emai
   };
   const bindings = {
     pairSchedule: "balanced", pairPlanningBudget: "", runSpendLimit: "", scoreSupportedFactors: false,
+    indiaBoard, boardIssue:"", reloadBoard:()=>{}, customSelection:indiaBoard.custom.map(c=>c.id), setCustomStatus:()=>{},
+    boardApi:()=>({read:async()=>indiaBoard,start:async(revision,card,sequence)=>scorecards.start(revision,card,{sequence})}),
+    boardWeights:b=>({rebalance:0,technical:0,threats:0,pairwise:0,...b.weights}),
     cards, isCard:key=>cards.includes(key), sourceSelections:{zerodha:17,indmoneyUs:17},setSourceSelections:()=>{},cardPolicies:{},scorecardApi:()=>scorecards,migratedPolicy:()=>({}), isUsableStageJob:()=>true,
     runtimeOwner: { id: 7 }, isCurrentWorkflowOwner: () => true, requireWorkflowOwner: owner => owner,
     actionablesActivityKey: helperModule.exports.actionablesActivityKey, announceActionablesActivity: helperModule.exports.announceActionablesActivity,
@@ -377,6 +381,7 @@ test("workflow card retains pending status and omits the failed-history banner",
   const workflowStates = Object.fromEntries(stages.map((stage) => [stage, { state: "completed" }]));
   for (const status of ["pending", "failed"]) {
     const bindings = {
+      indiaBoard:null, boardIssue:"", reloadBoard:()=>{}, apiService:{}, customStatus:{},customSelection:[],CustomBoardTiles:()=>null,
       isCard:stage=>["rebalance","technical","threats","pairwise"].includes(stage),exports: {}, technicalInputPlanIssue, selectedInputs: { zerodha: { technical: new Set(["technical:next"]) } },
       require: (name) => { assert.equal(name, "react/jsx-runtime"); return jsxRuntime; },
       scoreRevision: null, zerodhaBasketOrders: [], latestIndiaWorkflow: null, preparedSwing: null, RunSideEffectPolicyNotice: () => null,
@@ -624,4 +629,15 @@ test("a rejected final is durably failed, while model work and email are not rep
   assert.equal(h.view.states.zerodha.actionables.state, "failed");
   assert.equal(h.emails.length, 0);
   assert.equal(h.modelCalls.length, 3);
+});
+
+test("an installed custom scorecard and only enabled built-ins reach the final", async () => {
+  const id = "custom-" + "a".repeat(32);
+  const boardOverride = {version:10, enabled:["technical",id], custom:[{id,name:"Liquidity"}],
+    weights:{technical:60,[id]:40}};
+  const h = harness({boardOverride,selection:["swing","rebalance","technical","actionables"]});
+  await h.runWorkflow("zerodha");
+  assert.deepEqual(h.modelCalls.filter(c=>c.card).map(c=>c.card).sort(), [id,"technical"].sort());
+  assert.deepEqual(Object.keys(h.finals[0].attempts).sort(),[id,"technical"].sort());
+  assert.equal(h.finals[0].policy.weights[id],40);
 });

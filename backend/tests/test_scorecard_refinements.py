@@ -144,6 +144,8 @@ async def exercise_single_job_start(monkeypatch, card):
     history={"technical":{}}
     for packet in evidence["packets"].values():
         packet.update(features={"return_5_pct":1.0,"sessions":60},sources={"1":{"url":"https://example.test/quote","as_of":rev.manifest["as_of"]}})
+    monkeypatch.setattr("app.domains.runs.spend_guard.request_capacity",AsyncMock(return_value=(None,None)))
+    monkeypatch.setattr("app.domains.scorecards.technical_history.pairwise_prior_bars",AsyncMock(return_value={}))
     monkeypatch.setattr(router.pair_evidence,"latest_history",AsyncMock(return_value=history))
     monkeypatch.setattr(router.pair_evidence,"reconcile",lambda *args:evidence)
     monkeypatch.setattr(router.pair_evidence,"news",AsyncMock(return_value={}))
