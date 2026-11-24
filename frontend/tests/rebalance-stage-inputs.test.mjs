@@ -283,6 +283,7 @@ async function executeWorkflow({ stages = ['sync', 'swing', 'threats', 'rebalanc
     finalize:async (id,seq,outputs)=>{results.push(outputs);return {id:5,rows:[],schema:"independent-scorecards-v1"};},
   };
   const bindings = {
+    indiaBoard:null,boardIssue:"",reloadBoard:noop,customSelection:[],
     cards,scorecardApi:()=>api,migratedPolicy:()=>({}),cardPolicies:{},sourceSelections:{indmoneyUs:revision},setSourceSelections:noop,isUsableStageJob:()=>true,
     parseApiTimestamp: value => value ? new Date(value) : null, captureUsValuation: async () => ({schema:"us-valuation-v1"}),
     requireWorkflowOwner: () => ({ id: 7 }), actionablesActivityKey: () => "test", announceActionablesActivity: () => () => {},

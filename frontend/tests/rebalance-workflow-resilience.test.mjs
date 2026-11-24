@@ -85,7 +85,7 @@ test("auto-rebalance does not clear local run controls during stage handoffs", (
 test("a real stage failure is persisted and never feeds stale output to later stages", () => {
   assert.match(source, /delete chosen\[card\]/);
   assert.match(source, /recordAutoRebalanceStage\(portfolio,card,"failed"/);
-  assert.match(source, /Promise.allSettled\(cards.map\(runCard\)\)/);
+  assert.match(source, /Promise.allSettled\(\[\.\.\.cards.map\(runCard\),\.\.\.customToRun.map\(runCustom\)\]\)/);
   assert.doesNotMatch(source, /promptToContinueAfterProblem/);
 });
 
