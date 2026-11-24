@@ -55,6 +55,7 @@ async def test_custom_workflow_dispatch_pin_result_and_allocate(audit_db,monkeyp
         launch=custom.Launch(sequence=42,board_version=current["version"])
         started=await custom.start(db,owner,rev.id,KEY,launch)
         command=mock.await_args.args[0]
+        assert command.scorecard_batches[0]["scorecard_batch"]["custom_columns"] == DEFINITION["columns"]
         assert command.auto_rebalance_sequence==42 and command.user_id==7 and command.auto_rebalance_portfolio=="india"
         assert 'Evaluate the price evidence.' in command.prompt and 'NSE:A' in command.prompt and '"positions"' not in command.prompt
         doc=await storage.lookup(db,7,"india","attempt",started["id"])

@@ -1543,6 +1543,9 @@ def execute_ai_job(self, job_id: int) -> None:
                 raise RuntimeError(f"{job.provider}/{job.model} returned invalid output contract ({issue or 'no assigned listings'})")
             if delivered.keys() != assigned:
                 partial_price_notice = f"Scorecard received {len(delivered)}/{len(assigned)} assigned listings"
+        elif batch and batch.get("custom_columns"):
+            from app.domains.scorecards.custom import read_output
+            _, partial_price_notice = read_output(content, batch["custom_columns"], batch["listings"])
         elif _requires_generic_table_output(job.prompt):
             if _is_rebalance_output(job.prompt):
                 content, rebalance_table_issue, _parsed_rebalance_rows = _validate_rebalance_table_content(content, job.prompt)
