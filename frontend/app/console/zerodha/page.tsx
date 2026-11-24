@@ -444,7 +444,16 @@ export default function ZerodhaPage() {
           <div className="flex items-start gap-3 border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
             <AlertCircle className="mt-0.5 size-4 shrink-0" />
             <span>{error}</span>
-            <button onClick={() => setError(null)} className="ml-auto text-red-600 hover:text-red-800">✕</button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Dismiss portfolio error"
+              onClick={() => setError(null)}
+              className="ml-auto size-12 text-red-600 hover:text-red-800"
+            >
+              <span aria-hidden="true">✕</span>
+            </Button>
           </div>
         )}
 
