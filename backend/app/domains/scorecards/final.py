@@ -7,9 +7,9 @@ DEFAULT_WEIGHTS = dict(zip(CARDS, [98*17/22,98*5/22,1,1]))
 FACTORS = {"rebalance": set(R_WEIGHTS), "technical":set(T_WEIGHTS), "threats":set(CATEGORIES), "pairwise":{"pairwise"}}
 
 
-def policy(weights, factors, actions=None):
-    if set(weights)!=set(CARDS) or any(number(v,0,100) is None for v in weights.values()) or not isclose(sum(weights.values()),100,abs_tol=0.0001):
-        raise ValueError("Enter four nonnegative weights totalling 100%")
+def policy(weights, factors, actions=None, *, custom_cards=()):
+    if set(weights)!=set(CARDS).union(custom_cards) or any(number(v,0,100) is None for v in weights.values()) or not isclose(sum(weights.values()),100,abs_tol=0.0001):
+        raise ValueError("Enter nonnegative scorecard weights totalling 100%")
     for card, group in factors.items():
         if card not in FACTORS or not group or not set(group)<=FACTORS[card] or not any(group.values()) or any(number(v,0,1e6) is None for v in group.values()):
             raise ValueError("Invalid subsection weights")
@@ -25,7 +25,7 @@ def calculate_final(manifest, attempts, config):
     for stock in manifest["stocks"]:
         key=stock["listing"]
         scores,contributions,coverage={}, {}, {}
-        for card in CARDS:
+        for card in config["weights"]:
             data=tables.get(card,{}).get(key,{})
             score=data.get("score")
             status=data.get("coverage","Unassessed")
@@ -54,7 +54,7 @@ def calculate_final(manifest, attempts, config):
             coverage[card]=status
             contributions[card]=None if score is None else score*config["weights"][card]/100
         final,available=weighted(scores,config["weights"])
-        complete=all(not config["weights"][c] or scores[c] is not None and coverage[c]=="Complete" for c in CARDS)
+        complete=all(not config["weights"][c] or scores[c] is not None and coverage[c]=="Complete" for c in config["weights"])
         signed=6*final/100-3 if final is not None else None
         position=stock["settled"]
         action=None if signed is None or position is None else ("Add more" if stock["units"] else "Buy New") if signed>=1 else "Hold" if signed>=-1 else "Trim" if signed>=-2 else "Sell All"

@@ -5,7 +5,7 @@ import type { ScoreMatrixFormulaConfig } from "@/app/console/_components/FinalAc
 
 export const cards = ["rebalance", "technical", "threats", "pairwise"] as const;
 export type CardKey = typeof cards[number];
-export type CardWeights = Record<CardKey, number>;
+export type CardWeights = Record<CardKey, number> & Record<string, number>;
 export type CardPolicy = { weights: CardWeights; factors: Partial<Record<CardKey, Record<string, number>>>; actions?: Record<string, number> };
 export const defaultWeights: CardWeights = {rebalance:98*17/22, technical:98*5/22, threats:1, pairwise:1};
 export function migratedPolicy(config: ScoreMatrixFormulaConfig): CardPolicy {
@@ -32,7 +32,7 @@ export type TechnicalCounts = {jobs_dispatched?:number;evidence_gaps?:Record<str
 export type TechnicalRecovery = {state:string;next_retry?:string|null;pending?:Record<string,{attempts:number;reason:string;due:string}>;output_id?:number};
 export type AvailableOutput = {preview?:boolean;leading_factor?:string;affected?:number;phase_seconds?:Partial<Record<'sources'|'model'|'retry',number>>;readiness?:Pick<RebalanceReadiness,"ready"|"provisional"|"awaiting">;recovery?:PairRecovery;threat_diagnostics?:ThreatDiagnostics;technical_counts?:TechnicalCounts;technical_recovery?:TechnicalRecovery;counts?:RebalanceCounts;actions?:Record<string,number>;threat_returned?:number;threat_complete?:number;threat_status?:string;output_id:number;run_id:number|null;pair_counts?:PairCounts;covered:number;expected:number;used_output_id:number|null;final_id:number|null};
 export type WorkflowCoverage = {revision_id:number|null;listing_count?:number;final_summary?:FinalCounts;cards:Partial<Record<"rebalance"|"technical"|"pairwise"|"threats",AvailableOutput>>};
-export type CardRef = {id:number;card:CardKey;run_id:number};
+export type CardRef = {id:number;card:string;run_id:number};
 export type SourceDetail = {id:number;manifest:{sequence:number;as_of:string;snapshot_id:number;snapshot_at:string;swing_job_ids:number[];verified_listings?:VerifiedListing[];stocks:StockInput[];unresolved:Record<string,unknown>[]};attempts:CardRef[]; finals:{id:number}[]};
 export type CardRow = {listing:string;score:number|null;coverage:string;terms?:Record<string,number|null>; [field:string]:unknown};
 export type CardResult = {unassessed_trace?:Record<string,string[]>;threat_target?:ProviderModelTarget|null;threat_diagnostics?:ThreatDiagnostics;rebalance_readiness?:RebalanceReadiness;evidence_only?:boolean;recovered_from?:number;rebalance_audit?:RebalanceAudit;threat_version?:number;threat_counts?:{expected:number;returned:number;scored:number;complete:number;verified_cells:number;jobs_passed:number};id:number;attempt_cost_inr?:number|null;attempt_elapsed_seconds?:number;pair_counts?:PairCounts;evidence_readiness?:Record<string,unknown>[];observed_at?:string;as_of?:string;revision_id?:number;stage4_method?:string;technical_counts?:TechnicalCounts;technical_bullish?:number;recovery?:TechnicalRecovery|PairRecovery;status:string;research_notices?:string[];rows:CardRow[];jobs:number;completed:number;balanced_schedule?:Record<string,unknown>|null;cost_per_judgment_usd?:number|null;order_checks?:Record<string,unknown>[];recovered_pairs?:Record<string,unknown>[];model_tables?:{job_id:number;slot:number;model:string;rows:Record<string,unknown>[]}[];scored?:number;errors?:{job_id:number;reason:string}[]};

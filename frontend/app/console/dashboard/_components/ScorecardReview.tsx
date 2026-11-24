@@ -9,7 +9,8 @@ import { TechnicalStockScores } from "./TechnicalStockScores";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ScoreMatrixFormulaConfig } from "@/app/console/_components/FinalActionablesConsole";
 import { apiService } from "@/services/api";
-import { scorecardApi, cards, type CardKey, type CardPolicy, type CardResult, type CardFinal, type SourceDetail, type SourceRevision, type VerifiedListing } from "@/lib/independentScorecards";
+import { boardApi, cardLabel, type Board } from "@/lib/scorecardBoard";
+import { scorecardApi, cards, isCard, type CardKey, type CardPolicy, type CardResult, type CardFinal, type SourceDetail, type SourceRevision, type VerifiedListing } from "@/lib/independentScorecards";
 import { getCompatibleTargets, usesSingleScorecardJob, resolveStageModelKeys, type StageModelPreferences } from "@/lib/workflowStageModels";
 import { getAnalysisRunIdentity } from "@/lib/rebalanceRunIdentity";
 import type { ProviderModelTarget, RunListItem } from "@/types/api";
@@ -38,7 +39,10 @@ export function ScorecardReview({portfolio,stage:initial,revisionId,initialAttem
   const [detail,setDetail]=useState<SourceDetail|null>(null),[version,setVersion]=useState(0),[attempt,setAttempt]=useState(0);
   const [result,setResult]=useState<CardResult|null>(null),[final,setFinal]=useState<CardFinal|null>(null),[finalId,setFinalId]=useState(0);
   const [comparison,setComparison]=useState<Record<string,unknown>[]>([]);
-  const [chosen,setChosen]=useState<Partial<Record<CardKey,number>>>({});
+  const [chosen,setChosen]=useState<Record<string,number|undefined>>({});
+  const [board,setBoard]=useState<Board|null>(null);
+  const reviewCards:readonly string[] = board?.version ? board.enabled : cards;
+  const nameOf=(key:string)=>isCard(key)?titles[key]:board?cardLabel(board,key):key;
   const [policy,setPolicy]=useState<CardPolicy>(fallbackPolicy),[models,setModels]=useState<StageModelPreferences>({});
   const [providers,setProviders]=useState<ProviderModelTarget[]>([]),[swings,setSwings]=useState<RunListItem[]>([]),[jobs,setJobs]=useState<number[]>([]);
   const [prompt,setPrompt]=useState(""),[error,setError]=useState(""),[busy,setBusy]=useState(false);
@@ -53,12 +57,12 @@ export function ScorecardReview({portfolio,stage:initial,revisionId,initialAttem
   const selectedOutput=useRef<number|null>(initialAttempt ?? null);
   useEffect(()=>{const el=dialog.current;el?.showModal();return()=>el?.close();},[]);
   useEffect(()=>{let active=true; void (async()=>{
-    const values=await Promise.all([api.list(),client.getWorkflowModels(),client.getProviders({}),api.savedPolicy()]);
-    if(!active)return;setRevs(values[0]);setModels(values[1]);setProviders(getCompatibleTargets(values[2]));if(values[3])setPolicy(values[3]);
+    const values=await Promise.all([api.list(),client.getWorkflowModels(),client.getProviders({}),api.savedPolicy(),broker==="india"?boardApi(client).read():null]);
+    if(!active)return;setBoard(values[4]);setRevs(values[0]);setModels(values[1]);setProviders(getCompatibleTargets(values[2]));if(values[3])setPolicy(values[3]);
     setId(prev=>prev||values[0]?.[0]?.id||0);
-  })().catch(e=>active&&setError(String(e)));return()=>{active=false;};},[api,client,version]);
+  })().catch(e=>active&&setError(String(e)));return()=>{active=false;};},[api,client,version,broker]);
   useEffect(()=>{if(!id)return;let active=true;setDetail(null);setPrompt("");setResult(null);
-    void api.read(id).then(d=>{if(active){setDetail(d);setChosen(Object.fromEntries(cards.map(c=>[c,d.attempts.find(a=>a.card===c)?.id??0])));setAttempt(card?(d.attempts.find(a=>a.id===selectedOutput.current&&a.card===card)??d.attempts.find(a=>a.card===card))?.id??0:0);selectedOutput.current=null;setFinalId(d.finals[0]?.id??0);}}).catch(e=>active&&setError(String(e)));
+    void api.read(id).then(d=>{if(active){setDetail(d);setChosen(Object.fromEntries([...d.attempts].reverse().map(a=>[a.card,a.id])));setAttempt(card?(d.attempts.find(a=>a.id===selectedOutput.current&&a.card===card)??d.attempts.find(a=>a.card===card))?.id??0:0);selectedOutput.current=null;setFinalId(d.finals[0]?.id??0);}}).catch(e=>active&&setError(String(e)));
     return()=>{active=false;};},[api,id,card,version]);
   useEffect(()=>{setComparison([]);},[id,policy,chosen]);
   useEffect(()=>{if(!id||!card)return;let active=true;void api.prompt(id,card).then(x=>active&&setPrompt(x.prompt)).catch(e=>active&&setError(String(e)));return()=>{active=false;};},[api,id,card]);
@@ -95,8 +99,8 @@ export function ScorecardReview({portfolio,stage:initial,revisionId,initialAttem
   }
   async function compute(preview=false){
     if(!detail)return;
-    const refs:Partial<Record<CardKey,number>>={};
-    for(const c of cards){const ref=detail.attempts.find(a=>a.card===c && a.id===chosen[c]);if(!ref)continue;const output=await api.result(ref.id);if(output.status==="processing")throw Error(titles[c]+" is still running.");refs[c]=ref.id;}
+    const refs:Record<string,number>={};
+    for(const c of reviewCards){const ref=detail.attempts.find(a=>a.card===c && a.id===chosen[c]);if(!ref)continue;const output=await api.result(ref.id);if(output.status==="processing")throw Error(nameOf(c)+" is still running.");refs[c]=ref.id;}
     if(preview){setComparison((await api.compare(detail.id,detail.manifest.sequence,refs,policy,previousFormula)).comparison);return;}
     const f=await api.finalize(detail.id,detail.manifest.sequence,refs,policy);
     setFinal(f);setFinalId(f.id);onPolicy(policy);setVersion(n=>n+1);
@@ -178,18 +182,18 @@ export function ScorecardReview({portfolio,stage:initial,revisionId,initialAttem
         {!!result.recovered_pairs?.length&&<details><summary>Recovered comparisons</summary><Grid rows={result.recovered_pairs}/></details>}
         {!!result.errors?.length&&<details><summary>Job diagnostics</summary><Grid rows={result.errors}/></details>}</>}</section>}
     {stage==="actionables"&&<section className="space-y-3 py-3">
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{cards.map(c=><fieldset key={c} className="rounded-lg border p-2"><legend>{titles[c]}</legend>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{reviewCards.map(c=><fieldset key={c} className="rounded-lg border p-2"><legend>{nameOf(c)}</legend>
         <label className="block">Output <select className={input} value={chosen[c]??0} onChange={e=>setChosen(p=>({...p,[c]:Number(e.target.value)}))}><option value={0}>Unassessed</option>{detail?.attempts.filter(a=>a.card===c).map(a=><option key={a.id} value={a.id}>#{a.id} · {a.run_id ? "Run "+a.run_id : "Evidence only"}</option>)}</select></label>
         <label>Weight % <input className={input+" w-24"} type="number" step="any" min={0} max={100} value={policy.weights[c]} onChange={e=>setPolicy(p=>({...p,weights:{...p.weights,[c]:Number(e.target.value)}}))}/></label>
-        <label className="block text-sm"><input type="checkbox" checked={!!policy.factors[c]} onChange={e=>setPolicy(p=>{const f={...p.factors};if(e.target.checked)f[c]=Object.fromEntries(factors[c].map(k=>[k,1]));else delete f[c];return {...p,factors:f};})}/> Weight subsections</label>
-        {policy.factors[c]&&factors[c].map(k=><label className="flex justify-between gap-1 text-xs" key={k}>{k}<input className="w-14 border" type="number" min={0} step="any" value={policy.factors[c]?.[k]??0} onChange={e=>setPolicy(p=>({...p,factors:{...p.factors,[c]:{...p.factors[c],[k]:Number(e.target.value)}}}))}/></label>)}</fieldset>)}</div>
+        {isCard(c)&&<label className="block text-sm"><input type="checkbox" checked={!!policy.factors[c]} onChange={e=>setPolicy(p=>{const f={...p.factors};if(e.target.checked)f[c]=Object.fromEntries(factors[c].map(k=>[k,1]));else delete f[c];return {...p,factors:f};})}/> Weight subsections</label>}
+        {isCard(c)&&policy.factors[c]&&factors[c].map(k=><label className="flex justify-between gap-1 text-xs" key={k}>{k}<input className="w-14 border" type="number" min={0} step="any" value={policy.factors[c]?.[k]??0} onChange={e=>setPolicy(p=>({...p,factors:{...p.factors,[c]:{...p.factors[c],[k]:Number(e.target.value)}}}))}/></label>)}</fieldset>)}</div>
       <button className={button} disabled={busy||!detail} onClick={()=>void perform(()=>compute(true))}>Compare formulas on selected outputs</button>
       {comparison.length>0&&<details open><summary>Formula preview · same observed inputs</summary><Grid rows={comparison}/></details>}
       <button className={button} disabled={busy||!detail} onClick={()=>void perform(()=>compute())}>Recalculate and save</button>
       {final && broker==="india" && <button className={button} disabled={busy || !detail} onClick={()=>void perform(refreshSavedFinal)}>Update final #{final.id} from saved recoveries · ₹0</button>}
       <select aria-label="Final revision" className={input} value={finalId} onChange={e=>setFinalId(Number(e.target.value))}><option value={0}>Select final</option>{detail?.finals.map(f=><option value={f.id} key={f.id}>Final #{f.id}</option>)}</select>
-      {final&&<>{cards.some(c=>chosen[c] && final.attempts[c]!==chosen[c])&&<p>Selected scorecard outputs have changed. Recalculate to save a new final.</p>}<p>Final #{final.id} · Stage 2 #{final.revision_id} · {cards.map(c=>titles[c]+" "+fmt(final.policy.weights[c])+"%").join(" · ")}</p>
-      <Grid rows={final.rows.map(r=>({"Rank":r.rank,"Listing":r.listing,"Name":r.name,"Origin":r.origin,"Current units":r.units,...r.scores,"Weighted contributions":r.contributions,"Available weight %":r.available_weight,"Final /100":r.final,"Coverage":r.status,"Action":r.action,"Suggested units":r.suggested_units,"Sizing / eligibility":r.sizing_reason}))}/>
+      {final&&<>{cards.some(c=>chosen[c] && final.attempts[c]!==chosen[c])&&<p>Selected scorecard outputs have changed. Recalculate to save a new final.</p>}<p>Final #{final.id} · Stage 2 #{final.revision_id} · {Object.entries(final.policy.weights).map(([c,w])=>nameOf(c)+" "+fmt(w)+"%").join(" · ")}</p>
+      <Grid rows={final.rows.map(r=>({"Rank":r.rank,"Listing":r.listing,"Name":r.name,"Origin":r.origin,"Current units":r.units,...Object.fromEntries(Object.entries(r.scores).map(([c,v])=>[nameOf(c),v])),"Weighted contributions":Object.fromEntries(Object.entries(r.contributions).map(([c,v])=>[nameOf(c),v])),"Available weight %":r.available_weight,"Final /100":r.final,"Coverage":r.status,"Action":r.action,"Suggested units":r.suggested_units,"Sizing / eligibility":r.sizing_reason}))}/>
       <div className="flex gap-2">{cards.filter(c=>final.attempts[c]).map(c=><button className={button} key={c} onClick={()=>{selectedOutput.current=final.attempts[c]!;setStage(c);}}>{titles[c]} #{final.attempts[c]}</button>)}</div></>}
     </section>}
   </dialog>;
