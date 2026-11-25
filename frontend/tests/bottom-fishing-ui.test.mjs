@@ -11,7 +11,7 @@ const mocks = {
   "@/hooks/useAuth": 'export const useAuth=()=>({user:{id:7}});',
   "@/services/api": `export const apiService={
  get:async()=>({version:0,settings:{inputs:["bottom"],capital:100000,weights:{bounce:20,proximity:15,strength:15,recovery:10,roce:12,sales:10,profit:10,leverage:8}},state:{rows:[],positions:{}}}),
- post:async (path,v)=>({version:1,settings:v,state:{}})};`,
+ post:async (path,v)=>path.endsWith("/bottom-fishing/run")?{status:"queued"}:({version:1,settings:v,state:{}})};`,
 };
 const bundle=await build({absWorkingDir:frontend,stdin:{contents:`
  import React from "react";import {createRoot} from "react-dom/client";
@@ -39,6 +39,9 @@ try {
   await page.goto(root);
   await page.getByRole("heading",{name:"Bottom fishing",exact:true}).waitFor();
   assert.equal(await page.locator("article").count(),4);
+  await page.getByRole("button",{name:"Run Bottom fishing"}).click();
+  await page.getByText(/Paper run queued/).waitFor();
+  assert.equal(await page.getByRole("button",{name:"Run Bottom fishing"}).isDisabled(),true);
   await page.getByRole("button",{name:"Bottom Fishing Scorecard actions"}).click();
   await page.getByRole("menuitem",{name:"Inputs and weights"}).click();
   await page.getByRole("button",{name:"Inputs and weights"}).click();
