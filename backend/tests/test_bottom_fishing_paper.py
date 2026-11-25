@@ -100,6 +100,7 @@ def test_closed_market_cutoff_and_proposal_preserve_paper_account():
 
 @pytest.mark.asyncio
 async def test_legacy_queue_runs_all_four_stages_once_and_freezes_review(monkeypatch):
+    import asyncio
     from contextlib import asynccontextmanager
     from types import SimpleNamespace
     from fastapi import HTTPException
@@ -115,6 +116,8 @@ async def test_legacy_queue_runs_all_four_stages_once_and_freezes_review(monkeyp
         for table in [User.__table__, ActivityLog.__table__]:
             await conn.run_sync(table.create)
     owner = SimpleNamespace(id=5,username="owner")
+    wake = asyncio.Event()
+    http_request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(bottom_review_wake=wake)))
     async with sessions() as db:
         db.add(User(id=owner.id, username=owner.username, email="user@example.test", password_hash="test"))
         # Upgrade the actual previous request format, with no run id in its JSON.
@@ -160,8 +163,8 @@ async def test_legacy_queue_runs_all_four_stages_once_and_freezes_review(monkeyp
     monkeypatch.setattr(review,"paper_cycle",trace_sync(review.paper_cycle,"score"))
     monkeypatch.setattr(review,"size_entries",trace_sync(review.size_entries,"actionables"))
     async with sessions() as db:
-        assert (await store.request_run(db, owner))["id"] == request_id
-    assert review._wake.is_set()
+        assert (await store.request_run(http_request,db,owner))["id"] == request_id
+    assert wake.is_set()
     for _ in range(2):
         await review.drain_reviews(sessions)
     assert stages_seen == ["sync","screen","score","actionables"]
@@ -177,8 +180,8 @@ async def test_legacy_queue_runs_all_four_stages_once_and_freezes_review(monkeyp
         with pytest.raises(HTTPException) as denied:
             await store.history_record(key,db,SimpleNamespace(id=6))
         assert denied.value.status_code == 404
-        again = await store.request_run(db,owner)
+        again = await store.request_run(http_request,db,owner)
         assert again["id"] != request_id
-        assert (await store.request_run(db,owner))["id"] == again["id"]
+        assert (await store.request_run(http_request,db,owner))["id"] == again["id"]
         assert (await db.scalars(select(ActivityLog).where(ActivityLog.action==store.CYCLE))).all() == []
     await engine.dispose()
