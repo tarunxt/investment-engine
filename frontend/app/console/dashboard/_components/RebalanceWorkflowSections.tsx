@@ -330,6 +330,7 @@ const COST_BEARING_STAGES: WorkflowStageKey[] = [
   "swing",
   "rebalance",
   "technical",
+  "pairwise",
 ];
 
 function initialWorkflowState(): WorkflowState {
