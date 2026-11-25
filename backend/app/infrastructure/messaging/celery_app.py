@@ -89,6 +89,7 @@ celery.conf.task_routes = {
     "app.domains.bullpen_trade_analysis.tasks.refresh_bullpen_trade_analysis_history": {"queue": "ai"},
     "app.domains.fx_rates.tasks.refresh_usd_inr_rate": {"queue": "beat"},
     "app.domains.dashboard.tasks.capture_daily_dashboard_portfolios": {"queue": "beat"},
+    "app.domains.bottom_fishing.tasks.*": {"queue": "ai"},
     "app.domains.zerodha.tasks.*": {"queue": "ai"},
     "app.infrastructure.database.outbox.tasks.*": {"queue": "beat"},
 }
@@ -204,6 +205,7 @@ except ValueError:
 celery.conf.worker_prefetch_multiplier = _prefetch_multiplier
 
 celery.autodiscover_tasks((["app.domains.jobs", "app.domains.zerodha"] + (["app.domains.recommendation_audit"] if stored_audit_recovery_enabled() else [])) if recovery_mode() else [
+    "app.domains.bottom_fishing",
     "app.domains.sports_rankings",
     "app.domains.scorecards",
     "app.domains.jobs",
