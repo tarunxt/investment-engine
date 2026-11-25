@@ -624,6 +624,13 @@ jobs:
         working-directory: frontend
         run: npm run test:playwright-hardening
 
+      - name: Verify 320px scorecard conflict and retry recovery
+        if: matrix.bundler == 'webpack'
+        working-directory: frontend
+        run: |
+          export CHROMIUM_PATH="$(node -p 'require("playwright").chromium.executablePath()')"
+          node tests/scorecard-library.test.mjs
+
       - name: Verify API cost trend states and currency provenance offline
         if: matrix.bundler == 'webpack'
         working-directory: frontend
