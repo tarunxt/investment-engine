@@ -1,0 +1,21 @@
+import {URLs} from "@/lib/urls";
+
+export const apiPath = () => URLs.runs.list() + "/scorecards/india/bottom-fishing";
+export const route = "/console/zerodha/bottom-fishing";
+export const stages = ["sync", "screen", "score", "actionables"] as const;
+export type Stage = typeof stages[number];
+export const titles = {sync:"Sync market data and paper capital", screen:"Bottom Fishing Screen", score:"Bottom Fishing Scorecard", actionables:"Bottom Fishing Actionables"};
+export const labels: Record<string,string> = {bounce:"Support bounce", proximity:"Floor proximity", strength:"Relative strength", recovery:"Recovery", roce:"ROCE", sales:"Sales growth", profit:"Profit growth", leverage:"Debt / equity"};
+export type Settings = {inputs:string[]; capital:number; weights:Record<string,number>};
+export type Row = {symbol:string; sources:string[]; discovered?:string; score?:number; price?:number; breakout?:number; max_buy?:number; stop?:number; target?:number; rr?:number; risk?:number; qty?:number; reason:string; points?:Record<string,number>};
+type Setup = {discovered:string; discovery:number; low:number; high:number; invalid?:boolean};
+type Coverage = {at:string; universe:number; covered:number; patterns?:number; current_candles?:number};
+export type State = {sync?:Coverage; at?:string; market_as_of?:string; error?:string; status?:string; scans?:Coverage[]; rows?:Row[]; setups?:Record<string,Setup>;
+  positions?:Record<string,{qty:number; entry:string; price:number; stop:number; target:number}>; realized?:number; closed?:{symbol:string; qty:number; reason:string; pnl:number; end:string}[]};
+export type Output = {request_id?:number; finished_at?:string; mode:string; settings?:Settings; state:State};
+export type Manual = {id:number; status:string; stage?:Stage; error?:string};
+export type Snapshot = {version:number; settings:Settings; state:State; manual?:Manual; review?:Output};
+export const num = (x?:number) => x == null ? "—" : x.toLocaleString("en-IN",{maximumFractionDigits:2});
+export const date = (x?:string) => x ? new Date(x).toLocaleString("en-IN",{timeZone:"Asia/Kolkata",hour12:false}) : "—";
+export const latestOutput = (data:Snapshot):Output => data.review ?? {mode:"Paper cycle", state:data.state};
+export const pending = (status?:string) => status === "queued" || status === "running";

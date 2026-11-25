@@ -4,15 +4,16 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from sqlalchemy import select
+from sqlalchemy import select, func
 from app.domains.auth.dependencies import get_current_user
 from app.domains.auth.models import ActivityLog, User
 from app.infrastructure.database.session import get_async_db
 from .strategy import WEIGHTS
 
 MANUAL = "bottom_fishing.manual.v1"
+REVIEW = "bottom_fishing.review.v1"
 CONFIG = "bottom_fishing.settings.v1"
 CYCLE = "bottom_fishing.paper.v1"
 router = APIRouter(prefix="/runs/scorecards/india/bottom-fishing", tags=["scorecards"])
@@ -53,26 +54,37 @@ def append(db, owner, action, data):
     return row
 
 
-async def snapshot(db, owner):
+def public_request(request_id, job):
+    fields = ("status", "stage", "requested_at", "started_at", "finished_at", "error")
+    return dict(id=request_id, **{key: job[key] for key in fields if key in job})
+
+
+async def snapshot(db, owner, *, include_review=True):
     version, settings = await latest(db,owner,CONFIG,Settings().model_dump())
     _, state = await latest(db,owner,CYCLE,{})
     manual_id, manual = await latest(db,owner,MANUAL,{})
-    return dict(version=version, settings=settings, state=state, mode="paper", formula_version=1,
-                manual=dict(id=manual_id, **manual) if manual_id else None)
+    _, review = await latest(db,owner,REVIEW,None) if include_review else (0,None)
+    return dict(review=review, version=version, settings=settings, state=state, mode="paper", formula_version=1,
+                manual=public_request(manual_id, manual) if manual_id else None)
 
 
 @router.post("/run", status_code=202)
-async def request_run(db=Depends(get_async_db), user=Depends(get_current_user)):
+async def request_run(background_tasks: BackgroundTasks, db=Depends(get_async_db), user=Depends(get_current_user)):
     from app.domains.zerodha.upstox_quotes import configured_for
     if not configured_for(user.id,user.username):
         raise HTTPException(409,"Market data is unavailable for this account.")
     await lock(db,user.id)
-    _, manual = await latest(db,user.id,MANUAL,{})
-    if manual.get("status") != "queued":
+    request_id, manual = await latest(db,user.id,MANUAL,{})
+    if manual.get("status") not in {"queued","running"}:
         manual = dict(status="queued", requested_at=datetime.now(ZoneInfo("Asia/Kolkata")).isoformat())
-        append(db,user.id,MANUAL,manual)
+        row = append(db,user.id,MANUAL,manual)
+        await db.flush()
+        request_id = row.id
     await db.commit()
-    return manual
+    if manual["status"] == "queued":
+        from .tasks import dispatch_review
+        background_tasks.add_task(dispatch_review, user.id, request_id)
+    return public_request(request_id, manual)
 
 
 @router.get("")
@@ -96,3 +108,40 @@ async def change(body:Change, db=Depends(get_async_db), user=Depends(get_current
         append(db,user.id,CYCLE,state)
     await db.commit()
     return await snapshot(db,user.id)
+
+
+async def ready_requests(db, now):
+    newest = select(func.max(ActivityLog.id)).where(ActivityLog.action == MANUAL).group_by(ActivityLog.user_id)
+    rows = await db.execute(select(ActivityLog.user_id, ActivityLog.id, ActivityLog.details).where(ActivityLog.id.in_(newest)))
+    for owner, request_id, details in rows:
+        job = json.loads(details)
+        if job["status"] == "queued" or (job["status"] == "running" and job["lease_until"] <= now.isoformat()):
+            yield owner, request_id
+
+
+@router.get("/history")
+async def history(before: int | None = Query(default=None, gt=0), db=Depends(get_async_db), user=Depends(get_current_user)):
+    query = select(ActivityLog.id, ActivityLog.action, ActivityLog.details).where(
+        ActivityLog.user_id == user.id, ActivityLog.action.in_((CYCLE, REVIEW)))
+    if before is not None:
+        query = query.where(ActivityLog.id < before)
+    records = (await db.execute(query.order_by(ActivityLog.id.desc()).limit(21))).all()
+    items = []
+    for key, action, details in records[:20]:
+        data = json.loads(details)
+        state = data["state"] if action == REVIEW else data
+        items.append(dict(id=key, mode="Manual review" if action == REVIEW else "Paper cycle",
+                          at=data.get("finished_at") or state.get("attempt") or state.get("at"),
+                          status=state.get("status"), scored=sum(r.get("score") is not None for r in state.get("rows", [])),
+                          candidates=len(state.get("setups", {})), entries=sum(bool(r.get("qty")) for r in state.get("rows", []))))
+    return dict(items=items, next_before=items[-1]["id"] if len(records)>20 else None)
+
+
+@router.get("/history/{record_id}")
+async def history_record(record_id:int, db=Depends(get_async_db), user=Depends(get_current_user)):
+    record = (await db.execute(select(ActivityLog.action, ActivityLog.details).where(
+        ActivityLog.id == record_id, ActivityLog.user_id == user.id, ActivityLog.action.in_((CYCLE, REVIEW))))).first()
+    if not record:
+        raise HTTPException(404, "Saved run unavailable")
+    data = json.loads(record.details)
+    return data if record.action == REVIEW else dict(state=data, mode="Paper cycle")

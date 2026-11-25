@@ -20,15 +20,16 @@ def close_position(state, symbol, price, why, end):
     state["realized"] = round(state["realized"]+pnl,2)
 
 
-def paper_cycle(state, settings, stamp, levels, series, fundamentals, benchmark_close, screen, calendar):
+def paper_cycle(state, settings, stamp, levels, series, fundamentals, benchmark_close, screen, calendar, *, preview=False):
     at = stamp.isoformat()
     setups, positions = state["setups"],state["positions"]
-    state["pending"] = {}
+    if not preview:
+        state["pending"] = {}
     benchmark = series.get(BENCH,[])
     benchmark_return = None
     if benchmark_close and benchmark and benchmark[-1]["end"]==at:
         benchmark_return = benchmark[-1]["close"]/benchmark_close-1
-    for k,p in list(positions.items()):
+    for k,p in ([] if preview else list(positions.items())):
         for b in series.get(k,[]):
             if b["end"]<=p["checked"]:
                 continue
@@ -73,22 +74,32 @@ def paper_cycle(state, settings, stamp, levels, series, fundamentals, benchmark_
             row["discovered"] = s["discovered"]
         rows.append(row)
     rows.sort(key=lambda r:(-(r.get("score") or 0),-(r.get("rr") or 0),-setups.get(r["symbol"],{}).get("turnover",0),r["symbol"]))
-    for row in rows:
+    state.update(rows=rows, at=at, status="completed", error=None)
+    if not preview:
+        size_entries(state, settings, stamp)
+    return state
+
+
+def size_entries(state, settings, stamp, *, preview=False):
+    positions = state["positions"]
+    reservations = dict(state["pending"]) if preview else state["pending"]
+    for row in state["rows"]:
         k = row["symbol"]
         if row["reason"]!="Qualified":
             continue
-        if k in positions or k in state["seen"]:
+        if k in positions or k in reservations or k in state["seen"]:
             row["reason"] = "Already held or attempted today"
-        elif not time(9,30)<=stamp.time()<=time(14,45):
+        elif not preview and not time(9,30)<=stamp.time()<=time(14,45):
             row["reason"] = "Outside entry window"
         else:
-            qty = quantity(settings["capital"],positions,state["pending"],row["price"],row["risk"],state["realized"])
+            qty = quantity(settings["capital"],positions,reservations,row["price"],row["risk"],state["realized"])
             if qty:
-                state["pending"][k] = {f:row[f] for f in ("price","risk","stop","target")}
-                state["pending"][k].update(qty=qty,created=datetime.now(INDIA).isoformat(),isin=setups[k]["isin"])
+                reservations[k] = dict(price=row["price"], risk=row["risk"], qty=qty)
+                if preview:
+                    row.update(reason="Proposed buy", qty=qty)
+                    continue
+                reservations[k].update(stop=row["stop"], target=row["target"], created=datetime.now(INDIA).isoformat(), isin=state["setups"][k]["isin"])
                 state["seen"].append(k)
                 row.update(reason="Paper limit pending", qty=qty)
             else:
                 row["reason"] = "Cash or planned-risk limit"
-    state.update(rows=rows, at=at, status="completed", error=None)
-    return state

@@ -3075,10 +3075,10 @@ function ScopedZerodhaBasketPreviewDialog({
 
   return (
     <>
-    <div inert={displayCalculations.popupOpen || unitsDetailOrder || columnMenu || renameColumn || marketNoticeOpen ? true : undefined} className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm" onClick={onClose}>
-      <div {...reviewDialog} role="dialog" aria-modal="true" aria-label={basketTitle} className="relative w-[var(--basket-width,80rem)] max-w-full min-w-[min(320px,100%)] rounded-3xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
+    <div inert={displayCalculations.popupOpen || unitsDetailOrder || columnMenu || renameColumn || marketNoticeOpen ? true : undefined} className="basket-review-backdrop" onClick={onClose}>
+      <div {...reviewDialog} role="dialog" aria-modal="true" aria-label={basketTitle} className="basket-review-panel" onClick={(event) => event.stopPropagation()}>
         <BasketResizeHandles panelRef={reviewDialog.ref} owner={widthOwner} />
-        <div className="flex h-[var(--basket-height,auto)] max-h-[min(var(--basket-height,90dvh),calc(100dvh-2rem))] flex-col overflow-hidden rounded-[inherit]">
+        <div className="basket-review-layout">
         <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-5">
           <div>
             <div className="text-[11px] font-semibold uppercase tracking-[0.35em] text-slate-400">
@@ -3146,7 +3146,7 @@ function ScopedZerodhaBasketPreviewDialog({
             {openSavedBasket && <button type="button" className="mt-2 underline" onClick={openSavedBasket}>Open basket with saved scoring settings</button>}
           </div>
         ) : null}
-        <div role="region" aria-label="Basket orders, scroll to inspect" tabIndex={0} className="min-h-0 flex-1 overflow-auto overscroll-contain px-5 pb-5">
+        <div role="region" aria-label="Basket orders, scroll to inspect" tabIndex={0} className="basket-review-content">
           {loading ? (isZerodhaPreview ? <ZerodhaBasketLoading /> : (
             <div className="flex items-center justify-center gap-2 py-16 text-sm text-slate-500">
               <Loader2 className="size-4 animate-spin" /> {loadingLabel}

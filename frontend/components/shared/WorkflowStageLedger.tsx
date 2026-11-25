@@ -4,6 +4,7 @@ import { useId, useState, type ComponentProps, type ReactElement, type ReactNode
 import { Maximize2, Minimize2 } from "lucide-react";
 import type { RankedListing } from "@/lib/workflowScorecardRanking";
 import { StageDurationBreakdownDialog } from "@/app/console/dashboard/_components/StageDurationBreakdownDialog";
+import { WorkflowBasketButton } from "./WorkflowBasketButton";
 import { WorkflowTileMenu, type TileAction } from "./WorkflowTileMenu";
 import { StageErrorDetails } from "./StageErrorDetails";
 import { StageStatusIcon, stageTileBorder, getStageLedgerTone, getIdleStageRows, getStageTileLabel, STAGE_METADATA, type WorkflowStageTile } from "./WorkflowStageTile";
@@ -200,10 +201,9 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
                 {!compact && item.info.portfolioThreat && <p className="mt-2 text-sm">Portfolio Threat · {item.info.portfolioThreat}</p>}
               </div>
             </article>
-            {item.onPlaceOrderClick && <button type="button" onClick={item.onPlaceOrderClick}
-              className={`mx-auto mt-3 block min-h-12 max-w-full rounded-lg px-8 text-base font-semibold text-white ${basketReady && !active ? "bg-green-700 hover:bg-green-800" : "bg-blue-700 hover:bg-blue-800"}`}>
+            {item.onPlaceOrderClick && <WorkflowBasketButton ready={basketReady && !active} onClick={item.onPlaceOrderClick}>
               {item.placeOrderLabel ?? "Place Order"}
-            </button>}
+            </WorkflowBasketButton>}
             {item.stage === "swing" && <div className="mt-2 rounded-lg border p-3 text-sm">
               {tileHeader("merge", "Merge contenders", [...(onManageSource ? [{label:"Manage Stage 2 inputs",onSelect:onManageSource}] : []), { label: "Stock Flow", onSelect: onStockFlowClick }, { label: "History", href: historyHref }], (market === "zerodha" ? item.info.sourceRevision != null : item.info.recommendedStocks != null) ? {state:"completed"} : { state: "idle" })}
               <div id={`${detailId}-merge`}>

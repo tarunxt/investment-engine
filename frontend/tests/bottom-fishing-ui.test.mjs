@@ -9,17 +9,22 @@ const mocks = {
   "next/link": 'import React from "react"; export default function Link(props){return <a {...props}/>;}',
   "next/navigation": 'export const useRouter=()=>({replace:path=>location.assign(path)});',
   "@/hooks/useAuth": 'export const useAuth=()=>({user:{id:7}});',
-  "@/services/api": `export const apiService={
- get:async()=>({version:0,settings:{inputs:["bottom"],capital:100000,weights:{bounce:20,proximity:15,strength:15,recovery:10,roce:12,sales:10,profit:10,leverage:8}},state:{rows:[],positions:{}}}),
- post:async (path,v)=>path.endsWith("/bottom-fishing/run")?{status:"queued"}:({version:1,settings:v,state:{}})};`,
+  "@/services/api": `const row={symbol:"NSE:TEST",score:82,price:100,qty:2,stop:96,target:111,rr:2.2,reason:"Proposed buy",sources:["bottom"]};
+    const state={at:"2026-11-25T15:30:00+05:30",rows:[row],positions:{},setups:{"NSE:TEST":{discovered:"2026-11-25T15:30:00+05:30",discovery:99}}};
+    const data={version:0,settings:{inputs:["bottom"],capital:100000,weights:{bounce:20,proximity:15,strength:15,recovery:10,roce:12,sales:10,profit:10,leverage:8}},state:{},review:{request_id:42,mode:"Manual review",state}};
+    export const apiService={
+      get:async path=>path.endsWith("/history")?{items:[{id:45,mode:"Manual review",scored:1,entries:1,candidates:1,status:"completed"}]}:path.endsWith("/history/45")?data.review:data,
+      post:async (path,v)=>{if(path.endsWith("/run")){window.submits=(window.submits??0)+1;data.manual={id:46,status:"queued"};return data.manual;}
+        data.settings=v;data.version++;return data;}
+    };`,
 };
 const bundle=await build({absWorkingDir:frontend,stdin:{contents:`
  import React from "react";import {createRoot} from "react-dom/client";
- import Page from "@/app/console/zerodha/bottom-fishing/page";
+ import {StagePage} from "@/components/scorecards/bottomFishing/StagePage";
  import {BottomFishingBoard} from "@/components/scorecards/BottomFishingBoard";
  import {setWorkflowOwner} from "@/lib/workflowOwnerLifetime";
  setWorkflowOwner(7);
- createRoot(document.getElementById("root")).render(location.pathname.includes("bottom-fishing")?<Page/>:<BottomFishingBoard/>);
+ createRoot(document.getElementById("root")).render(location.pathname.includes("bottom-fishing")?<StagePage stage={location.pathname.split("/").at(-1)} view={new URLSearchParams(location.search).get("view")} record={Number(new URLSearchParams(location.search).get("record"))}/>:<BottomFishingBoard/>);
   `,resolveDir:frontend,loader:"tsx"},define:{"process.env":"{}"},jsx:"automatic",bundle:true,write:false,plugins:[{
   name:"offline-ports",setup(b){
     b.onResolve({filter:/^(next\/(link|navigation)|@\/(services\/api|hooks\/useAuth))$/},args=>({path:args.path,namespace:"fixture"}));
@@ -39,19 +44,44 @@ try {
   await page.goto(root);
   await page.getByRole("heading",{name:"Bottom fishing",exact:true}).waitFor();
   assert.equal(await page.locator("article").count(),4);
-  await page.getByRole("button",{name:"Run Bottom fishing"}).click();
-  await page.getByText(/Paper run queued/).waitFor();
-  assert.equal(await page.getByRole("button",{name:"Run Bottom fishing"}).isDisabled(),true);
-  await page.getByRole("button",{name:"Bottom Fishing Scorecard actions"}).click();
-  await page.getByRole("menuitem",{name:"Inputs and weights"}).click();
-  await page.getByRole("button",{name:"Inputs and weights"}).click();
+  const run=page.getByRole("button",{name:"Run Bottom fishing"});
+  await run.click();
+  await page.getByText(/Queued for immediate analysis/).waitFor();
+  assert.equal(await run.isDisabled(),true);
+  assert.equal(await page.evaluate(()=>window.submits),1);
+  await page.getByRole("button",{name:"View Final Basket"}).click();
+  const basket=page.getByRole("dialog",{name:"Bottom Fishing Final Basket"});
+  await basket.getByText("NSE:TEST").waitFor();
+  assert.equal(await basket.getByRole("columnheader",{name:"Stop ₹"}).count(),1);
+  assert.equal(await basket.getByRole("columnheader",{name:"Amount ₹"}).count(),1);
+  assert.equal(await basket.getByRole("button",{name:/place order/i}).count(),0);
+  await page.keyboard.press("Escape");
+  const titles=["Sync market data and paper capital","Bottom Fishing Screen","Bottom Fishing Scorecard","Bottom Fishing Actionables"];
+  for(const title of titles){
+    await page.getByRole("button",{name:title+" actions"}).click();
+    const labels=await page.getByRole("menuitem").allTextContents();
+    for(const label of ["Inputs","Saved output","Stock Flow","History","Open stage"])assert.ok(labels.includes(label));
+    assert.equal(labels.includes("Weights"),title===titles[2]);
+    await page.getByRole("menuitem",{name:"Saved output",exact:true}).click();
+    await page.getByRole("dialog",{name:title+" · Saved output"}).waitFor();
+    await page.keyboard.press("Escape");
+  }
+  const menu=page.getByRole("button",{name:"Bottom Fishing Scorecard actions"});
+  await menu.click(); await page.getByRole("menuitem",{name:"Weights"}).click();
+  await page.getByRole("spinbutton",{name:"Support bounce"}).waitFor(); await page.keyboard.press("Escape");
+  await menu.click(); await page.getByRole("menuitem",{name:"Inputs",exact:true}).click();
   const input=page.getByRole("checkbox",{name:"Bottom Fishing Screen"});
   assert.equal(await input.isChecked(),true);
-  assert.equal(await page.getByRole("checkbox").count(),1);
   await input.uncheck();
   await page.getByRole("button",{name:"Save",exact:true}).click();
-  await page.getByText(/fresh entries paused/).waitFor();
-  console.log("PASS four independent stages, scorecard menu, isolated sources and paper settings");
+  await page.getByText("Settings saved.").waitFor(); await page.keyboard.press("Escape");
+  await menu.click(); await page.getByRole("menuitem",{name:"Stock Flow"}).click();
+  await page.getByRole("dialog").getByText("Proposed buy").waitFor(); await page.keyboard.press("Escape");
+  await menu.click(); await page.getByRole("menuitem",{name:"Scorecard history"}).click();
+  await page.getByRole("link",{name:/#45/}).click();
+  await page.getByRole("heading",{name:"Saved run #45"}).waitFor();
+  await page.getByRole("cell",{name:"82",exact:true}).waitFor();
+  console.log("PASS immediate analysis request, review basket, four stage menus, settings, saved outputs, stock flow and frozen scorecard history");
 } finally {
   await browser?.close();
   server.close();

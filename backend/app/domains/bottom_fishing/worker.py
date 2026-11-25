@@ -17,17 +17,13 @@ log = logging.getLogger(__name__)
 INDIA = market.INDIA
 
 
-async def save(sessions, owner, version, previous, state, manual_id=None):
+async def save(sessions, owner, version, previous, state):
     async with sessions() as db:
         await store.lock(db,owner)
         current,_ = await store.latest(db,owner,store.CYCLE,{})
         settings,_ = await store.latest(db,owner,store.CONFIG,{})
         if (current,settings)!=(previous,version):
             return None
-        if manual_id:
-            request_id, manual = await store.latest(db,owner,store.MANUAL,{})
-            if request_id == manual_id:
-                store.append(db,owner,store.MANUAL,dict(manual,status=state["status"],finished_at=datetime.now(INDIA).isoformat()))
         row = store.append(db,owner,store.CYCLE,state)
         await db.flush()
         saved_id = row.id
@@ -82,17 +78,54 @@ async def paper_fills(client, guard, state):
     state["pending"] = {}
 
 
+async def prepared_market(client, cache, stamp):
+    cache_key = "bottom:prepared:v1:"+stamp.date().isoformat()
+    prepared = await cache.get(cache_key)
+    if prepared:
+        levels,benchmark,coverage = json.loads(prepared)
+    else:
+        levels,benchmark,coverage = await market.daily(client,cache,stamp)
+        await cache.set(cache_key,json.dumps([levels,benchmark,coverage]),ex=86400)
+    return levels, benchmark, coverage
+
+
+async def collect_evidence(client, cache, guard, stamp, levels, state, coverage):
+    keys = set(levels)|set(state["setups"])|set(state["positions"])|{market.BENCH}
+    master = await load_instruments(client)
+    gate = asyncio.Semaphore(4)
+    async def evidence(k):
+        async with gate:
+            try:
+                bars = await market.candles(client,master[k],stamp,guard)
+            except (httpx.HTTPError,KeyError,ValueError):
+                bars = []
+            facts = None
+            s = levels.get(k)
+            eligible = k in state["setups"] or (s and bars and s["low"]<=bars[-1]["close"]<=s["low"]+.15*s["width"])
+            if eligible:
+                try:
+                    facts = await market.facts(client,cache,k)
+                except (httpx.HTTPError, KeyError, ValueError, IndexError):
+                    pass
+            return k,bars,facts
+    results = await asyncio.gather(*(evidence(k) for k in sorted(keys)))
+    series = {k:b for k,b,_ in results}
+    fundamentals = {k:f for k,_,f in results}
+    if coverage is not None:
+        coverage["patterns"] = len(levels)
+        coverage["current_candles"] = sum(bool(series[k]) and series[k][-1]["end"]==stamp.isoformat() for k in levels)
+    return series, fundamentals
+
+
 async def run(sessions, owner, stamp):
     async with sessions() as db:
         await store.lock(db,owner)
         username = await db.scalar(select(User.username).where(User.id==owner))
         if username is None:
             return
-        view = await store.snapshot(db,owner)
+        view = await store.snapshot(db,owner,include_review=False)
         prior,_ = await store.latest(db,owner,store.CYCLE,{})
         settings = view["settings"]
-    manual = view["manual"] or {}
-    manual_id = manual.get("id") if manual.get("status")=="queued" and stamp.time()>=time(9,30) else None
     state = roll(view["state"],stamp)
     if state.get("at","")>stamp.isoformat() or (state.get("at")==stamp.isoformat() and not state["pending"]):
         return
@@ -107,45 +140,16 @@ async def run(sessions, owner, stamp):
             if stamp.date().isoformat() not in calendar:
                 return
             if state.get("at")!=stamp.isoformat():
-                screen = bool(manual_id) or stamp.time() in (time(9,30),time(13,15))
+                screen = stamp.time() in (time(9,30),time(13,15))
                 if screen or stamp.time()==time(9,20):
-                    cache_key = "bottom:prepared:v1:"+stamp.date().isoformat()
-                    prepared = await cache.get(cache_key)
-                    if prepared:
-                        levels,benchmark,coverage = json.loads(prepared)
-                    else:
-                        levels,benchmark,coverage = await market.daily(client,cache,stamp)
-                        await cache.set(cache_key,json.dumps([levels,benchmark,coverage]),ex=86400)
+                    levels,benchmark,coverage = await prepared_market(client,cache,stamp)
                     state["sync"] = dict(at=stamp.isoformat(), **coverage)
                     state["benchmark_close"] = benchmark
                     if not screen:
                         levels,coverage = {},None
                 else:
                     levels,coverage = {},None
-                keys = set(levels)|set(state["setups"])|set(state["positions"])|{market.BENCH}
-                master = await load_instruments(client)
-                gate = asyncio.Semaphore(4)
-                async def evidence(k):
-                    async with gate:
-                        try:
-                            bars = await market.candles(client,master[k],stamp,guard)
-                        except (httpx.HTTPError,KeyError,ValueError):
-                            bars = []
-                        facts = None
-                        s = levels.get(k)
-                        eligible = k in state["setups"] or (s and bars and s["low"]<=bars[-1]["close"]<=s["low"]+.15*s["width"])
-                        if eligible:
-                            try:
-                                facts = await market.facts(client,cache,k)
-                            except (httpx.HTTPError, KeyError, ValueError, IndexError):
-                                pass
-                        return k,bars,facts
-                results = await asyncio.gather(*(evidence(k) for k in sorted(keys)))
-                series = {k:b for k,b,_ in results}
-                fundamentals = {k:f for k,_,f in results}
-                if coverage is not None:
-                    coverage["patterns"] = len(levels)
-                    coverage["current_candles"] = sum(bool(series[k]) and series[k][-1]["end"]==stamp.isoformat() for k in levels)
+                series, fundamentals = await collect_evidence(client, cache, guard, stamp, levels, state, coverage)
                 paper_cycle(state,settings,stamp,levels,series,fundamentals,state.get("benchmark_close"),coverage,calendar)
                 missing = [r for r in state["rows"] if r["reason"].startswith("Missing ")]
                 if missing or (coverage and (coverage["covered"]<coverage["universe"] or coverage["current_candles"]<coverage["patterns"])):
@@ -155,7 +159,7 @@ async def run(sessions, owner, stamp):
                         if r["reason"]=="Paper limit pending":
                             r["reason"]="Signal expired"
                     state["pending"]={}
-                prior = await save(sessions,owner,view["version"],prior,state,manual_id)
+                prior = await save(sessions,owner,view["version"],prior,state)
                 if prior is None:
                     return
             if state["positions"] or state["pending"]:
@@ -166,13 +170,13 @@ async def run(sessions, owner, stamp):
     except Exception as exc:
         log.exception("Bottom Fishing cycle failed for account %s",owner)
         state.update(status="failed",error=type(exc).__name__+" during market-data collection",attempt=stamp.isoformat())
-        await save(sessions,owner,view["version"],prior,state,manual_id)
+        await save(sessions,owner,view["version"],prior,state)
         raise
 
 
 async def owners(sessions):
     async with sessions() as db:
-        users = set(await db.scalars(select(ActivityLog.user_id).where(ActivityLog.action.in_((store.CONFIG,store.MANUAL))).distinct()))
+        users = set(await db.scalars(select(ActivityLog.user_id).where(ActivityLog.action == store.CONFIG).distinct()))
         primary = os.getenv("UPSTOX_LTP_OWNER_USER_ID","")
         if primary.isdigit():
             users.add(int(primary))
