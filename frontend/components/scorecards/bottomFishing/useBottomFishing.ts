@@ -24,17 +24,25 @@ export function useBottomFishing(owner:WorkflowOwner) {
     const timer = setInterval(() => void refresh(),active ? 2500 : 30000);
     return () => clearInterval(timer);
   },[refresh,active]);
-  async function run() {
+  async function run(version?:number) {
     setSending(true);
     try {
-      const manual = await client.post<Manual>(apiPath()+"/run",{});
+      const manual = await client.post<Manual>(apiPath()+"/run",version===undefined?{}:{version});
       sequence.current++;
       setData(previous => previous && {...previous,manual});
       await refresh();
-    } catch (e) { setError(String(e)); } finally { setSending(false); }
+      return true;
+    } catch (e) {
+      setError(String(e));
+      if(version!==undefined) throw e;
+      return false;
+    } finally { setSending(false); }
   }
   async function save(settings:Settings, version:number) {
-    const result = await client.post<Snapshot>(apiPath()+"/inputs",{...settings,version});
+    const result = await client.post<Snapshot>(apiPath()+"/inputs",{...settings,version}).catch(async e=>{
+      if(e?.status===409) await refresh();
+      throw e;
+    });
     sequence.current++;
     setData(result); setError("");
     return result.version;

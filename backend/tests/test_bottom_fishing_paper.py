@@ -180,10 +180,22 @@ async def test_legacy_queue_runs_all_four_stages_once_and_freezes_review(monkeyp
         with pytest.raises(HTTPException) as denied:
             await store.history_record(key,db,SimpleNamespace(id=6))
         assert denied.value.status_code == 404
-        again = await store.request_run(http_request,db,owner)
+        with pytest.raises(HTTPException) as conflict:
+            await store.request_run(http_request,db,owner,store.RunInputs(version=9))
+        assert conflict.value.status_code == 409
+        again = await store.request_run(http_request,db,owner,store.RunInputs(version=0))
         assert again["id"] != request_id
         assert (await store.request_run(http_request,db,owner))["id"] == again["id"]
         assert (await db.scalars(select(ActivityLog).where(ActivityLog.action==store.CYCLE))).all() == []
+        edited = await store.change(store.Change(version=0,screen_query="Current price > 10000"),db,owner)
+        with pytest.raises(HTTPException) as active_conflict:
+            await store.request_run(http_request,db,owner,store.RunInputs(version=edited["version"]))
+        assert active_conflict.value.status_code == 409
+    await review.drain_reviews(sessions)
+    async with sessions() as db:
+        view = await store.snapshot(db,owner.id)
+        assert view["review"]["settings"]["screen_query"] == ""
+        assert view["settings"]["screen_query"] == "Current price > 10000"
     await engine.dispose()
 
 @pytest.mark.asyncio

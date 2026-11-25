@@ -1,11 +1,9 @@
+import {Table as ScorecardTable} from "../ScorecardPresentation";
 import type {ReactNode} from "react";
 import {date, labels, num, type Output, type Stage} from "./model";
 
 export function Table({headers,rows,empty}:{headers:string[]; rows:{key:string;cells:ReactNode[]}[];empty:string}) {
-  return <div className="overflow-x-auto rounded-xl border border-slate-200"><table className="w-full text-left text-sm tabular-nums">
-    <thead className="bg-slate-50 text-slate-600"><tr>{headers.map(h=><th scope="col" className="whitespace-nowrap px-3 py-2" key={h}>{h}</th>)}</tr></thead>
-    <tbody>{rows.length ? rows.map(row=><tr key={row.key} className="border-t border-slate-200">{row.cells.map((v,i)=><td className="px-3 py-2" key={headers[i]}>{v}</td>)}</tr>)
-    : <tr><td className="px-3 py-4 text-slate-500" colSpan={headers.length}>{empty}</td></tr>}</tbody></table></div>;
+  return <ScorecardTable columns={headers} rows={rows} empty={empty}/>;
 }
 
 export function Decisions({output}:{output:Output}) {
@@ -25,11 +23,15 @@ export function Decisions({output}:{output:Output}) {
 
 export function StageOutput({stage,output}:{stage:Stage;output:Output}) {
   const {state} = output;
+  const query = state.screen_query?.text ?? output.settings?.screen_query;
+  const scan = state.scans?.at(-1);
   const setups = Object.entries(state.setups??{});
   if (stage==="sync") return <><p>20 completed NSE sessions · {num(state.sync?.covered)} / {num(state.sync?.universe)} histories synced · {date(state.sync?.at)} IST</p>
     {output.settings && <p>Assigned paper capital ₹{num(output.settings.capital)}</p>}
     <Table headers={["Paper holding","Qty","Entry ₹","Stop ₹","Target ₹"]} empty="No open paper positions." rows={Object.entries(state.positions??{}).map(([k,p])=>({key:k,cells:[k,num(p.qty),num(p.price),num(p.stop),num(p.target)]}))}/></>;
-  if (stage==="screen") return <><p>{setups.length} discovered · {num(state.scans?.at(-1)?.current_candles)} / {num(state.scans?.at(-1)?.patterns)} support patterns with a current candle</p>
+  if (stage==="screen") return <><p>{setups.length} discovered · {num(scan?.current_candles)} / {num(scan?.patterns)} support patterns with a current candle</p>
+    {scan?.query_passed!=null && <p>{num(scan.query_passed)} passed the query · {num(scan.query_excluded)} excluded · {num(scan.query_missing)} with missing query data</p>}
+    {query && <details><summary className="cursor-pointer text-indigo-700">Query used in this run</summary><pre className="mt-2 whitespace-pre-wrap">{query}</pre></details>}
     <Table headers={["Stock","Discovered (IST)","Discovery ₹","Support ₹","Range high ₹","Setup"]} empty="No setups recorded." rows={setups.map(([k,v])=>({key:k,cells:[k,date(v.discovered),num(v.discovery),num(v.low),num(v.high),v.invalid?"Support broken":"In range at discovery"]}))}/></>;
   if (stage==="score") return <Table headers={["Stock","Score /100",...Object.values(labels),"Decision"]} empty="No scored listings recorded."
     rows={(state.rows??[]).map(r=>({key:r.symbol,cells:[r.symbol,num(r.score),...Object.keys(labels).map(k=>num(r.points?.[k])),r.reason]}))}/>;

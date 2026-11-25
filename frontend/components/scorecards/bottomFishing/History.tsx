@@ -2,6 +2,7 @@
 import {useEffect,useState} from "react";
 import Link from "next/link";
 import {apiPath,date,route,type Stage} from "./model";
+import {Status, scorecardButton} from "../ScorecardPresentation";
 import {Table} from "./StageOutput";
 import type {Model} from "./useBottomFishing";
 
@@ -21,8 +22,8 @@ export function History({stage,client,scorecards}:{stage:Stage;client:Model["cli
   return <><Table headers={scorecards?["Saved scorecard","Mode","Status","Listings scored"]:["Saved run","Mode","Status","Discovered","Scored","Sized entries"]}
     rows={data.items.map(item=>({key:String(item.id),cells:[
       <Link className="text-indigo-700 underline" href={route+"/"+stage+"?record="+item.id} key={item.id}>{date(item.at)} IST · #{item.id}</Link>,
-      item.mode,item.status,...(scorecards?[item.scored]:[item.candidates,item.scored,item.entries])
+      item.mode,<Status key="status" value={item.status}/>,...(scorecards?[item.scored]:[item.candidates,item.scored,item.entries])
     ]}))} empty="No saved runs yet."/>
-    <div className="flex gap-4">{cursor && <button className="underline" onClick={()=>setCursor(null)}>Latest runs</button>}
-      {data.next_before && <button className="underline" onClick={()=>setCursor(data.next_before??null)}>Older runs</button>}</div></>;
+    <div className="flex gap-4">{cursor && <button className={scorecardButton} onClick={()=>setCursor(null)}>Latest runs</button>}
+      {data.next_before && <button className={scorecardButton} onClick={()=>setCursor(data.next_before??null)}>Older runs</button>}</div></>;
 }

@@ -14,6 +14,7 @@ from app.domains.scorecards.technical_sources import session_calendar
 from app.domains.zerodha.upstox_quote_guard import QuoteGuard, redis_client
 from app.domains.zerodha.upstox_quotes import configured_for
 from . import market, store
+from .query_evidence import apply_screen
 from .engine import paper_cycle, roll, size_entries
 from .worker import INDIA, collect_evidence, prepared_market
 
@@ -69,7 +70,11 @@ async def execute_review(sessions, owner, request_id):
         if job["status"] != "queued" and not (job["status"] == "running" and job["lease_until"] <= now.isoformat()):
             return
         username = await db.scalar(select(User.username).where(User.id == owner))
-        version, settings = await store.latest(db, owner, store.CONFIG, store.Settings().model_dump())
+        if "settings" in job:
+            version, settings = job["version"], job["settings"]
+        else:
+            version, settings = await store.latest(db, owner, store.CONFIG, store.Settings().model_dump())
+            job.update(version=version, settings=settings)
         _, portfolio = await store.latest(db, owner, store.CYCLE, {})
         job.update(status="running", stage="sync", token=token, attempts=job.get("attempts",0)+1,
                    started_at=now.isoformat(), lease_until=(now+timedelta(minutes=12)).isoformat())
@@ -117,11 +122,12 @@ async def execute_review(sessions, owner, request_id):
             await checkpoint("screen")
             guard = ManualReviewQuoteGuard(cache, os.getenv("UPSTOX_LTP_OWNER_USER_ID") or owner, "bottom-review", [])
             series, fundamentals = await collect_evidence(client,cache,guard,stamp,levels,state,coverage)
+            levels = await apply_screen(client,cache,guard,settings,stamp,calendar,levels,series,state,coverage)
             await checkpoint("score")
             paper_cycle(state,settings,stamp,levels,series,fundamentals,benchmark,coverage,calendar,preview=True)
             await checkpoint("actionables")
             size_entries(state,settings,stamp,preview=True)
-            if (coverage["covered"] < coverage["universe"] or coverage["current_candles"] < coverage["patterns"]
+            if (coverage.get("query_missing",0) or coverage["covered"] < coverage["universe"] or coverage["current_candles"] < coverage["patterns"]
                     or any(row["reason"].startswith("Missing ") for row in state["rows"])):
                 state["status"] = "partial"
     except Exception as exc:

@@ -11,6 +11,7 @@ from app.domains.auth.dependencies import get_current_user
 from app.domains.auth.models import ActivityLog, User
 from app.infrastructure.database.session import get_async_db
 from .strategy import WEIGHTS
+from .query import FIELDS, compile_query
 
 MANUAL = "bottom_fishing.manual.v1"
 REVIEW = "bottom_fishing.review.v1"
@@ -23,15 +24,23 @@ class Settings(BaseModel):
     model_config = ConfigDict(extra="forbid")
     inputs: list[Literal["bottom"]] = Field(default_factory=lambda:["bottom"], max_length=1)
     capital: int = Field(default=100000, ge=1, le=100000000)
+    screen_query: str = Field(default="", max_length=4000)
+    latest_results: bool = False
     weights: dict[str,int] = Field(default_factory=lambda:dict(WEIGHTS))
 
     @model_validator(mode="after")
     def check(self):
+        if self.screen_query or self.latest_results:
+            compile_query(self.screen_query)
         if set(self.weights)!=set(WEIGHTS) or sum(self.weights.values())!=100 or min(self.weights.values())<0:
             raise ValueError("Eight nonnegative factor weights must total 100")
         if len(set(self.inputs))!=len(self.inputs):
             raise ValueError("Duplicate source")
         return self
+
+
+class RunInputs(BaseModel):
+    version: int | None = Field(default=None, ge=0)
 
 
 class Change(Settings):
@@ -64,19 +73,28 @@ async def snapshot(db, owner, *, include_review=True):
     _, state = await latest(db,owner,CYCLE,{})
     manual_id, manual = await latest(db,owner,MANUAL,{})
     _, review = await latest(db,owner,REVIEW,None) if include_review else (0,None)
-    return dict(review=review, version=version, settings=settings, state=state, mode="paper", formula_version=1,
+    return dict(review=review, version=version, settings=Settings.model_validate(settings).model_dump(),
+                query_fields=list(FIELDS), state=state, mode="paper", formula_version=1,
                 manual=public_request(manual_id, manual) if manual_id else None)
 
 
 @router.post("/run", status_code=202)
-async def request_run(request: Request, db=Depends(get_async_db), user=Depends(get_current_user)):
+async def request_run(request: Request, db=Depends(get_async_db), user=Depends(get_current_user), body: RunInputs | None = None):
     from app.domains.zerodha.upstox_quotes import configured_for
     if not configured_for(user.id,user.username):
         raise HTTPException(409,"Market data is unavailable for this account.")
     await lock(db,user.id)
     request_id, manual = await latest(db,user.id,MANUAL,{})
-    if manual.get("status") not in {"queued","running"}:
-        manual = dict(status="queued", requested_at=datetime.now(ZoneInfo("Asia/Kolkata")).isoformat())
+    version, settings = await latest(db,user.id,CONFIG,Settings().model_dump())
+    active = manual.get("status") in {"queued","running"}
+    if body and body.version is not None:
+        if body.version != version:
+            raise HTTPException(409,"Settings changed. Reload the query before running.")
+        if active and manual.get("version") != version:
+            raise HTTPException(409,"A review with earlier inputs is still running.")
+    if not active:
+        manual = dict(status="queued", requested_at=datetime.now(ZoneInfo("Asia/Kolkata")).isoformat(),
+                      version=version, settings=Settings.model_validate(settings).model_dump())
         row = append(db,user.id,MANUAL,manual)
         await db.flush()
         request_id = row.id
@@ -97,7 +115,15 @@ async def change(body:Change, db=Depends(get_async_db), user=Depends(get_current
     current = await snapshot(db,user.id)
     if body.version!=current["version"]:
         raise HTTPException(409,"Settings changed. Reload before saving.")
-    append(db,user.id,CONFIG,body.model_dump(exclude={"version"}))
+    updated = body.model_dump(exclude={"version"})
+    for name in ("screen_query", "latest_results"):
+        if name not in body.model_fields_set:
+            updated[name] = current["settings"][name]
+    try:
+        Settings.model_validate(updated)
+    except ValueError as exc:
+        raise HTTPException(422,"Invalid screening query or reporting-period filter.") from exc
+    append(db,user.id,CONFIG,updated)
     state = current["state"]
     if state.get("pending"):
         for row in state.get("rows",[]):
