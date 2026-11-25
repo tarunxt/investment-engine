@@ -34,11 +34,12 @@ function Board({owner}:{owner:WorkflowOwner}){
     {id:"score",heading:"Scorecards",title:"Bottom Fishing Scorecard",date:state.at,metric:"Scored listings",value:state.rows?.filter(r=>r.score!=null).length,detail:"Every five minutes. Technical and fundamental factors total 100 points."},
     {id:"actionables",heading:"Final Actionables",title:"Bottom Fishing Actionables",date:state.at,metric:"Paper positions",value:Object.keys(state.positions??{}).length,detail:"Paper orders, exits, cash and risk belong to this strategy."}
   ];
-  return <section aria-label="Bottom fishing strategy" className="mt-6 min-w-0">
-    <h2 className="text-xl font-semibold">Bottom fishing</h2>
+  return <section aria-label="Bottom fishing strategy" className="mt-6 min-w-0 rounded-2xl border border-indigo-200 bg-indigo-50/50 p-4">
+    <h2 className="text-xl font-medium text-slate-950">Bottom fishing</h2>
     {(error||state.error)&&<p role="alert" className="text-sm text-red-700">{error||state.error}</p>}
     <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{lanes.map((lane,i)=>{
-      const info:StageInfo={state:lane.date?"completed":"idle"};
+      const info:StageInfo={state:state.status==="failed"?"failed":lane.date?"completed":"idle",
+        runStatus:state.status==="partial"&&i>0?"partial":undefined};
       const Icon=expanded[lane.id]?Minimize2:Maximize2;
       const actions=[{label:lane.id==="score"?"Inputs and weights":"Saved output",href:href+"#"+lane.id}];
       return <section key={lane.id} className="min-w-0 rounded-xl border border-slate-200 bg-white p-3">
