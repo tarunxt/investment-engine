@@ -57,7 +57,6 @@ export function BrokerPortfolioTabs({ market, children }: { market: WorkflowMark
       <div aria-hidden="true" className="h-12" />
       <div id="broker-portfolio" className="scroll-mt-16" hidden={showWorkflow}>{children}</div>
       <div hidden={!showWorkflow}>
-        {market === 'zerodha' && <h2 className="mt-4 text-xl font-semibold">Tarun&apos;s Strategy</h2>}
         <PortfolioWorkflowSlot market={market} />
         {market === 'zerodha' && showWorkflow && <BottomFishingBoard />}
       </div>
