@@ -17,13 +17,17 @@ log = logging.getLogger(__name__)
 INDIA = market.INDIA
 
 
-async def save(sessions, owner, version, previous, state):
+async def save(sessions, owner, version, previous, state, manual_id=None):
     async with sessions() as db:
         await store.lock(db,owner)
         current,_ = await store.latest(db,owner,store.CYCLE,{})
         settings,_ = await store.latest(db,owner,store.CONFIG,{})
         if (current,settings)!=(previous,version):
             return None
+        if manual_id:
+            request_id, manual = await store.latest(db,owner,store.MANUAL,{})
+            if request_id == manual_id:
+                store.append(db,owner,store.MANUAL,dict(manual,status=state["status"],finished_at=datetime.now(INDIA).isoformat()))
         row = store.append(db,owner,store.CYCLE,state)
         await db.flush()
         saved_id = row.id
@@ -87,6 +91,8 @@ async def run(sessions, owner, stamp):
         view = await store.snapshot(db,owner)
         prior,_ = await store.latest(db,owner,store.CYCLE,{})
         settings = view["settings"]
+    manual = view["manual"] or {}
+    manual_id = manual.get("id") if manual.get("status")=="queued" and stamp.time()>=time(9,30) else None
     state = roll(view["state"],stamp)
     if state.get("at","")>stamp.isoformat() or (state.get("at")==stamp.isoformat() and not state["pending"]):
         return
@@ -101,7 +107,7 @@ async def run(sessions, owner, stamp):
             if stamp.date().isoformat() not in calendar:
                 return
             if state.get("at")!=stamp.isoformat():
-                screen = stamp.time() in (time(9,30),time(13,15))
+                screen = bool(manual_id) or stamp.time() in (time(9,30),time(13,15))
                 if screen or stamp.time()==time(9,20):
                     cache_key = "bottom:prepared:v1:"+stamp.date().isoformat()
                     prepared = await cache.get(cache_key)
@@ -149,7 +155,7 @@ async def run(sessions, owner, stamp):
                         if r["reason"]=="Paper limit pending":
                             r["reason"]="Signal expired"
                     state["pending"]={}
-                prior = await save(sessions,owner,view["version"],prior,state)
+                prior = await save(sessions,owner,view["version"],prior,state,manual_id)
                 if prior is None:
                     return
             if state["positions"] or state["pending"]:
@@ -160,13 +166,13 @@ async def run(sessions, owner, stamp):
     except Exception as exc:
         log.exception("Bottom Fishing cycle failed for account %s",owner)
         state.update(status="failed",error=type(exc).__name__+" during market-data collection",attempt=stamp.isoformat())
-        await save(sessions,owner,view["version"],prior,state)
+        await save(sessions,owner,view["version"],prior,state,manual_id)
         raise
 
 
 async def owners(sessions):
     async with sessions() as db:
-        users = set(await db.scalars(select(ActivityLog.user_id).where(ActivityLog.action==store.CONFIG).distinct()))
+        users = set(await db.scalars(select(ActivityLog.user_id).where(ActivityLog.action.in_((store.CONFIG,store.MANUAL))).distinct()))
         primary = os.getenv("UPSTOX_LTP_OWNER_USER_ID","")
         if primary.isdigit():
             users.add(int(primary))
