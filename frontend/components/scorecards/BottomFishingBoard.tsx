@@ -75,7 +75,7 @@ function Board({owner}:{owner:WorkflowOwner}){
         {stage==="actionables" && <WorkflowBasketButton ready={!!state.at&&!active&&state.status!=="failed"} onClick={()=>setBasket(true)}>View Final Basket</WorkflowBasketButton>}
       </section>;
     })}</div>
-    {basket&&<Basket owner={owner.id} output={output} onClose={()=>setBasket(false)}/>}
+    {basket&&<Basket key={output.request_id ?? output.state.at ?? "pending"} owner={owner.id} output={output} onClose={()=>setBasket(false)}/>}
     {selection&&<SavedOutputDialog title={titles[selection.stage]+" · "+selection.section} sectionLabel={selection.section}
       savedAt={selection.section==="Inputs"||selection.section==="Weights"?undefined:output.finished_at??state.at} provenance={selection.section==="Inputs"||selection.section==="Weights"?"Current strategy settings":output.mode}
       routeUrl={sectionRoute} onClose={()=>setSelection(null)} onRetry={()=>void model.refresh()} loading={!data}>

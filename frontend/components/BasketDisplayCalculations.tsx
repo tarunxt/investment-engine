@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { renderBasketAllocation } from "./BasketAllocationTable";
 import { AllocationScoreContext } from "./AllocationScoreContext";
 import { WorkflowMeanCalculation, IndiaWeightCalculation } from "./BasketAllocationBreakdown";
 import { BasketMetricPopup } from "./BasketMetricPopup";
@@ -213,40 +214,20 @@ export function useBasketDisplayCalculations(open: boolean, market: "india" | "u
     return stock.quoteLoading && price.basis !== "limit_estimate" ? null : brokerDisplayAllocation(allocation.weights.get(key), totalAssets, price.price, market)?.amount ?? null;
   }), totalAssets, Boolean(open && data && !data.truncated && !loading && !error && parameters.valid && stocks.length > 0 && Number.isSafeInteger(parameters.maximumStocks) && parameters.maximumStocks > 0 && Number.isFinite(parameters.cash) && parameters.cash >= 0 && parameters.cash <= 100 && Number.isFinite(parameters.normalised) && parameters.normalised >= 0 && parameters.normalised <= 100 && stocks.every(stock => (!india || metrics(stock).target != null) && means.get(stockIdentity(stock.symbol, stock.exchange))?.score != null)));
   const percentAggregate = (value: number | null) => value === null ? "Unavailable" : `${number(value * 100)}%`;
-  const balanceCell = (amount: number | null | undefined) => {
-    if (amount == null || !Number.isFinite(amount)) return "Unavailable";
-    const formatted = formatBasketDisplayCurrency(amount, market === "india" ? "INR" : "USD");
-    return totalAssets != null && totalAssets > 0
-      ? formatted + " (" + (100 * amount / totalAssets).toFixed(2) + "%)"
-      : formatted + " (—)";
-  };
   const unavailableScores = data && !loading && !error && !data.truncated
     ? stocks.filter(stock => means.get(stockIdentity(stock.symbol, stock.exchange))?.score == null) : [];
   const comparing = Boolean(india && data && !data.truncated && stocks.some(stock => stock.savedComparison));
   const displayScore = (score: number | null) => score == null ? "Unavailable" : ((Math.max(-3, Math.min(3, score)) + 3) * 100 / 6).toFixed(2);
   const renderDisclosure = (netPurchases: number | null = 0) => {
-    const columns = [
-      { label: "Current", tone: "bg-sky-100 text-sky-950", bar: "bg-sky-600", investments: assetInputs?.portfolioValue, cash: assetInputs?.availableMargin },
-      { label: "Recommended", tone: "bg-violet-100 text-violet-950", bar: "bg-violet-600", investments: aggregate.roundedAmount, cash: aggregate.roundedResidual },
-      { label: "Selected", tone: "bg-emerald-100 text-emerald-950", bar: "bg-emerald-600",
-        investments: assetInputs?.portfolioValue != null && netPurchases != null ? assetInputs.portfolioValue + netPurchases : null,
-        cash: assetInputs?.availableMargin != null && netPurchases != null ? assetInputs.availableMargin - netPurchases : null },
-    ];
     return <section aria-label="Allocation disclosure" className="my-3 text-sm">
-      <div className="mb-3 overflow-x-auto rounded-xl border border-slate-200">
-        <table aria-label="Portfolio allocation" className="w-full border-collapse text-sm tabular-nums">
-          <thead><tr>{columns.map(column => <th key={column.label} scope="colgroup" colSpan={2} className={`p-2 text-center font-bold ${column.tone}`}>{column.label}</th>)}</tr></thead>
-          <tbody>{(["investments", "cash"] as const).map(key => <tr key={key}>
-            {columns.flatMap(column => [
-              <td key={column.label + "-label"} className="border-t border-slate-200 px-3 py-2 text-slate-600">{key === "investments" ? "Investments" : "Cash"}</td>,
-              <td key={column.label} className="whitespace-nowrap border-t border-slate-200 px-3 py-2 text-right font-semibold">{balanceCell(column[key])}
-                {totalAssets != null && totalAssets > 0 && column[key] != null && column[key] >= 0 && column[key] <= totalAssets && <div aria-hidden="true" className="mt-1 h-1 overflow-hidden rounded-full bg-slate-100">
-                  <div className={`h-full rounded-full ${column.bar}`} style={{ width: `${100 * column[key] / totalAssets}%` }} />
-                </div>}</td>
-            ])}
-          </tr>)}</tbody>
-        </table>
-      </div>
+      {renderBasketAllocation(
+        { investments: assetInputs?.portfolioValue, cash: assetInputs?.availableMargin },
+        { investments: aggregate.roundedAmount, cash: aggregate.roundedResidual },
+        {
+          investments: assetInputs?.portfolioValue != null && netPurchases != null ? assetInputs.portfolioValue + netPurchases : null,
+          cash: assetInputs?.availableMargin != null && netPurchases != null ? assetInputs.availableMargin - netPurchases : null,
+        }, totalAssets, market === "india" ? "INR" : "USD",
+      )}
     {unavailableScores.length > 0 && data ? <section aria-label="Unavailable score reasons" className="mb-3 rounded border border-amber-500 p-3 text-amber-900 dark:text-amber-200">
       <h3 className="font-semibold">{unavailableScores.length} stock(s) need eligible score evidence</h3>
       <p>Selected score window: ({data.window_start}, {data.as_of}] · {data.timezone}. Missing scores are not zero or a recommendation to sell.</p>
