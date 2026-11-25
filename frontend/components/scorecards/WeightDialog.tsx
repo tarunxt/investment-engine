@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import {cardLabel, initialPercentages, type Board, type Intro} from "@/lib/scorecardBoard";
 
@@ -11,7 +11,18 @@ export function WeightDialog({board, addition, onCancel, onSave}: {
   const [values,setValues] = useState(()=>initialPercentages(board, addition?.id));
   const [busy,setBusy] = useState(false);
   const [error,setError] = useState("");
-  useEffect(()=>{const d=dialog.current; d?.showModal(); return ()=>d?.close();},[]);
+  useLayoutEffect(() => {
+    const element = dialog.current;
+    if (!element) return;
+    const opener = document.activeElement;
+    element.showModal();
+    return () => {
+      element.close();
+      if (opener instanceof HTMLElement && opener.isConnected) {
+        opener.focus({ preventScroll: true });
+      }
+    };
+  }, []);
   const ids = [...board.enabled,...(addition?[addition.id]:[])];
   const valid = ids.every(id=>/^\d{1,3}(\.\d{1,2})?$/.test(values[id]) && Number(values[id])<=100);
   const points = ids.reduce((sum,id)=>sum+Math.round((Number(values[id])||0)*100),0);
