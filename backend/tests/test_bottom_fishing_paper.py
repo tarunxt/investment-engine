@@ -185,3 +185,21 @@ async def test_legacy_queue_runs_all_four_stages_once_and_freezes_review(monkeyp
         assert (await store.request_run(http_request,db,owner))["id"] == again["id"]
         assert (await db.scalars(select(ActivityLog).where(ActivityLog.action==store.CYCLE))).all() == []
     await engine.dispose()
+
+@pytest.mark.asyncio
+async def test_manual_review_spaces_concurrent_candles_and_honors_shared_denials(monkeypatch):
+    import asyncio
+    from app.domains.bottom_fishing.review import ManualReviewQuoteGuard
+    from app.domains.zerodha.upstox_quote_guard import QuoteGuard
+
+    observed = []
+    async def shared_admission(self):
+        observed.append(asyncio.get_running_loop().time())
+        return len(observed) != 2
+
+    monkeypatch.setattr(QuoteGuard, "admit", shared_admission)
+    monkeypatch.setattr(ManualReviewQuoteGuard, "interval", 0.01)
+    guard = ManualReviewQuoteGuard(None, 1, "bottom-review", [])
+    allowed = await asyncio.gather(*(guard.admit() for _ in range(5)))
+    assert allowed == [True, False, True, True, True]
+    assert all(later - earlier >= 0.009 for earlier, later in zip(observed, observed[1:]))
