@@ -4,7 +4,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import select, func
 from app.domains.auth.dependencies import get_current_user
@@ -69,7 +69,7 @@ async def snapshot(db, owner, *, include_review=True):
 
 
 @router.post("/run", status_code=202)
-async def request_run(background_tasks: BackgroundTasks, db=Depends(get_async_db), user=Depends(get_current_user)):
+async def request_run(db=Depends(get_async_db), user=Depends(get_current_user)):
     from app.domains.zerodha.upstox_quotes import configured_for
     if not configured_for(user.id,user.username):
         raise HTTPException(409,"Market data is unavailable for this account.")
@@ -82,8 +82,8 @@ async def request_run(background_tasks: BackgroundTasks, db=Depends(get_async_db
         request_id = row.id
     await db.commit()
     if manual["status"] == "queued":
-        from .tasks import dispatch_review
-        background_tasks.add_task(dispatch_review, user.id, request_id)
+        from .review import wake_worker
+        wake_worker()
     return public_request(request_id, manual)
 
 
