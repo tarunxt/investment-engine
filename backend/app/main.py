@@ -145,11 +145,16 @@ async def lifespan(app: FastAPI):
 
     from app.domains.scorecards.technical_queue import serve as serve_technical_evidence
     from app.domains.bottom_fishing.tasks import serve as serve_bottom_fishing
+    from app.domains.bottom_fishing.review import serve_reviews
+    review_worker = asyncio.create_task(serve_reviews(AsyncSessionLocal))
     paper_scheduler = asyncio.create_task(serve_bottom_fishing(AsyncSessionLocal))
     technical_worker=asyncio.create_task(serve_technical_evidence(AsyncSessionLocal))
     try:
         yield
     finally:
+        review_worker.cancel()
+        with suppress(asyncio.CancelledError):
+            await review_worker
         paper_scheduler.cancel()
         with suppress(asyncio.CancelledError):
             await paper_scheduler

@@ -102,7 +102,7 @@ def test_closed_market_cutoff_and_proposal_preserve_paper_account():
 async def test_legacy_queue_runs_all_four_stages_once_and_freezes_review(monkeypatch):
     from contextlib import asynccontextmanager
     from types import SimpleNamespace
-    from fastapi import BackgroundTasks, HTTPException
+    from fastapi import HTTPException
     from sqlalchemy import select
     from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
     from app.domains.auth.models import User, ActivityLog
@@ -160,9 +160,10 @@ async def test_legacy_queue_runs_all_four_stages_once_and_freezes_review(monkeyp
     monkeypatch.setattr(review,"paper_cycle",trace_sync(review.paper_cycle,"score"))
     monkeypatch.setattr(review,"size_entries",trace_sync(review.size_entries,"actionables"))
     async with sessions() as db:
-        assert (await store.request_run(BackgroundTasks(), db, owner))["id"] == request_id
+        assert (await store.request_run(db, owner))["id"] == request_id
+    assert review._wake.is_set()
     for _ in range(2):
-        await review.execute_review(sessions,owner.id,request_id)
+        await review.drain_reviews(sessions)
     assert stages_seen == ["sync","screen","score","actionables"]
     async with sessions() as db:
         data = await store.snapshot(db,owner.id)
@@ -176,8 +177,8 @@ async def test_legacy_queue_runs_all_four_stages_once_and_freezes_review(monkeyp
         with pytest.raises(HTTPException) as denied:
             await store.history_record(key,db,SimpleNamespace(id=6))
         assert denied.value.status_code == 404
-        again = await store.request_run(BackgroundTasks(),db,owner)
+        again = await store.request_run(db,owner)
         assert again["id"] != request_id
-        assert (await store.request_run(BackgroundTasks(),db,owner))["id"] == again["id"]
+        assert (await store.request_run(db,owner))["id"] == again["id"]
         assert (await db.scalars(select(ActivityLog).where(ActivityLog.action==store.CYCLE))).all() == []
     await engine.dispose()
