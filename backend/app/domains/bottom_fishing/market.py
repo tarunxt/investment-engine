@@ -98,7 +98,13 @@ async def daily(client, cache, stamp):
 async def candles(client, key, stamp, guard):
     if not await guard.admit():
         return []
-    url = "https://api.upstox.com/v3/historical-candle/intraday/"+quote(key,safe="")+"/minutes/5"
+    base = "https://api.upstox.com/v3/historical-candle/"
+    instrument = quote(key, safe="")
+    day = stamp.date().isoformat()
+    if stamp.date() == datetime.now(INDIA).date():
+        url = f"{base}intraday/{instrument}/minutes/5"
+    else:
+        url = f"{base}{instrument}/minutes/5/{day}/{day}"
     response = await client.get(url, headers={"Authorization":"Bearer "+os.environ["UPSTOX_ANALYTICS_TOKEN"]})
     if response.status_code == 429:
         await guard.backoff(response.headers.get("Retry-After"))

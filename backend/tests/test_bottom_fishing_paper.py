@@ -77,3 +77,107 @@ def test_breakout_creates_only_one_paper_reservation_and_preserves_frozen_levels
     cycle(s,bar_time,104.1,103.5)
     assert not s["pending"] and s["rows"][0]["reason"]=="Already held or attempted today"
     assert "score" not in evaluate(setup,104.1,103.5,0,None,WEIGHTS)
+
+
+def test_closed_market_cutoff_and_proposal_preserve_paper_account():
+    from copy import deepcopy
+    from app.domains.bottom_fishing.review import candle_cutoff
+    from app.domains.bottom_fishing.engine import size_entries
+
+    assert candle_cutoff(T.replace(hour=21), [])[0] == T.replace(hour=15, minute=30)
+    assert candle_cutoff(T.replace(minute=43), [])[0] == T.replace(minute=40)
+    # Nov 24 is an exchange holiday, including before the open on Nov 25.
+    assert candle_cutoff(T.replace(hour=7), [])[0] == T.replace(day=23, hour=15, minute=30)
+    state = roll({}, T)
+    state["pending"] = {"NSE:OLD":dict(price=100, qty=2, risk=5)}
+    state["rows"] = [dict(symbol="NSE:A", reason="Qualified", price=104, risk=5)]
+    before = deepcopy(state)
+    size_entries(state, Settings().model_dump(), T.replace(hour=15,minute=30), preview=True)
+    assert state["rows"][0]["reason"] == "Proposed buy" and state["rows"][0]["qty"] > 0
+    for key in ("positions", "pending", "seen", "realized", "closed"):
+        assert state[key] == before[key]
+
+
+@pytest.mark.asyncio
+async def test_legacy_queue_runs_all_four_stages_once_and_freezes_review(monkeypatch):
+    from contextlib import asynccontextmanager
+    from types import SimpleNamespace
+    from fastapi import BackgroundTasks, HTTPException
+    from sqlalchemy import select
+    from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+    from app.domains.auth.models import User, ActivityLog
+    from app.domains.bottom_fishing import review, store
+    import app.models  # register relationships
+
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    async with engine.begin() as conn:
+        for table in [User.__table__, ActivityLog.__table__]:
+            await conn.run_sync(table.create)
+    owner = SimpleNamespace(id=5,username="owner")
+    async with sessions() as db:
+        db.add(User(id=owner.id, username=owner.username, email="user@example.test", password_hash="test"))
+        # Upgrade the actual previous request format, with no run id in its JSON.
+        request = store.append(db,owner.id,store.MANUAL,dict(status="queued",requested_at=T.isoformat()))
+        await db.commit()
+        request_id = request.id
+
+    @asynccontextmanager
+    async def cache():
+        yield object()
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return T.replace(hour=20)
+    stages_seen=[]
+    async def calendar(*args): return []
+    async def prepared(_client,_cache,stamp):
+        assert stamp.hour==15 and stamp.minute==30
+        return {"NSE:A":pattern()},100,dict(covered=500,universe=500)
+    async def evidence(_client,_cache,guard,stamp,levels,state,coverage):
+        coverage.update(patterns=1,current_candles=1)
+        return {"NSE:A":[candle(stamp-timedelta(minutes=5),101),candle(stamp,102)],
+                "NSE:NIFTYBEES":[candle(stamp,100)]},{"NSE:A":dict(roce=25,sales=25,profit=25,leverage=0)}
+    def traced(func,name):
+        async def wrapped(*args,**kwargs):
+            stages_seen.append(name)
+            return await func(*args,**kwargs)
+        return wrapped
+    monkeypatch.setattr(review.httpx,"AsyncClient",lambda **kwargs: cache())
+    monkeypatch.setattr(review,"datetime",Clock)
+    monkeypatch.setattr(review,"configured_for",lambda *args:True)
+    monkeypatch.setattr("app.domains.zerodha.upstox_quotes.configured_for",lambda *args:True)
+    monkeypatch.setattr(review,"redis_client",cache)
+    monkeypatch.setattr(review.market,"calendar",calendar)
+    monkeypatch.setattr(review,"prepared_market",traced(prepared,"sync"))
+    monkeypatch.setattr(review,"collect_evidence",traced(evidence,"screen"))
+    def trace_sync(func,name):
+        def wrapped(*args,**kwargs):
+            stages_seen.append(name)
+            return func(*args,**kwargs)
+        return wrapped
+    monkeypatch.setattr(review,"paper_cycle",trace_sync(review.paper_cycle,"score"))
+    monkeypatch.setattr(review,"size_entries",trace_sync(review.size_entries,"actionables"))
+    async with sessions() as db:
+        assert (await store.request_run(BackgroundTasks(), db, owner))["id"] == request_id
+    for _ in range(2):
+        await review.execute_review(sessions,owner.id,request_id)
+    assert stages_seen == ["sync","screen","score","actionables"]
+    async with sessions() as db:
+        data = await store.snapshot(db,owner.id)
+        assert data["manual"]["status"] == "completed"
+        assert data["state"] == {} and data["review"]["state"]["rows"][0]["score"] is not None
+        assert data["review"]["state"]["pending"] == {} and not data["review"]["state"]["positions"]
+        history = await store.history(None,db,owner)
+        assert len(history["items"]) == 1
+        key = history["items"][0]["id"]
+        assert (await store.history_record(key,db,owner))["request_id"] == request_id
+        with pytest.raises(HTTPException) as denied:
+            await store.history_record(key,db,SimpleNamespace(id=6))
+        assert denied.value.status_code == 404
+        again = await store.request_run(BackgroundTasks(),db,owner)
+        assert again["id"] != request_id
+        assert (await store.request_run(BackgroundTasks(),db,owner))["id"] == again["id"]
+        assert (await db.scalars(select(ActivityLog).where(ActivityLog.action==store.CYCLE))).all() == []
+    await engine.dispose()

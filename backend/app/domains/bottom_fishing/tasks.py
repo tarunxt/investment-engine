@@ -7,6 +7,8 @@ from uuid import uuid4
 from app.domains.zerodha.upstox_quote_guard import redis_client, RELEASE
 from app.infrastructure.messaging.celery_app import celery
 from app.infrastructure.database.session import AsyncSessionLocal, async_engine
+from . import store
+from .review import execute_review
 from .worker import INDIA, owners, run, monitor
 
 log = logging.getLogger(__name__)
@@ -38,11 +40,28 @@ async def advance(owner, end, exits_only):
 
 
 @celery.task(name=TASK,bind=True,max_retries=2,soft_time_limit=225,time_limit=240,acks_late=True)
-def advance_paper(self, owner:int, end:str, exits_only:bool=False):
+def advance_paper(self, owner:int, end:str, exits_only:bool=False, review_id:int | None=None):
     try:
-        asyncio.run(advance(owner,end,exits_only))
+        if review_id is None:
+            asyncio.run(advance(owner,end,exits_only))
+        else:
+            async def review():
+                try:
+                    await execute_review(AsyncSessionLocal,owner,review_id)
+                finally:
+                    await async_engine.dispose()
+            asyncio.run(review())
     except Exception as exc:
         raise self.retry(exc=exc,countdown=15)
+
+
+async def dispatch_review(owner, request_id):
+    # The database request survives a broker outage; the scheduler redelivers it.
+    async with redis_client() as cache:
+        if await cache.set(f"bottom:review-dispatch:{request_id}", "1", nx=True, ex=30):
+            await asyncio.to_thread(advance_paper.apply_async,
+                args=(owner, datetime.now(INDIA).isoformat(), False, request_id),
+                soft_time_limit=550, time_limit=575, expires=120)
 
 
 async def serve(sessions):
@@ -51,10 +70,15 @@ async def serve(sessions):
         await asyncio.sleep(5)
         now = datetime.now(INDIA)
         stamp = now.replace(minute=now.minute-now.minute%5,second=0,microsecond=0)
-        if not time(9,20)<=stamp.time()<=time(15,30):
-            continue
         try:
             async with redis_client() as cache:
+                if await cache.set("bottom:review-sweep", "1", nx=True, ex=60):
+                    async with sessions() as db:
+                        ready = [job async for job in store.ready_requests(db, now)]
+                    for owner, request_id in ready:
+                        await dispatch_review(owner, request_id)
+                if not time(9,20)<=stamp.time()<=time(15,30):
+                    continue
                 bucket = int(now.timestamp()) // 20
                 for owner in await owners(sessions):
                     if (now-stamp).total_seconds()>20 and await cache.exists(f"bottom:monitor:{owner}"):
