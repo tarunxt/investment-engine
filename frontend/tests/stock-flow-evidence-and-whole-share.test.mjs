@@ -1,3 +1,4 @@
+import { chartBindings } from "./fixtures/tradingview-bindings.mjs";
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -8,6 +9,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 
 const require = createRequire(import.meta.url);
 function load(relative, bindings = {}, exports = [], functionsOnly = false) {
+  bindings = {...chartBindings, ...bindings};
   const source = readFileSync(new URL(relative, import.meta.url), 'utf8') + (relative.endsWith('RebalanceWorkflowSections.tsx') ? '\n' + readFileSync(new URL('../components/shared/WorkflowStageTile.tsx', import.meta.url), 'utf8') : '');
   const ast = ts.createSourceFile(relative, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   const text = ast.statements.filter(node => functionsOnly ? ts.isFunctionDeclaration(node) : !ts.isImportDeclaration(node)).map(node => node.getText(ast)).join('\n');

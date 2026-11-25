@@ -1,3 +1,4 @@
+import { tradingViewText } from "@/components/shared/TradingViewSymbolLink";
 type RecordValue = Record<string, unknown>;
 const record = (value: unknown): value is RecordValue => typeof value === "object" && value !== null && !Array.isArray(value);
 const count = (value: unknown) => typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
@@ -46,7 +47,7 @@ export function OutputConsistencyNotice({ metadata }: { metadata?: unknown }) {
             const text = conflictText(finding);
             const source = record(finding.source) ? finding.source : {};
             return text ? <li key={index}>
-              {count(source.row) !== null ? `Row ${source.row}${count(source.fragment) !== null ? ` (fragment ${source.fragment})` : ""}: ` : ""}{text}
+              {count(source.row) !== null ? `Row ${source.row}${count(source.fragment) !== null ? ` (fragment ${source.fragment})` : ""}: ` : ""}{tradingViewText(text)}
             </li> : null;
           })}
         </ul>

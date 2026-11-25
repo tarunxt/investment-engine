@@ -1,5 +1,6 @@
 "use client";
 
+import { TradingViewSymbolLink } from "@/components/shared/TradingViewSymbolLink";
 import Link from "next/link";
 import { RunSpendLimitNotice } from "@/components/shared/RunSpendLimitNotice";
 import { RunSideEffectPolicyNotice } from "@/components/shared/AnalysisOnlyRunControl";
@@ -276,7 +277,7 @@ function JobDetails({ job }: { job: AutoRebalanceJobDetailResponse }) {
         <details className="mt-3 rounded border p-3 text-sm">
           <summary>Excluded inputs and validation findings</summary>
           {validation.finding_counts && <p>{Object.entries(validation.finding_counts).map(([code, count]) => `${code}: ${count}`).join(" · ")}</p>}
-          {validation.exclusions?.map((x, i) => <p key={i}>{[x.exchange, x.symbol].filter(Boolean).join(":") || `Row ${x.row ?? "unknown"}`} · {x.field || "Rationale"} · {x.reason}</p>)}
+          {validation.exclusions?.map((x, i) => <p key={i}>{x.symbol ? <TradingViewSymbolLink symbol={x.symbol} exchange={x.exchange}>{[x.exchange, x.symbol].filter(Boolean).join(":")}</TradingViewSymbolLink> : `Row ${x.row ?? "unknown"}`} · {x.field || "Rationale"} · {x.reason}</p>)}
           {validation.exclusion_count != null && validation.exclusion_count > (validation.exclusions?.length ?? 0) && <p>Showing {validation.exclusions?.length} of {validation.exclusion_count} excluded fields.</p>}
           {!validation.exclusions && <p>This job predates saved per-row exclusion details.</p>}
         </details>

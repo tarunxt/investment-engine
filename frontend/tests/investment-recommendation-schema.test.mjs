@@ -1,3 +1,4 @@
+import { chartBindings } from "./fixtures/tradingview-bindings.mjs";
 import * as actionColors from '../lib/actionColorScheme.ts';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -11,7 +12,7 @@ const require = createRequire(import.meta.url);
 const source = readFileSync(new URL('../components/InvestmentRecommendationTable.tsx', import.meta.url), 'utf8');
 const dependencies = {
   '@/components/shared/MarkdownRenderer': { default: ({ content }) => createElement('pre', null, content) },
-  '@/components/shared/TradingViewSymbolLink': { TradingViewSymbolLink: ({ children }) => createElement('span', null, children) },
+  '@/components/shared/TradingViewSymbolLink': chartBindings,
   '@/lib/actionColorScheme': actionColors,
   '@/lib/utils': { cn: (...parts) => parts.filter(Boolean).join(' ') },
 };

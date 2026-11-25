@@ -1,3 +1,4 @@
+import { chartBindings } from "./fixtures/tradingview-bindings.mjs";
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync } from 'node:fs';
@@ -6,7 +7,7 @@ import ts from 'typescript';
 import * as React from 'react';
 const require = createRequire(import.meta.url);
 let sharedColumnBindings = {};
-function load(path, bindings={}) { bindings = { ...sharedColumnBindings, BasketMetricPopup: () => null, BasketActionSizingPopup: () => null, ...bindings }; const source=readFileSync(new URL(path,import.meta.url),'utf8'), ast=ts.createSourceFile(path,source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX); const text=ast.statements.filter(n=>!ts.isImportDeclaration(n)).map(n=>n.getText(ast)).join('\n'); const output=ts.transpileModule(text,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText; const result={exports:{}}; new Function('exports','module','require',...Object.keys(bindings),output)(result.exports,result,require,...Object.values(bindings));return result.exports; }
+function load(path, bindings={}) { bindings = { ...chartBindings, ...sharedColumnBindings, BasketMetricPopup: () => null, BasketActionSizingPopup: () => null, ...bindings }; const source=readFileSync(new URL(path,import.meta.url),'utf8'), ast=ts.createSourceFile(path,source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX); const text=ast.statements.filter(n=>!ts.isImportDeclaration(n)).map(n=>n.getText(ast)).join('\n'); const output=ts.transpileModule(text,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText; const result={exports:{}}; new Function('exports','module','require',...Object.keys(bindings),output)(result.exports,result,require,...Object.values(bindings));return result.exports; }
 sharedColumnBindings = load('../lib/basketColumnPreferences.ts');
 const submissionSafety=load('../lib/basketSubmissionSafety.ts');
 const reviewDialogHooks=load('../hooks/useReviewDialog.ts',{useRef:initial=>({current:initial}),useEffect:()=>{},useCallback:fn=>fn});

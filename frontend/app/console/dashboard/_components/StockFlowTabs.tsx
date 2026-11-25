@@ -1,4 +1,5 @@
 "use client";
+import { TradingViewSymbolLink } from "@/components/shared/TradingViewSymbolLink";
 import { parseActionLabel } from '@/lib/actionColorScheme';
 import type { VerifiedUsListing } from "@/lib/usSecurityIdentity";
 
@@ -655,7 +656,7 @@ function RebalanceStockFlowSubwidget({
                         data-buy-threshold-eligible={isAboveBuyThreshold(row, buyThreshold) ? "true" : undefined}
                         className={isAboveBuyThreshold(row, buyThreshold) ? "bg-emerald-50" : undefined}
                       >
-                        <td className="px-4 py-3 text-sm font-semibold text-slate-950">{row.stock.exchange}:{row.stock.symbol}</td>
+                        <td className="px-4 py-3 text-sm font-semibold text-slate-950"><TradingViewSymbolLink symbol={row.stock.symbol} exchange={row.stock.exchange}>{`${row.stock.exchange}:${row.stock.symbol}`}</TradingViewSymbolLink></td>
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-2">
                             {row.formulaAction ? <ActionBadge action={row.formulaAction} /> : row.formulaScore == null ? "Score unavailable" : "Holdings unavailable"}
@@ -806,7 +807,7 @@ function Stage({ title, count, meta, toolbar, children }: { title: string; count
 }
 
 function StockRow({ name, action, score, consensus, detailed, highlighted = false, details = [] }: { name: string; action?: string; score?: number | null; consensus?: string; detailed: boolean; highlighted?: boolean; details?: string[] }) {
-  return <div className={cn("px-4 py-3", highlighted ? "bg-emerald-50" : "bg-white")}><div className="flex flex-wrap items-center gap-x-3 gap-y-1"><strong className="text-sm text-slate-950">{name}</strong>{action ? <ActionBadge action={action} /> : null}{highlighted ? <span className="rounded-full bg-emerald-600 px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-white">Above threshold</span> : null}{score !== undefined ? <span className="text-xs text-slate-600">Final Score: <b>{score === null ? "—" : score.toFixed(2)}</b></span> : null}{consensus ? <span className="text-xs text-slate-600">Consensus: <b>{consensus}</b></span> : null}</div>{detailed ? <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">{details.map((detail) => <span key={detail}>{detail}</span>)}</div> : null}</div>;
+  return <div className={cn("px-4 py-3", highlighted ? "bg-emerald-50" : "bg-white")}><div className="flex flex-wrap items-center gap-x-3 gap-y-1"><strong className="text-sm text-slate-950"><TradingViewSymbolLink symbol={name} /></strong>{action ? <ActionBadge action={action} /> : null}{highlighted ? <span className="rounded-full bg-emerald-600 px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-white">Above threshold</span> : null}{score !== undefined ? <span className="text-xs text-slate-600">Final Score: <b>{score === null ? "—" : score.toFixed(2)}</b></span> : null}{consensus ? <span className="text-xs text-slate-600">Consensus: <b>{consensus}</b></span> : null}</div>{detailed ? <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">{details.map((detail) => <span key={detail}>{detail}</span>)}</div> : null}</div>;
 }
 
 function StageHeader({ title, count, meta }: { title: string; count: number; meta: { models: string; timestamp: string } | null }) {
@@ -838,7 +839,7 @@ function SwingJobOutputsStage({ count, meta, outputs }: { count: number; meta: {
               </thead>
               <tbody className="divide-y divide-slate-200 bg-white">
                 {output.symbols.length ? output.symbols.map((symbol) => (
-                  <tr key={`${output.key}:${symbol}`}><td className="px-4 py-3 text-sm font-semibold text-slate-950">{symbol}</td></tr>
+                  <tr key={`${output.key}:${symbol}`}><td className="px-4 py-3 text-sm font-semibold text-slate-950"><TradingViewSymbolLink symbol={symbol} /></td></tr>
                 )) : (
                   <tr><td className="px-4 py-5 text-sm text-slate-500">{stockOutputMessage(output.state)} · {output.status}</td></tr>
                 )}
@@ -871,7 +872,7 @@ function RebalanceJobOutputsStage({ count, meta, stocks, outputs, warnings }: { 
           <tbody className="divide-y divide-slate-200 bg-white">
             {stocks.length ? stocks.map((stock) => (
               <tr key={stock.key}>
-                <td className="px-4 py-3 text-sm font-semibold text-slate-950" title={stock.sources.join("; ")}>{stock.key}{stock.relatedVenues.length ? <span className="block text-xs font-normal">Same symbol also at {stock.relatedVenues.join(", ")}; separate listing</span> : null}</td>
+                <td className="px-4 py-3 text-sm font-semibold text-slate-950" title={stock.sources.join("; ")}><TradingViewSymbolLink symbol={stock.key} />{stock.relatedVenues.length ? <span className="block text-xs font-normal">Same symbol also at {stock.relatedVenues.join(", ")}; separate listing</span> : null}</td>
                 {outputs.map((output) => {
                   const action = stock.actions[output.key] || "Missing analysis — no decision recorded";
                   return <td key={`${stock.key}:${output.key}`} className="border-l border-slate-100 px-4 py-3"><ActionBadge action={action} /><span className="block max-w-48 whitespace-normal text-xs text-slate-600">{stock.reasons[output.key] || "No model reason recorded; not an inferred rejection."}</span></td>;
@@ -949,7 +950,7 @@ function SavedSwingStage({ groups, fallback }: { groups: ReturnType<typeof saved
     <div role="region" aria-label="Saved Swing input runs" tabIndex={0} className="max-h-[min(58vh,36rem)] overflow-auto overscroll-contain space-y-3 p-3">
       {groups.map((group, index) => <section key={group.runId} aria-label={`Swing input Run #${group.runId}`} className="overflow-hidden rounded-xl border border-blue-200">
         <header className="bg-blue-50 px-3 py-3"><h4 className="font-bold">Run #{group.runId} · {index === 0 ? 'Latest input' : 'Older input'}</h4><time className="text-xs">{formatAuditTime(group.createdAt)}</time></header>
-        {group.jobs.map(job => <div key={job.key} className="border-t border-slate-200 p-3"><p className="text-xs font-semibold text-blue-800">{job.label}</p><ul className="mt-2 space-y-2 text-sm">{job.symbols.map(symbol => <li key={symbol}>{symbol}</li>)}</ul>{!job.symbols.length && <p className="text-xs text-amber-800">Saved stock rows could not be parsed; inspect this run's input.</p>}</div>)}
+        {group.jobs.map(job => <div key={job.key} className="border-t border-slate-200 p-3"><p className="text-xs font-semibold text-blue-800">{job.label}</p><ul className="mt-2 space-y-2 text-sm">{job.symbols.map(symbol => <li key={symbol}><TradingViewSymbolLink symbol={symbol} /></li>)}</ul>{!job.symbols.length && <p className="text-xs text-amber-800">Saved stock rows could not be parsed; inspect this run's input.</p>}</div>)}
       </section>)}
     </div>
   </article>;

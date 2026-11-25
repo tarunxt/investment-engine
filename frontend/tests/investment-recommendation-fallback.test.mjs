@@ -1,3 +1,4 @@
+import { chartBindings } from "./fixtures/tradingview-bindings.mjs";
 import * as actionColors from '../lib/actionColorScheme.ts';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -20,9 +21,7 @@ function loadParser() {
         return createElement('pre', null, content);
       },
     },
-    '@/components/shared/TradingViewSymbolLink': {
-      TradingViewSymbolLink: ({ children }) => createElement('span', null, children),
-    },
+    '@/components/shared/TradingViewSymbolLink': chartBindings,
     '@/lib/actionColorScheme': actionColors,
     '@/lib/utils': { cn: (...parts) => parts.filter(Boolean).join(' ') },
   };

@@ -1,5 +1,6 @@
 "use client";
 
+import { TradingViewSymbolLink } from "@/components/shared/TradingViewSymbolLink";
 import { useRef, useState } from "react";
 import { CanonicalRecommendationTable, REBALANCE_HEADER_ORDER } from "@/components/InvestmentRecommendationTable";
 import type { CardResult, CardRow, RebalanceReadiness } from "@/lib/independentScorecards";
@@ -21,11 +22,11 @@ export function RebalanceSourceCheck({data}:{data:RebalanceReadiness}) {
     <p><strong>Source readiness</strong> · {data.ready} ready for full scoring · {data.provisional} provisional inputs · {data.awaiting} awaiting evidence</p>
     {[...blockers].sort((a,b)=>b[1].length-a[1].length).map(([factor, entries])=>
       <details key={factor}><summary className="cursor-pointer">{labels[factor] ?? factor} · {entries.length} missing</summary>
-        <ul>{entries.map(entry=><li key={entry.listing}>{entry.listing} · {entry.reason}</li>)}</ul>
+        <ul>{entries.map(entry=><li key={entry.listing}><TradingViewSymbolLink symbol={entry.listing} /> · {entry.reason}</li>)}</ul>
       </details>)}
     <details><summary className="cursor-pointer">Evidence by listing ({data.rows.length})</summary>
       <table className="w-full text-left text-sm"><thead><tr><th>Listing</th><th>Verified listing</th><th>Price sessions (20 / 60 / 200)</th><th>Missing evidence</th></tr></thead>
-        <tbody>{data.rows.map(row=><tr key={row.listing}><td>{row.listing}</td><td>{row.verified_listing}</td>
+        <tbody>{data.rows.map(row=><tr key={row.listing}><td><TradingViewSymbolLink symbol={row.listing} /></td><td>{row.verified_listing && <TradingViewSymbolLink symbol={row.verified_listing} />}</td>
           <td>{["technical-short","technical-medium","technical-long"].map(f=>row.sessions[f]??"—").join(" / ")}</td>
           <td>{Object.entries(row.missing).map(([f,why])=><div key={f}>{labels[f]??f} · {why}</div>)}{row.state==="ready" && "Ready"}</td></tr>)}</tbody></table>
     </details></section>;
@@ -54,7 +55,7 @@ export function RebalanceStockScores({result:original,onRecover}:{result:CardRes
     {error && <p role="alert">{error}</p>}
     <p>{counts.assessed} assessed · {counts.complete} complete · {counts.provisional} provisional · {counts.unassessed} unassessed</p>
     {counts.unassessed > 0 && <details><summary className="cursor-pointer">Unassessed listings ({counts.unassessed})</summary>
-      <ul>{result.rows.filter(row=>row.score == null).map(row=><li key={row.listing}>{row.listing}
+      <ul>{result.rows.filter(row=>row.score == null).map(row=><li key={row.listing}><TradingViewSymbolLink symbol={row.listing} />
         {result.unassessed_trace?.[row.listing]?.map(reason=><span key={reason}> · {reason}</span>)}
         {result.rebalance_readiness?.rows.find(item=>item.listing===row.listing)?.state==="awaiting" && " · Awaiting eligible source evidence"}
       </li>)}</ul></details>}
@@ -63,7 +64,7 @@ export function RebalanceStockScores({result:original,onRecover}:{result:CardRes
     <table className="w-full text-left text-sm">
       <thead><tr>{["Listing","Score /100","Supported weight","Coverage","Action"].map(h=><th key={h} scope="col" className="p-2">{h}</th>)}</tr></thead>
       <tbody>{result.rows.map(row=><tr key={row.listing} className="border-t">
-        <td className="p-2">{row.listing}</td><td><button type="button" className="text-blue-700 underline"
+        <td className="p-2"><TradingViewSymbolLink symbol={row.listing} /></td><td><button type="button" className="text-blue-700 underline"
           aria-label={`Score calculation for ${row.listing}`} onClick={()=>{setCurrent(row);dialog.current?.showModal();}}>
           {row.score?.toFixed(1)??"Unavailable"}</button></td>
         <td>{String(row.available_weight??0)}/{totalWeight}</td><td>{row.coverage==="Partial"?"Provisional":row.coverage}</td>
@@ -76,7 +77,7 @@ export function RebalanceStockScores({result:original,onRecover}:{result:CardRes
       </summary><ul>{job.fields.map(([k,f,s])=><li key={k+f}>{k} · {labels[f]??f} · {s}</li>)}</ul></details>)}
     </details>
     <dialog ref={dialog} className="fixed inset-0 m-auto max-h-[85vh] w-[min(40rem,94vw)] overflow-auto rounded-xl bg-white p-5 shadow-xl backdrop:bg-black/40" aria-labelledby="rebalance-calc-title">
-      <div className="flex justify-between gap-4"><h3 id="rebalance-calc-title" className="font-semibold">{current?.listing} · Rebalance calculation</h3>
+      <div className="flex justify-between gap-4"><h3 id="rebalance-calc-title" className="font-semibold">{current && <TradingViewSymbolLink symbol={current.listing} />} · Rebalance calculation</h3>
         <button type="button" onClick={()=>dialog.current?.close()}>Close</button></div>
       <table className="my-3 w-full text-left text-sm"><thead><tr><th>Factor</th><th>Signed score</th><th>Weight</th><th>Contribution</th></tr></thead>
         <tbody>{Object.entries(audit.weights).map(([k,w])=><tr key={k}><td>{labels[k]??k}</td><td>{terms[k]??"Unavailable"}</td><td>{w}</td><td>{terms[k]==null?"Excluded":Number((terms[k]!*w).toFixed(3))}</td></tr>)}</tbody>

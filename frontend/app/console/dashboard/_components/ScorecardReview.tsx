@@ -1,4 +1,5 @@
 "use client";
+import { tradingViewText } from "@/components/shared/TradingViewSymbolLink";
 import { PairwiseStockScores } from "./PairwiseStockScores";
 import { PairwiseCoverage } from "./PairwiseCoverage";
 import { RebalanceSourceCheck, RebalanceStockScores } from "./RebalanceStockScores";
@@ -167,7 +168,7 @@ export function ScorecardReview({portfolio,stage:initial,revisionId,initialAttem
       </>}
       {card==="pairwise"&&attempt>0&&<button className={button} disabled={busy} onClick={()=>void perform(async()=>{const r=await api.recover(attempt);selectedOutput.current=r.id;setVersion(n=>n+1);})}>Recheck saved responses · no model call</button>}
       {attempt>0&&<button className={button} disabled={busy} onClick={()=>void perform(async()=>{setResult(await api.result(attempt));})}>Refresh output</button>}
-      {prompt&&<details><summary>LLM prompt · first batch</summary><pre className="max-h-80 overflow-auto whitespace-pre-wrap text-xs">{prompt}</pre></details>}
+      {prompt&&<details><summary>LLM prompt · first batch</summary><pre className="max-h-80 overflow-auto whitespace-pre-wrap text-xs">{tradingViewText(prompt)}</pre></details>}
       {(card==="technical"||card==="pairwise")&&broker==="india"&&<details><summary>Historical performance</summary><button className={button} disabled={busy} onClick={()=>void perform(async()=>setPerformance(await api.performance()))}>Evaluate saved decisions</button>
       {performance&&<><p>Top {performance.top_n} · {performance.benchmark} · {performance.one_way_cost_bps} basis points per side · {performance.eligible_workflows} saved workflows with both outputs. Returns require complete forward prices.</p><Grid rows={performance.rows}/></>}</details>}
       {card==="technical"&&broker==="india"&&<TechnicalValidation key={id} read={api.technicalValidation} executions={api.technicalExecutions}/>}

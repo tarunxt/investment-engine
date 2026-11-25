@@ -108,7 +108,7 @@ import {
   type StockConsensus,
 } from "@/app/console/_components/FinalActionablesConsole";
 import { Button } from "@/components/ui/button";
-import { TradingViewSymbolLink } from "@/components/shared/TradingViewSymbolLink";
+import { TradingViewSymbolLink, tradingViewText } from "@/components/shared/TradingViewSymbolLink";
 import { TradingViewUrlListButton } from "@/components/shared/TradingViewUrlListButton";
 import { LlmModelMixControls } from "@/components/shared/LlmModelMixControls";
 import { StandardLlmOutputRenderer } from "@/components/shared/StandardLlmOutputRenderer";
@@ -3142,7 +3142,7 @@ function ScopedZerodhaBasketPreviewDialog({
           <div role="alert" className="mx-5 mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
             {scoreRevision?.divisors.length ? <p className="font-semibold">Rationale divisor (basket → saved): {scoreRevision.divisors.join(", ")}</p> : null}
             {orderSubmissionBlockedReason}
-            {scoreRevision?.differences.length ? <details><summary>Affected listings ({scoreRevision.differences.length})</summary>{scoreRevision.differences.join(", ")}</details> : null}
+            {scoreRevision?.differences.length ? <details><summary>Affected listings ({scoreRevision.differences.length})</summary>{tradingViewText(scoreRevision.differences.join(", "))}</details> : null}
             {openSavedBasket && <button type="button" className="mt-2 underline" onClick={openSavedBasket}>Open basket with saved scoring settings</button>}
           </div>
         ) : null}
@@ -3385,7 +3385,7 @@ function ScopedZerodhaBasketPreviewDialog({
                                     >
                                       {row.listing}
                                     </TradingViewSymbolLink>
-                                    <small className="block">{row.name}</small>
+                                    <small className="block"><TradingViewSymbolLink symbol={row.symbol} exchange={row.exchange} market={tradingViewMarket}>{row.name}</TradingViewSymbolLink></small>
                                   </div>
                                 </div></td>
                                 <td className="whitespace-nowrap px-4 py-3">{renderSavedScore(row)}</td>

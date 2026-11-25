@@ -1,5 +1,6 @@
 "use client";
 
+import { tradingViewText } from "@/components/shared/TradingViewSymbolLink";
 import {Status, Table, scorecardButton as button, scorecardPanel as panel, scorecardHeader, scorecardPage, scorecardBreadcrumbs, scorecardTab} from "@/components/scorecards/ScorecardPresentation";
 import { RebalanceSourceCheck, RebalanceStockScores } from "./RebalanceStockScores";
 import { TechnicalValidation } from "./TechnicalValidation";
@@ -476,7 +477,7 @@ function Evidence({
             <details key={p.id} className="rounded-xl bg-slate-950 p-4 text-white">
               <summary className="cursor-pointer text-sm">{p.id} · Raw prompt</summary>
               <pre className="mt-3 max-h-96 overflow-auto whitespace-pre-wrap break-words text-xs">
-                {p.body || "No prompt text saved."}
+                {tradingViewText(p.body || "No prompt text saved.")}
               </pre>
             </details>
           ))}
@@ -498,7 +499,7 @@ function Evidence({
                   {j.response && card === "pairwise" ? (
                     <StandardLlmOutputRenderer content={j.response} pairwisePrompt={j.prompt ?? ""} />
                   ) : <pre className="mt-3 whitespace-pre-wrap break-words text-sm">
-                    {j.response || j.error_message || "No output text saved."}
+                    {tradingViewText(j.response || j.error_message || "No output text saved.")}
                   </pre>}
                 </article>
               ))}

@@ -1,5 +1,6 @@
 "use client";
 
+import { TradingViewSymbolLink } from "@/components/shared/TradingViewSymbolLink";
 import { technicalReason } from "@/lib/technicalReason";
 
 import { useEffect, useRef, useState } from "react";
@@ -53,7 +54,7 @@ export function TechnicalStockScores({result,revision,onRecover,onRetryCommentar
     <div className="overflow-x-auto"><table className="w-full text-left"><thead className="bg-slate-100"><tr>
       {["Listing","Score /100","Coverage","Setup / entry","Reason"].map(k=><th key={k} className={cell}>{k}</th>)}</tr></thead>
       <tbody>{ordered.map(r=>{const v=lines(r);const previous=r.previous_close_score as {score:number;session:string}|undefined;const ready=r.readiness as {setup?:string;entry?:string}|undefined;
-        return <tr key={r.listing}><th scope="row" className={cell}>{r.listing}</th><td className={cell}><button type="button" className={link}
+        return <tr key={r.listing}><th scope="row" className={cell}><TradingViewSymbolLink symbol={r.listing} /></th><td className={cell}><button type="button" className={link}
           aria-label={`Show calculation for ${r.listing}`} onClick={()=>setSelection(r)}>{fmt(r.score)} ↗</button>
           {previous&&<div>Last verified {fmt(previous.score)} /100 · {previous.session}</div>}</td>
           <td className={cell}>{typeof r.closing_pending==="string" ? `${r.closing_pending} closing data pending` : r.coverage}{v&&` · ${v.coverage_pct}%`}</td><td className={cell}>{ready?.setup??"—"} · {ready?.entry??"—"}</td>
@@ -67,11 +68,11 @@ export function TechnicalStockScores({result,revision,onRecover,onRetryCommentar
     {message&&<p role="status">{message}</p>}
     {selection&&<dialog ref={dialog} onClose={()=>setSelection(null)} aria-label={"Technical calculation for "+selection.listing}
       className="fixed inset-0 m-auto max-h-[85vh] w-[min(90vw,58rem)] resize overflow-auto rounded-2xl border border-slate-200 bg-white p-5 text-slate-900 shadow-xl backdrop:bg-black/40">
-      <div className="sticky top-0 flex items-center justify-between bg-white py-2"><h3 className="font-semibold">{selection.listing} · {fmt(selection.score)} /100</h3>
+      <div className="sticky top-0 flex items-center justify-between bg-white py-2"><h3 className="font-semibold"><TradingViewSymbolLink symbol={selection.listing} /> · {fmt(selection.score)} /100</h3>
       <button type="button" className={link} onClick={()=>dialog.current?.close()}>Close calculation</button></div>
       <div className="space-y-3 p-3 text-sm"><p>Output #{current.id} · Stage 2 #{current.revision_id??revision} · {selection.coverage}</p>
       {original&&<p>Original commentary from job #{original.job} refers to the earlier evidence revision.</p>}
-      {data?.canonical_listing&&<p>Verified source alias for {data.canonical_listing}. <a href={data.identity_source} className={link}>Exchange identity record</a></p>}
+      {data?.canonical_listing&&<p>Verified source alias for <TradingViewSymbolLink symbol={data.canonical_listing} />. <a href={data.identity_source} className={link}>Exchange identity record</a></p>}
       {data?<><p>{data.direction} · Cutoff {at(data.as_of)} · Decision session {data.session??"—"} · {data.vintage}{data.observed_at&&" · Evidence checked "+at(data.observed_at)}</p>
         <div className="overflow-x-auto"><table className="w-full text-left"><thead><tr>{["Factor","Score /100","Weight","Points from 50","Inputs"].map(k=><th key={k} className={cell}>{k}</th>)}</tr></thead>
         <tbody>{Object.entries(data.factors).map(([name,f])=><tr key={name}><th className={cell}>{name}</th><td className={cell}>{fmt(f.value)}</td><td className={cell}>{fmt(100*f.weight,0)}%</td>
