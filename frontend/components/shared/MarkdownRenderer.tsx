@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import ReactMarkdown, { ExtraProps } from 'react-markdown';
 import type { Element } from 'hast';
+import { remarkTradingView } from '@/lib/remarkTradingView';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
@@ -134,7 +135,7 @@ const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
                 </div>
             )}
             <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
+                remarkPlugins={[remarkGfm, remarkTradingView]}
                 components={{
                     // Headers
                     h1: ({ children, ...props }) => (

@@ -12,6 +12,7 @@ const US_EXCHANGE_ALIASES: Record<string, string> = {
   NASDAQSTOCKMARKET: 'NASDAQ',
   NEWYORKSTOCKEXCHANGE: 'NYSE',
   NYSEARCA: 'AMEX',
+  NYSEAMERICAN: 'AMEX',
   ARCA: 'AMEX',
   AMERICANSTOCKEXCHANGE: 'AMEX',
 };
@@ -120,12 +121,14 @@ export function buildTradingViewChartUrl({
   }
 
   if (QUALIFIED_SYMBOL_PATTERN.test(normalizedSymbol)) {
-    return `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(normalizedSymbol)}`;
+    const [venue, ticker] = normalizedSymbol.split(':');
+    const chartSymbol = ['US', 'UNKNOWN', 'UNRESOLVED'].includes(venue) ? ticker : `${normalizeExchange(venue)}:${ticker}`;
+    return `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(chartSymbol)}`;
   }
 
   const normalizedExchange = normalizeExchange(exchange ?? '');
 
-  if (market === 'india') {
+  if (market === 'india' || INDIA_EXCHANGES.has(normalizedExchange)) {
     const resolvedExchange = INDIA_EXCHANGES.has(normalizedExchange) ? normalizedExchange : 'NSE';
     return `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(`${resolvedExchange}:${normalizedSymbol}`)}`;
   }
@@ -179,4 +182,38 @@ export function getVisibleTradingViewColumns(columns: string[], rows: Record<str
     }
     return true;
   });
+}
+
+// Recognize listed equity venues in prose. Other uppercase words, source IDs,
+// URLs and fragments of longer identifiers are not stock mentions.
+const mentionPattern = /https?:\/\/[^\s<>]+|(?<![\w/:@.-])(?:NSE|BSE|NASDAQ(?:GS|GM|CM)?|NYSE(?:ARCA|AMERICAN)?|AMEX|ARCA|BATS|OTC(?:QX|QB)?|CBOE|LSE|TSX|TSXV|ASX|HKEX):[A-Z0-9](?:[A-Z0-9._&-]{0,22}[A-Z0-9])?(?![\w&-]|\.[\w])/gi;
+
+export function tradingViewMentions(text: string) {
+  if (!text.includes(':')) return [];
+  return Array.from(text.matchAll(mentionPattern))
+    .filter(match => !/^https?:/i.test(match[0]))
+    .map(match => ({ symbol: match[0], start: match.index, end: match.index + match[0].length }));
+}
+
+const identityKeys = new Set([...SYMBOL_COLUMN_KEYS, 'listing', 'canonical listing', 'stock ticker', 'trading symbol']);
+export function stockIdentityForColumns(columns: string[], values: readonly unknown[]) {
+  let symbol = '', exchange = '';
+  columns.forEach((column, index) => {
+    const key = normalizeColumnLabel(column);
+    const value = values[index];
+    if (typeof value !== 'string' && typeof value !== 'number') return;
+    const label = String(value).trim();
+    if (identityKeys.has(key) && looksLikeTradingViewSymbol(label) && (!symbol || label.includes(':'))) symbol = label;
+    if (EXCHANGE_COLUMN_KEYS.has(key) || key === 'venue' || key === 'stock exchange') exchange = label;
+  });
+  return { symbol, exchange };
+}
+
+export function chartSymbolForCell(column: string, text: string, identity: {symbol: string}) {
+  const key = normalizeColumnLabel(column);
+  const ownListing = identityKeys.has(key) || key === 'paper holding' || key === 'stock';
+  if (ownListing && QUALIFIED_SYMBOL_PATTERN.test(normalizeValue(text))) return text;
+  if (identity.symbol && (ownListing || key === 'name' || isTradingViewDisplayColumn(column))) return identity.symbol;
+  if ((ownListing || ['first listing', 'second listing', 'opponent'].includes(key)) && looksLikeTradingViewSymbol(text)) return text;
+  return null;
 }

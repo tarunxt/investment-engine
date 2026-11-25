@@ -1,5 +1,6 @@
 "use client";
 
+import { TradingViewSymbolLink } from "@/components/shared/TradingViewSymbolLink";
 import { useRef, useState } from "react";
 import type { CardResult, CardRow } from "@/lib/independentScorecards";
 
@@ -75,9 +76,9 @@ export function ThreatStockScores({ result, onRecover, onRefresh, onRetry }: {
         <tbody>{saved.rows.map(row => {
           const categoryScores = (row.categories ?? {}) as Record<string, number | null>;
           return <tr key={row.listing} className="border-t">
-            <th scope="row"><button type="button" aria-label={"Explain Threats score for "+row.listing}
+            <th scope="row"><TradingViewSymbolLink symbol={row.listing} /> <button type="button" aria-label={"Explain Threats score for "+row.listing}
               className="whitespace-nowrap py-1 text-blue-700 underline"
-              onClick={() => {setActive(row); dialog.current?.showModal();}}>{row.listing}</button></th>
+              onClick={() => {setActive(row); dialog.current?.showModal();}}>Explain score</button></th>
             {view === "Sub-scores" ? categories.map(name => <td key={name} className="px-2">{value(categoryScores[name])}</td>) :
               <><td>{value(row.stock_threat)}</td><td>{value(row.score)}</td></>}
             <td>{Number(row.assessed ?? 0)}/8</td><td>{assessment(row)}</td>
@@ -87,7 +88,7 @@ export function ThreatStockScores({ result, onRecover, onRefresh, onRetry }: {
     </div>
     <dialog ref={dialog} aria-label="Threats score calculation" className="m-auto max-h-[85vh] w-[min(58rem,94vw)] overflow-auto rounded-xl border p-5 backdrop:bg-black/40">
       {active && <><button type="button" className={control+" float-right"} onClick={()=>dialog.current?.close()}>Close</button>
-        <h3 className="text-lg font-semibold">{active.listing} · Threats score {value(active.score)}</h3>
+        <h3 className="text-lg font-semibold"><TradingViewSymbolLink symbol={active.listing} /> · Threats score {value(active.score)}</h3>
         <p>Event risk = 4 × likelihood × impact. Each category uses its highest accepted event.</p>
         {ranked.length<3 ? <p>{3-ranked.length} more verified {3-ranked.length===1?"category":"categories"} needed to calculate a stock score.</p> :
           <p>Top three risks · {ranked.slice(0,3).map((v,i)=>[70,20,10][i]+"% × "+value(v)).join(" + ")}. Saved threat risk {value(active.stock_threat)}. Basket score = 100 − {value(active.stock_threat)} = {value(active.score)}.</p>}

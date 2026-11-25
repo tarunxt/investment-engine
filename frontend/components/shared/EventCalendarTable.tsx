@@ -4,7 +4,7 @@ import { ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react';
 import React, { useState } from 'react';
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { TradingViewSymbolLink } from '@/components/shared/TradingViewSymbolLink';
+import { TradingViewSymbolLink, tradingViewText } from '@/components/shared/TradingViewSymbolLink';
 import {
   getVisibleTradingViewColumns,
   isTradingViewDisplayColumn,
@@ -355,7 +355,7 @@ function renderSourceContent(value: string) {
   const pattern = /\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g;
   const matches = [...value.matchAll(pattern)];
   if (matches.length === 0) {
-    return value || '-';
+    return tradingViewText(value || '-');
   }
 
   const nodes: React.ReactNode[] = [];
@@ -366,7 +366,7 @@ function renderSourceContent(value: string) {
     if (start > lastIndex) {
       nodes.push(
         <span key={`text-${index}`}>
-          {value.slice(lastIndex, start)}
+          {tradingViewText(value.slice(lastIndex, start))}
         </span>,
       );
     }
@@ -388,7 +388,7 @@ function renderSourceContent(value: string) {
   if (lastIndex < value.length) {
     nodes.push(
       <span key="tail">
-        {value.slice(lastIndex)}
+        {tradingViewText(value.slice(lastIndex))}
       </span>,
     );
   }
@@ -559,7 +559,7 @@ export function EventCalendarTable({
                                     <span className="underline-offset-4 hover:underline">{value}</span>
                                   </TradingViewSymbolLink>
                                 )
-                              : (value || '-')}
+                              : tradingViewText(value || '-')}
                         </div>
                       </td>
                     );

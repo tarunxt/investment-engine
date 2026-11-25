@@ -28,7 +28,7 @@ import { ScanHistoryButton } from "@/components/shared/ScanHistoryButton";
 import { PortfolioAnalysisNav } from "@/components/shared/PortfolioAnalysisNav";
 import { OperationalErrorNotice, normalizeOperationalErrorMessage } from "@/components/shared/OperationalErrorNotice";
 import { AllocationScoreContext } from "@/components/AllocationScoreContext";
-import { TradingViewSymbolLink } from "@/components/shared/TradingViewSymbolLink";
+import { TradingViewSymbolLink, tradingViewText } from "@/components/shared/TradingViewSymbolLink";
 import { TradingViewUrlListButton } from "@/components/shared/TradingViewUrlListButton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -3813,7 +3813,7 @@ function KeyValueGrid({
       {values.map(([label, value]) => (
         <div key={label} className={cn("rounded-lg border p-2", itemClassName ?? "border-gray-100 bg-gray-50")}>
           <dt className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">{label}</dt>
-          <dd className="mt-1 break-words text-sm text-gray-800">{value || "—"}</dd>
+          <dd className="mt-1 break-words text-sm text-gray-800">{typeof value === "string" ? tradingViewText(value || "—") : value || "—"}</dd>
         </div>
       ))}
     </dl>
@@ -4009,7 +4009,7 @@ export function ConsensusBreakupButton({
               <div className="min-w-0 flex-1">
                 <p className="text-xs font-semibold uppercase tracking-[0.22em] text-blue-600">Consensus breakup</p>
                 <h2 className="mt-1 flex flex-wrap items-baseline gap-2 text-2xl font-bold text-gray-900">
-                  <span>{stock.symbol} · {consensusText}</span>
+                  <span><TradingViewSymbolLink symbol={stock.symbol} exchange={stock.exchange} /> · {consensusText}</span>
                   <span className={cn("rounded-full border px-2.5 py-1 text-sm font-bold", CATEGORY_BADGE_CLASS[action])}>
                     {formatRecommendationLabel(action)}
                   </span>
@@ -4269,7 +4269,7 @@ function HistoricalScoreMatrixPopup({ item, coveredAt, runId, reconstructedDetai
       {result.detail ? <ScoreMatrixModal detail={result.detail} frozen historicalLabel={`${symbol} · ${formatDateTime(coveredAt)} · Run #${runId}`} onClose={onClose} /> : (
         <div inert={selectedEvidence ? true : undefined} role="dialog" aria-modal={!selectedEvidence} aria-label={`Historical score matrix for ${symbol}`} className="flex h-full items-start justify-center overflow-auto bg-slate-950/55 px-4 py-10">
           <div className="w-full max-w-xl rounded-2xl bg-white p-6 shadow-xl" onClick={(event) => event.stopPropagation()}>
-            <h2 className="font-bold">{symbol} · {formatDateTime(coveredAt)}</h2>
+            <h2 className="font-bold"><TradingViewSymbolLink symbol={symbol} exchange={exchange} market={market} /> · {formatDateTime(coveredAt)}</h2>
             {result.loading ? <p role="status" className="mt-4 flex items-center gap-2"><RefreshCw aria-hidden="true" className="size-4 animate-spin" />Loading historical score matrix…</p>
               : result.error ? <p role="alert" className="mt-4 text-red-700">Unable to load historical score matrix: {result.error}</p>
               : <div className="mt-4 space-y-2"><p>{result.evidence?.status === "ambiguous" ? "Multiple saved revisions match this selection. An exact captured revision is required." : "No original weighted score matrix is available for this stock and timestamp."}</p>{result.evidence?.notes.map((note, index) => <p key={index}>{note}</p>)}<p>Latest data has not been substituted.</p></div>}
@@ -4780,7 +4780,7 @@ function ScopedStockDetailsButton({
                           if (source.kind === "observation") {
                             const item = source.item, cell = (names: string[]) => originalSourceCell(item.cells, names) ?? "Not recorded";
                             return <tr key={`original:${item.id}`} className="bg-blue-50/30">
-                              <td className="px-3 py-2">{stock.symbol}<RetainedSourceFields cells={item.cells} /></td>
+                              <td className="px-3 py-2"><TradingViewSymbolLink symbol={stock.symbol} exchange={stock.exchange} market={market} /><RetainedSourceFields cells={item.cells} /></td>
                               <td className="px-3 py-2"><RunJobLink runId={item.run_id}>#{item.run_id} · {item.created_at ? formatDateTime(item.created_at) : "Original timestamp unavailable"}</RunJobLink></td>
                               <td className="px-3 py-2" title={`${item.source} · Source ${item.id}`}>Original retained Rebalance source · saved summary unavailable<br />Job #{item.job_id} · {item.provider ?? "Provider unavailable"} · {item.model ?? "Model unavailable"}<br />{item.run_status} / {item.job_status}</td>
                               <td className="px-3 py-2">No aggregate recorded score available</td>
@@ -4795,7 +4795,7 @@ function ScopedStockDetailsButton({
                           if (source.kind === "retained") {
                             const item = source.item;
                             return <tr key={`retained:${item.runId}:${item.stock.key}`} className="bg-amber-50/50">
-                              <td className="px-3 py-2">{item.stock.exchange}:{item.stock.symbol}</td>
+                              <td className="px-3 py-2"><TradingViewSymbolLink symbol={item.stock.symbol} exchange={item.stock.exchange} market={market}>{`${item.stock.exchange}:${item.stock.symbol}`}</TradingViewSymbolLink></td>
                               <td className="whitespace-nowrap px-3 py-2"><RunJobLink runId={item.runId}>#{item.runId} · {formatDateTime(item.coveredAt)}</RunJobLink></td>
                               <td className="px-3 py-2">Retained output · original summary not saved</td>
                               <td className="px-3 py-2"><FinalActionValue value={item.formulaAction} /><span className="block text-slate-500">Current-formula reconstruction</span></td>
@@ -4811,7 +4811,7 @@ function ScopedStockDetailsButton({
                           const item = source.item;
                           return (
                           <tr key={item.id} className={item.coverage_status === "suggested" ? "bg-white" : "bg-slate-50/70"}>
-                            <td className="whitespace-nowrap px-3 py-2 font-medium text-slate-900">{item.stock_symbol}</td>
+                            <td className="whitespace-nowrap px-3 py-2 font-medium text-slate-900"><TradingViewSymbolLink symbol={item.stock_symbol} exchange={stock.exchange} market={market} /></td>
                             <td className="whitespace-nowrap px-3 py-2 text-gray-700">
                               <RunJobLink runId={item.rebalance_run_id}>#{item.rebalance_run_id} · {formatDateTime(item.covered_at)}</RunJobLink>
                             </td>
@@ -5998,11 +5998,11 @@ export function ScoreMatrixModal({
               {historicalLabel ?? "Final Action Rule"}
             </h2>
             <div className="mt-2 flex flex-wrap items-baseline gap-2 text-slate-950">
-              <span className="text-2xl font-extrabold tracking-tight">{editedDetail.stockSymbol}</span>
-              <span className="text-lg font-bold text-slate-800">{editedDetail.stockName}</span>
+              <span className="text-2xl font-extrabold tracking-tight"><TradingViewSymbolLink symbol={editedDetail.stockSymbol} exchange={editedDetail.stockExchange} /></span>
+              <span className="text-lg font-bold text-slate-800"><TradingViewSymbolLink symbol={editedDetail.stockSymbol} exchange={editedDetail.stockExchange}>{editedDetail.stockName}</TradingViewSymbolLink></span>
             </div>
             <p className="mt-1 text-sm text-slate-500">
-              {editedDetail.stockExchange || "Unknown exchange"} · {editedDetail.stockSymbol} · {frozen ? "saved calculated score" : "calculated score"} <span title={`Unrounded score: ${validationSummary.displayScore ?? "unavailable"}`}>{formatActionScore(validationSummary.displayScore)}</span> · {frozen ? "saved action" : "formula action"}{" "}
+              {editedDetail.stockExchange || "Unknown exchange"} · <TradingViewSymbolLink symbol={editedDetail.stockSymbol} exchange={editedDetail.stockExchange} /> · {frozen ? "saved calculated score" : "calculated score"} <span title={`Unrounded score: ${validationSummary.displayScore ?? "unavailable"}`}>{formatActionScore(validationSummary.displayScore)}</span> · {frozen ? "saved action" : "formula action"}{" "}
               <FinalActionTag action={editedDetail.calculatedAction} />
               {" "}with units change {formatSignedQuantity(editedDetail.calculatedUnitsChange)}.
             </p>
@@ -6664,8 +6664,8 @@ function renderStockInfoBlock(
       ) : null}
       <div className="space-y-2 whitespace-normal text-slate-950">
         <div>
-          <div className="text-xl font-extrabold leading-6 tracking-tight">{stock.symbol}</div>
-          <div className="text-sm font-medium leading-5 text-slate-900">{stockName}</div>
+          <div className="text-xl font-extrabold leading-6 tracking-tight"><TradingViewSymbolLink symbol={stock.symbol} exchange={stock.exchange} market={market} /></div>
+          <div className="text-sm font-medium leading-5 text-slate-900"><TradingViewSymbolLink symbol={stock.symbol} exchange={stock.exchange} market={market}>{stockName}</TradingViewSymbolLink></div>
         </div>
         <div className="text-sm font-semibold uppercase tracking-wide text-slate-800">{stock.exchange || "—"}</div>
         {stock.identityIssue ? <p role="status" className="text-sm text-amber-800">{stock.identityIssue}</p> : null}
@@ -9421,7 +9421,7 @@ function FragmentRows({
                 {stock.symbol}
               </TradingViewSymbolLink>
               <div className="text-xs text-gray-500">{stock.exchange || "—"}</div>
-              <div className="text-xs text-gray-600">{stock.representative["Stock Name"] || stock.symbol}</div>
+              <div className="text-xs text-gray-600"><TradingViewSymbolLink symbol={stock.symbol} exchange={stock.exchange} market={market}>{stock.representative["Stock Name"] || stock.symbol}</TradingViewSymbolLink></div>
               <div className="mt-1 max-w-64 whitespace-normal text-[11px] text-gray-500">Position: {getPositionContextLabel(stock)}</div>
             </div>
           </div>

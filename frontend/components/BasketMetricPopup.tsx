@@ -1,4 +1,5 @@
 "use client";
+import { tradingViewText } from "@/components/shared/TradingViewSymbolLink";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Menu, X, ArrowLeft } from "lucide-react";
@@ -40,7 +41,7 @@ function ModalLayer({ title, eyebrow, onClose, children, footer, footerExtra, to
       <section role="dialog" aria-modal={covered ? undefined : true} aria-label={title} tabIndex={-1} ref={panel}
         className={`${styles.panel} ${wide ? styles.widePanel : ""} ${details ? styles.detailPanel : ""}`} onClick={event => event.stopPropagation()}>
         <header className={styles.header}>
-          <div><p className={styles.eyebrow}>{eyebrow}</p><h2>{title}</h2></div>
+          <div><p className={styles.eyebrow}>{tradingViewText(eyebrow)}</p><h2>{title}</h2></div>
           <div className={styles.actions}>{tools}<button type="button" className={styles.iconButton} aria-label={details ? "Close calculation details" : "Close metric summary"} onClick={onClose}><X size={19} aria-hidden="true" /></button></div>
         </header>
         <div className={styles.body}>{children}</div>

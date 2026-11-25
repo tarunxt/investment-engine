@@ -3,7 +3,7 @@
 import { parseActionLabel } from '@/lib/actionColorScheme';
 import { useMemo } from 'react';
 import MarkdownRenderer from '@/components/shared/MarkdownRenderer';
-import { TradingViewSymbolLink } from '@/components/shared/TradingViewSymbolLink';
+import { TradingViewSymbolLink, tradingViewText } from '@/components/shared/TradingViewSymbolLink';
 import { getStandardActionTextClass, type StandardActionCategory } from '@/lib/actionColorScheme';
 import { cn } from '@/lib/utils';
 
@@ -789,7 +789,7 @@ export function CanonicalRecommendationTable({canonicalTable}: {canonicalTable: 
 	                        <span className="underline-offset-4 hover:underline">{cellValue}</span>
 	                      </TradingViewSymbolLink>
 	                    ) : (
-	                      cellValue
+	                      tradingViewText(cellValue)
 	                    );
 
 	                  return (

@@ -1,3 +1,4 @@
+import { chartBindings } from "./fixtures/tradingview-bindings.mjs";
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
@@ -12,6 +13,7 @@ const compiled = ts.transpileModule(read('../components/OutputConsistencyNotice.
 } }).outputText;
 const exports = {};
 new Function('exports', 'require', compiled)(exports, (name) => {
+  if(name.includes('TradingViewSymbolLink')) return chartBindings;
   assert.equal(name, 'react/jsx-runtime');
   return jsxRuntime;
 });
@@ -46,7 +48,7 @@ test('conflicts show quoted evidence, supplied price, precise source scope and b
   assert.match(html, /Current price is below 120/);
   assert.match(html, /Price per Unit \(124.2\)/);
   assert.match(html, /Swing Trade Run #5/);
-  assert.match(html, /NSE:ABC row in the complete saved source evidence/);
+  assert.match(html, /NSE:ABC<\/a> row in the complete saved source evidence/);
   assert.match(html, /11 check details are omitted, including 1 conflict/);
 });
 

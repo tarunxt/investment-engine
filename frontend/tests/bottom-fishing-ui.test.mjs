@@ -51,7 +51,12 @@ try {
   assert.equal(await page.evaluate(()=>window.submits),1);
   await page.getByRole("button",{name:"View Final Basket"}).click();
   const basket=page.getByRole("dialog",{name:"Bottom Fishing Final Basket"});
-  await basket.getByText("NSE:TEST").waitFor();
+  async function verifyChart(scope) {
+    const link = scope.getByRole("link",{name:"NSE:TEST",exact:true});
+    assert.equal(await link.getAttribute("href"),"https://www.tradingview.com/chart/?symbol=NSE%3ATEST");
+    assert.equal(await link.getAttribute("target"),"_blank");
+  }
+  await verifyChart(basket);
   assert.equal(await basket.getByRole("columnheader",{name:"Stop ₹"}).count(),1);
   assert.equal(await basket.getByRole("columnheader",{name:"Amount ₹"}).count(),1);
   assert.equal(await basket.getByRole("button",{name:/place order/i}).count(),0);
@@ -88,6 +93,7 @@ try {
     assert.equal(labels.includes("Weights"),title===titles[2]);
     await page.getByRole("menuitem",{name:"Saved output",exact:true}).click();
     await page.getByRole("dialog",{name:title+" · Saved output"}).waitFor();
+    if(title!==titles[0]) await verifyChart(page.getByRole("dialog"));
     await page.keyboard.press("Escape");
   }
   await page.getByRole("button",{name:"Bottom Fishing Screen actions"}).click();
@@ -109,6 +115,11 @@ try {
   await page.getByRole("link",{name:/#45/}).click();
   await page.getByRole("heading",{name:"Saved run #45"}).waitFor();
   await page.getByRole("cell",{name:"82",exact:true}).waitFor();
+  await verifyChart(page);
+  for(const stage of ["screen","score","actionables"]){
+    await page.goto(root+"/console/zerodha/bottom-fishing/"+stage+"?view=stock-flow");
+    await verifyChart(page);
+  }
   await page.goto(root+"/console/zerodha/bottom-fishing/screen?view=inputs");
   const query=page.getByRole("textbox",{name:"Query",exact:true});
   assert.equal(await query.inputValue(),"Current price > 10");

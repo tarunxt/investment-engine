@@ -1,3 +1,5 @@
+import { stockTableCell } from "@/components/shared/TradingViewSymbolLink";
+import { stockIdentityForColumns } from "@/lib/tradingview";
 import type {ReactNode} from "react";
 
 export const scorecardPage = "mx-auto min-w-0 max-w-[100rem] space-y-5 p-3 pb-10 md:p-6";
@@ -47,15 +49,18 @@ export function Table({
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-100">
-          {rows.map((row) => (
+          {rows.map((row) => {
+            const identity = stockIdentityForColumns(columns, row.cells);
+            return (
             <tr key={row.key} className="even:bg-slate-50/60">
               {row.cells.map((cell, i) => (
                 <td key={columns[i]} className="px-4 py-3 align-top">
-                  {cell}
+                  {typeof cell === "string" ? stockTableCell(columns[i], cell, identity) : cell}
                 </td>
               ))}
             </tr>
-          ))}
+            );
+          })}
           {!rows.length && (
             <tr>
               <td colSpan={columns.length} className="p-4 text-slate-600">

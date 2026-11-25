@@ -1,4 +1,5 @@
 "use client";
+import { TradingViewSymbolLink } from "@/components/shared/TradingViewSymbolLink";
 import {useState} from "react";
 import {createPortal} from "react-dom";
 import {X} from "lucide-react";
@@ -86,7 +87,7 @@ export function Basket({output,owner,onClose}:{output:Output;owner:number;onClos
                 title={column === "Return" ? "(Target − Buy price) / Buy price, before fees" : undefined}>{column}</th>)}</tr></thead>
               <tbody>
                 {rows.map(row => <tr key={row.symbol} className="whitespace-nowrap bg-white text-slate-700">
-                  <td className="font-bold text-slate-950">{row.symbol}</td>
+                  <td className="font-bold text-slate-950"><TradingViewSymbolLink symbol={row.symbol} /></td>
                   <td><span className={'rounded-full px-3 py-1 text-xs font-bold ' + (row.strategyQty > 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-700')}>{row.reason}</span></td>
                   <td className="font-semibold text-slate-800">{num(row.score)}</td>
                   <td>{num(row.price)}</td><td>{num(row.breakout)}</td><td>{num(row.max_buy)}</td>

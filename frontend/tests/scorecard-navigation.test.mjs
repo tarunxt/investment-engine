@@ -1,3 +1,4 @@
+import { chartBindings } from "./fixtures/tradingview-bindings.mjs";
 import {readFileSync} from "node:fs";
 import ts from "typescript";
 import assert from "node:assert/strict";
@@ -89,7 +90,7 @@ test("Technical catalogue distinguishes execution from scored listings and links
     }}], total:1 };
   }}};
   const noop = () => null;
-  const bindings = {useRebalanceCostQuote: () => ({}), useState: () => [0, noop], useCallback: fn => fn, useRead: fn => ({ data: fn() }),
+  const bindings = {...chartBindings, useRebalanceCostQuote: () => ({}), useState: () => [0, noop], useCallback: fn => fn, useRead: fn => ({ data: fn() }),
     brokerKey: () => "india", icons: {technical:noop}, cards:["technical"], tones:{}, button:"", panel:"", title: () => "Technical",
     cardNames:{technical:"Technical"}, ArrowUpRight:noop, formatCompactStageTime:noop, Feedback:noop, elapsed:noop,
     formatRebalanceCost:noop, historicalStageInfo:noop, Link: "a", scorecardHref: (_m,_c,seq,tab,run) => [seq,tab,run].filter(Boolean).join("/") };

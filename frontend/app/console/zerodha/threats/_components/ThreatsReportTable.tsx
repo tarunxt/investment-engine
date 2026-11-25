@@ -4,7 +4,7 @@ import { ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react';
 import { useState } from 'react';
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { TradingViewSymbolLink } from '@/components/shared/TradingViewSymbolLink';
+import { TradingViewSymbolLink, tradingViewText } from '@/components/shared/TradingViewSymbolLink';
 import {
   getVisibleTradingViewColumns,
   isTradingViewDisplayColumn,
@@ -753,7 +753,7 @@ export function ThreatsReportTable({
             <span className="underline-offset-4 hover:underline">{value}</span>
           </TradingViewSymbolLink>
         ) : (
-          value || '-'
+          tradingViewText(value || '-')
         )}
       </div>
     );

@@ -1,5 +1,7 @@
 "use client";
 
+import { stockTableCell } from "@/components/shared/TradingViewSymbolLink";
+import { stockIdentityForColumns } from "@/lib/tradingview";
 import { useMemo } from "react";
 import MarkdownRenderer from "./MarkdownRenderer";
 
@@ -147,18 +149,21 @@ export function StandardLlmOutputRenderer({ content, pairwisePrompt }: { content
               </tr>
             </thead>
             <tbody>
-              {parsed.rows.map((row, rowIndex) => (
+              {parsed.rows.map((row, rowIndex) => {
+                const identity = stockIdentityForColumns(parsed.headers,row);
+                return (
                 <tr key={`llm-row-${rowIndex}`} className="odd:bg-white even:bg-slate-50 hover:bg-blue-50/70">
                   {row.map((cell, cellIndex) => (
                     <td
                       key={`llm-cell-${rowIndex}-${cellIndex}`}
                       className="min-w-36 max-w-[22rem] border-r border-t border-slate-100 px-3 py-3 align-top leading-5 last:border-r-0"
                     >
-                      {cell || "—"}
+                      {stockTableCell(parsed.headers[cellIndex],cell || "—",identity)}
                     </td>
                   ))}
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>

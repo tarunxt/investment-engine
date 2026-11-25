@@ -1,3 +1,4 @@
+import { TradingViewSymbolLink, tradingViewText } from "@/components/shared/TradingViewSymbolLink";
 import type { allocateIndiaEquities, BasketScoreHistory, DisplayParameters, workflowFinalMean } from "@/lib/basketDisplayCalculations";
 
 const numeric = (value: number) => value.toLocaleString("en-IN", { maximumFractionDigits: 12 });
@@ -42,15 +43,15 @@ export function IndiaWeightCalculation({ allocation, venue, listing, members, pa
   const investable = 1 - parameters.cash / 100;
   const raw = selected && allocation.denominator > 0 ? venue.issuerScore * investable / allocation.denominator : null;
   return <section aria-label="Target weight calculation">
-    <h3>How {listing} gets its target weight</h3>
+    <h3>How <TradingViewSymbolLink symbol={listing} /> gets its target weight</h3>
     <p>Each exchange listing contributes one mean to the issuer score for this ISIN.</p>
     <table aria-label="Issuer score sources"><thead><tr><th>Listing</th><th>Saved workflow finals (/100)</th><th>Listing mean (/100)</th></tr></thead>
       <tbody>{members.map(({ listing, mean }) => <tr key={listing}>
-        <td>{listing}</td><td>{mean?.rows.map(row => <div key={row.sequence}>#{row.sequence} · {numeric(row.score)}</div>)}</td>
+        <td><TradingViewSymbolLink symbol={listing} /></td><td>{mean?.rows.map(row => <div key={row.sequence}>#{row.sequence} · {numeric(row.score)}</div>)}</td>
         <td>{mean?.score == null ? "Unavailable" : numeric(mean.score)}</td>
       </tr>)}</tbody>
     </table>
-    <p>Issuer score ({venue.issuer}) = ({members.map(m => m.listing + " " + (m.mean?.score == null ? "unavailable" : numeric(m.mean.score))).join(" + ")})
+    <p>Issuer score ({venue.issuer}) = ({tradingViewText(members.map(m => m.listing + " " + (m.mean?.score == null ? "unavailable" : numeric(m.mean.score))).join(" + "))})
       {" ÷ "}{members.length} = <strong>{numeric(venue.issuerScore)} / 100</strong>.</p>
     <table><thead><tr><th>Positive-score ranking</th><th>Rank</th><th>Issuer score / 100</th></tr></thead><tbody>
       <tr><td>This issuer</td><td>{rank ? "#" + rank : "Unranked"}</td><td>{numeric(venue.issuerScore)}</td></tr>
@@ -63,7 +64,7 @@ export function IndiaWeightCalculation({ allocation, venue, listing, members, pa
       <p>Proportional weight = {numeric(venue.issuerScore)} ÷ {numeric(allocation.denominator)} (sum of selected scores) × {percent(investable)} = {percent(raw)}.</p>
       <p>Issuer weight = min({percent(raw)}, {numeric(parameters.normalised)}% effective cap) = <strong>{percent(venue.issuerWeight)}</strong>.</p>
       {members.length > 1 && assets != null && venue.budgetPaise != null
-        ? <p>After reserving existing holdings and routing any addition to one exchange, {listing} receives ₹{numeric(venue.budgetPaise / 100)}.
+        ? <p>After reserving existing holdings and routing any addition to one exchange, <TradingViewSymbolLink symbol={listing} /> receives ₹{numeric(venue.budgetPaise / 100)}.
           Listing weight = ₹{numeric(venue.budgetPaise / 100)} ÷ ₹{numeric(assets)} × 100 = <strong>{percent(venue.weight)}</strong>.</p>
         : <p>Listing target weight = <strong>{percent(venue.weight)}</strong>.</p>}
     </>}
