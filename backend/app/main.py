@@ -144,10 +144,15 @@ async def lifespan(app: FastAPI):
         await seed_system_prompts(db)
 
     from app.domains.scorecards.technical_queue import serve as serve_technical_evidence
+    from app.domains.bottom_fishing.tasks import serve as serve_bottom_fishing
+    paper_scheduler = asyncio.create_task(serve_bottom_fishing(AsyncSessionLocal))
     technical_worker=asyncio.create_task(serve_technical_evidence(AsyncSessionLocal))
     try:
         yield
     finally:
+        paper_scheduler.cancel()
+        with suppress(asyncio.CancelledError):
+            await paper_scheduler
         technical_worker.cancel()
         with suppress(asyncio.CancelledError):
             await technical_worker
@@ -333,6 +338,8 @@ from app.domains.recommendation_audit.router import router as recommendation_aud
 app.include_router(recommendation_audit_router)
 from app.domains.scorecards.router import router as scorecards_router
 app.include_router(scorecards_router)
+from app.domains.bottom_fishing.store import router as bottom_fishing_router
+app.include_router(bottom_fishing_router)
 app.include_router(runs_router)
 app.include_router(runs_ws_router)
 app.include_router(trading_bots_router)

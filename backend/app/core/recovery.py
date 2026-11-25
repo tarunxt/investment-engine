@@ -14,7 +14,8 @@ from app.shared.exceptions import AppException
 ANALYSIS_TASK = "app.domains.jobs.tasks.execute_ai_job"
 ZERODHA_SYNC_TASK = "app.domains.zerodha.tasks.sync_portfolio_snapshot_task"
 PAIRWISE_TASK = "app.domains.scorecards.pair_task.advance_pairwise"
-RECOVERY_TASKS = frozenset({ANALYSIS_TASK, ZERODHA_SYNC_TASK, PAIRWISE_TASK})
+PAPER_TASK = "app.domains.bottom_fishing.tasks.advance_paper"
+RECOVERY_TASKS = frozenset({ANALYSIS_TASK, ZERODHA_SYNC_TASK, PAIRWISE_TASK, PAPER_TASK})
 AUDIT_TASK = "app.domains.recommendation_audit.tasks.verify_reversal"
 
 ANALYSIS_QUEUE = "credx_recovery_analysis"
@@ -189,6 +190,8 @@ def recovery_http_allowed(method, path):
             "/jobs", "/prompts", "/providers", "/api-usage",
         ))
     if method == "POST":
+        if path == "/runs/scorecards/india/bottom-fishing/inputs":
+            return True
         if re.fullmatch(r"/runs/scorecards/india/workflows/[1-9][0-9]*/prepare-swing-source", path):
             return True
         if re.fullmatch(r"/runs/scorecards/india/attempts/[1-9][0-9]*/repair-(?:pair|threat)-evidence", path):

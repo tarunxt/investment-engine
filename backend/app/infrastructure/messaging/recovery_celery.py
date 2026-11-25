@@ -95,5 +95,5 @@ def configure_recovery_queue(app):
         beat_schedule={},
         task_always_eager=False,
         worker_enable_remote_control=False,
-        imports=("app.domains.jobs.tasks", "app.domains.zerodha.tasks", "app.domains.scorecards.pair_task") + (("app.domains.recommendation_audit.tasks",) if stored_audit_recovery_enabled() else ()),
+        imports=("app.domains.jobs.tasks", "app.domains.zerodha.tasks", "app.domains.scorecards.pair_task", "app.domains.bottom_fishing.tasks") + (("app.domains.recommendation_audit.tasks",) if stored_audit_recovery_enabled() else ()),
     )

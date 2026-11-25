@@ -6,7 +6,7 @@ from celery import Celery, Task
 from kombu.transport.redis import PrefixedStrictRedis
 
 from app.core.recovery import (
-    ANALYSIS_QUEUE, ANALYSIS_TASK, ZERODHA_SYNC_TASK, PAIRWISE_TASK, TRANSPORT_PREFIX, RecoveryBlocked,
+    ANALYSIS_QUEUE, ANALYSIS_TASK, ZERODHA_SYNC_TASK, PAIRWISE_TASK, PAPER_TASK, TRANSPORT_PREFIX, RecoveryBlocked,
     RecoveryMiddleware, recovery_mode, require_bullpen_command_allowed,
     require_indmoney_analysis,
 )
@@ -233,7 +233,7 @@ def test_transport_prefix_keeps_legacy_reservations_outside_recovery(recovery):
         assert prefixed[1] not in legacy
     assert app.backend.get_key_for_task("fixture").startswith(TRANSPORT_PREFIX.encode())
     assert app.conf.task_create_missing_queues is False
-    assert set(app.conf.task_routes) == {ANALYSIS_TASK, ZERODHA_SYNC_TASK, PAIRWISE_TASK}
+    assert set(app.conf.task_routes) == {ANALYSIS_TASK, ZERODHA_SYNC_TASK, PAIRWISE_TASK, PAPER_TASK}
     assert app.conf.beat_schedule == {}
     assert app.conf.worker_enable_remote_control is False
 
