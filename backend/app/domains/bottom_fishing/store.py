@@ -1,5 +1,7 @@
 """Account-owned settings and immutable paper-cycle snapshots in the existing audit ledger."""
 import json
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -10,6 +12,7 @@ from app.domains.auth.models import ActivityLog, User
 from app.infrastructure.database.session import get_async_db
 from .strategy import WEIGHTS
 
+MANUAL = "bottom_fishing.manual.v1"
 CONFIG = "bottom_fishing.settings.v1"
 CYCLE = "bottom_fishing.paper.v1"
 router = APIRouter(prefix="/runs/scorecards/india/bottom-fishing", tags=["scorecards"])
@@ -53,7 +56,23 @@ def append(db, owner, action, data):
 async def snapshot(db, owner):
     version, settings = await latest(db,owner,CONFIG,Settings().model_dump())
     _, state = await latest(db,owner,CYCLE,{})
-    return dict(version=version, settings=settings, state=state, mode="paper", formula_version=1)
+    manual_id, manual = await latest(db,owner,MANUAL,{})
+    return dict(version=version, settings=settings, state=state, mode="paper", formula_version=1,
+                manual=dict(id=manual_id, **manual) if manual_id else None)
+
+
+@router.post("/run", status_code=202)
+async def request_run(db=Depends(get_async_db), user=Depends(get_current_user)):
+    from app.domains.zerodha.upstox_quotes import configured_for
+    if not configured_for(user.id,user.username):
+        raise HTTPException(409,"Market data is unavailable for this account.")
+    await lock(db,user.id)
+    _, manual = await latest(db,user.id,MANUAL,{})
+    if manual.get("status") != "queued":
+        manual = dict(status="queued", requested_at=datetime.now(ZoneInfo("Asia/Kolkata")).isoformat())
+        append(db,user.id,MANUAL,manual)
+    await db.commit()
+    return manual
 
 
 @router.get("")
