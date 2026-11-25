@@ -7751,7 +7751,7 @@ ${zerodhaExecutionMode === "direct_market"
     () => [
       {
         portfolio: "zerodha" as const,
-        title: "Indian Stocks Auto-Rebalance",
+        title: "Tarun's Strategy",
         buttonLabel: "Run",
       },
       {
