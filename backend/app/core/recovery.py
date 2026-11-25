@@ -190,7 +190,7 @@ def recovery_http_allowed(method, path):
             "/jobs", "/prompts", "/providers", "/api-usage",
         ))
     if method == "POST":
-        if path == "/runs/scorecards/india/bottom-fishing/inputs":
+        if path in {"/runs/scorecards/india/bottom-fishing/inputs", "/runs/scorecards/india/bottom-fishing/run"}:
             return True
         if re.fullmatch(r"/runs/scorecards/india/workflows/[1-9][0-9]*/prepare-swing-source", path):
             return True
