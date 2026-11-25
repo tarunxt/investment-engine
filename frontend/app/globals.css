@@ -524,6 +524,11 @@ html:not([data-basket-table-details="shown"]) .basket-table-details td[data-bask
 
 /* Shared by the India workflow basket reviews. */
 @layer components {
+  .basket-preview-scroll > table { @apply w-full border-separate border-spacing-0 text-sm; }
+  .basket-preview-scroll > table > thead > tr { @apply bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500; }
+  .basket-preview-scroll > table > thead > tr > th { @apply px-4 py-3 font-semibold; }
+  .basket-preview-scroll > table > tbody { @apply divide-y divide-slate-100; }
+  .basket-preview-scroll > table > tbody > tr > td { @apply px-4 py-3; }
   .basket-review-backdrop { @apply fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm; }
   .basket-review-panel { @apply relative w-[var(--basket-width,80rem)] max-w-full min-w-[min(320px,100%)] rounded-3xl bg-white shadow-2xl; }
   .basket-review-layout { @apply flex h-[var(--basket-height,auto)] max-h-[min(var(--basket-height,90dvh),calc(100dvh-2rem))] flex-col overflow-hidden rounded-[inherit]; }

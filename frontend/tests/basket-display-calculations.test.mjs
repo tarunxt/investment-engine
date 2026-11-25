@@ -12,7 +12,7 @@ const submissionSafety=load('../lib/basketSubmissionSafety.ts');
 const reviewDialogHooks=load('../hooks/useReviewDialog.ts',{useRef:initial=>({current:initial}),useEffect:()=>{},useCallback:fn=>fn});
 const draftMath=load('../lib/basketEditableDraft.ts');
 const math=load('../lib/basketDisplayCalculations.ts');
-Object.assign(sharedColumnBindings, load('../components/AllocationScoreContext.tsx', math), load('../components/BasketAllocationBreakdown.tsx'));
+Object.assign(sharedColumnBindings, load('../components/BasketAllocationTable.tsx', math), load('../components/AllocationScoreContext.tsx', math), load('../components/BasketAllocationBreakdown.tsx'));
 const dateMath=load('../lib/datetime.ts');
 const scorecardBasket = load('../lib/scorecardBasket.ts', load('../lib/actionColorScheme.ts'));
 Object.assign(math,load('../lib/basketActionSizing.ts',math));
