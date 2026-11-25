@@ -11,6 +11,7 @@ from app.domains.scorecards.technical_sources import session_calendar
 from app.domains.zerodha.upstox_quote_guard import QuoteGuard, redis_client
 from app.domains.zerodha.upstox_quotes import configured_for, load_instruments, build_quote_request
 from . import market, store
+from .query_evidence import apply_screen
 from .engine import close_position, paper_cycle, roll
 
 log = logging.getLogger(__name__)
@@ -150,9 +151,10 @@ async def run(sessions, owner, stamp):
                 else:
                     levels,coverage = {},None
                 series, fundamentals = await collect_evidence(client, cache, guard, stamp, levels, state, coverage)
+                levels = await apply_screen(client,cache,guard,settings,stamp,calendar,levels,series,state,coverage)
                 paper_cycle(state,settings,stamp,levels,series,fundamentals,state.get("benchmark_close"),coverage,calendar)
                 missing = [r for r in state["rows"] if r["reason"].startswith("Missing ")]
-                if missing or (coverage and (coverage["covered"]<coverage["universe"] or coverage["current_candles"]<coverage["patterns"])):
+                if missing or (coverage and (coverage.get("query_missing",0) or coverage["covered"]<coverage["universe"] or coverage["current_candles"]<coverage["patterns"])):
                     state["status"] = "partial"
                 if datetime.now(INDIA)>=stamp+timedelta(minutes=5):
                     for r in state["rows"]:

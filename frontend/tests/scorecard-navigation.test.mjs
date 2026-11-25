@@ -76,7 +76,8 @@ test("Technical catalogue distinguishes execution from scored listings and links
   const React = require("react");
   const { renderToStaticMarkup } = require("react-dom/server");
   const code = readFileSync(new URL("../app/console/dashboard/_components/ScorecardScreen.tsx", import.meta.url), "utf8");
-  const ast = ts.createSourceFile("catalogue.tsx", code, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const presentation = readFileSync(new URL("../components/scorecards/ScorecardPresentation.tsx", import.meta.url), "utf8");
+  const ast = ts.createSourceFile("catalogue.tsx", code + "\n" + presentation, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   const selected = ast.statements.filter(s => ts.isFunctionDeclaration(s) && ["Catalogue", "TechnicalCoverage", "Status", "Table"].includes(s.name?.text));
   const js = ts.transpileModule(selected.map(s => s.getText(ast)).join("\n") + "\nexport {Catalogue};", {
     fileName: "catalogue.tsx", compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX }

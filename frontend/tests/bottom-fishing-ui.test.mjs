@@ -11,11 +11,11 @@ const mocks = {
   "@/hooks/useAuth": 'export const useAuth=()=>({user:{id:7}});',
   "@/services/api": `const row={symbol:"NSE:TEST",score:82,price:100,qty:2,stop:96,target:111,rr:2.2,reason:"Proposed buy",sources:["bottom"]};
     const state={at:"2026-11-25T15:30:00+05:30",rows:[row,{...row,symbol:"NSE:WATCH",qty:undefined,score:67.57,price:222,target:235.3,reason:"Score below 70"},{...row,symbol:"NSE:MISSING",qty:undefined,score:undefined,price:undefined,target:undefined,reason:"Missing current closed candle"}],positions:{},setups:{"NSE:TEST":{discovered:"2026-11-25T15:30:00+05:30",discovery:99}}};
-    const data={version:0,settings:{inputs:["bottom"],capital:100000,weights:{bounce:20,proximity:15,strength:15,recovery:10,roce:12,sales:10,profit:10,leverage:8}},state:{},review:{request_id:42,mode:"Manual review",state}};
+    const data={version:0,settings:{screen_query:"Current price > 10",latest_results:false,inputs:["bottom"],capital:100000,weights:{bounce:20,proximity:15,strength:15,recovery:10,roce:12,sales:10,profit:10,leverage:8}},state:{},review:{request_id:42,mode:"Manual review",state}};
     export const apiService={
       get:async path=>path.endsWith("/history")?{items:[{id:45,mode:"Manual review",scored:1,entries:1,candidates:1,status:"completed"}]}:path.endsWith("/history/45")?data.review:data,
-      post:async (path,v)=>{if(path.endsWith("/run")){window.submits=(window.submits??0)+1;data.manual={id:46,status:"queued"};return data.manual;}
-        data.settings=v;data.version++;return data;}
+      post:async (path,v)=>{if(path.endsWith("/run")){window.submits=(window.submits??0)+1;window.runVersion=v.version;data.manual={id:46,status:"queued"};return data.manual;}
+        data.settings=v;data.version++;return {...data};}
     };`,
 };
 const bundle=await build({absWorkingDir:frontend,stdin:{contents:`
@@ -90,6 +90,10 @@ try {
     await page.getByRole("dialog",{name:title+" · Saved output"}).waitFor();
     await page.keyboard.press("Escape");
   }
+  await page.getByRole("button",{name:"Bottom Fishing Screen actions"}).click();
+  await page.getByRole("menuitem",{name:"Inputs",exact:true}).click();
+  assert.equal(await page.getByRole("dialog").getByRole("textbox",{name:"Query",exact:true}).inputValue(),"Current price > 10");
+  await page.keyboard.press("Escape");
   const menu=page.getByRole("button",{name:"Bottom Fishing Scorecard actions"});
   await menu.click(); await page.getByRole("menuitem",{name:"Weights"}).click();
   await page.getByRole("spinbutton",{name:"Support bounce"}).waitFor(); await page.keyboard.press("Escape");
@@ -105,6 +109,18 @@ try {
   await page.getByRole("link",{name:/#45/}).click();
   await page.getByRole("heading",{name:"Saved run #45"}).waitFor();
   await page.getByRole("cell",{name:"82",exact:true}).waitFor();
+  await page.goto(root+"/console/zerodha/bottom-fishing/screen?view=inputs");
+  const query=page.getByRole("textbox",{name:"Query",exact:true});
+  assert.equal(await query.inputValue(),"Current price > 10");
+  assert.equal(await page.getByRole("link",{name:"Inputs",exact:true}).getAttribute("aria-current"),"page");
+  await query.fill("Current price < 100\nAND MACD > MACD Previous Day");
+  await page.getByRole("checkbox",{name:/Only companies with/}).check();
+  await page.getByRole("button",{name:"Save query",exact:true}).click();
+  await page.getByText("Query saved.",{exact:true}).waitFor();
+  await page.getByRole("button",{name:"Run this query",exact:true}).click();
+  await page.getByText("Query submitted for a manual review.",{exact:true}).waitFor();
+  assert.equal(await page.evaluate(()=>window.runVersion),1);
+  console.log("PASS editable Stage 2 Inputs, checkbox, versioned save and manual run");
   console.log("PASS immediate analysis request, review basket, four stage menus, settings, saved outputs, stock flow and frozen scorecard history");
 } finally {
   await browser?.close();

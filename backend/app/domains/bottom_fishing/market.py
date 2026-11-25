@@ -8,10 +8,10 @@ import os
 from datetime import datetime, timedelta
 from urllib.parse import quote
 
-from lxml import html
 from app.domains.scorecards.research import INDIA, download
 from app.domains.scorecards.technical_sources import archive_url, extract_archive, session_calendar, nse_actions, HOLIDAYS
 from app.domains.zerodha.upstox_quotes import technical_instruments
+from .issuer import facts, financials  # preserve published market-data entry points
 from .strategy import support
 
 INDEX = "https://www.niftyindices.com/IndexConstituent/ind_nifty500list.csv"
@@ -115,54 +115,3 @@ async def candles(client, key, stamp, guard):
         if end.date()==stamp.date() and end<=stamp and 0<lo<=min(op,cl)<=max(op,cl)<=hi and vol>0:
             bars[end.isoformat()] = dict(end=end.isoformat(), open=op, high=hi, low=lo, close=cl)
     return [bars[k] for k in sorted(bars)]
-
-
-def financials(data, symbol):
-    root = html.fromstring(data)
-    # Preserve identity on redirects and never mix consolidated and standalone columns.
-    if not any(('/'+symbol+'/') in href or href.rstrip('/').endswith('/'+symbol)
-               or href.split('symbol=')[-1].split('&')[0]==symbol for href in root.xpath('//a/@href')):
-        raise ValueError("Issuer identity unavailable")
-    def series(section, label):
-        table = root.xpath(f'//section[@id="{section}"]//table')[0]
-        dates = [c.text_content().strip() for c in table.xpath('.//thead/tr[last()]/th')][1:]
-        for row in table.xpath('.//tbody/tr'):
-            cells = row.xpath('./td')
-            if cells and ' '.join(cells[0].text_content().replace('+','').split())==label:
-                return {d:float(c.text_content().replace(',','').replace('%','').strip()) for d,c in zip(dates,cells[1:])
-                        if c.text_content().strip() not in ('','—','-')}
-        raise ValueError("Missing "+label)
-    def latest(series):
-        return max(series, key=lambda d:datetime.strptime(d,'%b %Y'))
-    sales, profit = series("quarters","Sales"), series("quarters","Net Profit")
-    period = latest(sales)
-    prev = datetime.strptime(period,'%b %Y')
-    prior = prev.replace(year=prev.year-1).strftime('%b %Y')
-    def growth(values):
-        if values[prior]<=0:
-            raise ValueError("Non-positive growth base")
-        return 100*(values[period]/values[prior]-1)
-    debt, capital, reserves = (series("balance-sheet",k) for k in ("Borrowings","Equity Capital","Reserves"))
-    balance = latest(debt)
-    equity = capital[balance]+reserves[balance]
-    if equity<=0:
-        raise ValueError("Non-positive equity")
-    roce = series("ratios","ROCE %")
-    return dict(sales=growth(sales), profit=growth(profit), roce=roce[latest(roce)], leverage=debt[balance]/equity,
-                quarter=period, balance=balance, roce_period=latest(roce))
-
-
-async def facts(client, cache, listing):
-    symbol = listing.split(":",1)[1]
-    key = "bottom:facts:v1:"+symbol
-    raw = await cache.get(key)
-    if raw:
-        return json.loads(raw)
-    url = "https://www.screener.in/company/"+quote(symbol,safe="")+"/consolidated/"
-    result = financials(await download(client,url),symbol)
-    observed = datetime.now(INDIA)
-    if (observed.replace(tzinfo=None)-datetime.strptime(result["quarter"],"%b %Y")).days>200:
-        raise ValueError("Latest quarter unavailable")
-    result.update(source=url, observed=observed.isoformat())
-    await cache.set(key,json.dumps(result),ex=300)
-    return result
