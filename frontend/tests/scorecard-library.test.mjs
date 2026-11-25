@@ -12,7 +12,15 @@ const mocks = {
   "@/services/api": `export class APIError extends Error {}; export const apiService={
     get:async path=> path.endsWith("/board") ? JSON.parse(sessionStorage.board) : {id:"technical",name:"Technical",summary:"Price evidence",inputs:"OHLCV",prompt:"Assess the price",columns:["Listing","Score /100"]},
     getProviders:async()=>[{configured:true,name:"fixture",models:["offline"]}],
-    post:async (path,change)=>{const b=JSON.parse(sessionStorage.board);b.weights=change.weights;b.version++;
+    post:async (path,change)=>{const b=JSON.parse(sessionStorage.board);
+      const failure=sessionStorage.getItem("nextSave");
+      sessionStorage.removeItem("nextSave");
+      if (failure === "conflict") {
+        b.version++;sessionStorage.board=JSON.stringify(b);
+        const error=new APIError("Concurrent update");error.status=409;throw error;
+      }
+      if (failure === "unavailable") throw new Error("Save service unavailable");
+      b.weights=change.weights;b.version++;
       if(change.add)b.enabled.push(change.add);if(change.definition)b.custom.push(change.definition);
       sessionStorage.board=JSON.stringify(b);return b;}
   };`,
@@ -46,6 +54,24 @@ try {
   await page.getByRole("heading",{name:"Explore Scorecards"}).waitFor();
   assert.equal(await page.locator("article").count(),4);
   const add=page.locator("article").filter({has:page.getByRole("link",{name:"Threats",exact:true})}).getByRole("button",{name:"Add Scorecard"});
+  await page.setViewportSize({width:320,height:740});
+  assert.equal(await page.evaluate(()=>innerWidth),320);
+  for(const failure of ["conflict","unavailable"]){
+    await page.evaluate(f=>sessionStorage.setItem("nextSave",f),failure);
+    await page.getByRole("button",{name:"Edit weights"}).click();
+    await page.getByRole("button",{name:"Save weights"}).click();
+    if(failure==="conflict"){
+      await page.getByText("Your board changed.",{exact:false}).waitFor();
+      assert.equal(await page.getByRole("dialog").count(),0);
+    }else{
+      await page.getByRole("alert").filter({hasText:"Save service unavailable"}).waitFor();
+      assert.equal(await page.getByRole("button",{name:"Save weights"}).isEnabled(),true);
+      await page.getByRole("button",{name:"Save weights"}).click();
+      await page.getByText("Stage 3 weights saved.",{exact:false}).waitFor();
+    }
+    assert.deepEqual(await page.evaluate(()=>JSON.parse(sessionStorage.board).weights),{technical:100});
+  }
+  console.log("PASS: 320 CSS px, stale-version reload, failed save, retry and committed weights.");
   await add.click();
   assert.deepEqual(await page.getByRole("spinbutton").evaluateAll(ns=>ns.map(n=>n.value)),["100","0"]);
   await page.getByRole("button",{name:"Increase Threats weight"}).click();
