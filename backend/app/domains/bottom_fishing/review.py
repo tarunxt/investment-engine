@@ -20,6 +20,26 @@ from .worker import INDIA, collect_evidence, prepared_market
 log = logging.getLogger(__name__)
 
 
+class ManualReviewQuoteGuard(QuoteGuard):
+    # Distribute one review across the shared 200/minute budget and leave room
+    # for the dashboard and other workers. Redis still decides every admission.
+    interval = 0.35
+
+    def __init__(self, *args):
+        super().__init__(*args)
+        self._pacing_lock = asyncio.Lock()
+        self._next_request = 0.0
+
+    async def admit(self):
+        clock = asyncio.get_running_loop().time
+        async with self._pacing_lock:
+            delay = self._next_request - clock()
+            if delay > 0:
+                await asyncio.sleep(delay)
+            self._next_request = clock() + self.interval
+            return await super().admit()
+
+
 def candle_cutoff(now, holidays):
     calendar = session_calendar(now.replace(hour=23, minute=59), "NSE", holidays, 60)
     if not calendar:
@@ -95,7 +115,7 @@ async def execute_review(sessions, owner, request_id):
             levels, benchmark, coverage = await prepared_market(client,cache,stamp)
             state["sync"] = dict(at=stamp.isoformat(), **coverage)
             await checkpoint("screen")
-            guard = QuoteGuard(cache, os.getenv("UPSTOX_LTP_OWNER_USER_ID") or owner, "bottom-review", [])
+            guard = ManualReviewQuoteGuard(cache, os.getenv("UPSTOX_LTP_OWNER_USER_ID") or owner, "bottom-review", [])
             series, fundamentals = await collect_evidence(client,cache,guard,stamp,levels,state,coverage)
             await checkpoint("score")
             paper_cycle(state,settings,stamp,levels,series,fundamentals,benchmark,coverage,calendar,preview=True)
