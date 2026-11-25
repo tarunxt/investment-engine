@@ -115,14 +115,6 @@ async def execute_review(sessions, owner, request_id):
         state.update(status="failed", error=f"Review stopped during market analysis: {reason}")
     await checkpoint(finish=True)
 
-# Public-market I/O runs in the same authorized service as the Technical evidence
-# worker. Each process has a wake signal; database claims arbitrate across them.
-_wake = asyncio.Event()
-
-
-def wake_worker():
-    _wake.set()
-
 
 async def drain_reviews(sessions):
     async with sessions() as db:
@@ -131,14 +123,15 @@ async def drain_reviews(sessions):
         await execute_review(sessions, owner, request_id)
 
 
-async def serve_reviews(sessions):
+async def serve_reviews(sessions, wake: asyncio.Event):
+    """One wake signal per service lifespan, with database leases across processes."""
     while True:
-        _wake.clear()
+        try:
+            await asyncio.wait_for(wake.wait(), timeout=30)
+        except TimeoutError:
+            pass
+        wake.clear()
         try:
             await drain_reviews(sessions)
         except Exception:
             log.exception("Bottom Fishing manual review sweep failed")
-        try:
-            await asyncio.wait_for(_wake.wait(), timeout=30)
-        except TimeoutError:
-            pass
