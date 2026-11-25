@@ -2,6 +2,7 @@
 
 import { type ReactNode, useContext, useEffect, useSyncExternalStore } from 'react';
 import { AuthContext } from '@/hooks/useAuth';
+import { BottomFishingBoard } from '@/components/scorecards/BottomFishingBoard';
 import { PortfolioWorkflowSlot, type WorkflowMarket } from './WorkflowSurfaceSlots';
 
 function subscribe(onChange: () => void) {
@@ -55,7 +56,11 @@ export function BrokerPortfolioTabs({ market, children }: { market: WorkflowMark
       </nav>
       <div aria-hidden="true" className="h-12" />
       <div id="broker-portfolio" className="scroll-mt-16" hidden={showWorkflow}>{children}</div>
-      <div hidden={!showWorkflow}><PortfolioWorkflowSlot market={market} /></div>
+      <div hidden={!showWorkflow}>
+        {market === 'zerodha' && <h2 className="mt-4 text-xl font-semibold">Tarun&apos;s Strategy</h2>}
+        <PortfolioWorkflowSlot market={market} />
+        {market === 'zerodha' && showWorkflow && <BottomFishingBoard />}
+      </div>
     </>
   );
 }
