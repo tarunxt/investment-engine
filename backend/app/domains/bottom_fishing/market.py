@@ -5,17 +5,50 @@ import io
 import json
 import math
 import os
+
+import httpx
 from datetime import datetime, timedelta
 from urllib.parse import quote
 
 from app.domains.scorecards.research import INDIA, download
-from app.domains.scorecards.technical_sources import archive_url, extract_archive, session_calendar, nse_actions, HOLIDAYS
+from app.domains.scorecards.technical_sources import archive_url, extract_archive, session_calendar, nse_actions, action_ledger, HOLIDAYS
 from app.domains.zerodha.upstox_quotes import technical_instruments
 from .issuer import facts, financials  # preserve published market-data entry points
 from .strategy import support, support_metrics
 
-INDEX = "https://www.niftyindices.com/IndexConstituent/ind_nifty500list.csv"
+INDEX = "https://archives.nseindia.com/content/indices/ind_nifty500list.csv"
+INDEX_FALLBACK = "https://www.niftyindices.com/IndexConstituent/ind_nifty500list.csv"
 BENCH = "NSE:NIFTYBEES"
+
+
+async def archive_download(client, primary, alternate):
+    try:
+        return await download(client, primary)
+    except httpx.HTTPError:
+        return await download(client, alternate)
+
+
+async def issuer_actions(client, cache, isins, start, end):
+    gate = asyncio.Semaphore(4)
+    async def ledger(isin):
+        key = f"bottom:issuer-actions:{isin}:{start}:{end}"
+        try:
+            cached = await cache.get(key)
+            if cached is not None:
+                return isin, json.loads(cached)
+            async with gate:
+                response = await client.get(f"https://api.upstox.com/v2/fundamentals/{isin}/corporate-actions",
+                                            headers={"Authorization":"Bearer "+os.environ["UPSTOX_ANALYTICS_TOKEN"]})
+            response.raise_for_status()
+            body = response.json()
+            if body.get("status") != "success" or not isinstance(body.get("data"), list):
+                return isin, None
+            events = action_ledger(body["data"], start, end)
+            await cache.set(key, json.dumps(events), ex=3600)
+            return isin, events
+        except (httpx.HTTPError, ValueError, KeyError, TypeError):
+            return isin, None
+    return dict(await asyncio.gather(*(ledger(isin) for isin in set(isins))))
 
 
 async def calendar(client, cache, stamp):
@@ -39,7 +72,7 @@ async def daily(client, cache, stamp, comparison=None):
     if raw:
         members = json.loads(raw)
     else:
-        rows = csv.DictReader(io.StringIO((await download(client, INDEX)).decode("utf-8-sig")))
+        rows = csv.DictReader(io.StringIO((await archive_download(client, INDEX, INDEX_FALLBACK)).decode("utf-8-sig")))
         members = {"NSE:"+r["Symbol"]:r["ISIN Code"].strip() for r in rows if r["Series"] == "EQ"}
         if len(members) < 450:
             raise ValueError("Nifty 500 constituent feed is incomplete")
@@ -62,7 +95,7 @@ async def daily(client, cache, stamp, comparison=None):
         url = archive_url("NSE", day)
         if payload is None:
             async with gate:
-                data = await download(client, url)
+                data = await archive_download(client, url.replace("nsearchives.", "archives."), url)
             all_keys = {k:v["isin"] for k,v in master.items() if k.startswith("NSE:")}
             records = await asyncio.to_thread(extract_archive, data, "NSE", day, close, all_keys, url)
             values = {k:{f:r[0][f] for f in ("as_of","close","high","low","volume","isin")} for k,r in records.items() if len(r)==1}
@@ -73,19 +106,27 @@ async def daily(client, cache, stamp, comparison=None):
     start = datetime.fromisoformat(next(iter(sessions)))
     actions_key = "bottom:actions:" + day
     raw = await cache.get(actions_key)
-    if raw is None:
-        url = ("https://www.nseindia.com/api/corporates-corporateActions?index=equities"
+    try:
+        if raw is None:
+            url = ("https://www.nseindia.com/api/corporates-corporateActions?index=equities"
                f"&from_date={start:%d-%m-%Y}&to_date={stamp:%d-%m-%Y}")
-        raw = (await download(client, url)).decode()
-        nse_actions(json.loads(raw), keys.values())
-        await cache.set(actions_key, raw, ex=6*3600)
-    actions = nse_actions(json.loads(raw), keys.values())
+            raw = (await download(client, url)).decode()
+            nse_actions(json.loads(raw), keys.values())
+            await cache.set(actions_key, raw, ex=6*3600)
+        actions = nse_actions(json.loads(raw), keys.values())
+    except (httpx.HTTPError, ValueError):
+        if not rows:
+            raise
+        # The bulk ledger can time out. Retain independently confirmed issuer
+        # histories for the original matches and report partial universe coverage.
+        wanted = [keys[k] for k in rows if k in keys]
+        actions = await issuer_actions(client, cache, wanted, start.date().isoformat(), day)
     levels = {}
     covered = 0
     for k,isin in keys.items():
         bars = [d[k].copy() for d in days if k in d and d[k]["isin"]==isin]
-        events = actions[isin]
-        if len(bars)!=20 or any(not a["multiplier"] for a in events):
+        events = actions.get(isin)
+        if events is None or len(bars)!=20 or any(not a["multiplier"] for a in events):
             continue
         for b in bars:
             factor = math.prod(a["multiplier"] for a in events if b["as_of"][:10]<a["date"]<=day)
