@@ -14,7 +14,9 @@ type KiteHolding = {tradingsymbol:string; exchange:string; quantity:number; aver
   last_price:number; invested_value:number; market_value:number; pnl:number; day_change_percentage?:number};
 type KiteSync = {captured_at:string; holdings_count?:number; holdings?:KiteHolding[];
   holdings_market_value?:number; holdings_pnl?:number; available_margin?:number};
-export type State = {kite_sync?:KiteSync; screen_query?:{text:string;latest_results:boolean}; sync?:Coverage; at?:string; market_as_of?:string; error?:string; status?:string; scans?:Coverage[]; rows?:Row[]; setups?:Record<string,Setup>;
+export type ScreenMatch = {name:string; symbol:string; universe?:boolean; liquidity?:boolean; touches?:boolean;
+  rebound?:boolean; proximity?:boolean; close?:number};
+export type State = {original_results?:{at:string; source?:string; total?:number; complete:boolean; error?:string; rows:ScreenMatch[]}; kite_sync?:KiteSync; screen_query?:{text:string;latest_results:boolean}; sync?:Coverage; at?:string; market_as_of?:string; error?:string; status?:string; scans?:Coverage[]; rows?:Row[]; setups?:Record<string,Setup>;
   positions?:Record<string,{qty:number; entry:string; price:number; stop:number; target:number}>; realized?:number; closed?:{symbol:string; qty:number; reason:string; pnl:number; end:string}[]};
 export type Output = {request_id?:number; finished_at?:string; mode:string; settings?:Settings; state:State};
 export type Manual = {kite_sync?:KiteSync; id:number; status:string; stage?:Stage; error?:string};
