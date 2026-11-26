@@ -47,6 +47,14 @@ def build_indmoney_us_threat_prompt(snapshot: IndMoneyUsPortfolioSnapshot, *, co
         default=0.0,
     )
 
+    total_return_percent = _fmt_pct(snapshot.total_return_percent)
+    if (
+        snapshot.total_return_value is not None
+        and snapshot.total_return_percent is not None
+        and snapshot.total_return_value * snapshot.total_return_percent < 0
+    ):
+        total_return_percent = "Unknown (source percentage conflicts with return amount; exclude from analysis)"
+
     prompt_sections = [
         THREAT_JOB_MARKER,
         THREAT_WEB_SEARCH_MARKER,
@@ -104,7 +112,7 @@ def build_indmoney_us_threat_prompt(snapshot: IndMoneyUsPortfolioSnapshot, *, co
         f"- 1D return value (USD): {_fmt_num(snapshot.day_return_value)}",
         f"- 1D return (%): {_fmt_pct(snapshot.day_return_percent)}",
         f"- Total return value (USD): {_fmt_num(snapshot.total_return_value)}",
-        f"- Total return (%): {_fmt_pct(snapshot.total_return_percent)}",
+        f"- Total return (%): {total_return_percent}",
         f"- Largest single-holding weight (%): {_fmt_pct(top_weight)}",
         "",
         "Market indices table:",

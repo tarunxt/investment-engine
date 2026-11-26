@@ -645,6 +645,10 @@ export function IndMoneyUsSnapshotsPanel({
     (selectedSnapshot.total_return_value ?? selectedSnapshot.derived.parsed_holdings_total_pnl) >= 0
       ? 'positive'
       : 'negative';
+  const reportedReturn = selectedSnapshot.total_return_value;
+  const reportedPercent = selectedSnapshot.total_return_percent;
+  const returnSignConflict =
+    reportedReturn != null && reportedPercent != null && reportedReturn * reportedPercent < 0;
   const dayReturnTone = (selectedSnapshot.day_return_value ?? 0) >= 0 ? 'positive' : 'negative';
   const sortedHoldings = sortIndMoneyHoldings(selectedSnapshot.holdings, holdingsSort);
 
@@ -682,7 +686,9 @@ export function IndMoneyUsSnapshotsPanel({
             <MetricCard
               label="Total Returns"
               value={formatCurrency(selectedSnapshot.total_return_value ?? selectedSnapshot.derived.parsed_holdings_total_pnl)}
-              sublabel={formatPercent(selectedSnapshot.total_return_percent)}
+              sublabel={returnSignConflict
+                ? 'Source conflict: percentage and return amount have opposite signs.'
+                : formatPercent(reportedPercent)}
               tone={totalReturnTone}
               icon={TrendingUp}
             />
