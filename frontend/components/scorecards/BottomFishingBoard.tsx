@@ -17,7 +17,7 @@ import {Basket} from "./bottomFishing/Basket";
 type Section = "Inputs"|"Weights"|"Saved output"|"Stock Flow";
 type Selection = {stage:Stage;section:Section};
 const headings = ["Sync portfolio","Find New Promising Stocks","Scorecards","Final Actionables"];
-const details = ["Nifty 500 market histories and assigned paper capital.","Screen against the prior 20 completed NSE sessions.","Eight technical and fundamental factors total 100 points.","Review entry decisions, quantities, stops and targets."];
+const details = ["Sync Kite holdings, positions and margins for the connected account.","Screen against the prior 20 completed NSE sessions.","Eight technical and fundamental factors total 100 points.","Review entry decisions, quantities, stops and targets."];
 const viewNames = {"Inputs":"inputs","Weights":"weights","Stock Flow":"stock-flow","Saved output":""};
 
 export function BottomFishingBoard(){
@@ -34,9 +34,10 @@ function Board({owner}:{owner:WorkflowOwner}){
   const [expanded,setExpanded]=useState<Partial<Record<Stage,boolean>>>({});
   const [selection,setSelection]=useState<Selection|null>(null);
   const [basket,setBasket]=useState(false);
-  const dates=[state.sync?.at,state.scans?.at(-1)?.at,state.at,state.at];
+  const kite=active?manual?.kite_sync:state.kite_sync;
+  const dates=[kite?.captured_at??(!active?state.sync?.at:undefined),state.scans?.at(-1)?.at,state.at,state.at];
   const metrics=[
-    ["Histories synced",state.sync?.covered],["Stocks discovered",Object.keys(state.setups??{}).length],
+    [kite?"Kite holdings":"Histories synced",kite?kite.holdings_count:state.sync?.covered],["Stocks discovered",Object.keys(state.setups??{}).length],
     ["Scored listings",state.rows?.filter(r=>r.score!=null).length],["Sized entries",state.rows?.filter(r=>r.qty).length]
   ];
   const currentStage=manual?.stage?stages.indexOf(manual.stage):-1;
@@ -50,7 +51,7 @@ function Board({owner}:{owner:WorkflowOwner}){
       </Button>
     </div>
     {manual&&<p role="status" className="mt-2 text-sm">{manual.status==="queued"?"Queued for immediate analysis using the latest completed NSE candle.":manual.status==="running"?"Running · "+(manual.stage?titles[manual.stage]:"Market data"):"Latest manual run · "+manual.status}{active&&data?.review?" · Showing the previous saved output.":""}</p>}
-    {(model.error||state.error)&&<p role="alert" className="text-sm text-red-700">{model.error||state.error}</p>}
+    {(model.error||(!active&&state.error))&&<p role="alert" className="text-sm text-red-700">{model.error||state.error}</p>}
     <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{stages.map((stage,i)=>{
       const info:StageInfo=active?{state:manual?.status==="queued"||i>currentStage?"queued":i===currentStage?"running":"completed"}
         :manual?.status==="failed"&&currentStage>=0?{state:i===currentStage?"failed":i<currentStage?"completed":"idle"}
@@ -68,8 +69,8 @@ function Board({owner}:{owner:WorkflowOwner}){
             <div className="flex shrink-0 items-center"><button aria-label={`Toggle ${title} details`} aria-expanded={!!expanded[stage]}
               onClick={()=>setExpanded(v=>({...v,[stage]:!v[stage]}))} className="-my-1 inline-flex size-9 items-center justify-center rounded-lg text-slate-700 hover:bg-white/80"><Icon className="size-4"/></button>
               <WorkflowTileMenu title={title} actions={actions}/></div></div>
-          <dl className="mt-2 text-xs"><div className="flex justify-between gap-2"><dt>Market data (IST)</dt><dd>{date(dates[i])}</dd></div>
-            <div className="flex justify-between gap-2"><dt>{metrics[i][0]}</dt><dd>{dates[i]?metrics[i][1]??0:"—"}</dd></div></dl>
+          <dl className="mt-2 text-xs"><div className="flex justify-between gap-2"><dt>{stage==="sync"&&kite?"Kite sync (IST)":"Market data (IST)"}</dt><dd>{date(dates[i])}</dd></div>
+            <div className="flex justify-between gap-2"><dt>{metrics[i][0]}</dt><dd>{dates[i]?metrics[i][1]??"—":"—"}</dd></div></dl>
           {expanded[stage]&&<p className="mt-2 text-xs">{details[i]}</p>}
         </article>
         {stage==="actionables" && <WorkflowBasketButton ready={!!state.at&&!active&&state.status!=="failed"} onClick={()=>setBasket(true)}>View Final Basket</WorkflowBasketButton>}

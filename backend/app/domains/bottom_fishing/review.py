@@ -58,6 +58,19 @@ def candle_cutoff(now, holidays):
     return previous[-1], calendar
 
 
+async def sync_kite_portfolio(owner):
+    from app.domains.zerodha.tasks import sync_portfolio_snapshot_task
+
+    task = await asyncio.to_thread(sync_portfolio_snapshot_task.delay, owner, "bottom_fishing")
+    result = await asyncio.to_thread(task.get, timeout=300)
+    if result.get("status") != "completed":
+        reason = result.get("reason", "sync failed")
+        if reason in {"session_expired", "not_connected", "missing_token"}:
+            raise ValueError("Connect Kite on the India Portfolio page and run Bottom Fishing again.")
+        raise ValueError("Kite portfolio sync failed. Check the Zerodha sync history.")
+    return {key: result[key] for key in ("captured_at", "holdings_count") if key in result}
+
+
 async def execute_review(sessions, owner, request_id):
     token = uuid4().hex
     now = datetime.now(INDIA)
@@ -82,6 +95,7 @@ async def execute_review(sessions, owner, request_id):
         await db.commit()
 
     state = {}
+    phase = "Kite portfolio sync"
     async def checkpoint(stage=None, *, finish=False):
         async with sessions() as db:
             await store.lock(db, owner)
@@ -99,12 +113,17 @@ async def execute_review(sessions, owner, request_id):
                 current.pop("lease_until", None)
             else:
                 current["stage"] = stage
+                current["kite_sync"] = state["kite_sync"]
             record.details = json.dumps(current)
             await db.commit()
 
     try:
         if job["attempts"] > 2:
             raise ValueError("Worker interrupted twice before this review could finish")
+        kite = job.get("kite_sync") or await sync_kite_portfolio(owner)
+        state["kite_sync"] = kite
+        await checkpoint("screen")
+        phase = "market analysis"
         if not configured_for(owner,username):
             raise ValueError("Market data unavailable for this account")
         async with asyncio.timeout(525), redis_client() as cache, httpx.AsyncClient(
@@ -115,11 +134,10 @@ async def execute_review(sessions, owner, request_id):
             state = roll(portfolio, stamp)
             # Preserve the paper portfolio and same-session setups, but never
             # report an earlier run's rows or stage completions as this review's.
-            state.update(rows=[], scans=[], at=None, sync=None, error=None)
+            state.update(rows=[], scans=[], at=None, sync=None, error=None, kite_sync=kite)
             state["market_as_of"] = stamp.isoformat()
             levels, benchmark, coverage = await prepared_market(client,cache,stamp)
             state["sync"] = dict(at=stamp.isoformat(), **coverage)
-            await checkpoint("screen")
             guard = ManualReviewQuoteGuard(cache, os.getenv("UPSTOX_LTP_OWNER_USER_ID") or owner, "bottom-review", [])
             series, fundamentals = await collect_evidence(client,cache,guard,stamp,levels,state,coverage)
             levels = await apply_screen(client,cache,guard,settings,stamp,calendar,levels,series,state,coverage)
@@ -138,7 +156,7 @@ async def execute_review(sessions, owner, request_id):
             reason = str(exc)[:180]
         else:
             reason = type(exc).__name__
-        state.update(status="failed", error=f"Review stopped during market analysis: {reason}")
+        state.update(status="failed", error=f"Review stopped during {phase}: {reason}")
     await checkpoint(finish=True)
 
 

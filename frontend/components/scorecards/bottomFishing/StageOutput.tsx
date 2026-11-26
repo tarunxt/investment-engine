@@ -26,7 +26,8 @@ export function StageOutput({stage,output}:{stage:Stage;output:Output}) {
   const query = state.screen_query?.text ?? output.settings?.screen_query;
   const scan = state.scans?.at(-1);
   const setups = Object.entries(state.setups??{});
-  if (stage==="sync") return <><p>20 completed NSE sessions · {num(state.sync?.covered)} / {num(state.sync?.universe)} histories synced · {date(state.sync?.at)} IST</p>
+  if (stage==="sync") return <>{state.kite_sync && <p>Kite portfolio synced {date(state.kite_sync.captured_at)} IST · {num(state.kite_sync.holdings_count)} holdings</p>}
+    {state.sync && <p>20 completed NSE sessions · {num(state.sync?.covered)} / {num(state.sync?.universe)} histories synced · {date(state.sync?.at)} IST</p>}
     {output.settings && <p>Assigned paper capital ₹{num(output.settings.capital)}</p>}
     <Table headers={["Paper holding","Qty","Entry ₹","Stop ₹","Target ₹"]} empty="No open paper positions." rows={Object.entries(state.positions??{}).map(([k,p])=>({key:k,cells:[k,num(p.qty),num(p.price),num(p.stop),num(p.target)]}))}/></>;
   if (stage==="screen") return <><p>{setups.length} discovered · {num(scan?.current_candles)} / {num(scan?.patterns)} support patterns with a current candle</p>

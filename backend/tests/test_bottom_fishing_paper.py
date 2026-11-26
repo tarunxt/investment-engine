@@ -153,6 +153,10 @@ async def test_legacy_queue_runs_all_four_stages_once_and_freezes_review(monkeyp
     monkeypatch.setattr("app.domains.zerodha.upstox_quotes.configured_for",lambda *args:True)
     monkeypatch.setattr(review,"redis_client",cache)
     monkeypatch.setattr(review.market,"calendar",calendar)
+    async def kite(user_id):
+        assert user_id == owner.id
+        return {"captured_at": T.isoformat(), "holdings_count": 7}
+    monkeypatch.setattr(review,"sync_kite_portfolio",traced(kite,"kite"))
     monkeypatch.setattr(review,"prepared_market",traced(prepared,"sync"))
     monkeypatch.setattr(review,"collect_evidence",traced(evidence,"screen"))
     def trace_sync(func,name):
@@ -167,10 +171,11 @@ async def test_legacy_queue_runs_all_four_stages_once_and_freezes_review(monkeyp
     assert wake.is_set()
     for _ in range(2):
         await review.drain_reviews(sessions)
-    assert stages_seen == ["sync","screen","score","actionables"]
+    assert stages_seen == ["kite","sync","screen","score","actionables"]
     async with sessions() as db:
         data = await store.snapshot(db,owner.id)
         assert data["manual"]["status"] == "completed"
+        assert data["review"]["state"]["kite_sync"]["holdings_count"] == 7
         assert data["state"] == {} and data["review"]["state"]["rows"][0]["score"] is not None
         assert data["review"]["state"]["pending"] == {} and not data["review"]["state"]["positions"]
         history = await store.history(None,db,owner)

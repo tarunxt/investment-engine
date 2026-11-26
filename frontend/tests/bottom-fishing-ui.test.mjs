@@ -85,7 +85,7 @@ try {
 
   await page.keyboard.press("Escape");
   await basket.waitFor({state:"hidden"});
-  const titles=["Sync market data and paper capital","Bottom Fishing Screen","Bottom Fishing Scorecard","Bottom Fishing Actionables"];
+  const titles=["Sync Kite portfolio","Bottom Fishing Screen","Bottom Fishing Scorecard","Bottom Fishing Actionables"];
   for(const title of titles){
     await page.getByRole("button",{name:title+" actions"}).click();
     const labels=await page.getByRole("menuitem").allTextContents();
