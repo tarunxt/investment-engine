@@ -75,7 +75,7 @@ def project(definition, manifest, jobs):
 async def start(db, user, revision_id, card, body):
     from .router import _get_redis, owned, workflow
     w = await workflow(db, user.id, "india", body.sequence)
-    rev = await owned(db, user.id, "india", "revision", revision_id, lock=True)
+    rev = await owned(db, user.id, "india", "revision", revision_id, lock=True, card=card)
     identity = f"{card}/workflow-{body.sequence}"
     prior = await storage.by_key(db, "attempt", identity, workflow_id=w.id, revision_id=rev.id)
     if prior:

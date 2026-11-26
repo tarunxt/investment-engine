@@ -7322,7 +7322,7 @@ ${zerodhaExecutionMode === "direct_market"
             return match ? [Number(match[1])] : [];
           });
           // Selecting a saved Stage 2 publication never re-reads holdings or Swing.
-          if (generatedSwingRun || (!revision && explicitJobs.length)) {
+          if (generatedSwingRun || (!revision && explicitJobs.length) || (broker === "india" && !recovery && (selectedCards.length || customToRun.length))) {
             const snapshot = workflowSnapshot ?? (portfolio === "zerodha" ? await apiService.zerodhaPortfolioOverview() : await apiService.indmoneyUsPortfolioOverview()).latest;
             if (!snapshot) throw new Error("Stage 2 requires a portfolio snapshot.");
             const selectedIds = [...new Set([...explicitJobs,...(generatedSwingRun?.run_jobs ?? []).filter(link => isUsableStageJob(link.job)).map(link=>link.job_id)])];
@@ -8054,7 +8054,7 @@ ${zerodhaExecutionMode === "direct_market"
                   ? () => void showStageLlmInfo(section.portfolio, stage)
                   : undefined
               }
-              onInputClick={stage === "pairwise" ? () => openCard(stage,"inputs") : isCard(stage) ? () => openInputSelection(section.portfolio,stage) : stage==="actionables" ? ()=>setCardReview({portfolio:section.portfolio,stage}) :
+              onInputClick={section.portfolio === "zerodha" && isCard(stage) ? () => openCard(stage,"inputs") : stage === "pairwise" ? () => openCard(stage,"inputs") : isCard(stage) ? () => openInputSelection(section.portfolio,stage) : stage==="actionables" ? ()=>setCardReview({portfolio:section.portfolio,stage}) :
                 stage==="swing" ? ()=>openInputSelection(section.portfolio,stage):undefined}
               onPromptClick={isCard(stage) ? () => openCard(stage,"prompts") :
                 stage==="swing" ? ()=>showStagePrompt(section.portfolio,stage):undefined}

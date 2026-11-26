@@ -8,6 +8,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { workflowOwnedApi } from "@/lib/workflowOwnedApi";
 import { captureWorkflowOwner, onWorkflowOwnerInvalidated, type WorkflowOwner } from "@/lib/workflowOwnerLifetime";
 import { boardApi, boardChanged, boardPath, libraryPath, sourceLabels, type Board, type Definition, type Intro, type Method } from "@/lib/scorecardBoard";
+import { ScorecardInputs } from "@/components/screeners/ScorecardInputs";
 import { WeightDialog } from "./WeightDialog";
 import { CreateScorecard } from "./CreateScorecard";
 
@@ -61,6 +62,7 @@ function Library({screen,owner}:{screen:string;owner:WorkflowOwner}) {
     </>}
     {board&&screen==="create"&&<><h2 className="text-xl font-semibold">Create New Scorecard</h2><CreateScorecard client={client} onAssign={definition=>setPending({add:definition,definition})}/></>}
     {detail&&method&&board&&<><div className="flex flex-wrap items-center justify-between gap-3"><p className="text-slate-600">{method.summary}</p>{action(method)}</div>
+      {board.custom.some(c=>c.id===method.id) && <div id="inputs"><ScorecardInputs strategy="og" card={method.id}/></div>}
       <section className="space-y-6 rounded-xl border bg-white p-5">
         <div><h2 className="mb-2 font-semibold">Inputs</h2>{board.custom.find(c=>c.id===method.id)?.sources.map(s=><p key={s} className="text-sm">{sourceLabels[s]}</p>)}<p className="whitespace-pre-wrap">{method.inputs}</p></div>
         <div><h2 className="mb-2 font-semibold">Prompt</h2><pre className="whitespace-pre-wrap break-words rounded-lg bg-slate-50 p-4 text-sm leading-6">{method.prompt}</pre></div>

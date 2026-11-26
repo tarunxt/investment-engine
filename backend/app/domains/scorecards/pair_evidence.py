@@ -115,7 +115,7 @@ async def repair(db, original, owner, username, *, requested=None):
     from .technical_sources import collect
     old=original.result_json
     rev_id=original.data["revision_id"]
-    rev=await storage.lookup(db,owner,"india","revision",rev_id)
+    rev=await storage.lookup(db,owner,"india","revision",rev_id,card="pairwise")
     manifest=rev.manifest
     wf=original.row.workflow_id
     source_id=original.id
@@ -142,7 +142,7 @@ async def repair(db, original, owner, username, *, requested=None):
     research=reconcile(manifest,updated,prior) if updated else initial
     signature=digest(research["packets"])
     identity=f"pairwise/evidence/{source_id}/{signature}"
-    rev=await storage.lookup(db,owner,"india","revision",rev_id,lock=True)
+    rev=await storage.lookup(db,owner,"india","revision",rev_id,lock=True,card="pairwise")
     if updated:
         await save_history(db,rev,wf,updated)
     if old.get("pair_protocol")==3 and digest(prior_packets)==signature and prior.get("candle_sources")==research.get("candle_sources"):

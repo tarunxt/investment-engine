@@ -93,7 +93,9 @@ export function ScorecardReview({portfolio,stage:initial,revisionId,initialAttem
     const identity=JSON.stringify([detail.id,c,targets,retry,pairOptions,scoringOptions]);
     const token=pendingStarts.current.get(identity)??crypto.randomUUID();
     pendingStarts.current.set(identity,token);
-    const queued=await api.start(detail.id,c,{sequence:detail.manifest.sequence,request_key:token,targets,retry_attempt_id:retry,...pairOptions,...scoringOptions});
+    const sourceId = broker === "india" && !retry ? (await api.refreshScreeners(detail.id)).id : detail.id;
+    if (sourceId !== detail.id) { setId(sourceId); onRevision(sourceId); }
+    const queued=await api.start(sourceId,c,{sequence:detail.manifest.sequence,request_key:token,targets,retry_attempt_id:retry,...pairOptions,...scoringOptions});
     selectedOutput.current=queued.id;
     pendingStarts.current.delete(identity);
     return queued.id;

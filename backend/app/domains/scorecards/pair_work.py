@@ -147,7 +147,7 @@ async def step(db, work, now, work_id, token):
         wanted = pending(work,now)
         if wanted and work.get("warmed") != current.id:
             from .technical_sources import collect
-            rev = await storage.lookup(db,owner,"india","revision",revision)
+            rev = await storage.lookup(db,owner,"india","revision",revision,card="pairwise")
             history = await pair_evidence.latest_history(db,revision)
             await db.commit()
             updated = await collect(rev.manifest,user.username,history,set(wanted),pair_repair=True)

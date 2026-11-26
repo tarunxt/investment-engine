@@ -21,9 +21,11 @@ const mocks = {
       data.manual={id:50,status:"failed",stage:"screen"};
       data.review={mode:"Manual review",state:{status:"failed",error:"ReadTimeout"}};
     }
+    let selected;
+    const inputState=()=>({version:selected===undefined?0:1,groups:[{id:"bottom",name:"Bottom Fishing Screen",runs:[{id:45,at:cutoff,status:"completed",count:1}],pinned_older:[],latest:[45],selected:selected??[45],automatic:selected===undefined}]});
     export const apiService={
-      get:async path=>path.split("?")[0].endsWith("/history")?{items:[{id:45,mode:"Manual review",scored:1,entries:1,candidates:1,status:"completed"}]}:path.endsWith("/history/45")?data.review:data,
-      post:async (path,v)=>{if(path.endsWith("/run")){window.submits=(window.submits??0)+1;window.runVersion=v.version;data.manual={id:46,status:"queued"};return data.manual;}
+      get:async path=>path.includes("/screeners/inputs/")?inputState():path.split("?")[0].endsWith("/history")?{items:[{id:45,mode:"Manual review",scored:1,entries:1,candidates:1,status:"completed"}]}:path.endsWith("/history/45")?data.review:data,
+      post:async (path,v)=>{if(path.includes("/screeners/inputs/")){selected=v.selected.bottom;return inputState();}if(path.endsWith("/run")){window.submits=(window.submits??0)+1;window.runVersion=v.version;data.manual={id:46,status:"queued"};return data.manual;}
         data.settings=v;data.version++;return {...data};}
     };`,
 };
@@ -114,11 +116,11 @@ try {
   await menu.click(); await page.getByRole("menuitem",{name:"Weights"}).click();
   await page.getByRole("spinbutton",{name:"Support bounce"}).waitFor(); await page.keyboard.press("Escape");
   await menu.click(); await page.getByRole("menuitem",{name:"Inputs",exact:true}).click();
-  const input=page.getByRole("checkbox",{name:"Bottom Fishing Screen"});
+  const input=page.getByRole("checkbox",{name:/Run #45/});
   assert.equal(await input.isChecked(),true);
   await input.uncheck();
-  await page.getByRole("button",{name:"Save",exact:true}).click();
-  await page.getByText("Settings saved.").waitFor(); await page.keyboard.press("Escape");
+  await page.getByRole("button",{name:"Save inputs",exact:true}).click();
+  await page.getByText("Scorecard inputs saved.").waitFor(); await page.keyboard.press("Escape");
   await menu.click(); await page.getByRole("menuitem",{name:"Stock Flow"}).click();
   await page.getByRole("dialog").getByText("Waiting for fresh breakout").waitFor(); await page.keyboard.press("Escape");
   await menu.click(); await page.getByRole("menuitem",{name:"Scorecard history"}).click();

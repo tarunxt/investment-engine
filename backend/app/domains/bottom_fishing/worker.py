@@ -11,7 +11,7 @@ from app.domains.scorecards.technical_sources import session_calendar
 from app.domains.zerodha.upstox_quote_guard import QuoteGuard, redis_client
 from app.domains.zerodha.upstox_quotes import configured_for, load_instruments, build_quote_request
 from . import market, store
-from .query_evidence import apply_screen
+from . import score_inputs
 from .engine import close_position, paper_cycle, roll
 
 log = logging.getLogger(__name__)
@@ -127,6 +127,7 @@ async def run(sessions, owner, stamp):
         view = await store.snapshot(db,owner,include_review=False)
         prior,_ = await store.latest(db,owner,store.CYCLE,{})
         settings = view["settings"]
+        settings["score_inputs"] = await score_inputs.plan(db, owner, settings)
     state = roll(view["state"],stamp)
     if state.get("at","")>stamp.isoformat() or (state.get("at")==stamp.isoformat() and not state["pending"]):
         return
@@ -151,8 +152,11 @@ async def run(sessions, owner, stamp):
                 else:
                     levels,coverage = {},None
                 series, fundamentals = await collect_evidence(client, cache, guard, stamp, levels, state, coverage)
-                levels = await apply_screen(client,cache,guard,settings,stamp,calendar,levels,series,state,coverage)
-                paper_cycle(state,settings,stamp,levels,series,fundamentals,state.get("benchmark_close"),coverage,calendar)
+                levels, native = await score_inputs.filter_paper(client,cache,guard,settings,stamp,calendar,levels,series,state,coverage)
+                paper_cycle(state,score_inputs.scoring_settings(settings),stamp,levels,series,fundamentals,state.get("benchmark_close"),coverage,calendar)
+                score_inputs.record_inputs(state,settings,native)
+                if coverage:
+                    state["screen_symbols"] = sorted(k for k in native if k in state["setups"])
                 missing = [r for r in state["rows"] if r["reason"].startswith("Missing ")]
                 if missing or (coverage and (coverage.get("query_missing",0) or coverage["covered"]<coverage["universe"] or coverage["current_candles"]<coverage["patterns"])):
                     state["status"] = "partial"

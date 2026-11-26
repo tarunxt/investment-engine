@@ -14,7 +14,7 @@ from sqlalchemy import select
 from app.domains.auth.models import User
 from app.domains.zerodha.upstox_quote_guard import QuoteGuard, RELEASE, redis_client
 from app.domains.zerodha.upstox_quotes import build_quote_request, configured_for, technical_instruments
-from . import market, store
+from . import market, store, score_inputs
 from .cloud_score import finish_screen
 from .issuer import issuer
 from .query import compile_query, evaluate
@@ -161,14 +161,16 @@ async def refresh(sessions,owner):
         previous_id, previous = await latest(db,owner,LIVE,{})
         if not settings.get("screen_query","").strip():
             return
+        inputs = await score_inputs.plan(db, owner, settings)
+        fingerprint = inputs["fingerprint"] if inputs else ""
     now = datetime.now(INDIA)
     async with redis_client() as cache, httpx.AsyncClient(timeout=8,follow_redirects=False) as client:
         stamp, calendar = candle_cutoff(now,await market.calendar(client,cache,now))
-        slot = f"bottom:cloud:scored:{owner}:{version}:{stamp.isoformat()}"
+        slot = f"bottom:cloud:scored:{owner}:{version}:{fingerprint}:{stamp.isoformat()}"
         lease = f"bottom:cloud:lock:{owner}"
         token = uuid4().hex
         saved = previous.get("state", {})
-        if (previous.get("version") == version and saved.get("market_as_of") == stamp.isoformat()
+        if (previous.get("version") == version and previous.get("input_fingerprint","") == fingerprint and saved.get("market_as_of") == stamp.isoformat()
                 and saved.get("score_status") and saved.get("status") == "completed"):
             return
         if await cache.exists(slot) or not await cache.set(lease,token,nx=True,ex=390):
@@ -177,7 +179,7 @@ async def refresh(sessions,owner):
                      market_as_of=stamp.isoformat())
         try:
             try:
-                state = await scan(client, cache, owner, store.Settings.model_validate(settings).model_dump(),
+                state = await scan(client, cache, owner, {**store.Settings.model_validate(settings).model_dump(), "score_inputs": inputs},
                                    stamp, calendar, previous.get("state") if previous.get("version") == version else None)
             except Exception as exc:
                 log.exception("Cloud BFS scan failed")
@@ -187,10 +189,13 @@ async def refresh(sessions,owner):
                 current,_ = await latest(db,owner,CONFIG,{})
                 if current != version:
                     return
+                latest_inputs = await score_inputs.plan(db, owner, settings)
+                if (latest_inputs["fingerprint"] if latest_inputs else "") != fingerprint:
+                    return
                 latest_id, _ = await latest(db,owner,LIVE,{})
                 if latest_id != previous_id:
                     return
-                output = dict(mode="Cloud screen",version=version,settings=settings,state=state,
+                output = dict(mode="Cloud screen",version=version,input_fingerprint=fingerprint,settings=settings,state=state,
                               finished_at=datetime.now(INDIA).isoformat())
                 store.append(db,owner,LIVE,output)
                 await db.commit()

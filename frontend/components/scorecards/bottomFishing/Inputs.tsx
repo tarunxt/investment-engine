@@ -1,4 +1,5 @@
 "use client";
+import {ScorecardInputs} from "@/components/screeners/ScorecardInputs";
 import {useState} from "react";
 import {QueryEditor} from "./QueryEditor";
 import {labels, type Stage, type Snapshot} from "./model";
@@ -11,6 +12,14 @@ export function Inputs({stage,weights=false,data,save,readOnly=false,run,active}
   const [busy,setBusy]=useState(false);
   const total=Object.values(draft.weights).reduce((a,b)=>a+b,0);
   if(stage==="screen") return <QueryEditor data={data} save={save} run={run} active={active} readOnly={readOnly}/>;
+  if(stage==="score" && !weights && !readOnly) return <ScorecardInputs strategy="bfs" card="bottom"/>;
+  if(stage==="score" && !weights && readOnly && data.state.scorecard_inputs) {
+    const frozen=data.state.scorecard_inputs;
+    return <ul className="space-y-2 text-sm">{Object.entries(frozen.runs).map(([source,ids])=><li key={source}>
+      <strong>{source==="bottom"?"Bottom Fishing Screen":source==="swing"?"Swing Scan":source}</strong>
+      {" · "}{source==="bottom" && frozen.current_bottom?"This run":ids.length?ids.map(n=>"#"+n).join(", "):"No runs selected"}
+    </li>)}</ul>;
+  }
   if(stage==="actionables") return <p>Bottom Fishing Scorecard · Minimum score 70/100 · Fresh breakout and net reward/risk ≥ 2 · Up to ₹10,000 per stock, 0.5% capital risk per entry and 1.5% total planned risk.</p>;
   return <form className="space-y-4" onSubmit={async e=>{
     e.preventDefault();if (readOnly || busy || total!==100 || version!==data.version) return;setBusy(true);setMessage("");

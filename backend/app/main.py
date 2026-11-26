@@ -354,7 +354,7 @@ app.include_router(api_usage_router)
 from app.domains.recommendation_audit.router import router as recommendation_audit_router
 app.include_router(recommendation_audit_router)
 from app.domains.scorecards.router import router as scorecards_router
-from app.domains.scorecards.screener_runs import router as screener_library_router
+from app.domains.scorecards.screener_inputs import router as screener_library_router
 app.include_router(screener_library_router)
 app.include_router(scorecards_router)
 from app.domains.bottom_fishing.store import router as bottom_fishing_router

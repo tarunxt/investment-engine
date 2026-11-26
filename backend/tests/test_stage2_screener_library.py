@@ -70,3 +70,60 @@ async def test_scan_queue_deduplicates_claims_and_reports_partial_matches_only_t
         assert (await runs.result(key, db, OWNER))["status"] == "partial"
         assert await runs.result(key, db, OTHER) is None
         assert await runs.claim(audit_db.sessions) is None
+
+
+@pytest.mark.anyio
+async def test_card_specific_runs_are_owned_frozen_and_used_by_the_scorecard(audit_db, monkeypatch):
+    from datetime import datetime, timezone
+    from app.domains.bottom_fishing import store, score_inputs
+    from app.domains.scorecards import screener_inputs as inputs, screener_manifest, router, storage
+    from app.domains.zerodha.models import ZerodhaPortfolioSnapshot
+    from app.domains.auth.models import ActivityLog
+    import json
+
+    stamp = datetime(2026, 11, 26, 10, tzinfo=timezone.utc)
+    async with audit_db.engine.begin() as conn:
+        await conn.run_sync(ZerodhaPortfolioSnapshot.__table__.create)
+    async with audit_db.sessions() as db:
+        board = await library.add(library.AddScreener(strategy="og", version=0, definition=DEFINITION), db, OWNER)
+        key = board["assigned"]["og"][-1]
+        await library.add(library.AddScreener(strategy="bfs", version=board["version"], existing=key), db, OWNER)
+        ids = []
+        for index in range(6):
+            report = dict(rows=[dict(symbol=f"TEST{index}",name="Test",exchange="NSE")],total=1)
+            record = ActivityLog(user_id=7, resource_type=key, action=runs.FINISHED, details=json.dumps(dict(status="completed",report=report)))
+            db.add(record)
+            await db.flush()
+            ids.append(record.id)
+        state = (await inputs.inputs("og","technical",db,OWNER))["groups"][-1]
+        assert [r["id"] for r in state["runs"]] == list(reversed(ids[1:]))
+        assert state["automatic"] and state["selected"] == [ids[-1]]
+        change = inputs.Selection(version=0,selected={key:ids[1:3], "swing":[]})
+        await inputs.save_inputs("og","technical",change,db,OWNER)
+        with pytest.raises(HTTPException,match="changed"):
+            await inputs.save_inputs("og","technical",change,db,OWNER)
+        with pytest.raises(HTTPException,match="available"):
+            await inputs.save_inputs("og","technical",inputs.Selection(version=0, selected={key:[ids[-1]]}),db,OTHER)
+        await inputs.save_inputs("bfs","bottom",inputs.Selection(version=0,selected={key:[ids[1]],"bottom":[]}),db,OWNER)
+        bfs = await score_inputs.plan(db,7,store.Settings().model_dump())
+        assert not bfs["current"] and bfs["sources"] == {"NSE:TEST1":[key]}
+        assert score_inputs.apply_candidates({"score_inputs":bfs},{"NSE:NATIVE"},{"NSE:TEST1":1,"NSE:NATIVE":2}) == {"NSE:TEST1":1}
+        snap = ZerodhaPortfolioSnapshot(user_id=7,captured_at=stamp,snapshot_date=stamp.date(),holdings_count=1,
+            holdings=[dict(exchange="NSE",tradingsymbol="HELD",quantity=2,last_price=100)])
+        db.add(snap)
+        await db.commit()
+        publication = router.Publication(sequence=42, request_key="test", captured_at=stamp,
+            use_screeners=True, snapshot_id=snap.id, swing_job_ids=[])
+        wf = await router.workflow(db,7,"india",42)
+        manifest = await screener_manifest.publish_with_screeners(db,7,wf,publication)
+        doc = await storage.append(db,wf.id,"revision","test-freeze",dict(manifest=manifest,digest="test"))
+        await db.commit()
+        def listings(view): return [row["listing"] for row in view["stocks"]]
+        assert listings((await router.detail("india",doc.id,db,OWNER,card="technical"))["manifest"]) == ["NSE:HELD","NSE:TEST1","NSE:TEST2"]
+        for card in ("rebalance","pairwise","threats"):
+            assert listings((await storage.lookup(db,7,"india","revision",doc.id,card=card)).manifest) == ["NSE:HELD","NSE:TEST5"]
+        prior = (await inputs.inputs("og","technical",db,OWNER))["version"]
+        await inputs.save_inputs("og","technical",inputs.Selection(version=prior,selected={key:[]}),db,OWNER)
+        assert listings((await storage.lookup(db,7,"india","revision",doc.id,card="technical")).manifest) == ["NSE:HELD","NSE:TEST1","NSE:TEST2"]
+        newer = await screener_manifest.refresh(db,OWNER,doc.id)
+        assert newer != doc.id and listings((await storage.lookup(db,7,"india","revision",newer,card="technical")).manifest) == ["NSE:HELD"]

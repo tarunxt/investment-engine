@@ -1,4 +1,5 @@
 "use client";
+import { WorkflowTileMenu } from "@/components/shared/WorkflowTileMenu";
 import Link from "next/link";
 import { useState } from "react";
 import { libraryPath, type Board } from "@/lib/scorecardBoard";
@@ -18,7 +19,7 @@ export function CustomBoardTiles({board,issue,reload,client,status,selectable,se
   return <>{board.custom.map(d=>{
     const last=board.latest?.[d.id];
     return <article key={d.id} className="mb-3 space-y-2 rounded-lg border border-slate-200 p-3 text-sm">
-      <h4 className="font-semibold"><Link className="hover:underline" href={libraryPath+"/"+d.id}>{d.name}</Link></h4>
+      <div className="flex items-center justify-between"><h4 className="font-semibold"><Link className="hover:underline" href={libraryPath+"/"+d.id}>{d.name}</Link></h4><WorkflowTileMenu title={d.name} actions={[{label:"Inputs",href:libraryPath+"/"+d.id+"#inputs"},{label:"Open stage",href:libraryPath+"/"+d.id}]}/></div>
       <p>{d.summary}</p><p>{board.weights[d.id]}% weight · {status[d.id] ?? last?.status ?? "Ready for first run"}</p>
       {selectable&&<label className="block"><input type="checkbox" checked={selected.includes(d.id)} onChange={()=>toggle(d.id)}/> Select for next run</label>}
       {last&&<button type="button" className="text-indigo-700 underline" onClick={async()=>{

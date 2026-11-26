@@ -10,7 +10,7 @@ const mocks = {
   "next/navigation": 'export const useRouter=()=>({replace:path=>location.assign(path)});',
   "@/hooks/useAuth": 'export const useAuth=()=>({user:{id:7}});',
   "@/services/api": `export class APIError extends Error {}; export const apiService={
-    get:async path=> path.endsWith("/board") ? JSON.parse(sessionStorage.board) : {id:"technical",name:"Technical",summary:"Price evidence",inputs:"OHLCV",prompt:"Assess the price",columns:["Listing","Score /100"]},
+    get:async path=> path.includes("/screeners/inputs/") ? {version:0,groups:[]} : path.endsWith("/board") ? JSON.parse(sessionStorage.board) : {id:"technical",name:"Technical",summary:"Price evidence",inputs:"OHLCV",prompt:"Assess the price",columns:["Listing","Score /100"]},
     getProviders:async()=>[{configured:true,name:"fixture",models:["offline"]}],
     post:async (path,change)=>{const b=JSON.parse(sessionStorage.board);b.weights=change.weights;b.version++;
       if(change.add)b.enabled.push(change.add);if(change.definition)b.custom.push(change.definition);

@@ -13,8 +13,8 @@ from app.domains.auth.models import ActivityLog, User
 from app.domains.scorecards.technical_sources import session_calendar
 from app.domains.zerodha.upstox_quote_guard import QuoteGuard, redis_client
 from app.domains.zerodha.upstox_quotes import configured_for
-from . import market, store
-from .query_evidence import apply_screen
+from . import market, store, score_inputs
+
 from .engine import paper_cycle, roll, size_entries
 from .worker import INDIA, collect_evidence, prepared_market
 
@@ -78,7 +78,8 @@ async def review_cloud_score(sessions, owner, version, settings, client, cache, 
     async with sessions() as db:
         _, latest = await store.latest(db, owner, store.LIVE, {})
     prior = latest.get("state", {}) if latest.get("version") == version else {}
-    if prior.get("market_as_of") == stamp.isoformat() and prior.get("score_status"):
+    if (prior.get("market_as_of") == stamp.isoformat() and prior.get("score_status") and
+            (prior.get("scorecard_inputs") or {}).get("fingerprint") == (settings.get("score_inputs") or {}).get("fingerprint")):
         return prior
     spec = dict(text=settings["screen_query"], latest_results=settings.get("latest_results", False))
     if not prior and portfolio.get("screen_query") == spec:
@@ -111,8 +112,8 @@ async def review_screen(client, cache, owner, settings, stamp, calendar, state, 
             if bars and bars[-1]["end"] == stamp.isoformat():
                 close = bars[-1]["close"]
                 row.update(close=close, proximity=row["low"] <= close <= row["low"]+.15*(row["high"]-row["low"]))
-    levels = await apply_screen(client,cache,guard,settings,stamp,calendar,levels,series,state,coverage)
-    return levels, series, fundamentals, benchmark, coverage
+    levels, native = await score_inputs.filter_paper(client,cache,guard,settings,stamp,calendar,levels,series,state,coverage)
+    return levels, series, fundamentals, benchmark, coverage, native
 
 
 async def execute_review(sessions, owner, request_id):
@@ -132,6 +133,9 @@ async def execute_review(sessions, owner, request_id):
         else:
             version, settings = await store.latest(db, owner, store.CONFIG, store.Settings().model_dump())
             job.update(version=version, settings=settings)
+        if "score_inputs" not in settings:
+            settings = {**settings, "score_inputs": await score_inputs.plan(db, owner, settings)}
+            job["settings"] = settings
         _, portfolio = await store.latest(db, owner, store.CYCLE, {})
         job.update(status="running", stage="sync", token=token, attempts=job.get("attempts",0)+1,
                    started_at=now.isoformat(), lease_until=(now+timedelta(minutes=12)).isoformat())
@@ -189,12 +193,15 @@ async def execute_review(sessions, owner, request_id):
                 for key in ("original_results", "screen_query", "screen_status", "score_status", "scored_at",
                             "rows", "setups", "scans", "sync", "at", "status"):
                     state[key] = scored[key]
+                state["scorecard_inputs"] = scored.get("scorecard_inputs")
             else:
-                levels, series, fundamentals, benchmark, coverage = await review_screen(
+                levels, series, fundamentals, benchmark, coverage, native = await review_screen(
                     client, cache, owner, settings, stamp, calendar, state, capture)
                 await checkpoint("score")
                 phase = "scorecard"
-                paper_cycle(state,settings,stamp,levels,series,fundamentals,benchmark,coverage,calendar,preview=True)
+                paper_cycle(state,score_inputs.scoring_settings(settings),stamp,levels,series,fundamentals,benchmark,coverage,calendar,preview=True)
+                score_inputs.record_inputs(state, settings, native)
+                state["screen_symbols"] = sorted(k for k in native if k in state["setups"])
                 if (coverage.get("query_missing",0) or coverage["covered"] < coverage["universe"]
                         or coverage["current_candles"] < coverage["patterns"]
                         or any(row["reason"].startswith("Missing ") for row in state["rows"])):
