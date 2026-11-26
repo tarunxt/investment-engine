@@ -199,7 +199,10 @@ def recovery_http_allowed(method, path):
             return True
         if re.fullmatch(r"/runs/scorecards/india/revisions/[1-9][0-9]*/refresh-screeners", path):
             return True
-        if path in {"/runs/scorecards/india/bottom-fishing/inputs", "/runs/scorecards/india/bottom-fishing/run"}:
+        if path in {
+            "/runs/scorecards/india/bottom-fishing/inputs", "/runs/scorecards/india/bottom-fishing/run",
+            "/runs/scorecards/india/bottom-fishing/columns", "/runs/scorecards/india/bottom-fishing/columns/import",
+        }:
             return True
         if re.fullmatch(r"/runs/scorecards/india/workflows/[1-9][0-9]*/prepare-swing-source", path):
             return True

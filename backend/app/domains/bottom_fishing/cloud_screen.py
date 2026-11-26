@@ -62,6 +62,9 @@ async def quotes(client, guard, keys, stamp):
             if traded.date()!=stamp.date() or not isinstance(price,(int,float)) or not math.isfinite(price) or price<=0:
                 continue
             values = {"price":price}
+            volume=q.get("volume")
+            if isinstance(volume,(int,float)) and math.isfinite(volume) and volume>=0:
+                values["quote_volume"]=volume
             previous = (q.get("ohlc") or {}).get("close")
             if previous and previous>0:
                 values["day_return"] = 100*(price/previous-1)
@@ -150,6 +153,7 @@ async def query_matches(client, cache, owner, settings, stamp, calendar):
         if matched is True:
             report["rows"].append(dict(symbol=k.split(":",1)[1], exchange=k[:3], name=master[k]["name"] or k,
                                        isin=master[k]["isin"], exchange_token=master[k].get("exchange_token"),
+                                       session_volume=values.get("quote_volume"),
                                        columns={label:values[field] for field,label in (("price","Current price"),("day_return","Return over 1day"),("cap","Market Capitalization"),("roce","Return on capital employed"),("macd","MACD"),("previous_macd","MACD Previous Day")) if values.get(field) is not None},
                                        **({"universe":rules.check("universe",**{f"nifty_{n}_member":0 for n in INDEX_SIZES},nse_equity=0,isin_match=1)} if k.startswith("BSE:") else {})))
     report["total"] = len(report["rows"])
@@ -176,12 +180,12 @@ async def refresh(sessions,owner):
     now = datetime.now(INDIA)
     async with redis_client() as cache, httpx.AsyncClient(timeout=8,follow_redirects=False) as client:
         stamp, calendar = candle_cutoff(now,await market.calendar(client,cache,now))
-        slot = f"bottom:cloud:scored:columns1:{owner}:{version}:{fingerprint}:{stamp.isoformat()}"
+        slot = f"bottom:cloud:scored:columns2:{owner}:{version}:{fingerprint}:{stamp.isoformat()}"
         lease = f"bottom:cloud:lock:{owner}"
         token = uuid4().hex
         saved = previous.get("state", {})
         if (previous.get("version") == version and previous.get("input_fingerprint","") == fingerprint and saved.get("market_as_of") == stamp.isoformat()
-                and (saved.get("original_results") or {}).get("column_schema") and saved.get("score_status") and saved.get("status") == "completed"):
+                and (saved.get("original_results") or {}).get("column_schema") == 2 and saved.get("score_status") and saved.get("status") == "completed"):
             return
         if await cache.exists(slot) or not await cache.set(lease,token,nx=True,ex=390):
             return
