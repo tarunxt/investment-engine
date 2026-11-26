@@ -40,15 +40,20 @@ async def daily_closes(client,cache,guard,instrument,stamp,last_session):
     if response.status_code==429:
         await guard.backoff(response.headers.get("Retry-After"))
     response.raise_for_status()
-    prices = {}
-    for t, _, _, _, close, *_ in response.json()["data"]["candles"]:
+    prices, volumes = {}, {}
+    for t, _, _, _, close, *rest in response.json()["data"]["candles"]:
         day = datetime.fromisoformat(t).astimezone(INDIA).date().isoformat()
         if first<=day<=last_session:
             if day in prices or not math.isfinite(close) or close<=0:
                 raise ValueError("Invalid historical close")
             prices[day] = close
+            if rest and isinstance(rest[0],(int,float)) and math.isfinite(rest[0]) and rest[0]>=0:
+                volumes[day]=rest[0]
     if last_session not in prices or len(prices)<60:
         return []
+    if volumes:
+        history={d:[prices[d],volumes.get(d)] for d in prices}
+        await cache.set(f"bottom:display:daily:{instrument}:{last_session}",json.dumps(history),ex=172800)
     closes = [prices[d] for d in sorted(prices)]
     await cache.set(key,json.dumps(closes),ex=86400)
     return closes

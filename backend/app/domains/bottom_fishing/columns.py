@@ -90,69 +90,123 @@ def read_export(text, rows):
     return result
 
 
-async def price_facts(client, cache, guard, instrument, stamp, calendar):
-    end = max(day for day,close in calendar.items() if day < stamp.date().isoformat() or
-              day == stamp.date().isoformat() and close and datetime.fromisoformat(close)<=stamp)
-    key = f"bottom:display:prices:{instrument}:{end}"
-    raw = await cache.get(key)
-    if raw:
-        return json.loads(raw)
-    if not await guard.admit():
-        return {}
-    first=(date.fromisoformat(end)-timedelta(days=380)).isoformat()
-    url=f"https://api.upstox.com/v3/historical-candle/{quote(instrument,safe='')}/days/1/{end}/{first}"
-    response=await client.get(url,headers={"Authorization":"Bearer "+os.environ["UPSTOX_ANALYTICS_TOKEN"]})
-    if response.status_code==429:
-        await guard.backoff(response.headers.get("Retry-After"))
-    response.raise_for_status()
-    days={}
-    for t, _, _, _, close, volume, *_ in response.json()["data"]["candles"]:
-        day=datetime.fromisoformat(t).date().isoformat()
-        if first<=day<=end and number(close) is not None and close>0 and number(volume) is not None and volume>=0:
-            days[day]=(close,volume)
-    ordered=sorted(days)
+def price_columns(days, end):
+    ordered=sorted(d for d in days if d<=end)
     if not ordered or ordered[-1]!=end:
         return {}
-    closes=[days[d][0] for d in ordered]
-    data={"Volume":days[end][1]}
+    data={}
+    close, volume=days[end]
+    if volume is not None:
+        data["Volume"]=volume
     for n in (50,200):
-        if len(closes)>=n:
-            data[f"DMA {n}"]=mean(closes[-n:])
-        if len(closes)>n:
-            data[f"DMA {n} previous day"]=mean(closes[-n-1:-1])
+        for back,suffix in ((0,""),(1," previous day")):
+            sample=ordered[-n-back:len(ordered)-back]
+            if len(sample)==n and all(days[d][0] is not None for d in sample):
+                data[f"DMA {n}"+suffix]=mean(days[d][0] for d in sample)
     for span, label in ((7,"1week"),(30,"1month"),(365,"1year")):
         start=(date.fromisoformat(end)-timedelta(days=span)).isoformat()
-        if ordered[0]<=start:
-            data[f"Volume {label} average"]=mean(days[d][1] for d in ordered if d>start)
-    await cache.set(key,json.dumps(data),ex=86400)
+        sample=[days[d][1] for d in ordered if d>start]
+        if ordered[0]<=start and sample and all(v is not None for v in sample):
+            data[f"Volume {label} average"]=mean(sample)
+    return data
+
+
+def parse_candles(payload, first, end):
+    rows={}
+    for t, _, _, _, raw_close, raw_volume, *_ in payload["data"]["candles"]:
+        day=datetime.fromisoformat(t).date().isoformat()
+        close, volume=number(raw_close),number(raw_volume)
+        if first<=day<=end and close is not None and close>0:
+            rows[day]=[close,volume if volume is not None and volume>=0 else None]
+    return rows
+
+
+async def price_facts(client, cache, guard, instrument, stamp, calendar, session_volume=None):
+    end = max(day for day,close in calendar.items() if day < stamp.date().isoformat() or
+              day == stamp.date().isoformat() and close and datetime.fromisoformat(close)<=stamp)
+    key=f"bottom:display:prices:v2:{instrument}:{end}"
+    raw=await cache.get(key)
+    if raw:
+        return json.loads(raw)
+    same_day=end==stamp.date().isoformat()
+    history_end=max(d for d in calendar if d<end) if same_day else end
+    base="https://api.upstox.com/v3/historical-candle/"
+    token=quote(instrument,safe="")
+    async def candles(path, start, until):
+        if not await guard.admit():
+            return {}
+        response=await client.get(base+path,headers={"Authorization":"Bearer "+os.environ["UPSTOX_ANALYTICS_TOKEN"]})
+        if response.status_code==429:
+            await guard.backoff(response.headers.get("Retry-After"))
+        response.raise_for_status()
+        return parse_candles(response.json(),start,until)
+
+    history_key=f"bottom:display:daily:{instrument}:{history_end}"
+    past=await cache.get(history_key)
+    days=json.loads(past) if past else {}
+    if not days:
+        start=(date.fromisoformat(end)-timedelta(days=380)).isoformat()
+        days=await candles(f"{token}/days/1/{end}/{start}",start,end)
+        if history_end in days:
+            await cache.set(history_key,json.dumps({d:v for d,v in days.items() if d<=history_end}),ex=172800)
+    if same_day and history_end in days and end not in days:
+        from app.domains.scorecards.research import INDIA
+        today=datetime.now(INDIA).date().isoformat()
+        try:
+            current=await candles(f"intraday/{token}/days/1" if end==today else f"{token}/days/1/{end}/{end}",end,end)
+        except (httpx.HTTPError,KeyError,ValueError):
+            current={}
+        days.update(current)
+        # The full quote includes cumulative day volume from the same venue and session.
+        if end not in days and session_volume is not None:
+            days[end]=[None,session_volume]
+    data=price_columns(days,end)
+    if data and "DMA 200" in data and "Volume 1year average" in data:
+        await cache.set(key,json.dumps(data),ex=172800)
     return data
 
 
 async def enrich(client, cache, guard, instruments, settings, stamp, calendar, report):
-    gate = asyncio.Semaphore(5)
-    canonical = {n.casefold():n for n in NAMES}
-    async def one(row):
-        key=row["exchange"]+":"+row["symbol"]
-        dest=row.setdefault("columns",{})
-        async with gate:
+    issuer_gate, history_gate=asyncio.Semaphore(3),asyncio.Semaphore(3)
+    canonical={n.casefold():n for n in NAMES}
+
+    async def company(row,key,dest):
+        cache_key=f"bottom:display:issuer:{stamp.date()}:{key}"
+        cached=await cache.get(cache_key)
+        if cached is not None:
+            dest.update(json.loads(cached))
+            return
+        async with issuer_gate:
             try:
-                identity = "BSE:"+row["exchange_token"] if row["exchange"]=="BSE" else key
-                fields,_ = await issuer(client,cache,identity)
-                dest.update({canonical[k.casefold()]:v for k,v in fields.get("display",{}).items() if k.casefold() in canonical and k!="Current price"})
+                identity="BSE:"+row["exchange_token"] if row["exchange"]=="BSE" else key
+                fields,_=await issuer(client,cache,identity)
+                values={canonical[k.casefold()]:v for k,v in fields.get("display",{}).items()
+                        if k.casefold() in canonical and k!="Current price"}
             except (httpx.HTTPError, ValueError, IndexError, KeyError):
-                pass
+                values={}
+            dest.update(values)
+            await cache.set(cache_key,json.dumps(values),ex=172800 if values else 900)
+
+    async def history(row,key,dest):
+        async with history_gate:
             try:
-                prices=await price_facts(client,cache,guard,instruments[key],stamp,calendar)
+                prices=await price_facts(client,cache,guard,instruments[key],stamp,calendar,row.get("session_volume"))
                 dest.update(prices)
                 cmp_dma=ratio(dest.get("Current price"),prices.get("DMA 200"))
                 if cmp_dma is not None:
                     dest["CMP by 200 DMA"]=cmp_dma
             except (httpx.HTTPError, ValueError, IndexError, KeyError):
                 pass
+
+    async def project(row):
+        key=row["exchange"]+":"+row["symbol"]
+        dest=row.setdefault("columns",{})
+        await asyncio.gather(company(row,key,dest),history(row,key,dest))
+
     try:
         async with asyncio.timeout(18):
-            await asyncio.gather(*(one(row) for row in report["rows"]))
+            await asyncio.gather(*(project(row) for row in report["rows"]))
     except TimeoutError:
         pass
-    report["column_names"] = settings.get("column_names",DEFAULT)
-    report["column_schema"] = 1
+    report["column_names"]=settings.get("column_names",DEFAULT)
+    report["column_schema"]=2

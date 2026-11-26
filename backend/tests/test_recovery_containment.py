@@ -67,6 +67,35 @@ async def test_recovery_saves_screener_membership_and_card_inputs(recovery, audi
         assert (await client.get(root)).json()["assigned"]["og"] == ["swing"]
 
 
+@pytest.mark.anyio
+async def test_recovery_persists_owner_display_columns(recovery, audit_db, monkeypatch):
+    from fastapi import FastAPI
+    from httpx import ASGITransport, AsyncClient
+    from app.domains.auth import dependencies as auth
+    from app.domains.bottom_fishing import store
+    from app.infrastructure.database.session import get_async_db
+
+    app=FastAPI()
+    app.include_router(store.router)
+    app.add_middleware(RecoveryMiddleware)
+    async def session():
+        async with audit_db.sessions() as db:
+            yield db
+    app.dependency_overrides[get_async_db]=session
+    monkeypatch.setattr(auth,"is_auth_disabled",lambda:False)
+    url="/runs/scorecards/india/bottom-fishing/columns"
+    change={"version":0,"names":["Volume","Industry PE"]}
+    async with AsyncClient(transport=ASGITransport(app=app),base_url="http://test") as client:
+        assert (await client.post(url,json=change)).status_code==401
+        app.dependency_overrides[auth.get_current_user]=lambda:SimpleNamespace(id=7)
+        assert (await client.post(url,json=change)).status_code==200
+        assert (await client.get(url)).json()["names"]==change["names"]
+        assert (await client.post(url,json=change)).status_code==409
+        assert (await client.post(url+"/import",json={"session":"2026-11-26","text":"Name,Volume\nX,100"})).status_code==409
+        app.dependency_overrides[auth.get_current_user]=lambda:SimpleNamespace(id=8)
+        assert (await client.get(url)).json()["version"]==0
+
+
 @pytest.mark.parametrize("value", ["", "true", "yes", "2", " 1", "invalid"])
 def test_malformed_mode_refuses_execution(monkeypatch, value):
     monkeypatch.setenv("CREDX_RECOVERY_MODE", value)

@@ -66,3 +66,15 @@ async def test_minimum_qualifies_stage_three_with_missing_candle(monkeypatch,min
     assert report["rows"][0]["qualified"]==bool(expected)
     if expected:
         assert result["rows"][0]["reason"]=="Missing current closed candle"
+
+
+def test_delayed_daily_close_preserves_observed_volume_without_inventing_a_dma():
+    from datetime import date,timedelta
+    last=date(2026,11,26)
+    history={(last-timedelta(days=i)).isoformat():[10,100] for i in range(1,381)}
+    history[last.isoformat()]=[None,240]
+    data=columns.price_columns(history,last.isoformat())
+    assert data["Volume 1week average"]==120 and "Volume 1year average" in data
+    assert "DMA 200" not in data and data["DMA 200 previous day"]==10
+    history[last.isoformat()]=[12,240]
+    assert columns.price_columns(history,last.isoformat())["DMA 200"]==10.01
