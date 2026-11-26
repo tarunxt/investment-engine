@@ -13,6 +13,7 @@ from app.core.recovery import (
 from app.infrastructure.messaging.recovery_celery import (
     RecoveryCelery, RecoveryTask, configure_recovery_queue,
 )
+from test_auto_rebalance_audit_durability import anyio_backend, audit_db
 
 
 @pytest.fixture
@@ -25,6 +26,45 @@ def test_default_preserves_normal_policy(monkeypatch):
     assert not recovery_mode()
     require_bullpen_command_allowed(["polymarket", "buy"])
     require_indmoney_analysis(None, {"kind": "polymarket_bullpen_event"}, auto_export=True)
+
+
+@pytest.mark.anyio
+async def test_recovery_saves_screener_membership_and_card_inputs(recovery, audit_db, monkeypatch):
+    from fastapi import FastAPI
+    from httpx import ASGITransport, AsyncClient
+    from app.domains.auth import dependencies as auth
+    from app.domains.scorecards import screener_inputs, router as scorecards
+    from app.infrastructure.database.session import get_async_db
+
+    app = FastAPI()
+    app.include_router(screener_inputs.router)
+    app.include_router(scorecards.router)
+    app.add_middleware(RecoveryMiddleware)
+    async def session():
+        async with audit_db.sessions() as db:
+            yield db
+    app.dependency_overrides[get_async_db] = session
+    monkeypatch.setattr(auth, "is_auth_disabled", lambda: False)
+    root = "/runs/scorecards/india/screeners"
+    selection = root + "/inputs/og/rebalance"
+    change = {"strategy": "og", "version": 0, "existing": "bottom"}
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        assert (await client.post(root, json=change)).status_code == 401
+        app.dependency_overrides[auth.get_current_user] = lambda: SimpleNamespace(id=7)
+        assert (await client.post(root, json=change)).status_code == 200
+        assert (await client.get(root)).json()["assigned"]["og"] == ["swing", "bottom"]
+        assert (await client.post(root, json=change)).status_code == 409
+        result = await client.post(selection, json={"version": 0, "selected": {"bottom": []}})
+        assert result.status_code == 200, result.text
+        groups = (await client.get(selection)).json()["groups"]
+        assert {g["id"]: g["automatic"] for g in groups} == {"swing": True, "bottom": False}
+        assert (await client.get(root + "/inputs/og/threats")).json()["groups"][1]["automatic"]
+        assert (await client.post("/runs/scorecards/india/revisions/999/refresh-screeners")).status_code == 404
+        for path in (root + "/custom-" + "a" * 32 + "/run", root + "/inputs/bfs/rebalance",
+                     selection + "/run", "/runs/scorecards/us/screeners"):
+            assert (await client.post(path)).json()["code"] == "RECOVERY_CONTAINMENT"
+        app.dependency_overrides[auth.get_current_user] = lambda: SimpleNamespace(id=8)
+        assert (await client.get(root)).json()["assigned"]["og"] == ["swing"]
 
 
 @pytest.mark.parametrize("value", ["", "true", "yes", "2", " 1", "invalid"])

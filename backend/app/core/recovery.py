@@ -190,6 +190,15 @@ def recovery_http_allowed(method, path):
             "/jobs", "/prompts", "/providers", "/api-usage",
         ))
     if method == "POST":
+        # Stage 2 membership, scorecard preferences and source revisions only persist
+        # the authenticated owner's settings and existing results.
+        if path == "/runs/scorecards/india/screeners" or re.fullmatch(
+            r"/runs/scorecards/india/screeners/inputs/(?:bfs/bottom|og/(?:rebalance|technical|threats|pairwise|custom-[a-f0-9]{32}))",
+            path,
+        ):
+            return True
+        if re.fullmatch(r"/runs/scorecards/india/revisions/[1-9][0-9]*/refresh-screeners", path):
+            return True
         if path in {"/runs/scorecards/india/bottom-fishing/inputs", "/runs/scorecards/india/bottom-fishing/run"}:
             return True
         if re.fullmatch(r"/runs/scorecards/india/workflows/[1-9][0-9]*/prepare-swing-source", path):
