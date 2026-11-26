@@ -3,7 +3,7 @@ import Link from "next/link";
 import {useEffect,useState,useSyncExternalStore} from "react";
 import {useAuth} from "@/hooks/useAuth";
 import {captureWorkflowOwner,onWorkflowOwnerInvalidated,type WorkflowOwner} from "@/lib/workflowOwnerLifetime";
-import {apiPath,date,latestOutput,route,stages,titles,type Output,type Stage} from "./model";
+import {apiPath,date,stageOutput,latestOutput,route,stages,titles,type Output,type Stage} from "./model";
 import {useBottomFishing} from "./useBottomFishing";
 import {History} from "./History";
 import {Status, scorecardPanel, scorecardHeader, scorecardPage, scorecardBreadcrumbs, scorecardTab} from "../ScorecardPresentation";
@@ -25,7 +25,7 @@ function PageContent({owner,stage,view,record}:{owner:WorkflowOwner}&Props) {
     if(record) client.get<Output>(apiPath()+"/history/"+record).then(v=>{if(current)setSaved(v);}).catch(e=>{if(current)setIssue(String(e));});
     return ()=>{current=false;};
   },[client,record]);
-  const output=record?saved:data?latestOutput(data):null;
+  const output=record?saved:data?(stage?stageOutput(data,stage):latestOutput(data)):null;
   const captured = output?.state.screen_query;
   const recordedSettings = output?.settings ?? (stage==="screen" && captured && data
     ? {...data.settings,screen_query:captured.text,latest_results:captured.latest_results} : undefined);
@@ -63,10 +63,10 @@ function PageContent({owner,stage,view,record}:{owner:WorkflowOwner}&Props) {
           {recordedSettings ? <Inputs key={record+currentView} stage={id} weights={currentView==="weights"} data={{...data,state:output.state,settings:recordedSettings}} readOnly save={model.save}/> : <p>These inputs were not recorded for this run.</p>}
         </div> : <div className={scorecardPanel}><Inputs key={id+currentView} stage={id} weights={currentView==="weights"} data={data} save={model.save} run={model.run} active={model.active||model.sending}/></div>) :
           <><div className="flex flex-wrap items-center gap-3 text-sm">
-            {output.state.status && <Status value={output.state.status}/>}
-            {output.finished_at||output.state.at ? <span>{date(output.finished_at??output.state.at)} IST</span> : null}
-            <span>{output.mode}</span></div>
-            {id!=="actionables" && output.state.error && <p role="alert">{output.state.error}</p>}
+            {id==="sync" && output.state.kite_sync ? <Status value="completed"/> : output.state.status && <Status value={output.state.status}/>}
+            {output.finished_at||output.state.at ? <span>{date(id==="sync" && output.state.kite_sync ? output.state.kite_sync.captured_at : output.finished_at??output.state.at)} IST</span> : null}
+            <span>{output.mode==="Paper cycle"?"Archived simulation":output.mode}</span></div>
+            {id!=="actionables" && !(id==="sync" && output.state.kite_sync) && output.state.error && <p role="alert">{output.state.error}</p>}
             {currentView==="stock-flow"?<StockFlow output={output}/>:<StageOutput stage={id} output={output}/>}</>}
       </section>)}
   </main>;

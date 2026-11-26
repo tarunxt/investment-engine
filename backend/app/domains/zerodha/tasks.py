@@ -118,6 +118,9 @@ def sync_portfolio_snapshot_task(self, user_id: int, source: str = "manual"):
             )
             return {
                 "status": "completed",
+                **({key: snapshot_data[key] for key in (
+                    "holdings", "holdings_market_value", "holdings_pnl", "available_margin"
+                )} if source == "bottom_fishing" else {}),
                 "holdings_count": snapshot.holdings_count,
                 "snapshot_date": snapshot.snapshot_date.isoformat(),
                 "captured_at": snapshot.captured_at.isoformat(),

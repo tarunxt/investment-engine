@@ -22,7 +22,7 @@ function potentialReturn(price?: number, target?: number) {
 export function Basket({output,owner,onClose}:{output:Output;owner:number;onClose:()=>void}) {
   const dialog = useReviewDialog<HTMLDivElement>(true, onClose);
   const [edits, setEdits] = useState<Record<string, string>>({});
-  const {state, settings} = output;
+  const {state} = output;
   const rows = (state.rows ?? []).map(row => {
     const strategyQty = row.qty ?? 0;
     const qty = Number(edits[row.symbol] ?? strategyQty);
@@ -36,12 +36,12 @@ export function Basket({output,owner,onClose}:{output:Output;owner:number;onClos
   const recommended = total(false);
   const selectedCount = rows.filter(row => row.qty > 0).length;
   const recommendedCount = rows.filter(row => row.strategyQty > 0).length;
-  const capital = settings?.capital;
-  const assets = capital == null ? null : capital + (state.realized ?? 0);
-  const held = Object.values(state.positions ?? {}).reduce((sum, position) => sum + position.qty * position.price, 0);
+  const cash = state.kite_sync?.available_margin;
+  const held = state.kite_sync?.holdings_market_value;
+  const assets = cash == null || held == null ? null : cash + held;
   const allocation = (buys: number | null) => ({
-    investments:buys == null ? null : held + buys,
-    cash:assets == null || buys == null ? null : assets - held - buys,
+    investments:buys == null || held == null ? null : held + buys,
+    cash:buys == null || cash == null ? null : cash - buys,
   });
   function changeQty(symbol: string, value: string) {
     if (/^\d*$/.test(value) && Number.isSafeInteger(Number(value))) {
@@ -71,9 +71,9 @@ export function Basket({output,owner,onClose}:{output:Output;owner:number;onClos
                 <p className="mt-2 text-sm text-emerald-900">{selectedCount} selected · {recommendedCount} sized by the strategy</p>
               </section>
               <section className="rounded-2xl border border-violet-200 bg-violet-50 p-4">
-                <h4 className="text-xs font-bold uppercase tracking-wide text-violet-700">Paper portfolio</h4>
-                <p className="mt-2 text-sm">Assigned capital <strong>{money(capital)}</strong></p>
-                <p className="mt-1 text-xs text-slate-600">Holdings at entry cost · Preview amounts before fees</p>
+                <h4 className="text-xs font-bold uppercase tracking-wide text-violet-700">Kite portfolio</h4>
+                <p className="mt-2 text-sm">Available margin <strong>{money(cash ?? null)}</strong></p>
+                <p className="mt-1 text-xs text-slate-600">Holdings at synced market value · Preview amounts before fees</p>
                 <p className="mt-1 text-xs text-slate-600">Market data {date(state.market_as_of ?? state.at)} IST</p>
               </section>
             </div>
