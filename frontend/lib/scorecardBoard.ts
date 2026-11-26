@@ -3,7 +3,7 @@ import type { apiService } from "@/services/api";
 import type { ProviderModelTarget } from "@/types/api";
 import type { CardKey, CardWeights } from "./independentScorecards";
 
-export const libraryPath = "/console/zerodha/scorecard-library";
+export const libraryPath = "/console/zerodha/scorecards/library";
 export const boardPath = "/console/zerodha#india-workflow";
 export const boardChanged = "zerodha-scorecard-board-changed";
 export const sourceLabels = {listings:"Listing identity and price", positions:"Holdings and position sizes", swing:"Stage 2 Swing evidence"};

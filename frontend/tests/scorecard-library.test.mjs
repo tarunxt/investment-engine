@@ -10,7 +10,7 @@ const mocks = {
   "next/navigation": 'export const useRouter=()=>({replace:path=>location.assign(path)});',
   "@/hooks/useAuth": 'export const useAuth=()=>({user:{id:7}});',
   "@/services/api": `export class APIError extends Error {}; export const apiService={
-    get:async path=> path.endsWith("/board") ? JSON.parse(sessionStorage.board) : {id:"technical",name:"Technical",summary:"Price evidence",inputs:"OHLCV",prompt:"Assess the price",columns:["Listing","Score /100"]},
+    get:async path=> path.includes("/screeners/inputs/") ? {version:0,groups:[]} : path.endsWith("/board") ? JSON.parse(sessionStorage.board) : {id:"technical",name:"Technical",summary:"Price evidence",inputs:"OHLCV",prompt:"Assess the price",columns:["Listing","Score /100"]},
     getProviders:async()=>[{configured:true,name:"fixture",models:["offline"]}],
     post:async (path,change)=>{const b=JSON.parse(sessionStorage.board);b.weights=change.weights;b.version++;
       if(change.add)b.enabled.push(change.add);if(change.definition)b.custom.push(change.definition);
@@ -24,7 +24,7 @@ const bundle=await build({absWorkingDir:frontend,stdin:{contents:`
   setWorkflowOwner(7);
   const catalog=["rebalance","technical","threats","pairwise"].map(id=>({id,name:id[0].toUpperCase()+id.slice(1),summary:"Research methodology"}));
   sessionStorage.board??=JSON.stringify({catalog,version:1,enabled:["technical"],weights:{technical:100},custom:[]});
-  const screen=location.pathname.split("scorecard-library")[1]?.slice(1)||"explore";
+  const screen=location.pathname.split("scorecards/library")[1]?.slice(1)||"explore";
   createRoot(document.getElementById("root")).render(<ScorecardLibrary screen={screen}/>);
   `,resolveDir:frontend,loader:"tsx"},define:{"process.env":"{}"},jsx:"automatic",bundle:true,write:false,plugins:[{
   name:"offline-ports",setup(b){
@@ -41,7 +41,7 @@ try {
   browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||(existsSync("/usr/bin/chromium")?"/usr/bin/chromium":undefined),args:["--no-sandbox"]});
   const page=await browser.newPage();
   page.on("pageerror",error=>console.error(error.message));
-  const root="http://127.0.0.1:"+server.address().port+"/console/zerodha/scorecard-library";
+  const root="http://127.0.0.1:"+server.address().port+"/console/zerodha/scorecards/library";
   await page.goto(root);
   await page.getByRole("heading",{name:"Explore Scorecards"}).waitFor();
   assert.equal(await page.locator("article").count(),4);

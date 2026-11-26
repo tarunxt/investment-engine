@@ -4,7 +4,7 @@ from datetime import datetime
 
 import httpx
 
-from . import market
+from . import market, score_inputs
 from .engine import paper_cycle, roll
 
 FILTERS = ("universe", "liquidity", "touches", "rebound", "proximity")
@@ -13,9 +13,16 @@ FILTERS = ("universe", "liquidity", "touches", "rebound", "proximity")
 async def finish_screen(client, cache, guard, instruments, settings, stamp, calendar, report, previous):
     cutoff = stamp.isoformat()
     rows = {"NSE:" + row["symbol"]: row for row in report["rows"] if row["exchange"] == "NSE"}
+    native = set(rows)
+    plan = settings.get("score_inputs")
+    if plan:
+        for key in plan["sources"]:
+            if key.startswith("NSE:"):
+                rows.setdefault(key, dict(exchange="NSE", symbol=key[4:]))
+    allowed = score_inputs.apply_candidates(settings, native, rows)
     state = roll({}, stamp)
     if previous.get("day") == state["day"] and (previous.get("at") or "") <= cutoff:
-        state["setups"] = {k: dict(v) for k, v in previous.get("setups", {}).items() if k in rows}
+        state["setups"] = {k: dict(v) for k, v in previous.get("setups", {}).items() if k in allowed}
     levels, benchmark, series = {}, None, {}
     coverage = {"universe": 0, "covered": 0}
     if rows:
@@ -47,6 +54,7 @@ async def finish_screen(client, cache, guard, instruments, settings, stamp, cale
         report["error"] = "Some discovery candles were unavailable before the deadline."
 
     qualified = {k for k, row in rows.items() if all(row.get(flag) is True for flag in FILTERS)}
+    qualified.intersection_update(allowed)
     selected = {k: levels[k] for k in qualified if k in levels}
     candidates = qualified | set(state["setups"])
     facts = {}
@@ -58,7 +66,8 @@ async def finish_screen(client, cache, guard, instruments, settings, stamp, cale
         except (httpx.HTTPError, ValueError, KeyError, IndexError):
             pass  # The scorecard records an explicit missing-evidence decision.
 
-    if candidates and "bottom" in settings["inputs"]:
+    effective_settings = score_inputs.scoring_settings(settings)
+    if candidates and "bottom" in effective_settings["inputs"]:
         try:
             async with asyncio.timeout(35):
                 await asyncio.gather(get_bars(market.BENCH), *(get_facts(k) for k in candidates if k in series))
@@ -66,13 +75,14 @@ async def finish_screen(client, cache, guard, instruments, settings, stamp, cale
             pass  # Keep individual results already received.
 
     coverage.update(patterns=len(selected), current_candles=sum(k in series for k in selected))
-    paper_cycle(state, settings, stamp, selected, series, facts, benchmark, coverage, calendar, preview=True)
-    if "bottom" in settings["inputs"]:
+    paper_cycle(state, effective_settings, stamp, selected, series, facts, benchmark, coverage, calendar, preview=True)
+    if "bottom" in effective_settings["inputs"]:
         for key in sorted(qualified - selected.keys() - state["setups"].keys()):
             state["rows"].append(dict(symbol=key, sources=["bottom"], reason="Missing verified support levels"))
+    score_inputs.record_inputs(state, settings, native)
     incomplete = any(row["reason"].startswith("Missing ") for row in state["rows"])
     screen_partial = (not report["complete"] or bool(report.get("error")) or
-                      any(any(flag not in row for flag in FILTERS) for row in rows.values()))
+                      any(any(flag not in row for flag in FILTERS) for key,row in rows.items() if key in native))
     state.update(market_as_of=cutoff, original_results=report, sync=dict(at=cutoff, **coverage),
                  screen_query=dict(text=settings["screen_query"], latest_results=settings.get("latest_results", False)),
                  screen_status="partial" if screen_partial else "completed",

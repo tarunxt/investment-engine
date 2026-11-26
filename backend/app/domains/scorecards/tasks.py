@@ -70,7 +70,7 @@ def warm_rebalance_sources(owner, revision_id):
         from .rebalance_readiness import prepare
         try:
             async with AsyncSessionLocal() as db:
-                rev=await storage.lookup(db,owner,"india","revision",revision_id)
+                rev=await storage.lookup(db,owner,"india","revision",revision_id,card="rebalance")
                 if rev:
                     username=await db.scalar(select(User.username).where(User.id==owner))
                     packet=await prepare(db,rev,owner,username)

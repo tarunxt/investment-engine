@@ -5,6 +5,7 @@ identifies a versioned analysis document. The ledger supplies a durable integer
 ID, a workflow FK, a run FK, timestamps and unique (workflow, stage) keys.
 """
 from dataclasses import dataclass
+from functools import cached_property
 from hashlib import sha256
 from sqlalchemy import select
 from app.domains.runs.models import AutoRebalanceWorkflow as Workflow, AutoRebalanceWorkflowStage as Stage
@@ -13,6 +14,7 @@ from app.domains.runs.models import AutoRebalanceWorkflow as Workflow, AutoRebal
 @dataclass(frozen=True)
 class Document:
     row: Stage
+    card: str | None = None
 
     @property
     def id(self):
@@ -22,9 +24,13 @@ class Document:
     def data(self):
         return self.row.summary_json
 
-    @property
+    @cached_property
     def manifest(self):
-        return self.data["manifest"]
+        manifest = self.data["manifest"]
+        if self.card and "screener_inputs" in manifest:
+            from .screener_manifest import project
+            return project(manifest, self.card)
+        return manifest
 
     @property
     def digest(self):
@@ -50,7 +56,7 @@ def of_kind(kind, revision_id=None):
     return Stage.stage.startswith(prefix(kind, revision_id))
 
 
-async def lookup(db, uid, portfolio, kind, record_id, *, sequence=None, lock=False):
+async def lookup(db, uid, portfolio, kind, record_id, *, sequence=None, lock=False, card=None):
     query = select(Stage).join(Workflow).where(
         Stage.id == record_id, of_kind(kind), Workflow.user_id == uid, Workflow.portfolio == portfolio)
     if sequence is not None:
@@ -58,7 +64,7 @@ async def lookup(db, uid, portfolio, kind, record_id, *, sequence=None, lock=Fal
     if lock:
         query = query.with_for_update(of=Stage)
     row = await db.scalar(query)
-    return Document(row) if row else None
+    return Document(row, card) if row else None
 
 
 async def by_key(db, kind, identity, *, workflow_id=None, revision_id=None):

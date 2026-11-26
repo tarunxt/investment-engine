@@ -150,11 +150,17 @@ async def lifespan(app: FastAPI):
     review_worker = asyncio.create_task(serve_reviews(AsyncSessionLocal, app.state.bottom_review_wake))
     from app.domains.bottom_fishing.cloud_screen import serve as serve_cloud_screen
     cloud_scheduler = asyncio.create_task(serve_cloud_screen(AsyncSessionLocal))
+    from app.domains.scorecards.screener_runs import serve as serve_screeners
+    app.state.screener_wake = asyncio.Event()
+    screener_worker = asyncio.create_task(serve_screeners(AsyncSessionLocal, app.state.screener_wake))
     paper_scheduler = asyncio.create_task(serve_bottom_fishing(AsyncSessionLocal))
     technical_worker=asyncio.create_task(serve_technical_evidence(AsyncSessionLocal))
     try:
         yield
     finally:
+        screener_worker.cancel()
+        with suppress(asyncio.CancelledError):
+            await screener_worker
         review_worker.cancel()
         with suppress(asyncio.CancelledError):
             await review_worker
@@ -348,6 +354,8 @@ app.include_router(api_usage_router)
 from app.domains.recommendation_audit.router import router as recommendation_audit_router
 app.include_router(recommendation_audit_router)
 from app.domains.scorecards.router import router as scorecards_router
+from app.domains.scorecards.screener_inputs import router as screener_library_router
+app.include_router(screener_library_router)
 app.include_router(scorecards_router)
 from app.domains.bottom_fishing.store import router as bottom_fishing_router
 app.include_router(bottom_fishing_router)

@@ -1,5 +1,6 @@
 "use client";
 
+import { ScorecardInputs } from "@/components/screeners/ScorecardInputs";
 import { tradingViewText } from "@/components/shared/TradingViewSymbolLink";
 import {Status, Table, scorecardButton as button, scorecardPanel as panel, scorecardHeader, scorecardPage, scorecardBreadcrumbs, scorecardTab} from "@/components/scorecards/ScorecardPresentation";
 import { RebalanceSourceCheck, RebalanceStockScores } from "./RebalanceStockScores";
@@ -293,7 +294,7 @@ function Evidence({
   const readiness=useRead(readReadiness,!!revision && showReadiness && card==="rebalance" && tab==="inputs");
   const readTemplate = useCallback(() => api.prompt(revision!, card), [api, revision, card]);
   const template = useRead(readTemplate, !!revision && tab === "prompts" && templateOpen);
-  const readSource = useCallback(() => api.read(revision!), [api, revision, refresh]);
+  const readSource = useCallback(() => api.read(revision!,market==="zerodha"?card:undefined), [api, revision, refresh, market, card]);
   const source = useRead(readSource, !!revision);
   const attempts=source.data?.attempts.filter(a=>a.card===card)??[];
   const matching=attempts.filter(a=>runId?a.run_id===runId:a.id===published?.output_id);
@@ -401,6 +402,7 @@ function Evidence({
                 Snapshot #{manifest.snapshot_id} · {formatApiTimestamp(manifest.snapshot_at)} · Swing jobs{" "}
                 {manifest.swing_job_ids.map((id) => "#" + id).join(", ") || "—"}
               </p>
+              {manifest.screener_inputs?.[card] && <p className="mb-3 text-sm">Frozen screener runs · {Object.entries(manifest.screener_inputs[card]).map(([key,ids])=>(key==="swing"?"Swing Scan":key==="bottom"?"Bottom Fishing Screen":key)+" "+(ids.map(id=>"#"+id).join(", ")||"(none)")).join(" · ")}</p>}
               <Table
                 columns={["Listing", "Company", "Source", "Held units"]}
                 rows={manifest.stocks.map((s) => ({
@@ -421,7 +423,7 @@ function Evidence({
             <button className={button} onClick={() => onTab("prompts")}>
               View saved prompts
             </button>
-            {tools?.onInputs && (
+            {market!=="zerodha" && tools?.onInputs && (
               <button className={button} onClick={() => tools.onInputs?.(card)}>
                 Configure workflow inputs
               </button>
@@ -713,6 +715,8 @@ export function ScorecardScreen({
         </Link>
         <h1 className="mt-1 text-2xl font-semibold">{here}</h1>
       </header>
+      {market==="zerodha" && card && tab==="inputs" && <ScorecardInputs strategy="og" card={card}/>}
+      {market==="zerodha" && card && !sequence && tab!=="inputs" && <Link className={button} href={href("inputs")}>Inputs</Link>}
       {card && sequence ? (
         <>
           <nav aria-label="Scorecard sections" className="flex flex-wrap gap-2">
@@ -781,7 +785,8 @@ export function ScorecardEvidenceDialog({
       if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
     };
   }, [initialTab]);
-  const body = (
+  const body = (<>
+    {market==="zerodha" && tab==="inputs" && <ScorecardInputs strategy="og" card={card}/>}
     <Evidence
       market={market}
       client={client}
@@ -794,7 +799,7 @@ export function ScorecardEvidenceDialog({
       onTab={setTab}
       onExecution={setExecution}
       tools={{ onInputs, onTemplate }}
-    />
+    /></>
   );
   if (initialTab !== "output")
     return (

@@ -10,7 +10,7 @@ from .universe import digest
 async def recover(db, original, owner, username, only=None, commit=True):
     old=original.result_json
     rev_id=original.data["revision_id"]
-    rev=await storage.lookup(db,owner,"india","revision",rev_id)
+    rev=await storage.lookup(db,owner,"india","revision",rev_id,card="technical")
     packet_id=original.data["settings"].get("packet_id")
     packet=await storage.lookup(db,owner,"india","packet",packet_id) if packet_id else None
     previous=packet.data["research"] if packet else {}

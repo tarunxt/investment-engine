@@ -9,6 +9,7 @@ import { WorkflowTileMenu, type TileAction } from "./WorkflowTileMenu";
 import { StageErrorDetails } from "./StageErrorDetails";
 import { StageStatusIcon, stageTileBorder, getStageLedgerTone, getIdleStageRows, getStageTileLabel, STAGE_METADATA, type WorkflowStageTile } from "./WorkflowStageTile";
 
+import { ScreenerLane } from "@/components/screeners/ScreenerLane";
 import Link from "next/link";
 import { isCard, type CardKey } from "@/lib/independentScorecards";
 import { libraryPath, type Board } from "@/lib/scorecardBoard";
@@ -149,12 +150,12 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
     const rebalance = stages.find(item => item.stage === "rebalance")?.info;
     const lanes = [
       { title: "Sync portfolio", keys: ["sync"] },
-      { title: market === "zerodha" ? "Find New Promising Stocks" : "Discover contenders", keys: ["swing"] },
+      { title: market === "zerodha" ? "Screeners" : "Discover contenders", keys: ["swing"] },
       { title: "Scorecards", keys: ["rebalance", "technical", "threats", "pairwise"] },
       { title: market === "zerodha" ? "Final Actionables" : "Build Actionables", keys: ["actionables"] },
     ];
     return <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Rebalance workflow">
-      {lanes.map((lane, index) => <section key={lane.title} className="min-w-0 rounded-xl border border-slate-200 bg-white p-3">
+      {lanes.map((lane, index) => <section key={lane.title} className="flex min-w-0 flex-col items-stretch rounded-xl border border-slate-200 bg-white p-3">
         <h3 className="mb-3 font-semibold">{index + 1} · {lane.title === "Scorecards" && market ? <Link className="text-indigo-800 underline-offset-4 hover:underline" href={scorecardHref(market)}>Scorecards</Link> : lane.title}</h3>
         {lane.keys.map(key => {
           if (market === "zerodha" && isCard(key) && scorecardBoard !== undefined && !scorecardBoard?.enabled.includes(key)) return null;
@@ -214,9 +215,10 @@ export function WorkflowStageLedger({ children, enabled, view = "ledger", histor
 
           </div>;
         })}
+        {index === 1 && market === "zerodha" && <ScreenerLane strategy="og"/>}
         {lane.title === "Scorecards" && market === "zerodha" && <>
           {customTiles}
-          <Link href={libraryPath} className={control}>Add Scorecard</Link>
+          <Link href={libraryPath} className={control+" self-start"}>Add Scorecard</Link>
         </>}
       </section>)}
       <StageDurationBreakdownDialog open={Boolean(durationStage)} stageLabel={durationStage ? STAGE_METADATA[durationStage.stage].idle : ""} info={durationStage?.info ?? { state: "idle" }} now={durationStage?.now ?? 0} onClose={() => setDurationStage(null)} />

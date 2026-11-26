@@ -61,6 +61,7 @@ class VerifiedListing(Request):
 
 
 class Publication(Request):
+    use_screeners: bool = False
     request_key: str = Field(min_length=1,max_length=80)
     sequence: int = Field(gt=0)
     snapshot_id: int | None = Field(default=None,gt=0)
@@ -98,8 +99,8 @@ async def workflow(db, uid, portfolio, sequence):
     return w
 
 
-async def owned(db, uid, portfolio, kind, record_id, *, lock=False):
-    record = await storage.lookup(db, uid, portfolio, kind, record_id, lock=lock)
+async def owned(db, uid, portfolio, kind, record_id, *, lock=False, card=None):
+    record = await storage.lookup(db, uid, portfolio, kind, record_id, lock=lock, card=card)
     if not record:
         raise HTTPException(404, "Scorecard record not found")
     return record
@@ -194,10 +195,14 @@ async def publish(portfolio:Portfolio, body:Publication, db:AsyncSession=Depends
     previous=await storage.by_key(db, "revision", body.request_key, workflow_id=w.id)
     if previous:
         m=previous.manifest
-        if m.get("verified_listings",[]) != [v.model_dump() for v in body.verified_listings] or body.snapshot_id is not None and m["snapshot_id"]!=body.snapshot_id or m["swing_job_ids"]!=sorted(set(body.swing_job_ids)) or datetime.fromisoformat(m["snapshot_at"])!=body.captured_at:
+        if m.get("verified_listings",[]) != [v.model_dump() for v in body.verified_listings] or body.snapshot_id is not None and m["snapshot_id"]!=body.snapshot_id or m.get("requested_swing_jobs", m["swing_job_ids"])!=sorted(set(body.swing_job_ids)) or datetime.fromisoformat(m["snapshot_at"])!=body.captured_at:
             raise HTTPException(409,"Publication key already names different source inputs")
         return {"id":previous.id,"manifest":m,"digest":previous.digest}
-    m=await publish_manifest(db,user.id,w,body)
+    if portfolio == "india" and body.use_screeners:
+        from .screener_manifest import publish_with_screeners
+        m = await publish_with_screeners(db, user.id, w, body)
+    else:
+        m = await publish_manifest(db, user.id, w, body)
     record=await storage.append(db, w.id, "revision", body.request_key, {"digest": digest(m), "manifest": m})
     out={"id":record.id,"manifest":m,"digest":record.digest}
     await db.commit()
@@ -213,10 +218,16 @@ async def publish(portfolio:Portfolio, body:Publication, db:AsyncSession=Depends
     return out
 
 
+@router.post("/india/revisions/{revision_id}/refresh-screeners")
+async def refresh_screeners(revision_id:int, db:AsyncSession=Depends(get_async_db), user:User=Depends(get_current_user)):
+    from .screener_manifest import refresh
+    return {"id": await refresh(db, user, revision_id)}
+
+
 @router.post("/india/revisions/{revision_id}/rebalance/readiness")
 async def rebalance_preflight(revision_id:int,db:AsyncSession=Depends(get_async_db),user:User=Depends(get_current_user)):
     from .rebalance_readiness import prepare, checklist
-    rev=await owned(db,user.id,"india","revision",revision_id)
+    rev=await owned(db,user.id,"india","revision",revision_id,card="rebalance")
     packet=await prepare(db,rev,user.id,user.username)
     return checklist(packet.data["research"])
 
@@ -229,8 +240,8 @@ async def revisions(portfolio:Portfolio, db:AsyncSession=Depends(get_async_db),u
 
 
 @router.get("/{portfolio}/revisions/{revision_id}")
-async def detail(portfolio:Portfolio,revision_id:int,db:AsyncSession=Depends(get_async_db),user:User=Depends(get_current_user)):
-    rev=await owned(db,user.id,portfolio,"revision",revision_id)
+async def detail(portfolio:Portfolio,revision_id:int,db:AsyncSession=Depends(get_async_db),user:User=Depends(get_current_user), card:board.CardId | None=None):
+    rev=await owned(db,user.id,portfolio,"revision",revision_id,card=card)
     attempts=(await db.execute(select(Stage.id,Stage.summary_json["card"].as_string(),Stage.run_id).where(
         storage.of_kind("attempt",rev.id)).order_by(Stage.id.desc()))).all()
     finals=(await db.execute(select(Stage.id,Stage.summary_json["digest"].as_string()).where(
@@ -246,7 +257,7 @@ async def start(portfolio:Portfolio,revision_id:int,card:Card,body:Start,db:Asyn
 
 async def start_scorecard(portfolio,revision_id,card,body,db,user,*,managed=False):
     owner = user.id
-    rev = await owned(db,owner,portfolio,"revision",revision_id)
+    rev = await owned(db,owner,portfolio,"revision",revision_id,card=card)
     if not rev.manifest["stocks"]:
         raise HTTPException(422,"Resolve the flagged Stage 2 listing identities before scoring")
     identity = card + "/" + body.request_key
@@ -306,6 +317,11 @@ async def start_scorecard(portfolio,revision_id,card,body,db,user,*,managed=Fals
         if pair_v3:
             from .technical_history import pairwise_prior_bars
             seed = await pairwise_prior_bars(db, manifest, [s["listing"] for s in manifest["stocks"]])
+        if technical_v3 and history and "screener_inputs" in manifest:
+            # Pairwise may have warmed a different selection from the same Stage 2 publication.
+            required = {s["listing"] for s in manifest["stocks"]}
+            if not required.issubset(history.get("technical", {})):
+                history = None
         if technical_v3 and not history:
             from .technical_history import prior_bars
             seed=await prior_bars(db,manifest,[s["listing"] for s in manifest["stocks"]])
@@ -340,7 +356,7 @@ async def start_scorecard(portfolio,revision_id,card,body,db,user,*,managed=Fals
         else:
             research = await collect_research(manifest,card,username=username)
     w=await workflow(db,owner,portfolio,body.sequence)
-    rev=await owned(db,owner,portfolio,"revision",revision_id,lock=True)
+    rev=await owned(db,owner,portfolio,"revision",revision_id,lock=True,card=card)
     config={"targets":[t.model_dump() for t in body.targets],"parent":body.retry_attempt_id}
     if rebalance_v2 and body.score_supported_factors:
         config["score_supported_factors"] = True
@@ -660,13 +676,13 @@ async def attempt_result(portfolio:Portfolio,attempt_id:int,db:AsyncSession=Depe
         if portfolio == "india" and a.data["card"] == "technical" and jobs[-1][-1].get("technical"):
             from .technical_output import saved_rows
             from .technical_history import closing_display
-            rev = await owned(db,user.id,portfolio,"revision",a.data["revision_id"])
+            rev = await owned(db,user.id,portfolio,"revision",a.data["revision_id"],card=a.data["card"])
             packet = jobs[-1][-1]
             preview = saved_rows(rev.manifest,packet,packet.get("carried_comments",{}),[],[j.id for j,*_ in jobs])
             return await closing_display(db,user.id,{**base,**preview,"status":"processing",
                                          "scored":sum(r["score"] is not None for r in preview["rows"])})
         return {**base,"status":"processing","rows":[]}
-    rev=await owned(db,user.id,portfolio,"revision",a.data["revision_id"])
+    rev=await owned(db,user.id,portfolio,"revision",a.data["revision_id"],card=a.data["card"])
     definition = a.data["settings"].get("definition")
     result = custom.project(definition, rev.manifest, jobs) if definition else project(a.data["card"],rev.manifest,jobs)
     if a.data["settings"].get("pair_protocol")==3:
@@ -751,7 +767,7 @@ async def repair_threat_evidence(attempt_id:int, db:AsyncSession=Depends(get_asy
     if not wanted:
         return result
     revision_id = original.data["revision_id"]
-    revision = await owned(db,user.id,"india","revision",revision_id)
+    revision = await owned(db,user.id,"india","revision",revision_id,card="threats")
     prior = await pair_evidence.attempt_packet(db,original)
     wf, parent, settings, manifest = original.row.workflow_id, original.id, dict(original.data["settings"]), revision.manifest
     owner, username = user.id,user.username
@@ -794,7 +810,7 @@ async def recover_pairs(portfolio:Portfolio,attempt_id:int,db:AsyncSession=Depen
         if existing:
             return existing.result_json
         from .threat_output import project as project_threats
-        revision = await owned(db,user.id,portfolio,"revision",rev_id)
+        revision = await owned(db,user.id,portfolio,"revision",rev_id,card="threats")
         projected = project_threats(revision.manifest,await observations(db,original,user.id,portfolio))
         threat_coverage.annotate(projected, await pair_evidence.attempt_packet(db, original))
         counts = projected["threat_counts"]
@@ -831,7 +847,7 @@ async def recover_pairs(portfolio:Portfolio,attempt_id:int,db:AsyncSession=Depen
     existing=await storage.by_key(db,"attempt",identity,workflow_id=original.row.workflow_id,revision_id=rev_id)
     if existing:
         return existing.result_json
-    rev=await owned(db,user.id,portfolio,"revision",rev_id)
+    rev=await owned(db,user.id,portfolio,"revision",rev_id,card="pairwise")
     jobs=await observations(db,original,user.id,portfolio)
     result=project("pairwise",rev.manifest,jobs)
     if not result["recovered_pairs"] or sum(r["valid"] for r in result["rows"])<=sum(r["valid"] for r in original.result_json["rows"]):
@@ -902,7 +918,7 @@ async def finalize(portfolio:Portfolio,revision_id:int,body:Finalize,db:AsyncSes
 
 @router.get("/{portfolio}/revisions/{revision_id}/{card}/prompt")
 async def prompt_preview(portfolio:Portfolio,revision_id:int,card:Card,db:AsyncSession=Depends(get_async_db),user:User=Depends(get_current_user)):
-    rev=await owned(db,user.id,portfolio,"revision",revision_id)
+    rev=await owned(db,user.id,portfolio,"revision",revision_id,card=card)
     first=next(batches(rev.manifest["stocks"],card,portfolio=portfolio),([],[]))
     packet_key = {"technical":"technical-v3","pairwise":"pairwise-v3","threats":"threats-v3","rebalance":"rebalance-v2"}.get(card,"market-v2") if portfolio=="india" else "market-v2"
     packet = await storage.by_key(db,"packet",packet_key,revision_id=rev.id) if card in ("technical","pairwise","rebalance") or (portfolio=="india" and card=="threats") else None

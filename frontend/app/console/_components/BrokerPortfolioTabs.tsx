@@ -29,16 +29,17 @@ export function BrokerPortfolioTabs({ market, children }: { market: WorkflowMark
       return false;
     }
   }, () => false);
-  const showWorkflow = hash ? hash === workflowHash : rememberedWorkflow;
+  const workflowAnchor = hash === workflowHash || (market === 'zerodha' && ['#og-screeners', '#bfs-screeners'].includes(hash));
+  const showWorkflow = hash ? workflowAnchor : rememberedWorkflow;
 
   useEffect(() => {
     if (!hash || !preferenceKey) return;
     try {
-      window.localStorage.setItem(preferenceKey, hash === workflowHash ? 'rebalance' : 'portfolio');
+      window.localStorage.setItem(preferenceKey, workflowAnchor ? 'rebalance' : 'portfolio');
     } catch {
       // Fragment navigation still works when browser storage is unavailable.
     }
-  }, [hash, preferenceKey, workflowHash]);
+  }, [hash, preferenceKey, workflowAnchor]);
   const tabs = [
     { label: 'Rebalance', href: workflowHash, current: showWorkflow },
     { label: `My ${broker} Portfolio`, href: '#broker-portfolio', current: !showWorkflow },

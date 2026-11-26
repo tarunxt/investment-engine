@@ -137,7 +137,7 @@ def annotate(result,research, *, score_supported_factors=False):
 async def recover(db, original, owner, username):
     from .rebalance_audit import replay
     rev_id=original.data["revision_id"]
-    rev=await storage.lookup(db,owner,"india","revision",rev_id)
+    rev=await storage.lookup(db,owner,"india","revision",rev_id,card="rebalance")
     settings=dict(original.data["settings"])
     parent=original.result_json
     if "unassessed_trace" not in parent and original.row.run_id and not original.data.get("data_recovery"):

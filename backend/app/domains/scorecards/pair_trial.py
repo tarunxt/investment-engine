@@ -50,7 +50,7 @@ async def saved_trials(db,owner):
         pair=await storage.lookup(db,owner,"india","attempt",pair_id)
         if not pair or not pair.result_json or not all(r["coverage"]=="Complete" for r in pair.result_json["rows"]):
             continue
-        revision=await storage.lookup(db,owner,"india","revision",revision_id)
+        revision=await storage.lookup(db,owner,"india","revision",revision_id,card="pairwise")
         outputs={"pairwise":pair.result_json}
         for card,ref in refs.items():
             if card!="pairwise":
