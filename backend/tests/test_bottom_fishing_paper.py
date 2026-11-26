@@ -215,3 +215,30 @@ async def test_manual_review_spaces_concurrent_candles_and_honors_shared_denials
     allowed = await asyncio.gather(*(guard.admit() for _ in range(5)))
     assert allowed == [True, False, True, True, True]
     assert all(later - earlier >= 0.009 for earlier, later in zip(observed, observed[1:]))
+
+
+@pytest.mark.asyncio
+async def test_scheduled_candle_and_exit_tick_use_local_service_once(monkeypatch):
+    from contextlib import asynccontextmanager
+    from unittest.mock import AsyncMock
+    from app.domains.bottom_fishing import tasks
+
+    cache = AsyncMock()
+    cache.set.side_effect = [True, False, False, True]
+    cache.exists.return_value = True
+
+    @asynccontextmanager
+    async def redis():
+        yield cache
+
+    advance = AsyncMock()
+    monkeypatch.setattr(tasks, "redis_client", redis)
+    monkeypatch.setattr(tasks, "advance", advance)
+    sessions = object()
+    await tasks.scheduled_owner(sessions, 42, T, T)
+    await tasks.scheduled_owner(sessions, 42, T, T)
+    await tasks.scheduled_owner(sessions, 42, T, T + timedelta(seconds=25))
+    assert [item.args for item in advance.await_args_list] == [
+        (sessions, 42, T.isoformat(), False),
+        (sessions, 42, T.isoformat(), True),
+    ]
