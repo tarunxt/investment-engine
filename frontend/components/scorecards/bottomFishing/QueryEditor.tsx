@@ -1,8 +1,9 @@
 "use client";
 import {useId, useState} from "react";
 import {scorecardButton} from "../ScorecardPresentation";
-import type {Snapshot} from "./model";
-import type {CapturedResults, Model} from "./useBottomFishing";
+import {route,type Snapshot} from "./model";
+import {useRouter} from "next/navigation";
+import type {Model} from "./useBottomFishing";
 
 type Props = { data:Snapshot; save:Model["save"]; run?:Model["run"]; readOnly?:boolean; active?:boolean };
 
@@ -18,8 +19,7 @@ export function QueryEditor({data,save,run,readOnly=false,active=false}:Props) {
   const [query,setQuery] = useState(data.settings.screen_query ?? "");
   const [latest,setLatest] = useState(data.settings.latest_results ?? false);
   const [version,setVersion] = useState(data.version);
-  const [sourceUrl,setSourceUrl] = useState("");
-  const [capture,setCapture] = useState<CapturedResults>();
+  const router = useRouter();
   const [busy,setBusy] = useState(false);
   const [error,setError] = useState("");
   const [message,setMessage] = useState("");
@@ -32,8 +32,8 @@ export function QueryEditor({data,save,run,readOnly=false,active=false}:Props) {
     try {
       const savedVersion = changed ? await save({...data.settings,screen_query:query,latest_results:latest},version) : version;
       setVersion(savedVersion);
-      if(startRun && run) await run(savedVersion,capture);
-      setMessage(startRun ? "Query submitted for a manual review." : "Query saved.");
+      if(startRun) router.push(route+"/screen");
+      setMessage("Query applied to the cloud screen.");
     } catch(e) { setError(e instanceof Error ? e.message : String(e)); }
     finally { setBusy(false); }
   }
@@ -61,43 +61,17 @@ export function QueryEditor({data,save,run,readOnly=false,active=false}:Props) {
       onChange={event=>{setLatest(event.target.checked);setMessage("");}}/>Only companies with {previousQuarter(readOnly?data.state.market_as_of??data.state.at:undefined)} results</label>
     <div className="space-y-1 text-sm text-slate-700">
       <h3 className="font-semibold text-slate-950">Where the query runs</h3>
-      <p>Manual reviews fetch the original query matches from Screener.in for the Saved output table. Cred-X marks the five discovery filters for each company and evaluates eligible new and carried setups for scoring. Nifty Indices supplies membership, NSE supplies daily prices, volume and corporate actions, and Upstox supplies the completed five-minute candle.</p>
+      <p>Saving a query updates the cloud screen. Cred-X evaluates NSE and BSE company equities, preferring NSE for dual listings, every five minutes during the session even when your browser is closed. Manual reviews remain available in History. Cred-X marks the five discovery filters for each company and evaluates eligible new and carried setups for scoring. Nifty Indices supplies membership, NSE supplies daily prices, volume and corporate actions, and Upstox supplies the completed five-minute candle.</p>
       <p>Screener.in consolidated company pages supply the financial inputs and the 52-week High price and Low price used in your query. The built-in support filters above use the separate 20-session range. Only confirmed query matches progress.</p>
     </div>
     {!readOnly && <><details className="text-sm text-slate-600"><summary className="cursor-pointer text-indigo-700">Supported ratios and query syntax</summary>
       <p className="mt-2">{data.query_fields?.join(" · ")}</p>
       <p className="mt-2">Use numeric comparisons, parentheses, +, -, *, /, AND and OR. Enter percentages as whole numbers and market capitalization in ₹ crore.</p>
     </details>
-    {run && <details className="space-y-2 text-sm">
-      <summary>Use results from a signed-in Screener tab</summary>
-      <label className="block">Screener query results URL
-        <input className="block w-full rounded border p-2" value={sourceUrl} onChange={event=>{setSourceUrl(event.target.value);setCapture(undefined);}}/>
-      </label>
-      <label className="block">In the Screener results tab, select all and copy. Paste the page here.
-        <textarea className="block w-full rounded border p-2" value="" onChange={()=>{}} onPaste={event=>{
-          event.preventDefault();
-          setCapture(undefined);
-          try {
-            const url = new URL(sourceUrl);
-            if (!["www.screener.in","screener.in"].includes(url.hostname) || url.pathname!=="/screen/raw/") throw new Error("Enter the Screener query results URL.");
-            const content = new DOMParser().parseFromString(event.clipboardData.getData("text/html"),"text/html");
-            const rows = Array.from(content.querySelectorAll("table a[href]")).flatMap(link=>{
-              const path = new URL(link.getAttribute("href")!,url).pathname.match(/^\/company\/([^/]+)\//);
-              return path ? [{symbol:decodeURIComponent(path[1]),name:link.textContent?.trim()??""}] : [];
-            });
-            const total = Number(event.clipboardData.getData("text/plain").match(/([\d,]+)\s+results? found/i)?.[1].replaceAll(",",""));
-            if (!total || rows.length!==total) throw new Error("Copy the full results page including its count and company links.");
-            setCapture({query:url.searchParams.get("query")??"",latest:url.searchParams.has("latest"),rows,total});
-            setError("");
-          } catch(e) {setError(String(e));}
-        }}/>
-      </label>
-      {capture && <p>{capture.total} Screener matches ready to include in this run. <button type="button" onClick={()=>setCapture(undefined)}>Clear</button></p>}
-    </details>}
     <div className="flex flex-wrap gap-2">
       <button type="button" className={scorecardButton+" aria-disabled:opacity-50"} aria-disabled={busy||conflict||active||!changed} onClick={()=>void submit(false)}>Save query</button>
       {run && <button type="button" className="rounded-full bg-indigo-700 px-4 py-2 text-sm font-semibold text-white aria-disabled:opacity-50"
-        aria-disabled={busy||conflict||active} onClick={()=>void submit(true)}>{busy?"Working…":active?"Review running…":"Run this query"}</button>}
+        aria-disabled={busy||conflict||active} onClick={()=>void submit(true)}>{busy?"Working…":active?"Review running…":"View live results"}</button>}
     </div>
     {conflict && <button type="button" className={scorecardButton} onClick={()=>{setQuery(data.settings.screen_query??"");setLatest(Boolean(data.settings.latest_results));setVersion(data.version);setError("");setMessage("");}}>Reload current query</button>}
     {message && <p role="status" className="text-sm text-indigo-700">{message}</p>}
