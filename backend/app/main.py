@@ -148,6 +148,8 @@ async def lifespan(app: FastAPI):
     from app.domains.bottom_fishing.review import serve_reviews
     app.state.bottom_review_wake = asyncio.Event()
     review_worker = asyncio.create_task(serve_reviews(AsyncSessionLocal, app.state.bottom_review_wake))
+    from app.domains.bottom_fishing.cloud_screen import serve as serve_cloud_screen
+    cloud_scheduler = asyncio.create_task(serve_cloud_screen(AsyncSessionLocal))
     paper_scheduler = asyncio.create_task(serve_bottom_fishing(AsyncSessionLocal))
     technical_worker=asyncio.create_task(serve_technical_evidence(AsyncSessionLocal))
     try:
@@ -156,6 +158,9 @@ async def lifespan(app: FastAPI):
         review_worker.cancel()
         with suppress(asyncio.CancelledError):
             await review_worker
+        cloud_scheduler.cancel()
+        with suppress(asyncio.CancelledError):
+            await cloud_scheduler
         paper_scheduler.cancel()
         with suppress(asyncio.CancelledError):
             await paper_scheduler
