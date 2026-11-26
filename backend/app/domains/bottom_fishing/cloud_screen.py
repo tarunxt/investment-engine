@@ -15,7 +15,7 @@ from app.domains.auth.models import User
 from app.domains.zerodha.upstox_quote_guard import QuoteGuard, RELEASE, redis_client
 from app.domains.zerodha.upstox_quotes import build_quote_request, configured_for, technical_instruments
 from . import market, store, score_inputs, columns
-from .discovery import Discovery
+from .discovery import Discovery, INDEX_SIZES
 from .cloud_score import finish_screen
 from .issuer import issuer
 from .query import compile_query, evaluate
@@ -151,7 +151,7 @@ async def query_matches(client, cache, owner, settings, stamp, calendar):
             report["rows"].append(dict(symbol=k.split(":",1)[1], exchange=k[:3], name=master[k]["name"] or k,
                                        isin=master[k]["isin"], exchange_token=master[k].get("exchange_token"),
                                        columns={label:values[field] for field,label in (("price","Current price"),("day_return","Return over 1day"),("cap","Market Capitalization"),("roce","Return on capital employed"),("macd","MACD"),("previous_macd","MACD Previous Day")) if values.get(field) is not None},
-                                       **({"universe":rules.check("universe",nifty_500_member=0,nse_equity=0,isin_match=1)} if k.startswith("BSE:") else {})))
+                                       **({"universe":rules.check("universe",**{f"nifty_{n}_member":0 for n in INDEX_SIZES},nse_equity=0,isin_match=1)} if k.startswith("BSE:") else {})))
     report["total"] = len(report["rows"])
     report["complete"] = not report["unknown"]
     benchmark = master.get(market.BENCH)

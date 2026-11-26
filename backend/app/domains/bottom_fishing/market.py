@@ -68,16 +68,33 @@ async def daily(client, cache, stamp, comparison=None, discovery=None):
     rules = Discovery.model_validate(discovery or {})
     master = await technical_instruments(client)
     day = stamp.date().isoformat()
-    cache_key = "bottom:universe:v1:" + day
-    raw = await cache.get(cache_key)
-    if raw:
-        members = json.loads(raw)
-    else:
-        rows = csv.DictReader(io.StringIO((await archive_download(client, INDEX, INDEX_FALLBACK)).decode("utf-8-sig")))
-        members = {"NSE:"+r["Symbol"]:r["ISIN Code"].strip() for r in rows if r["Series"] == "EQ"}
-        if len(members) < 450:
-            raise ValueError("Nifty 500 constituent feed is incomplete")
-        await cache.set(cache_key, json.dumps(members), ex=86400)
+    async def constituents(size):
+        cache_key = f"bottom:universe:v1:{day}" if size==500 else f"bottom:index:{size}:{day}"
+        raw = await cache.get(cache_key)
+        if raw:
+            return json.loads(raw)
+        data = await archive_download(client,INDEX.replace("500",str(size)),INDEX_FALLBACK.replace("500",str(size)))
+        rows = csv.DictReader(io.StringIO(data.decode("utf-8-sig")))
+        found = {"NSE:"+r["Symbol"]:r["ISIN Code"].strip() for r in rows if r["Series"]=="EQ"}
+        if len(found) < size*.9:
+            raise ValueError(f"Nifty {size} constituent feed is incomplete")
+        await cache.set(cache_key,json.dumps(found),ex=86400)
+        return found
+
+    members = await constituents(500)
+    universes = {500:members}
+    for size in rules.indices():
+        if size!=500:
+            try:
+                universes[size]=await constituents(size)
+            except (httpx.HTTPError, ValueError, KeyError):
+                universes[size]=None
+    def membership(key):
+        listing = master.get(key,{})
+        flags={f"nifty_{size}_member":(None if stocks is None else int(key in stocks and stocks[key]==listing.get("isin")))
+               for size,stocks in universes.items()}
+        return rules.check("universe", **flags, nse_equity=int(listing.get("series")=="EQ"),
+                           isin_match=int(key in master and (key not in members or listing["isin"]==members[key])))
     keys = {k:v for k,v in members.items() if master.get(k,{}).get("isin")==v}
     if comparison is None and (rules.minimum < 5 or rules.formulas["universe"] != DEFAULTS["universe"]):
         keys.update({k:v["isin"] for k,v in master.items() if k.startswith("NSE:") and v["series"]=="EQ"
@@ -85,8 +102,7 @@ async def daily(client, cache, stamp, comparison=None, discovery=None):
     keys.update({k:master[k]["isin"] for k in [BENCH] if k in master and k.startswith("NSE:")})
     rows = {"NSE:"+r["symbol"]:r for r in (comparison or [])}
     for k, row in rows.items():
-        row["universe"] = rules.check("universe", nifty_500_member=int(k in members), nse_equity=int(master.get(k,{}).get("series")=="EQ"),
-                                      isin_match=int(k in master and (k not in members or master[k]["isin"]==members[k])))
+        row["universe"] = membership(k)
         if k in master and (k not in members or master[k]["isin"] == members[k]):
             keys[k] = master[k]["isin"]
     holidays = await calendar(client, cache, stamp)
@@ -139,7 +155,7 @@ async def daily(client, cache, stamp, comparison=None, discovery=None):
                 b[f] /= factor
             b["volume"] = b["volume"]*factor if b["volume"] is not None else None
         covered += int(k in members)
-        member = rules.check("universe", nifty_500_member=int(k in members), nse_equity=int(master[k]["series"]=="EQ"), isin_match=1)
+        member = membership(k)
         flags, pattern = daily_pattern(bars, master[k]["tick"], isin, member, rules)
         if k in rows:
             rows[k].update(flags)

@@ -1,4 +1,5 @@
 """Versioned discovery rules evaluated on observed listing and candle data."""
+import ast
 from functools import lru_cache
 from statistics import mean, median
 
@@ -6,9 +7,10 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from .query import compile_expression, evaluate
 
 FLAGS = ("universe", "liquidity", "touches", "rebound", "proximity")
+INDEX_SIZES = (50, 100, 200, 500)
 RANGE = ("L", "H", "R")
 FIELDS = {
-    "universe": ("Nifty 500 member", "NSE equity", "ISIN match"),
+    "universe": (*(f"Nifty {n} member" for n in INDEX_SIZES), "NSE equity", "ISIN match"),
     "liquidity": ("Median turnover", "Mean turnover", "Median volume", *RANGE),
     "touches": ("Daily low", "Daily high", "Daily close", *RANGE),
     "rebound": ("Between touches high", *RANGE),
@@ -48,6 +50,10 @@ class Discovery(BaseModel):
         if 1 + (self.min_touches - 1) * self.touch_gap > self.lookback:
             raise ValueError("The lookback is too short for the selected touch count and spacing.")
         return self
+
+    def indices(self):
+        names = {node.id for node in ast.walk(expression("universe", self.formulas["universe"])) if isinstance(node, ast.Name)}
+        return [n for n in INDEX_SIZES if f"_nifty_{n}_member" in names]
 
     def check(self, flag, **values):
         return evaluate(expression(flag, self.formulas[flag]), values)

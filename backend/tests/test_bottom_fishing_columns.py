@@ -44,6 +44,8 @@ def test_configured_formulas_and_unknowns_drive_threshold():
     strict=custom.model_copy(update=dict(minimum=4))
     _,level=daily_pattern(bars,.05,"observed",True,strict)
     assert not at_close(level,110)
+    alternate=Discovery(formulas={**rules.formulas,"universe":"Nifty 200 member = 1 AND NSE equity = 1"})
+    assert alternate.indices()==[200] and alternate.check("universe",nifty_200_member=1,nse_equity=1) is True
     with pytest.raises(ValidationError):
         Discovery(formulas={**rules.formulas,"liquidity":"Close > 0"})
 
