@@ -118,6 +118,7 @@ def sync_portfolio_snapshot_task(self, user_id: int, source: str = "manual"):
             )
             return {
                 "status": "completed",
+                "holdings_count": snapshot.holdings_count,
                 "snapshot_date": snapshot.snapshot_date.isoformat(),
                 "captured_at": snapshot.captured_at.isoformat(),
             }

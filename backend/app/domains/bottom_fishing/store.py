@@ -64,7 +64,7 @@ def append(db, owner, action, data):
 
 
 def public_request(request_id, job):
-    fields = ("status", "stage", "requested_at", "started_at", "finished_at", "error")
+    fields = ("status", "stage", "requested_at", "started_at", "finished_at", "error", "kite_sync")
     return dict(id=request_id, **{key: job[key] for key in fields if key in job})
 
 
