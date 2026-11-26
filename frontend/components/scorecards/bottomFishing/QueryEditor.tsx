@@ -44,10 +44,24 @@ export function QueryEditor({data,save,run,readOnly=false,active=false}:Props) {
         className="block min-h-64 w-full resize-y rounded-lg border border-slate-300 bg-white px-4 py-3 text-base leading-7 text-slate-950 focus:border-indigo-500 focus:outline-2 focus:outline-indigo-300"
         rows={Math.max(10,query.split("\n").length)} onChange={event=>{setQuery(event.target.value);setError("");setMessage("");}}/>
     </div>
+    <section aria-labelledby={id+"-filters"} className="space-y-2 text-sm text-slate-700">
+      <h3 id={id+"-filters"} className="font-semibold text-slate-950">Built-in discovery filters</h3>
+      <p>L and H are the lowest low and highest high over the prior 20 completed NSE sessions, adjusted for corporate actions. R = H − L.</p>
+      <ol className="list-decimal space-y-2 pl-6">
+        <li><strong>Universe.</strong> Nifty 500 member with NSE series EQ and an ISIN matching the Upstox instrument master.</li>
+        <li><strong>Liquidity.</strong> Median of daily (close × volume) ≥ ₹1 crore across those 20 sessions.</li>
+        <li><strong>Support touches.</strong> At least two sessions with daily low ≤ L + 0.10 × R, at least five trading sessions apart.</li>
+        <li><strong>Rebound.</strong> For at least one such pair, a session strictly between the touches has a high ≥ L + 0.40 × R.</li>
+        <li><strong>Discovery price.</strong> For a new setup, L ≤ latest completed five-minute close ≤ L + 0.15 × R.</li>
+      </ol>
+    </section>
     <label className="flex items-center gap-2"><input type="checkbox" checked={latest} disabled={readOnly}
       onChange={event=>{setLatest(event.target.checked);setMessage("");}}/>Only companies with {previousQuarter(readOnly?data.state.market_as_of??data.state.at:undefined)} results</label>
-    <p className="text-sm text-slate-600">Cred-X applies this query to stocks that pass the Nifty 500 support screen. Low price and High price use the 52-week range. Edits are saved to this Cred-X account.</p>
-    <details className="text-sm text-slate-600"><summary className="cursor-pointer text-indigo-700">Nifty 500 support screen</summary><p className="mt-2">20 prior sessions · Median daily turnover ≥ ₹1 crore · Two support touches at least five sessions apart · Bounce through 40% of the range · Discovery in the bottom 15%.</p></details>
+    <div className="space-y-1 text-sm text-slate-700">
+      <h3 className="font-semibold text-slate-950">Where the query runs</h3>
+      <p>The Cred-X backend evaluates your saved query on eligible new and carried setups. Nifty Indices supplies membership, NSE supplies daily prices, volume and corporate actions, and Upstox supplies the completed five-minute candle.</p>
+      <p>Screener.in consolidated company pages supply the financial inputs and the 52-week High price and Low price used in your query. The built-in support filters above use the separate 20-session range. Only confirmed query matches progress.</p>
+    </div>
     {!readOnly && <><details className="text-sm text-slate-600"><summary className="cursor-pointer text-indigo-700">Supported ratios and query syntax</summary>
       <p className="mt-2">{data.query_fields?.join(" · ")}</p>
       <p className="mt-2">Use numeric comparisons, parentheses, +, -, *, /, AND and OR. Enter percentages as whole numbers and market capitalization in ₹ crore.</p>
