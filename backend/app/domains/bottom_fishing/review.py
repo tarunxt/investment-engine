@@ -15,6 +15,7 @@ from app.domains.zerodha.upstox_quote_guard import QuoteGuard, redis_client
 from app.domains.zerodha.upstox_quotes import configured_for
 from . import market, store
 from .query_evidence import apply_screen
+from .screener_results import original_results
 from .engine import paper_cycle, roll, size_entries
 from .worker import INDIA, collect_evidence, prepared_market
 
@@ -130,6 +131,10 @@ async def execute_review(sessions, owner, request_id):
         async with asyncio.timeout(525), redis_client() as cache, httpx.AsyncClient(
                 timeout=12, follow_redirects=False,
                 headers={"User-Agent":"Cred-X market research (https://cred-x.in)"}) as client:
+            report = None
+            if settings.get("screen_query", "").strip():
+                report = job.get("original_results") or await original_results(client, settings, now)
+                state["original_results"] = report
             holidays = await market.calendar(client,cache,now)
             stamp, calendar = candle_cutoff(now,holidays)
             state = roll(portfolio, stamp)
@@ -137,10 +142,30 @@ async def execute_review(sessions, owner, request_id):
             # report an earlier run's rows or stage completions as this review's.
             state.update(rows=[], scans=[], at=None, sync=None, error=None, kite_sync=kite)
             state["market_as_of"] = stamp.isoformat()
-            levels, benchmark, coverage = await prepared_market(client,cache,stamp)
+            if report is not None:
+                state["original_results"] = report
+            if report and report["rows"]:
+                levels, benchmark, coverage = await market.daily(client,cache,stamp,report["rows"])
+            else:
+                levels, benchmark, coverage = await prepared_market(client,cache,stamp)
             state["sync"] = dict(at=stamp.isoformat(), **coverage)
             guard = ManualReviewQuoteGuard(cache, os.getenv("UPSTOX_LTP_OWNER_USER_ID") or owner, "bottom-review", [])
             series, fundamentals = await collect_evidence(client,cache,guard,stamp,levels,state,coverage)
+            if report:
+                for row in report["rows"]:
+                    if "low" not in row:
+                        continue
+                    key = "NSE:" + row["symbol"]
+                    bars = series.get(key)
+                    if bars is None:
+                        try:
+                            master = await market.technical_instruments(client)
+                            bars = await market.candles(client, "NSE_EQ|"+master[key]["isin"], stamp, guard)
+                        except (httpx.HTTPError, KeyError, ValueError):
+                            continue
+                    if bars and bars[-1]["end"] == stamp.isoformat():
+                        close = bars[-1]["close"]
+                        row.update(close=close, proximity=row["low"] <= close <= row["low"]+.15*(row["high"]-row["low"]))
             levels = await apply_screen(client,cache,guard,settings,stamp,calendar,levels,series,state,coverage)
             await checkpoint("score")
             paper_cycle(state,settings,stamp,levels,series,fundamentals,benchmark,coverage,calendar,preview=True)
