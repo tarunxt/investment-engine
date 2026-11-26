@@ -29,10 +29,12 @@ export function Status({ value }: { value: string }) {
 }
 export function Table({
   columns,
+  headerContent,
   rows,
   empty,
 }: {
   columns: string[];
+  headerContent?: Record<string,ReactNode>;
   rows: { key: string | number; cells: ReactNode[] }[];
   empty: string;
 }) {
@@ -43,7 +45,7 @@ export function Table({
           <tr>
             {columns.map((c) => (
               <th key={c} scope="col" className="whitespace-nowrap px-4 py-3">
-                {c}
+                {headerContent?.[c] ?? c}
               </th>
             ))}
           </tr>

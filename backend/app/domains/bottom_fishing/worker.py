@@ -12,6 +12,8 @@ from app.domains.zerodha.upstox_quote_guard import QuoteGuard, redis_client
 from app.domains.zerodha.upstox_quotes import configured_for, load_instruments, build_quote_request
 from . import market, store
 from . import score_inputs
+from .discovery import at_close, Discovery
+from hashlib import sha256
 from .engine import close_position, paper_cycle, roll
 
 log = logging.getLogger(__name__)
@@ -79,13 +81,15 @@ async def paper_fills(client, guard, state):
     state["pending"] = {}
 
 
-async def prepared_market(client, cache, stamp):
-    cache_key = "bottom:prepared:v1:"+stamp.date().isoformat()
+async def prepared_market(client, cache, stamp, discovery=None):
+    config = Discovery.model_validate(discovery or {}).model_dump()
+    signature = sha256(json.dumps(config,sort_keys=True).encode()).hexdigest()
+    cache_key = f"bottom:prepared:v2:{stamp.date()}:{signature}"
     prepared = await cache.get(cache_key)
     if prepared:
         levels,benchmark,coverage = json.loads(prepared)
     else:
-        levels,benchmark,coverage = await market.daily(client,cache,stamp)
+        levels,benchmark,coverage = await market.daily(client,cache,stamp,discovery=config)
         await cache.set(cache_key,json.dumps([levels,benchmark,coverage]),ex=86400)
     return levels, benchmark, coverage
 
@@ -102,7 +106,7 @@ async def collect_evidence(client, cache, guard, stamp, levels, state, coverage)
                 bars = []
             facts = None
             s = levels.get(k)
-            eligible = k in state["setups"] or (s and bars and s["low"]<=bars[-1]["close"]<=s["low"]+.15*s["width"])
+            eligible = k in state["setups"] or (s and bars and at_close(s,bars[-1]["close"]))
             if eligible:
                 try:
                     facts = await market.facts(client,cache,k)
@@ -144,7 +148,7 @@ async def run(sessions, owner, stamp):
             if state.get("at")!=stamp.isoformat():
                 screen = stamp.time() in (time(9,30),time(13,15))
                 if screen or stamp.time()==time(9,20):
-                    levels,benchmark,coverage = await prepared_market(client,cache,stamp)
+                    levels,benchmark,coverage = await prepared_market(client,cache,stamp,settings.get("discovery"))
                     state["sync"] = dict(at=stamp.isoformat(), **coverage)
                     state["benchmark_close"] = benchmark
                     if not screen:

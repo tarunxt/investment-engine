@@ -5,6 +5,7 @@ from datetime import datetime
 from urllib.parse import quote
 
 from lxml import html
+from .column_facts import statement_columns
 from app.domains.scorecards.research import INDIA, download
 
 
@@ -116,7 +117,7 @@ def issuer_fields(root):
 
 async def issuer(client, cache, listing):
     symbol = listing.split(":",1)[1]
-    key = "bottom:query-issuer:v1:"+listing
+    key = "bottom:query-issuer:v2:"+listing
     raw = await cache.get(key)
     if raw:
         return json.loads(raw)
@@ -125,6 +126,7 @@ async def issuer(client, cache, listing):
     root = html.fromstring(page)
     verify_issuer(root,symbol)
     fields = issuer_fields(root)
+    fields['display'] = statement_columns(root)
     try:
         score_facts = score_financials(root)
         observed = datetime.now(INDIA)

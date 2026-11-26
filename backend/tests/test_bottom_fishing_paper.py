@@ -135,7 +135,7 @@ async def test_legacy_queue_runs_all_four_stages_once_and_freezes_review(monkeyp
             return T.replace(hour=20)
     stages_seen=[]
     async def calendar(*args): return []
-    async def prepared(_client,_cache,stamp):
+    async def prepared(_client,_cache,stamp, discovery=None):
         assert stamp.hour==15 and stamp.minute==30
         return {"NSE:A":pattern()},100,dict(covered=500,universe=500)
     async def evidence(_client,_cache,guard,stamp,levels,state,coverage):

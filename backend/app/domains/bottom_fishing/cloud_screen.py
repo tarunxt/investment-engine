@@ -14,7 +14,8 @@ from sqlalchemy import select
 from app.domains.auth.models import User
 from app.domains.zerodha.upstox_quote_guard import QuoteGuard, RELEASE, redis_client
 from app.domains.zerodha.upstox_quotes import build_quote_request, configured_for, technical_instruments
-from . import market, store, score_inputs
+from . import market, store, score_inputs, columns
+from .discovery import Discovery, INDEX_SIZES
 from .cloud_score import finish_screen
 from .issuer import issuer
 from .query import compile_query, evaluate
@@ -71,10 +72,16 @@ async def quotes(client, guard, keys, stamp):
 async def scan(client, cache, owner, settings, stamp, calendar, previous=None):
     async with asyncio.timeout(235):
         report, instruments, guard = await query_matches(client, cache, owner, settings, stamp, calendar)
-    return await finish_screen(client, cache, guard, instruments, settings, stamp, calendar, report, previous or {})
+    state = await finish_screen(client, cache, guard, instruments, settings, stamp, calendar, report, previous or {})
+    try:
+        await columns.enrich(client, cache, guard, instruments, settings, stamp, calendar, report)
+    except Exception:
+        log.exception("Display column enrichment unavailable")
+    return state
 
 
 async def query_matches(client, cache, owner, settings, stamp, calendar):
+    rules = Discovery.model_validate(settings.get("discovery", {}))
     root = compile_query(settings["screen_query"])
     fields = {n.id[1:] for n in ast.walk(root) if isinstance(n,ast.Name)}
     master = await technical_instruments(client)
@@ -103,7 +110,7 @@ async def query_matches(client, cache, owner, settings, stamp, calendar):
                 fields,_ = await issuer(client,cache,issuer_key)
             except (httpx.HTTPError, ValueError, KeyError, IndexError):
                 fields = {}
-            cached[i] = json.dumps(fields)
+            cached[i] = json.dumps({k:v for k,v in fields.items() if k!="display"})
             await cache.set(key,cached[i],ex=86400 if fields else 1800)
     try:
         async with asyncio.timeout(80):
@@ -142,7 +149,9 @@ async def query_matches(client, cache, owner, settings, stamp, calendar):
             report["unknown"] += 1
         if matched is True:
             report["rows"].append(dict(symbol=k.split(":",1)[1], exchange=k[:3], name=master[k]["name"] or k,
-                                       **({"universe":False} if k.startswith("BSE:") else {})))
+                                       isin=master[k]["isin"], exchange_token=master[k].get("exchange_token"),
+                                       columns={label:values[field] for field,label in (("price","Current price"),("day_return","Return over 1day"),("cap","Market Capitalization"),("roce","Return on capital employed"),("macd","MACD"),("previous_macd","MACD Previous Day")) if values.get(field) is not None},
+                                       **({"universe":rules.check("universe",**{f"nifty_{n}_member":0 for n in INDEX_SIZES},nse_equity=0,isin_match=1)} if k.startswith("BSE:") else {})))
     report["total"] = len(report["rows"])
     report["complete"] = not report["unknown"]
     benchmark = master.get(market.BENCH)
@@ -161,17 +170,18 @@ async def refresh(sessions,owner):
         previous_id, previous = await latest(db,owner,LIVE,{})
         if not settings.get("screen_query","").strip():
             return
+        _, display_names = await latest(db,owner,columns.PREF,columns.DEFAULT)
         inputs = await score_inputs.plan(db, owner, settings)
         fingerprint = inputs["fingerprint"] if inputs else ""
     now = datetime.now(INDIA)
     async with redis_client() as cache, httpx.AsyncClient(timeout=8,follow_redirects=False) as client:
         stamp, calendar = candle_cutoff(now,await market.calendar(client,cache,now))
-        slot = f"bottom:cloud:scored:{owner}:{version}:{fingerprint}:{stamp.isoformat()}"
+        slot = f"bottom:cloud:scored:columns1:{owner}:{version}:{fingerprint}:{stamp.isoformat()}"
         lease = f"bottom:cloud:lock:{owner}"
         token = uuid4().hex
         saved = previous.get("state", {})
         if (previous.get("version") == version and previous.get("input_fingerprint","") == fingerprint and saved.get("market_as_of") == stamp.isoformat()
-                and saved.get("score_status") and saved.get("status") == "completed"):
+                and (saved.get("original_results") or {}).get("column_schema") and saved.get("score_status") and saved.get("status") == "completed"):
             return
         if await cache.exists(slot) or not await cache.set(lease,token,nx=True,ex=390):
             return
@@ -179,7 +189,7 @@ async def refresh(sessions,owner):
                      market_as_of=stamp.isoformat())
         try:
             try:
-                state = await scan(client, cache, owner, {**store.Settings.model_validate(settings).model_dump(), "score_inputs": inputs},
+                state = await scan(client, cache, owner, {**store.Settings.model_validate(settings).model_dump(), "score_inputs": inputs, "column_names":display_names},
                                    stamp, calendar, previous.get("state") if previous.get("version") == version else None)
             except Exception as exc:
                 log.exception("Cloud BFS scan failed")

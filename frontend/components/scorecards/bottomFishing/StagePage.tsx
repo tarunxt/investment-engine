@@ -7,6 +7,7 @@ import {apiPath,date,stageOutput,latestOutput,route,stages,titles,type Output,ty
 import {useBottomFishing} from "./useBottomFishing";
 import {History} from "./History";
 import {Status, scorecardPanel, scorecardHeader, scorecardPage, scorecardBreadcrumbs, scorecardTab} from "../ScorecardPresentation";
+import {ManageColumns} from "./ManageColumns";
 import {Inputs} from "./Inputs";
 import {CloudResults,StageOutput,StockFlow} from "./StageOutput";
 
@@ -31,7 +32,7 @@ function PageContent({owner,stage,view,record}:{owner:WorkflowOwner}&Props) {
     ? {...data.settings,screen_query:captured.text,latest_results:captured.latest_results} : undefined);
   const tabs = [["inputs","Inputs"], ...(stage==="score" ? [["weights","Weights"]] : []), ["",stage==="screen"&&!record?"Live results":"Saved output"],
     ["stock-flow","Stock Flow"], ["history","History"], ...(stage==="score" ? [["scorecard-history","Scorecard history"]] : [])];
-  const currentView = tabs.some(([id])=>id===view) ? view : "";
+  const currentView = stage==="screen" && !record && view==="columns" ? "columns" : tabs.some(([id])=>id===view) ? view : "";
   const heading = stage ? titles[stage] + (record ? " · Saved run #"+record : "") : "Bottom Fishing";
   function tabHref(id:string) {
     const query = new URLSearchParams();
@@ -54,7 +55,7 @@ function PageContent({owner,stage,view,record}:{owner:WorkflowOwner}&Props) {
       <Link key={id} scroll={false} aria-current={id===currentView?"page":undefined} className={scorecardTab(id===currentView)} href={tabHref(id)}>{label}</Link>)}</nav>
       : <nav aria-label="Bottom Fishing stages" className="flex flex-wrap gap-2">{stages.map((id,i)=><Link className={scorecardTab(false)} key={id} href={route+"/"+id}>{i+1} · {titles[id]}</Link>)}</nav>}
     {(model.error||issue)&&<p className="rounded-xl bg-rose-50 p-4 text-rose-900" role="alert">{issue||model.error}</p>}
-    {stage&&(currentView==="history"||currentView==="scorecard-history") ? <History stage={stage} client={client} scorecards={currentView==="scorecard-history"}/> :
+    {currentView==="columns"?<ManageColumns model={model}/> : stage&&(currentView==="history"||currentView==="scorecard-history") ? <History stage={stage} client={client} scorecards={currentView==="scorecard-history"}/> :
       !data||!output ? (!issue&&<p role="status" className="text-sm text-indigo-700">Loading saved output…</p>) :
       (stage?[stage]:stages).map(id=>{
         const shown = record ? output : stageOutput(data,id);
@@ -65,7 +66,7 @@ function PageContent({owner,stage,view,record}:{owner:WorkflowOwner}&Props) {
           <h2 className="mb-3 text-lg font-semibold">Saved {currentView}</h2>
           {recordedSettings ? <Inputs key={record+currentView} stage={id} weights={currentView==="weights"} data={{...data,state:shown.state,settings:recordedSettings}} readOnly save={model.save}/> : <p>These inputs were not recorded for this run.</p>}
         </div> : <div className={scorecardPanel}><Inputs key={id+currentView} stage={id} weights={currentView==="weights"} data={data} save={model.save} run={model.run} active={model.active||model.sending}/></div>) :
-          id==="screen" && !record && !currentView ? <CloudResults output={shown}/> : <><div className="flex flex-wrap items-center gap-3 text-sm">
+          id==="screen" && !record && !currentView ? <CloudResults output={shown} model={model}/> : <><div className="flex flex-wrap items-center gap-3 text-sm">
             {id==="sync" && shown.state.kite_sync ? <Status value="completed"/> : status && <Status value={status}/>}
             {shown.finished_at||shown.state.at ? <span>{date(id==="sync" && shown.state.kite_sync ? shown.state.kite_sync.captured_at : shown.finished_at??shown.state.at)} IST</span> : null}
             <span>{shown.mode==="Paper cycle"?"Archived simulation":shown.mode}</span></div>

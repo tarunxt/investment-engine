@@ -58,7 +58,10 @@ async def filter_paper(client, cache, guard, settings, stamp, calendar, levels, 
         native_levels = await apply_screen(client,cache,guard,settings,stamp,calendar,levels,series,state,coverage)
         return native_levels, set(native_levels) | set(state["setups"])
     # Apply the native query independently. Other screeners supply their own verified candidates.
-    carried = state["setups"].copy()
+    from .discovery import Discovery
+    same_rules = ((state.get("discovery") or Discovery().model_dump())
+                  == (settings.get("discovery") or Discovery().model_dump()))
+    carried = state["setups"].copy() if same_rules else {}
     native_levels = await apply_screen(client,cache,guard,settings,stamp,calendar,levels,series,state,coverage)
     native = set(native_levels) | set(state["setups"])
     state["setups"] = apply_candidates(settings, native, carried)

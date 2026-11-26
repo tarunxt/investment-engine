@@ -12,21 +12,24 @@ FIELDS = {
     "Low price": "low_52w", "High price": "high_52w", "Return over 1day": "day_return",
     "MACD": "macd", "MACD Previous Day": "previous_macd",
 }
-FIELD_PATTERN = re.compile(r"\b(?:" + "|".join(re.escape(k).replace(r"\ ",r"\s+")
-    for k in sorted(FIELDS, key=len, reverse=True)) + r")\b", re.I)
-NAMES = {k.casefold(): v for k, v in FIELDS.items()}
 OPS = {ast.Add:operator.add, ast.Sub:operator.sub, ast.Mult:operator.mul, ast.Div:operator.truediv,
        ast.Lt:operator.lt, ast.LtE:operator.le, ast.Gt:operator.gt, ast.GtE:operator.ge,
        ast.Eq:operator.eq, ast.NotEq:operator.ne}
 
 @lru_cache(maxsize=64)
 def compile_query(text):
+    return compile_expression(text, FIELDS)
+
+
+def compile_expression(text, fields):
     if not text.strip() or len(text)>4000:
         raise ValueError("Enter a query of 1 to 4,000 characters.")
     # Use generated identifiers exclusively. User-entered Python identifiers cannot stand in for ratios.
     if re.search(r"[_#'\"\\;:\[\]{}@]", text):
         raise ValueError("Use ratio names, numbers, parentheses, comparisons, AND or OR.")
-    expr = FIELD_PATTERN.sub(lambda m: "_"+NAMES[" ".join(m[0].casefold().split())], text)
+    pattern = r"\b(?:" + "|".join(re.escape(k).replace(r"\ ",r"\s+") for k in sorted(fields,key=len,reverse=True)) + r")\b"
+    names = {k.casefold(): v for k,v in fields.items()}
+    expr = re.sub(pattern, lambda m: "_"+names[" ".join(m[0].casefold().split())], text, flags=re.I)
     expr = re.sub(r"\b(and|or)\b", lambda m:m[0].lower(), expr, flags=re.I)
     expr = re.sub(r"(?<![><=!])=(?!=)", "==", expr)
     try:
@@ -48,7 +51,7 @@ def compile_query(text):
             validate(node.right, False)
         elif not boolean and isinstance(node, ast.UnaryOp) and isinstance(node.op,(ast.UAdd,ast.USub)):
             validate(node.operand, False)
-        elif not boolean and isinstance(node, ast.Name) and node.id.startswith("_") and node.id[1:] in FIELDS.values():
+        elif not boolean and isinstance(node, ast.Name) and node.id.startswith("_") and node.id[1:] in fields.values():
             pass
         elif not boolean and isinstance(node, ast.Constant) and type(node.value) in (float,int) and abs(node.value)<=1e18:
             pass

@@ -1,6 +1,7 @@
 """Single paper cycle. No broker order client or execution credentials."""
 from datetime import datetime, time, timedelta
 from .market import BENCH, INDIA
+from .discovery import at_close
 from .strategy import COST, evaluate, quantity, exit_fill
 
 
@@ -55,10 +56,10 @@ def paper_cycle(state, settings, stamp, levels, series, fundamentals, benchmark_
         pattern = levels.get(k)
         if screen and k not in setups and pattern and current:
             price = current["close"]
-            if pattern["low"]<=price<=pattern["low"]+.15*pattern["width"]:
+            if at_close(pattern, price):
                 setups[k] = dict(pattern, discovery=price, discovered=at)
         s = setups.get(k)
-        sources = ["bottom"] if s and s["member"] else []
+        sources = ["bottom"] if s and (s.get("discovery_flags") or s["member"]) else []
         if s and any(b["end"]>s["discovered"] and b["close"]<s["low"] for b in bars):
             s["invalid"] = True
         if not set(sources).intersection(settings["inputs"]):
@@ -73,7 +74,7 @@ def paper_cycle(state, settings, stamp, levels, series, fundamentals, benchmark_
             row.update(evaluate(s,current["close"],prev,benchmark_return,fundamentals.get(k),settings["weights"]))
             row["discovered"] = s["discovered"]
         rows.append(row)
-    rows.sort(key=lambda r:(-(r.get("score") or 0),-(r.get("rr") or 0),-setups.get(r["symbol"],{}).get("turnover",0),r["symbol"]))
+    rows.sort(key=lambda r:(-(r.get("score") or 0),-(r.get("rr") or 0),-(setups.get(r["symbol"],{}).get("turnover") or 0),r["symbol"]))
     state.update(rows=rows, at=at, status="completed", error=None)
     if not preview:
         size_entries(state, settings, stamp)
