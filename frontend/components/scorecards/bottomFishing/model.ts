@@ -14,13 +14,13 @@ type KiteHolding = {tradingsymbol:string; exchange:string; quantity:number; aver
   last_price:number; invested_value:number; market_value:number; pnl:number; day_change_percentage?:number};
 type KiteSync = {captured_at:string; holdings_count?:number; holdings?:KiteHolding[];
   holdings_market_value?:number; holdings_pnl?:number; available_margin?:number};
-export type ScreenMatch = {name:string; symbol:string; universe?:boolean; liquidity?:boolean; touches?:boolean;
+export type ScreenMatch = {name:string; symbol:string; exchange?:string; universe?:boolean; liquidity?:boolean; touches?:boolean;
   rebound?:boolean; proximity?:boolean; close?:number};
-export type State = {original_results?:{at:string; source?:string; total?:number; complete:boolean; error?:string; rows:ScreenMatch[]}; kite_sync?:KiteSync; screen_query?:{text:string;latest_results:boolean}; sync?:Coverage; at?:string; market_as_of?:string; error?:string; status?:string; scans?:Coverage[]; rows?:Row[]; setups?:Record<string,Setup>;
+export type State = {original_results?:{at:string; source?:string; unknown?:number; universe_size?:number; total?:number; complete:boolean; error?:string; rows:ScreenMatch[]}; kite_sync?:KiteSync; screen_query?:{text:string;latest_results:boolean}; sync?:Coverage; at?:string; market_as_of?:string; error?:string; status?:string; scans?:Coverage[]; rows?:Row[]; setups?:Record<string,Setup>;
   positions?:Record<string,{qty:number; entry:string; price:number; stop:number; target:number}>; realized?:number; closed?:{symbol:string; qty:number; reason:string; pnl:number; end:string}[]};
 export type Output = {request_id?:number; finished_at?:string; mode:string; settings?:Settings; state:State};
 export type Manual = {kite_sync?:KiteSync; id:number; status:string; stage?:Stage; error?:string};
-export type Snapshot = {query_fields?:string[]; version:number; settings:Settings; state:State; manual?:Manual; review?:Output};
+export type Snapshot = {live?:Output|null; query_fields?:string[]; version:number; settings:Settings; state:State; manual?:Manual; review?:Output};
 export const num = (x?:number) => x == null ? "—" : x.toLocaleString("en-IN",{maximumFractionDigits:2});
 export const date = (x?:string) => x ? new Date(x).toLocaleString("en-IN",{timeZone:"Asia/Kolkata",hour12:false}) : "—";
 export const latestOutput = (data:Snapshot):Output => data.review ?? {mode:"Kite portfolio", state:{}};

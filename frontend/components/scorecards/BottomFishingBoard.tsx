@@ -11,14 +11,14 @@ import {captureWorkflowOwner,onWorkflowOwnerInvalidated,type WorkflowOwner} from
 import {date,stageOutput,latestOutput,route,stages,titles,type Stage} from "./bottomFishing/model";
 import {useBottomFishing} from "./bottomFishing/useBottomFishing";
 import {Inputs} from "./bottomFishing/Inputs";
-import {StageOutput,StockFlow} from "./bottomFishing/StageOutput";
+import {CloudResults,StageOutput,StockFlow} from "./bottomFishing/StageOutput";
 import {Basket} from "./bottomFishing/Basket";
 
-type Section = "Inputs"|"Weights"|"Saved output"|"Stock Flow";
+type Section = "Live results"|"Inputs"|"Weights"|"Saved output"|"Stock Flow";
 type Selection = {stage:Stage;section:Section};
 const headings = ["Sync portfolio","Find New Promising Stocks","Scorecards","Final Actionables"];
 const details = ["Sync Kite holdings, positions and margins for the connected account.","Screen against the prior 20 completed NSE sessions.","Eight technical and fundamental factors total 100 points.","Review entry decisions, quantities, stops and targets."];
-const viewNames = {"Inputs":"inputs","Weights":"weights","Stock Flow":"stock-flow","Saved output":""};
+const viewNames = {"Live results":"","Inputs":"inputs","Weights":"weights","Stock Flow":"stock-flow","Saved output":""};
 
 export function BottomFishingBoard(){
   const {user}=useAuth();
@@ -35,9 +35,9 @@ function Board({owner}:{owner:WorkflowOwner}){
   const [selection,setSelection]=useState<Selection|null>(null);
   const [basket,setBasket]=useState(false);
   const kite=active?manual?.kite_sync:state.kite_sync;
-  const dates=[kite?.captured_at??(!active?state.sync?.at:undefined),state.scans?.at(-1)?.at,state.at,state.at];
+  const dates=[kite?.captured_at??(!active?state.sync?.at:undefined),data?.live?.state.market_as_of,state.at,state.at];
   const metrics=[
-    [kite?"Kite holdings":"Histories synced",kite?kite.holdings_count:state.sync?.covered],["Stocks discovered",Object.keys(state.setups??{}).length],
+    [kite?"Kite holdings":"Histories synced",kite?kite.holdings_count:state.sync?.covered],["Query matches",data?.live?.state.original_results?.rows.length],
     ["Scored listings",state.rows?.filter(r=>r.score!=null).length],["Sized entries",state.rows?.filter(r=>r.qty).length]
   ];
   const currentStage=manual?.stage?stages.indexOf(manual.stage):-1;
@@ -53,13 +53,14 @@ function Board({owner}:{owner:WorkflowOwner}){
     {manual&&<p role="status" className="mt-2 text-sm">{manual.status==="queued"?"Queued for immediate analysis using the latest completed NSE candle.":manual.status==="running"?"Running · "+(manual.stage?titles[manual.stage]:"Market data"):"Latest manual run · "+manual.status}{active&&data?.review?" · Showing the previous saved output.":""}</p>}
     {(model.error||(!active&&state.error))&&<p role="alert" className="text-sm text-red-700">{model.error||state.error}</p>}
     <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{stages.map((stage,i)=>{
-      const info:StageInfo=active?{state:manual?.status==="queued"||i>currentStage?"queued":i===currentStage?"running":"completed"}
+      const liveStatus=data?.live?.state.status;
+      const info:StageInfo=stage==="screen"?{state:liveStatus==="failed"?"failed":liveStatus?"completed":"idle",runStatus:liveStatus==="partial"?"partial":undefined}:active?{state:manual?.status==="queued"||i>currentStage?"queued":i===currentStage?"running":"completed"}
         :manual?.status==="failed"&&currentStage>=0?{state:i===currentStage?"failed":i<currentStage?"completed":"idle"}
         :{state:dates[i]?"completed":"idle",runStatus:state.status==="partial"?"partial":undefined};
       const title=titles[stage];
       const Icon=expanded[stage]?Minimize2:Maximize2;
       const dialogAction=(section:Section):TileAction=>({label:section,onSelect:()=>setSelection({stage,section})});
-      const actions:TileAction[]=[dialogAction("Inputs"),...(stage==="score"?[dialogAction("Weights")]:[]),dialogAction("Saved output"),dialogAction("Stock Flow"),
+      const actions:TileAction[]=[dialogAction("Inputs"),...(stage==="score"?[dialogAction("Weights")]:[]),dialogAction(stage==="screen"?"Live results":"Saved output"),dialogAction("Stock Flow"),
         {label:"History",href:route+"/"+stage+"?view=history"},...(stage==="score"?[{label:"Scorecard history",href:route+"/score?view=scorecard-history"}]:[]),
         {label:"Open stage",href:route+"/"+stage}];
       return <section key={stage} className="min-w-0 rounded-xl border border-slate-200 bg-white p-3">
@@ -78,11 +79,11 @@ function Board({owner}:{owner:WorkflowOwner}){
     })}</div>
     {basket&&<Basket key={output.request_id ?? output.state.at ?? "pending"} owner={owner.id} output={output} onClose={()=>setBasket(false)}/>}
     {selection&&<SavedOutputDialog title={titles[selection.stage]+" · "+selection.section} sectionLabel={selection.section}
-      savedAt={selection.section==="Inputs"||selection.section==="Weights"?undefined:output.finished_at??state.at} provenance={selection.section==="Inputs"||selection.section==="Weights"?"Current strategy settings":output.mode}
+      savedAt={selection.section==="Live results"||selection.section==="Inputs"||selection.section==="Weights"?undefined:output.finished_at??state.at} provenance={selection.section==="Live results"?"Cloud screen · Five-minute refresh":selection.section==="Inputs"||selection.section==="Weights"?"Current strategy settings":output.mode}
       routeUrl={sectionRoute} onClose={()=>setSelection(null)} onRetry={()=>void model.refresh()} loading={!data}>
       <div className="space-y-3 p-5 text-sm">{!data?<p>Loading strategy…</p>:selection.section==="Inputs"||selection.section==="Weights"?
         <Inputs stage={selection.stage} weights={selection.section==="Weights"} data={data} save={model.save} run={model.run} active={model.active||model.sending}/>:
-        selection.section==="Stock Flow"?<StockFlow output={output}/>:<StageOutput stage={selection.stage} output={stageOutput(data,selection.stage)}/>}</div>
+        selection.section==="Live results"?<CloudResults output={data.live}/>:selection.section==="Stock Flow"?<StockFlow output={output}/>:<StageOutput stage={selection.stage} output={stageOutput(data,selection.stage)}/>}</div>
     </SavedOutputDialog>}
   </section>;
 }

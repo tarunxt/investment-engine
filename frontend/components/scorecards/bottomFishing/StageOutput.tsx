@@ -22,6 +22,10 @@ export function Decisions({output}:{output:Output}) {
   </div>;
 }
 
+export function CloudResults({output}:{output?:Output|null}) {
+  return output ? <StageOutput stage="screen" output={output}/> : <p role="status">Waiting for cloud results for the current saved query.</p>;
+}
+
 export function StageOutput({stage,output}:{stage:Stage;output:Output}) {
   const {state} = output;
   const query = state.screen_query?.text ?? output.settings?.screen_query;
@@ -42,24 +46,26 @@ export function StageOutput({stage,output}:{stage:Stage;output:Output}) {
   }
   if (stage==="screen" && (query || state.original_results)) {
     const report = state.original_results;
+    const cloud = output.mode==="Cloud screen";
     const filters = ["universe","liquidity","touches","rebound","proximity"] as const;
     const mark = (value?:boolean) => value === undefined ? "Unavailable" : value ? "✓ Pass" : "✕ Fail";
     return <>
-      <h3 className="font-semibold">Original Screener query matches</h3>
+      <h3 className="font-semibold">{cloud?"Live query matches":"Original Screener query matches"}</h3>
       {query && <details><summary>Query used in this run</summary><pre className="whitespace-pre-wrap">{query}</pre></details>}
       {state.error && <p role="alert">{state.error}</p>}
       {report ? <>
-        <p>{report.rows.length} of {num(report.total)} original matches captured · {report.source ?? "Screener.in"} · {date(report.at)} IST</p>
-        <p>{report.rows.filter(row=>filters.every(key=>row[key]===true)).length} confirmed across all five filters{state.market_as_of && <> · Market data {date(state.market_as_of)} IST</>}</p>
+        {cloud ? <p>{report.rows.length} confirmed query matches across {num(report.universe_size)} listings · {num(report.unknown)} awaiting evidence · Cloud scan {date(report.at)} IST</p>
+          : <p>{report.rows.length} of {num(report.total)} original matches captured · {report.source ?? "Screener.in"} · {date(report.at)} IST</p>}
+        <p>{report.rows.filter(row=>filters.every(key=>row[key]===true)).length} confirmed across all five filters{state.market_as_of && <> · Candle cutoff {date(state.market_as_of)} IST</>}</p>
         {report.error && <p role="alert">{report.error}</p>}
         <Table headers={["Company","Symbol","Universe","Liquidity","Support touches","Rebound","Discovery price","All five"]}
           rows={report.rows.map(row=>{
             const values = filters.map(key=>row[key]);
-            return {key:row.symbol,cells:[row.name,row.symbol,...values.map(mark),
+            return {key:(row.exchange??"")+row.symbol,cells:[row.name,<TradingViewSymbolLink key="stock" symbol={row.symbol.includes(":")?row.symbol:(row.exchange??"NSE")+":"+row.symbol}/>,...values.map(mark),
               values.includes(false) ? "✕ Excluded" : values.every(value=>value===true) ? "✓ Qualified" : "Unconfirmed"]};
           })}
-          empty={report.complete?"Screener returned zero matches for this query.":"Original query results unavailable."}/>
-      </> : <p>This run did not capture the original Screener result list. Run the query again to populate the comparison.</p>}
+          empty={cloud ? (report.unknown ? "No confirmed matches yet. Coverage is partial." : "No stocks matched this query.") : report.complete?"Screener returned zero matches for this query.":"Original query results unavailable."}/>
+      </> : cloud ? <p>Current query results unavailable.</p> : <p>This run did not capture the original Screener result list. Run the query again to populate the comparison.</p>}
     </>;
   }
   if (stage==="screen") return <><p>{setups.length} discovered · {num(scan?.current_candles)} / {num(scan?.patterns)} support patterns with a current candle</p>

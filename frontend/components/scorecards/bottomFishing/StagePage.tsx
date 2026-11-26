@@ -8,7 +8,7 @@ import {useBottomFishing} from "./useBottomFishing";
 import {History} from "./History";
 import {Status, scorecardPanel, scorecardHeader, scorecardPage, scorecardBreadcrumbs, scorecardTab} from "../ScorecardPresentation";
 import {Inputs} from "./Inputs";
-import {StageOutput,StockFlow} from "./StageOutput";
+import {CloudResults,StageOutput,StockFlow} from "./StageOutput";
 
 type Props={stage?:Stage;view?:string;record?:number};
 export function StagePage(props:Props) {
@@ -29,7 +29,7 @@ function PageContent({owner,stage,view,record}:{owner:WorkflowOwner}&Props) {
   const captured = output?.state.screen_query;
   const recordedSettings = output?.settings ?? (stage==="screen" && captured && data
     ? {...data.settings,screen_query:captured.text,latest_results:captured.latest_results} : undefined);
-  const tabs = [["inputs","Inputs"], ...(stage==="score" ? [["weights","Weights"]] : []), ["","Saved output"],
+  const tabs = [["inputs","Inputs"], ...(stage==="score" ? [["weights","Weights"]] : []), ["",stage==="screen"&&!record?"Live results":"Saved output"],
     ["stock-flow","Stock Flow"], ["history","History"], ...(stage==="score" ? [["scorecard-history","Scorecard history"]] : [])];
   const currentView = tabs.some(([id])=>id===view) ? view : "";
   const heading = stage ? titles[stage] + (record ? " · Saved run #"+record : "") : "Bottom Fishing";
@@ -62,7 +62,7 @@ function PageContent({owner,stage,view,record}:{owner:WorkflowOwner}&Props) {
           <h2 className="mb-3 text-lg font-semibold">Saved {currentView}</h2>
           {recordedSettings ? <Inputs key={record+currentView} stage={id} weights={currentView==="weights"} data={{...data,state:output.state,settings:recordedSettings}} readOnly save={model.save}/> : <p>These inputs were not recorded for this run.</p>}
         </div> : <div className={scorecardPanel}><Inputs key={id+currentView} stage={id} weights={currentView==="weights"} data={data} save={model.save} run={model.run} active={model.active||model.sending}/></div>) :
-          <><div className="flex flex-wrap items-center gap-3 text-sm">
+          id==="screen" && !record && !currentView ? <CloudResults output={data.live}/> : <><div className="flex flex-wrap items-center gap-3 text-sm">
             {id==="sync" && output.state.kite_sync ? <Status value="completed"/> : output.state.status && <Status value={output.state.status}/>}
             {output.finished_at||output.state.at ? <span>{date(id==="sync" && output.state.kite_sync ? output.state.kite_sync.captured_at : output.finished_at??output.state.at)} IST</span> : null}
             <span>{output.mode==="Paper cycle"?"Archived simulation":output.mode}</span></div>

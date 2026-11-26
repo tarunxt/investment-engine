@@ -7,13 +7,13 @@ import {chromium} from "playwright";
 const frontend = new URL("../",import.meta.url).pathname;
 const mocks = {
   "next/link": 'import React from "react"; export default function Link(props){return <a {...props}/>;}',
-  "next/navigation": 'export const useRouter=()=>({replace:path=>location.assign(path)});',
+  "next/navigation": 'export const useRouter=()=>({replace:path=>location.assign(path),push:path=>location.assign(path)});',
   "@/hooks/useAuth": 'export const useAuth=()=>({user:{id:7}});',
   "@/services/api": `const row={symbol:"NSE:TEST",score:82,price:100,qty:2,stop:96,target:111,rr:2.2,reason:"Proposed buy",sources:["bottom"]};
     const state={kite_sync:{captured_at:"2026-11-25T15:30:00+05:30",holdings_count:1,holdings:[{exchange:"NSE",tradingsymbol:"TEST",quantity:11,average_price:20,last_price:22,invested_value:220,market_value:242,pnl:22}]},at:"2026-11-25T15:30:00+05:30",rows:[row,{...row,symbol:"NSE:WATCH",qty:undefined,score:67.57,price:222,target:235.3,reason:"Score below 70"},{...row,symbol:"NSE:MISSING",qty:undefined,score:undefined,price:undefined,target:undefined,reason:"Missing current closed candle"}],positions:{},setups:{"NSE:TEST":{discovered:"2026-11-25T15:30:00+05:30",discovery:99}}};
-    const data={version:0,settings:{screen_query:"Current price > 10",latest_results:false,inputs:["bottom"],capital:100000,weights:{bounce:20,proximity:15,strength:15,recovery:10,roce:12,sales:10,profit:10,leverage:8}},state:{},review:{request_id:42,mode:"Manual review",state}};
+    const data={live:{mode:"Cloud screen",state:{status:"completed",original_results:{rows:[{symbol:"TEST",name:"Test",exchange:"NSE"}],universe_size:1,unknown:0}}},version:0,settings:{screen_query:"Current price > 10",latest_results:false,inputs:["bottom"],capital:100000,weights:{bounce:20,proximity:15,strength:15,recovery:10,roce:12,sales:10,profit:10,leverage:8}},state:{},review:{request_id:42,mode:"Manual review",state}};
     export const apiService={
-      get:async path=>path.includes("/history?")?{items:[{id:45,mode:"Manual review",scored:1,entries:1,candidates:1,status:"completed"}]}:path.endsWith("/history/45")?data.review:data,
+      get:async path=>path.split("?")[0].endsWith("/history")?{items:[{id:45,mode:"Manual review",scored:1,entries:1,candidates:1,status:"completed"}]}:path.endsWith("/history/45")?data.review:data,
       post:async (path,v)=>{if(path.endsWith("/run")){window.submits=(window.submits??0)+1;window.runVersion=v.version;data.manual={id:46,status:"queued"};return data.manual;}
         data.settings=v;data.version++;return {...data};}
     };`,
@@ -89,10 +89,11 @@ try {
   for(const title of titles){
     await page.getByRole("button",{name:title+" actions"}).click();
     const labels=await page.getByRole("menuitem").allTextContents();
-    for(const label of ["Inputs","Saved output","Stock Flow","History","Open stage"])assert.ok(labels.includes(label));
+    const outputLabel=title===titles[1]?"Live results":"Saved output";
+    for(const label of ["Inputs",outputLabel,"Stock Flow","History","Open stage"])assert.ok(labels.includes(label));
     assert.equal(labels.includes("Weights"),title===titles[2]);
-    await page.getByRole("menuitem",{name:"Saved output",exact:true}).click();
-    await page.getByRole("dialog",{name:title+" · Saved output"}).waitFor();
+    await page.getByRole("menuitem",{name:outputLabel,exact:true}).click();
+    await page.getByRole("dialog",{name:title+" · "+outputLabel}).waitFor();
     await verifyChart(page.getByRole("dialog"));
     await page.keyboard.press("Escape");
   }
@@ -127,11 +128,11 @@ try {
   await query.fill("Current price < 100\nAND MACD > MACD Previous Day");
   await page.getByRole("checkbox",{name:/Only companies with/}).check();
   await page.getByRole("button",{name:"Save query",exact:true}).click();
-  await page.getByText("Query saved.",{exact:true}).waitFor();
-  await page.getByRole("button",{name:"Run this query",exact:true}).click();
-  await page.getByText("Query submitted for a manual review.",{exact:true}).waitFor();
-  assert.equal(await page.evaluate(()=>window.runVersion),1);
-  console.log("PASS editable Stage 2 Inputs, checkbox, versioned save and manual run");
+  await page.getByText("Query applied to the cloud screen.",{exact:true}).waitFor();
+  await page.getByRole("button",{name:"View live results",exact:true}).click();
+  await page.getByText("Live query matches",{exact:true}).waitFor();
+  await verifyChart(page);
+  console.log("PASS editable Stage 2 Inputs, checkbox, versioned save and live results");
   console.log("PASS immediate analysis request, review basket, four stage menus, settings, saved outputs, stock flow and frozen scorecard history");
 } finally {
   await browser?.close();

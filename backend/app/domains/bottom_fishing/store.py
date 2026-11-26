@@ -100,7 +100,13 @@ async def snapshot(db, owner, *, include_review=True):
     manual_id, manual = await latest(db,owner,MANUAL,{})
     _, review = await latest(db,owner,REVIEW,None) if include_review else (0,None)
     await restore_kite_details(db, owner, review)
-    return dict(review=review, version=version, settings=Settings.model_validate(settings).model_dump(),
+    live = None
+    if include_review:
+        from .cloud_screen import LIVE
+        _, saved_live = await latest(db,owner,LIVE,{})
+        if saved_live.get("version")==version:
+            live = saved_live
+    return dict(live=live, review=review, version=version, settings=Settings.model_validate(settings).model_dump(),
                 query_fields=list(FIELDS), state=state, mode="paper", formula_version=1,
                 manual=public_request(manual_id, manual) if manual_id else None)
 
