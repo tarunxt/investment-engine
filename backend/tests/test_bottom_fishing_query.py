@@ -46,3 +46,20 @@ async def test_saved_query_filters_candidates_before_scoring_and_preserves_holdi
     assert set(await screened("Current price > 103")) == {"B"}
     assert state["setups"] == {}
     assert state["positions"] == {"B":{"qty":1}}
+
+
+@pytest.mark.asyncio
+async def test_original_results_preserve_every_company_and_check_pagination():
+    import httpx
+    from datetime import datetime, timezone
+    from app.domains.bottom_fishing.screener_results import original_results
+
+    def respond(request):
+        assert request.url.params["latest"] == "on"
+        assert request.url.params["query"] == "Market Capitalization > 300"
+        symbol = "ABC" if "page" not in request.url.params else "DEF"
+        return httpx.Response(200, text=f'<body>2 results found<table><tr><td><a href="/company/{symbol}/">{symbol}</a></td></tr></table></body>')
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        report = await original_results(client, {"screen_query":"Market Capitalization > 300","latest_results":True}, datetime.now(timezone.utc))
+    assert report["complete"] and [r["symbol"] for r in report["rows"]] == ["ABC","DEF"]
