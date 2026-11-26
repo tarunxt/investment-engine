@@ -12,7 +12,7 @@ from app.domains.scorecards.research import INDIA, download
 from app.domains.scorecards.technical_sources import archive_url, extract_archive, session_calendar, nse_actions, HOLIDAYS
 from app.domains.zerodha.upstox_quotes import technical_instruments
 from .issuer import facts, financials  # preserve published market-data entry points
-from .strategy import support
+from .strategy import support, support_metrics
 
 INDEX = "https://www.niftyindices.com/IndexConstituent/ind_nifty500list.csv"
 BENCH = "NSE:NIFTYBEES"
@@ -30,7 +30,7 @@ async def calendar(client, cache, stamp):
     return events
 
 
-async def daily(client, cache, stamp):
+async def daily(client, cache, stamp, comparison=None):
     """Cache each session archive across users, only read ordinary NSE shares with matching ISIN."""
     master = await technical_instruments(client)
     day = stamp.date().isoformat()
@@ -46,6 +46,11 @@ async def daily(client, cache, stamp):
         await cache.set(cache_key, json.dumps(members), ex=86400)
     keys = {k:v for k,v in members.items() if master.get(k,{}).get("isin")==v}
     keys.update({k:master[k]["isin"] for k in [BENCH] if k in master and k.startswith("NSE:")})
+    rows = {"NSE:"+r["symbol"]:r for r in (comparison or [])}
+    for k, row in rows.items():
+        row["universe"] = k in keys and k in members and master[k]["isin"] == members[k]
+        if k in master:
+            keys[k] = master[k]["isin"]
     holidays = await calendar(client, cache, stamp)
     sessions = session_calendar(stamp.replace(hour=0, minute=0), "NSE", holidays, 20)
     if len(sessions) != 20:
@@ -69,7 +74,7 @@ async def daily(client, cache, stamp):
     actions_key = "bottom:actions:" + day
     raw = await cache.get(actions_key)
     if raw is None:
-        url = ("https://www.nseindia.in/api/corporates-corporateActions?index=equities"
+        url = ("https://www.nseindia.com/api/corporates-corporateActions?index=equities"
                f"&from_date={start:%d-%m-%Y}&to_date={stamp:%d-%m-%Y}")
         raw = (await download(client, url)).decode()
         nse_actions(json.loads(raw), keys.values())
@@ -88,7 +93,15 @@ async def daily(client, cache, stamp):
                 b[f] /= factor
             b["volume"] = (b["volume"] or 0)*factor
         covered += int(k in members)
-        pattern = support(bars,master[k]["tick"])
+        metrics = support_metrics(bars)
+        if k in rows:
+            low, high, turnover, pair = metrics
+            width = high - low
+            rows[k].update(low=low, high=high, liquidity=turnover >= 10_000_000,
+                           touches=bool(width > 0 and pair), rebound=bool(width > 0 and pair and pair[0] >= low + .4*width))
+        if k not in members and k != BENCH:
+            continue
+        pattern = support(bars,master[k]["tick"],metrics)
         if pattern:
             levels[k] = dict(pattern, isin=isin, member=k in members)
     benchmark = days[-1].get(BENCH)
