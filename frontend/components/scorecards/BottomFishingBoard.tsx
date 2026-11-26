@@ -1,4 +1,5 @@
 "use client";
+import { ScreenerLane } from "@/components/screeners/ScreenerLane";
 import {useState,useSyncExternalStore} from "react";
 import {Maximize2,Minimize2,Play} from "lucide-react";
 import {WorkflowTileMenu,type TileAction} from "@/components/shared/WorkflowTileMenu";
@@ -16,7 +17,7 @@ import {Basket} from "./bottomFishing/Basket";
 
 type Section = "Live results"|"Inputs"|"Weights"|"Saved output"|"Stock Flow";
 type Selection = {stage:Stage;section:Section};
-const headings = ["Sync portfolio","Find New Promising Stocks","Scorecards","Final Actionables"];
+const headings = ["Sync portfolio","Screeners","Scorecards","Final Actionables"];
 const details = ["Sync Kite holdings, positions and margins for the connected account.","Screen against the prior 20 completed NSE sessions.","Eight technical and fundamental factors total 100 points.","Review entry decisions, quantities, stops and targets."];
 const viewNames = {"Live results":"","Inputs":"inputs","Weights":"weights","Stock Flow":"stock-flow","Saved output":""};
 
@@ -67,7 +68,7 @@ function Board({owner}:{owner:WorkflowOwner}){
       const actions:TileAction[]=[dialogAction("Inputs"),...(stage==="score"?[dialogAction("Weights")]:[]),dialogAction(stage==="screen"?"Live results":"Saved output"),dialogAction("Stock Flow"),
         {label:"History",href:route+"/"+stage+"?view=history"},...(stage==="score"?[{label:"Scorecard history",href:route+"/score?view=scorecard-history"}]:[]),
         {label:"Open stage",href:route+"/"+stage}];
-      return <section key={stage} className="min-w-0 rounded-xl border border-slate-200 bg-white p-3">
+      return <section key={stage} className="flex min-w-0 flex-col rounded-xl border border-slate-200 bg-white p-3">
         <h3 className="mb-3 font-semibold">{i+1} · {headings[i]}</h3>
         <article className={`rounded-lg p-3 ${stageTileBorder(info,"border border-slate-200")} ${getStageLedgerTone(info)}`}>
           <div className="flex items-start justify-between gap-2"><h4 className="min-w-0 font-semibold">{title}<StageStatusIcon info={info}/></h4>
@@ -78,6 +79,7 @@ function Board({owner}:{owner:WorkflowOwner}){
             <div className="flex justify-between gap-2"><dt>{metrics[i][0]}</dt><dd>{dates[i]?metrics[i][1]??"—":"—"}</dd></div></dl>
           {expanded[stage]&&<p className="mt-2 text-xs">{details[i]}</p>}
         </article>
+        {stage==="screen" && <ScreenerLane strategy="bfs"/>}
         {stage==="actionables" && <WorkflowBasketButton ready={!!state.at&&!active&&state.status!=="failed"} onClick={()=>setBasket(true)}>View Final Basket</WorkflowBasketButton>}
       </section>;
     })}</div>

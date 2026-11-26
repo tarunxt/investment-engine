@@ -24,7 +24,7 @@ const bundle=await build({absWorkingDir:frontend,stdin:{contents:`
   setWorkflowOwner(7);
   const catalog=["rebalance","technical","threats","pairwise"].map(id=>({id,name:id[0].toUpperCase()+id.slice(1),summary:"Research methodology"}));
   sessionStorage.board??=JSON.stringify({catalog,version:1,enabled:["technical"],weights:{technical:100},custom:[]});
-  const screen=location.pathname.split("scorecard-library")[1]?.slice(1)||"explore";
+  const screen=location.pathname.split("scorecards/library")[1]?.slice(1)||"explore";
   createRoot(document.getElementById("root")).render(<ScorecardLibrary screen={screen}/>);
   `,resolveDir:frontend,loader:"tsx"},define:{"process.env":"{}"},jsx:"automatic",bundle:true,write:false,plugins:[{
   name:"offline-ports",setup(b){
@@ -41,7 +41,7 @@ try {
   browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||(existsSync("/usr/bin/chromium")?"/usr/bin/chromium":undefined),args:["--no-sandbox"]});
   const page=await browser.newPage();
   page.on("pageerror",error=>console.error(error.message));
-  const root="http://127.0.0.1:"+server.address().port+"/console/zerodha/scorecard-library";
+  const root="http://127.0.0.1:"+server.address().port+"/console/zerodha/scorecards/library";
   await page.goto(root);
   await page.getByRole("heading",{name:"Explore Scorecards"}).waitFor();
   assert.equal(await page.locator("article").count(),4);
