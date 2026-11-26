@@ -39,7 +39,20 @@ class Settings(BaseModel):
         return self
 
 
+class CapturedCompany(BaseModel):
+    symbol: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9&._-]+$")
+    name: str = Field(min_length=1, max_length=160)
+
+
+class CapturedResults(BaseModel):
+    query: str = Field(min_length=1, max_length=4000)
+    latest: bool
+    total: int = Field(ge=1, le=5000)
+    rows: list[CapturedCompany] = Field(min_length=1, max_length=5000)
+
+
 class RunInputs(BaseModel):
+    capture: CapturedResults | None = None
     version: int | None = Field(default=None, ge=0)
 
 
@@ -106,9 +119,21 @@ async def request_run(request: Request, db=Depends(get_async_db), user=Depends(g
             raise HTTPException(409,"Settings changed. Reload the query before running.")
         if active and manual.get("version") != version:
             raise HTTPException(409,"A review with earlier inputs is still running.")
+    capture = body.capture if body else None
+    if capture:
+        if active:
+            raise HTTPException(409, "A review is already running.")
+        if (" ".join(capture.query.split()) != " ".join(settings.get("screen_query","").split())
+                or capture.latest != bool(settings.get("latest_results"))
+                or len(capture.rows) != capture.total
+                or len({r.symbol for r in capture.rows}) != capture.total):
+            raise HTTPException(422, "The pasted results must match the saved query, quarter option and full result count.")
     if not active:
         manual = dict(status="queued", requested_at=datetime.now(ZoneInfo("Asia/Kolkata")).isoformat(),
                       version=version, settings=Settings.model_validate(settings).model_dump())
+        if capture:
+            manual["original_results"] = dict(at=manual["requested_at"], source="Pasted Screener results",
+                                               rows=[r.model_dump() for r in capture.rows], total=capture.total, complete=True)
         row = append(db,user.id,MANUAL,manual)
         await db.flush()
         request_id = row.id
