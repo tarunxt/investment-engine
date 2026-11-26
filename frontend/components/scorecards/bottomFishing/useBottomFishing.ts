@@ -5,6 +5,8 @@ import {workflowOwnedApi} from "@/lib/workflowOwnedApi";
 import type {WorkflowOwner} from "@/lib/workflowOwnerLifetime";
 import {apiPath, pending, type Manual, type Settings, type Snapshot} from "./model";
 
+export type CapturedResults = {query:string; latest:boolean; total:number; rows:{symbol:string; name:string}[]};
+
 export function useBottomFishing(owner:WorkflowOwner) {
   const client = useMemo(() => workflowOwnedApi(apiService,owner),[owner]);
   const [data,setData] = useState<Snapshot|null>(null);
@@ -24,10 +26,10 @@ export function useBottomFishing(owner:WorkflowOwner) {
     const timer = setInterval(() => void refresh(),active ? 2500 : 30000);
     return () => clearInterval(timer);
   },[refresh,active]);
-  async function run(version?:number) {
+  async function run(version?:number, capture?:CapturedResults) {
     setSending(true);
     try {
-      const manual = await client.post<Manual>(apiPath()+"/run",version===undefined?{}:{version});
+      const manual = await client.post<Manual>(apiPath()+"/run",{version,capture});
       sequence.current++;
       setData(previous => previous && {...previous,manual});
       await refresh();

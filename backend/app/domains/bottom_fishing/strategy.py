@@ -11,21 +11,25 @@ def clamp(value):
     return max(0.0, min(1.0, value))
 
 
-def support(bars, tick):
-    if len(bars) != 20 or not tick or tick <= 0:
-        return None
+def support_metrics(bars):
     low = min(b["low"] for b in bars)
     high = max(b["high"] for b in bars)
     width = high - low
     turnover = median(b["close"] * (b["volume"] or 0) for b in bars)
-    if width <= 0 or turnover < 10_000_000:
-        return None
     touches = [i for i, b in enumerate(bars) if b["low"] <= low + .1 * width]
     pairs = [(max(b["high"] for b in bars[i+1:j]), i, j)
              for i in touches for j in touches if j-i >= 5]
-    if not pairs:
+    return low, high, turnover, max(pairs, default=None)
+
+
+def support(bars, tick, metrics=None):
+    if len(bars) != 20 or not tick or tick <= 0:
         return None
-    peak, i, j = max(pairs)
+    low, high, turnover, pair = metrics or support_metrics(bars)
+    width = high - low
+    if width <= 0 or turnover < 10_000_000 or pair is None:
+        return None
+    peak, i, j = pair
     if peak < low + .4 * width:
         return None
     return dict(low=low, high=high, width=width, bounce=(peak-low)/width,

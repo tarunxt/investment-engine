@@ -40,6 +40,28 @@ export function StageOutput({stage,output}:{stage:Stage;output:Output}) {
           empty="Kite returned no holdings at this sync."/>
       </> : <p>Stock details are unavailable for this capture. Run Bottom Fishing to save a fresh portfolio.</p>}</>;
   }
+  if (stage==="screen" && (query || state.original_results)) {
+    const report = state.original_results;
+    const filters = ["universe","liquidity","touches","rebound","proximity"] as const;
+    const mark = (value?:boolean) => value === undefined ? "Unavailable" : value ? "✓ Pass" : "✕ Fail";
+    return <>
+      <h3 className="font-semibold">Original Screener query matches</h3>
+      {query && <details><summary>Query used in this run</summary><pre className="whitespace-pre-wrap">{query}</pre></details>}
+      {state.error && <p role="alert">{state.error}</p>}
+      {report ? <>
+        <p>{report.rows.length} of {num(report.total)} original matches captured · {report.source ?? "Screener.in"} · {date(report.at)} IST</p>
+        <p>{report.rows.filter(row=>filters.every(key=>row[key]===true)).length} confirmed across all five filters{state.market_as_of && <> · Market data {date(state.market_as_of)} IST</>}</p>
+        {report.error && <p role="alert">{report.error}</p>}
+        <Table headers={["Company","Symbol","Universe","Liquidity","Support touches","Rebound","Discovery price","All five"]}
+          rows={report.rows.map(row=>{
+            const values = filters.map(key=>row[key]);
+            return {key:row.symbol,cells:[row.name,row.symbol,...values.map(mark),
+              values.includes(false) ? "✕ Excluded" : values.every(value=>value===true) ? "✓ Qualified" : "Unconfirmed"]};
+          })}
+          empty={report.complete?"Screener returned zero matches for this query.":"Original query results unavailable."}/>
+      </> : <p>This run did not capture the original Screener result list. Run the query again to populate the comparison.</p>}
+    </>;
+  }
   if (stage==="screen") return <><p>{setups.length} discovered · {num(scan?.current_candles)} / {num(scan?.patterns)} support patterns with a current candle</p>
     {scan?.query_passed!=null && <p>{num(scan.query_passed)} passed the query · {num(scan.query_excluded)} excluded · {num(scan.query_missing)} with missing query data</p>}
     {query && <details><summary className="cursor-pointer text-indigo-700">Query used in this run</summary><pre className="mt-2 whitespace-pre-wrap">{query}</pre></details>}
