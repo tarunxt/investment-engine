@@ -89,7 +89,7 @@ function Board({owner}:{owner:WorkflowOwner}){
       routeUrl={sectionRoute} onClose={()=>setSelection(null)} onRetry={()=>void model.refresh()} loading={!data}>
       <div className="space-y-3 p-5 text-sm">{!data?<p>Loading strategy…</p>:selection.section==="Inputs"||selection.section==="Weights"?
         <Inputs stage={selection.stage} weights={selection.section==="Weights"} data={data} save={model.save} run={model.run} active={model.active||model.sending}/>:
-        selection.section==="Live results"?<CloudResults output={screen}/>:selection.section==="Stock Flow"?<StockFlow output={selected}/>:<StageOutput stage={selection.stage} output={stageOutput(data,selection.stage)}/>}</div>
+        selection.section==="Live results"?<CloudResults output={screen} model={model}/>:selection.section==="Stock Flow"?<StockFlow output={selected}/>:<StageOutput stage={selection.stage} output={stageOutput(data,selection.stage)}/>}</div>
     </SavedOutputDialog>}
   </section>;
 }

@@ -14,7 +14,7 @@ from app.domains.scorecards.research import INDIA, download
 from app.domains.scorecards.technical_sources import archive_url, extract_archive, session_calendar, nse_actions, action_ledger, HOLIDAYS
 from app.domains.zerodha.upstox_quotes import technical_instruments
 from .issuer import facts, financials  # preserve published market-data entry points
-from .strategy import support, support_metrics
+from .discovery import DEFAULTS, Discovery, daily_pattern
 
 INDEX = "https://archives.nseindia.com/content/indices/ind_nifty500list.csv"
 INDEX_FALLBACK = "https://www.niftyindices.com/IndexConstituent/ind_nifty500list.csv"
@@ -63,8 +63,9 @@ async def calendar(client, cache, stamp):
     return events
 
 
-async def daily(client, cache, stamp, comparison=None):
+async def daily(client, cache, stamp, comparison=None, discovery=None):
     """Cache each session archive across users, only read ordinary NSE shares with matching ISIN."""
+    rules = Discovery.model_validate(discovery or {})
     master = await technical_instruments(client)
     day = stamp.date().isoformat()
     cache_key = "bottom:universe:v1:" + day
@@ -78,15 +79,19 @@ async def daily(client, cache, stamp, comparison=None):
             raise ValueError("Nifty 500 constituent feed is incomplete")
         await cache.set(cache_key, json.dumps(members), ex=86400)
     keys = {k:v for k,v in members.items() if master.get(k,{}).get("isin")==v}
+    if comparison is None and (rules.minimum < 5 or rules.formulas["universe"] != DEFAULTS["universe"]):
+        keys.update({k:v["isin"] for k,v in master.items() if k.startswith("NSE:") and v["series"]=="EQ"
+                     and v.get("isin") and (k not in members or v["isin"] == members[k])})
     keys.update({k:master[k]["isin"] for k in [BENCH] if k in master and k.startswith("NSE:")})
     rows = {"NSE:"+r["symbol"]:r for r in (comparison or [])}
     for k, row in rows.items():
-        row["universe"] = k in keys and k in members and master[k]["isin"] == members[k]
-        if k in master:
+        row["universe"] = rules.check("universe", nifty_500_member=int(k in members), nse_equity=int(master.get(k,{}).get("series")=="EQ"),
+                                      isin_match=int(k in master and (k not in members or master[k]["isin"]==members[k])))
+        if k in master and (k not in members or master[k]["isin"] == members[k]):
             keys[k] = master[k]["isin"]
     holidays = await calendar(client, cache, stamp)
-    sessions = session_calendar(stamp.replace(hour=0, minute=0), "NSE", holidays, 20)
-    if len(sessions) != 20:
+    sessions = session_calendar(stamp.replace(hour=0, minute=0), "NSE", holidays, rules.lookback)
+    if len(sessions) != rules.lookback:
         raise ValueError("Incomplete exchange calendar")
     gate = asyncio.Semaphore(4)
     async def session(day, close):
@@ -104,7 +109,7 @@ async def daily(client, cache, stamp, comparison=None):
         return json.loads(payload)
     days = await asyncio.gather(*(session(d,c) for d,c in sessions.items()))
     start = datetime.fromisoformat(next(iter(sessions)))
-    actions_key = "bottom:actions:" + day
+    actions_key = f"bottom:actions:{start.date()}:{day}"
     raw = await cache.get(actions_key)
     try:
         if raw is None:
@@ -126,25 +131,20 @@ async def daily(client, cache, stamp, comparison=None):
     for k,isin in keys.items():
         bars = [d[k].copy() for d in days if k in d and d[k]["isin"]==isin]
         events = actions.get(isin)
-        if events is None or len(bars)!=20 or any(not a["multiplier"] for a in events):
+        if events is None or len(bars)!=rules.lookback or any(not a["multiplier"] for a in events):
             continue
         for b in bars:
             factor = math.prod(a["multiplier"] for a in events if b["as_of"][:10]<a["date"]<=day)
             for f in ("high","low","close"):
                 b[f] /= factor
-            b["volume"] = (b["volume"] or 0)*factor
+            b["volume"] = b["volume"]*factor if b["volume"] is not None else None
         covered += int(k in members)
-        metrics = support_metrics(bars)
+        member = rules.check("universe", nifty_500_member=int(k in members), nse_equity=int(master[k]["series"]=="EQ"), isin_match=1)
+        flags, pattern = daily_pattern(bars, master[k]["tick"], isin, member, rules)
         if k in rows:
-            low, high, turnover, pair = metrics
-            width = high - low
-            rows[k].update(low=low, high=high, liquidity=turnover >= 10_000_000,
-                           touches=bool(width > 0 and pair), rebound=bool(width > 0 and pair and pair[0] >= low + .4*width))
-        if k not in members and k != BENCH:
-            continue
-        pattern = support(bars,master[k]["tick"],metrics)
-        if pattern:
-            levels[k] = dict(pattern, isin=isin, member=k in members)
+            rows[k].update(flags)
+        if pattern and (k in members or k in rows or comparison is None and k != BENCH):
+            levels[k] = pattern
     benchmark = days[-1].get(BENCH)
     return levels, benchmark and benchmark["close"], dict(universe=len(members), covered=covered)
 

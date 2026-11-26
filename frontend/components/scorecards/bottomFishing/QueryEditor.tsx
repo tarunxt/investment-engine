@@ -2,6 +2,7 @@
 import {useId, useState} from "react";
 import {scorecardButton} from "../ScorecardPresentation";
 import {route,type Snapshot} from "./model";
+import {DiscoveryEditor,defaultDiscovery} from "./DiscoveryEditor";
 import {useRouter} from "next/navigation";
 import type {Model} from "./useBottomFishing";
 
@@ -18,19 +19,20 @@ export function QueryEditor({data,save,run,readOnly=false,active=false}:Props) {
   const id = useId();
   const [query,setQuery] = useState(data.settings.screen_query ?? "");
   const [latest,setLatest] = useState(data.settings.latest_results ?? false);
+  const [discovery,setDiscovery]=useState(data.settings.discovery??defaultDiscovery);
   const [version,setVersion] = useState(data.version);
   const router = useRouter();
   const [busy,setBusy] = useState(false);
   const [error,setError] = useState("");
   const [message,setMessage] = useState("");
-  const changed = query!==(data.settings.screen_query??"") || latest!==Boolean(data.settings.latest_results);
+  const changed = JSON.stringify(discovery)!==JSON.stringify(data.settings.discovery??defaultDiscovery) || query!==(data.settings.screen_query??"") || latest!==Boolean(data.settings.latest_results);
   const conflict = version!==data.version;
 
   async function submit(startRun:boolean) {
     if(readOnly||busy||conflict||active||(!startRun&&!changed)) return;
     setBusy(true); setError(""); setMessage("");
     try {
-      const savedVersion = changed ? await save({...data.settings,screen_query:query,latest_results:latest},version) : version;
+      const savedVersion = changed ? await save({...data.settings,screen_query:query,latest_results:latest,discovery},version) : version;
       setVersion(savedVersion);
       if(startRun) router.push(route+"/screen");
       setMessage("Query applied to the cloud screen.");
@@ -46,23 +48,13 @@ export function QueryEditor({data,save,run,readOnly=false,active=false}:Props) {
         className="block min-h-64 w-full resize-y rounded-lg border border-slate-300 bg-white px-4 py-3 text-base leading-7 text-slate-950 focus:border-indigo-500 focus:outline-2 focus:outline-indigo-300"
         rows={Math.max(10,query.split("\n").length)} onChange={event=>{setQuery(event.target.value);setError("");setMessage("");}}/>
     </div>
-    <section aria-labelledby={id+"-filters"} className="space-y-2 text-sm text-slate-700">
-      <h3 id={id+"-filters"} className="font-semibold text-slate-950">Built-in discovery filters</h3>
-      <p>L and H are the lowest low and highest high over the prior 20 completed NSE sessions, adjusted for corporate actions. R = H − L.</p>
-      <ol className="list-decimal space-y-2 pl-6">
-        <li><strong>Universe.</strong> Nifty 500 member with NSE series EQ and an ISIN matching the Upstox instrument master.</li>
-        <li><strong>Liquidity.</strong> Median of daily (close × volume) ≥ ₹1 crore across those 20 sessions.</li>
-        <li><strong>Support touches.</strong> At least two sessions with daily low ≤ L + 0.10 × R, at least five trading sessions apart.</li>
-        <li><strong>Rebound.</strong> For at least one such pair, a session strictly between the touches has a high ≥ L + 0.40 × R.</li>
-        <li><strong>Discovery price.</strong> For a new setup, L ≤ latest completed five-minute close ≤ L + 0.15 × R.</li>
-      </ol>
-    </section>
+    <DiscoveryEditor value={discovery} onChange={v=>{setDiscovery(v);setMessage("");}} readOnly={readOnly}/>
     <label className="flex items-center gap-2"><input type="checkbox" checked={latest} disabled={readOnly}
       onChange={event=>{setLatest(event.target.checked);setMessage("");}}/>Only companies with {previousQuarter(readOnly?data.state.market_as_of??data.state.at:undefined)} results</label>
     <div className="space-y-1 text-sm text-slate-700">
       <h3 className="font-semibold text-slate-950">Where the query runs</h3>
       <p>Saving a query updates the cloud screen. Cred-X evaluates NSE and BSE company equities, preferring NSE for dual listings, every five minutes during the session even when your browser is closed. Manual reviews remain available in History. Cred-X marks the five discovery filters for each company and evaluates eligible new and carried setups for scoring. Nifty Indices supplies membership, NSE supplies daily prices, volume and corporate actions, and Upstox supplies the completed five-minute candle.</p>
-      <p>Screener.in consolidated company pages supply the financial inputs and the 52-week High price and Low price used in your query. The built-in support filters above use the separate 20-session range. Only confirmed query matches progress.</p>
+      <p>Screener.in consolidated company pages supply the financial inputs and the 52-week High price and Low price used in your query. The built-in support filters above use the configured lookback range. Only confirmed query matches progress.</p>
     </div>
     {!readOnly && <><details className="text-sm text-slate-600"><summary className="cursor-pointer text-indigo-700">Supported ratios and query syntax</summary>
       <p className="mt-2">{data.query_fields?.join(" · ")}</p>
@@ -73,7 +65,7 @@ export function QueryEditor({data,save,run,readOnly=false,active=false}:Props) {
       {run && <button type="button" className="rounded-full bg-indigo-700 px-4 py-2 text-sm font-semibold text-white aria-disabled:opacity-50"
         aria-disabled={busy||conflict||active} onClick={()=>void submit(true)}>{busy?"Working…":active?"Review running…":"View live results"}</button>}
     </div>
-    {conflict && <button type="button" className={scorecardButton} onClick={()=>{setQuery(data.settings.screen_query??"");setLatest(Boolean(data.settings.latest_results));setVersion(data.version);setError("");setMessage("");}}>Reload current query</button>}
+    {conflict && <button type="button" className={scorecardButton} onClick={()=>{setQuery(data.settings.screen_query??"");setLatest(Boolean(data.settings.latest_results));setDiscovery(data.settings.discovery??defaultDiscovery);setVersion(data.version);setError("");setMessage("");}}>Reload current query</button>}
     {message && <p role="status" className="text-sm text-indigo-700">{message}</p>}
     {error && <p role="alert" className="text-sm text-rose-800">{error}</p>}</>}
   </section>;

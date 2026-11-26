@@ -11,6 +11,8 @@ from app.domains.auth.dependencies import get_current_user
 from app.domains.auth.models import ActivityLog, User
 from app.infrastructure.database.session import get_async_db
 from .strategy import WEIGHTS
+from . import columns
+from .discovery import Discovery
 from .query import FIELDS, compile_query
 
 MANUAL = "bottom_fishing.manual.v1"
@@ -27,6 +29,7 @@ class Settings(BaseModel):
     capital: int = Field(default=100000, ge=1, le=100000000)
     screen_query: str = Field(default="", max_length=4000)
     latest_results: bool = False
+    discovery: Discovery = Field(default_factory=Discovery)
     weights: dict[str,int] = Field(default_factory=lambda:dict(WEIGHTS))
 
     @model_validator(mode="after")
@@ -106,7 +109,10 @@ async def snapshot(db, owner, *, include_review=True):
         _, saved_live = await latest(db,owner,LIVE,{})
         if saved_live.get("version")==version:
             live = saved_live
-    return dict(live=live, review=review, version=version, settings=Settings.model_validate(settings).model_dump(),
+    column_version, names = await latest(db,owner,columns.PREF,columns.DEFAULT)
+    session = ((live or review or {}).get("state",{}).get("market_as_of") or "")[:10]
+    _, imported = await latest(db,owner,columns.IMPORT+session,{}) if session else (0,{})
+    return dict(columns=dict(version=column_version,names=names,session=session,imported=imported), live=live, review=review, version=version, settings=Settings.model_validate(settings).model_dump(),
                 query_fields=list(FIELDS), state=state, mode="paper", formula_version=1,
                 manual=public_request(manual_id, manual) if manual_id else None)
 
@@ -154,6 +160,43 @@ async def read(db=Depends(get_async_db), user=Depends(get_current_user)):
     return await snapshot(db,user.id)
 
 
+@router.get("/columns")
+async def column_catalog(db=Depends(get_async_db), user=Depends(get_current_user)):
+    version, names = await latest(db,user.id,columns.PREF,columns.DEFAULT)
+    return dict(catalog=columns.CATALOG, defaults=columns.DEFAULT, names=names, version=version)
+
+
+@router.post("/columns")
+async def save_columns(body:columns.Selection, db=Depends(get_async_db), user=Depends(get_current_user)):
+    await lock(db,user.id)
+    version,_ = await latest(db,user.id,columns.PREF,columns.DEFAULT)
+    if version != body.version:
+        raise HTTPException(409,"Columns changed in another tab. Reopen Manage columns.")
+    saved=append(db,user.id,columns.PREF,body.names)
+    await db.flush()
+    revision=saved.id
+    await db.commit()
+    return dict(names=body.names,version=revision)
+
+
+@router.post("/columns/import")
+async def import_columns(body:columns.Export, db=Depends(get_async_db), user=Depends(get_current_user)):
+    await lock(db,user.id)
+    snap=await snapshot(db,user.id)
+    day=body.session.isoformat()
+    outputs=[o for o in (snap["live"],snap["review"]) if o and (o["state"].get("market_as_of") or "")[:10]==day]
+    if not outputs or day!=snap["columns"]["session"]:
+        raise HTTPException(409,"Select the same market session as the current results.")
+    rows=[r for o in outputs for r in (o["state"].get("original_results") or {}).get("rows",[])]
+    additions=columns.read_export(body.text,rows)
+    merged=snap["columns"]["imported"]
+    for key,values in additions.items():
+        merged.setdefault(key,{}).update(values)
+    append(db,user.id,columns.IMPORT+day,merged)
+    await db.commit()
+    return dict(companies=len(additions),cells=sum(len(v) for v in additions.values()))
+
+
 @router.post("/inputs")
 async def change(body:Change, db=Depends(get_async_db), user=Depends(get_current_user)):
     await lock(db,user.id)
@@ -161,7 +204,7 @@ async def change(body:Change, db=Depends(get_async_db), user=Depends(get_current
     if body.version!=current["version"]:
         raise HTTPException(409,"Settings changed. Reload before saving.")
     updated = body.model_dump(exclude={"version"})
-    for name in ("screen_query", "latest_results"):
+    for name in ("screen_query", "latest_results", "discovery"):
         if name not in body.model_fields_set:
             updated[name] = current["settings"][name]
     try:

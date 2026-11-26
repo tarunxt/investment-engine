@@ -1,3 +1,8 @@
+import Link from "next/link";
+import {useState} from "react";
+import {defaultDiscovery,thresholdName,filterKeys} from "./DiscoveryEditor";
+import type {Model} from "./useBottomFishing";
+import {route} from "./model";
 import {TradingViewSymbolLink} from "@/components/shared/TradingViewSymbolLink";
 import {Table as ScorecardTable} from "../ScorecardPresentation";
 import type {ReactNode} from "react";
@@ -22,11 +27,28 @@ export function Decisions({output}:{output:Output}) {
   </div>;
 }
 
-export function CloudResults({output}:{output?:Output|null}) {
-  return output ? <StageOutput stage="screen" output={output}/> : <p role="status">Waiting for cloud results for the current saved query.</p>;
+export function CloudResults({output,model}:{output?:Output|null;model:Model}) {
+  const [error,setError]=useState(""),[busy,setBusy]=useState(false);
+  const data=model.data;
+  const discovery=data?.settings.discovery??defaultDiscovery;
+  async function setMinimum(minimum:number) {
+    if(!data||busy||minimum===discovery.minimum)return;
+    setBusy(true);setError("");
+    try{await model.save({...data.settings,discovery:{...discovery,minimum}},data.version);}
+    catch(e){setError(String(e));}finally{setBusy(false);}
+  }
+  const chooser=<select aria-label="Minimum discovery filters to pass" value={discovery.minimum} disabled={busy||!data}
+    className="rounded border border-indigo-300 bg-white px-2 py-1 font-semibold text-indigo-800" onChange={e=>void setMinimum(Number(e.target.value))}>
+    {[5,4,3,2].map(n=><option key={n} value={n}>{thresholdName(n)}</option>)}</select>;
+  const current=output && (!output.version || output.version===data?.version);
+  return <><Link className="inline-block rounded-full border border-indigo-200 px-4 py-2 text-sm font-semibold text-indigo-800" href={route+"/screen?view=columns"}>Edit Columns</Link>
+    {error&&<p role="alert">{error}</p>}
+    {current && output?.state.original_results ? <StageOutput stage="screen" output={output} model={model} chooser={chooser}/> :
+      <>{chooser}{current && output?.state.setups ? <StageOutput stage="screen" output={output}/> : <p role="status">Waiting for cloud results for the current saved query.</p>}</>}
+  </>;
 }
 
-export function StageOutput({stage,output}:{stage:Stage;output:Output}) {
+export function StageOutput({stage,output,model,chooser}:{stage:Stage;output:Output;model?:Model;chooser?:ReactNode}) {
   const {state} = output;
   const query = state.screen_query?.text ?? output.settings?.screen_query;
   const scan = state.scans?.at(-1);
@@ -47,8 +69,14 @@ export function StageOutput({stage,output}:{stage:Stage;output:Output}) {
   if (stage==="screen" && (query || state.original_results)) {
     const report = state.original_results;
     const cloud = output.mode==="Cloud screen" || report?.source==="Cred-X cloud";
-    const filters = ["universe","liquidity","touches","rebound","proximity"] as const;
-    const mark = (value?:boolean) => value === undefined ? "Unavailable" : value ? "✓ Pass" : "✕ Fail";
+    const filters = filterKeys;
+    const minimum=report?.minimum??output.settings?.discovery?.minimum??5;
+    const label=thresholdName(minimum);
+    const columns=model?.data?.columns;
+    const names=columns?.names??report?.column_names??[];
+    const imported=columns?.session && columns.session===state.market_as_of?.slice(0,10)?columns.imported:{};
+    const qualified=(row:NonNullable<typeof report>["rows"][number])=>filters.filter(k=>row[k]===true).length>=minimum;
+    const mark = (value?:boolean) => value == null ? "Unavailable" : value ? "✓ Pass" : "✕ Fail";
     return <>
       <h3 className="font-semibold">{cloud?"Live query matches":"Original Screener query matches"}</h3>
       {query && <details><summary>Query used in this run</summary><pre className="whitespace-pre-wrap">{query}</pre></details>}
@@ -56,13 +84,19 @@ export function StageOutput({stage,output}:{stage:Stage;output:Output}) {
       {report ? <>
         {cloud ? <p>{report.rows.length} confirmed query matches across {num(report.universe_size)} listings · {num(report.unknown)} awaiting evidence · Cloud scan {date(report.at)} IST</p>
           : <p>{report.rows.length} of {num(report.total)} original matches captured · {report.source ?? "Screener.in"} · {date(report.at)} IST</p>}
-        <p>{report.rows.filter(row=>filters.every(key=>row[key]===true)).length} confirmed across all five filters{state.market_as_of && <> · Candle cutoff {date(state.market_as_of)} IST</>}</p>
+        <p>{report.rows.filter(qualified).length} qualified under {label}{state.market_as_of && <> · Candle cutoff {date(state.market_as_of)} IST</>}</p>
         {report.error && <p role="alert">{report.error}</p>}
-        <Table headers={["Company","Symbol","Universe","Liquidity","Support touches","Rebound","Discovery price","All five"]}
+        <ScorecardTable columns={["Company","Symbol","Universe","Liquidity","Support touches","Rebound","Discovery price",label,...names]} headerContent={chooser?{[label]:chooser}:undefined}
           rows={report.rows.map(row=>{
             const values = filters.map(key=>row[key]);
-            return {key:(row.exchange??"")+row.symbol,cells:[row.name,<TradingViewSymbolLink key="stock" symbol={row.symbol.includes(":")?row.symbol:(row.exchange??"NSE")+":"+row.symbol}/>,...values.map(mark),
-              values.includes(false) ? "✕ Excluded" : values.every(value=>value===true) ? "✓ Qualified" : "Unconfirmed"]};
+            const key=(row.exchange??"NSE")+":"+row.symbol;
+            const count=values.filter(v=>v===true).length;
+            const possible=count+values.filter(v=>v==null).length;
+            return {key,cells:[row.name,<TradingViewSymbolLink key="stock" symbol={row.symbol.includes(":")?row.symbol:(row.exchange??"NSE")+":"+row.symbol}/>,...values.map(mark),
+              (qualified(row)?"✓ Qualified":possible<minimum?"✕ Excluded":"Unconfirmed")+" ("+count+"/5)",
+              ...names.map(name=>{const native=imported?.[key]?.[name];const v=native??row.columns?.[name];
+                const source=native!=null?"Screener CSV":name.startsWith("Volume")||name.includes("DMA")?(row.exchange??"NSE")+" listing · Upstox":"Issuer or exchange observation";
+                return <span key={name} title={v==null?"No verified value for this company and session":source}>{num(v)}</span>;})]};
           })}
           empty={cloud ? (report.unknown ? "No confirmed matches yet. Coverage is partial." : "No stocks matched this query.") : report.complete?"Screener returned zero matches for this query.":"Original query results unavailable."}/>
       </> : cloud ? <p>Current query results unavailable.</p> : <p>This run did not capture the original Screener result list. Run the query again to populate the comparison.</p>}
@@ -72,8 +106,14 @@ export function StageOutput({stage,output}:{stage:Stage;output:Output}) {
     {scan?.query_passed!=null && <p>{num(scan.query_passed)} passed the query · {num(scan.query_excluded)} excluded · {num(scan.query_missing)} with missing query data</p>}
     {query && <details><summary className="cursor-pointer text-indigo-700">Query used in this run</summary><pre className="mt-2 whitespace-pre-wrap">{query}</pre></details>}
     <Table headers={["Stock","Discovered (IST)","Discovery ₹","Support ₹","Range high ₹","Setup"]} empty="No setups recorded." rows={setups.map(([k,v])=>({key:k,cells:[<TradingViewSymbolLink key="stock" symbol={k}/>,date(v.discovered),num(v.discovery),num(v.low),num(v.high),v.invalid?"Support broken":"In range at discovery"]}))}/></>;
-  if (stage==="score") return <Table headers={["Stock","Score /100",...Object.values(labels),"Decision"]} empty={state.scored_at ? (output.settings?.inputs?.length===0 ? "Scorecard ran with the screen input disabled." : "Scorecard ran. No eligible listings among the confirmed results.") : "No scored listings recorded."}
-    rows={(state.rows??[]).map(r=>({key:r.symbol,cells:[<TradingViewSymbolLink key="stock" symbol={r.symbol}/>,num(r.score),...Object.keys(labels).map(k=>num(r.points?.[k])),r.reason]}))}/>;
+  if (stage==="score") {
+    const report=state.original_results, minimum=report?.minimum??output.settings?.discovery?.minimum??5;
+    const passed=report?.rows.filter(r=>filterKeys.filter(k=>r[k]===true).length>=minimum).length??0;
+    return <>{state.scored_at && report && <p className="text-sm text-slate-700">{report.rows.length} query matches · {passed} qualified under <strong>{thresholdName(minimum)}</strong> · {(state.rows??[]).filter(r=>r.score!=null).length} scored.
+      {state.scorecard_inputs && <> Stage 3 used the runs selected in Inputs.</>}</p>}
+      <Table headers={["Stock","Score /100",...Object.values(labels),"Decision"]} empty={state.scored_at ? (output.settings?.inputs?.length===0 ? "Scorecard ran with the screen input disabled." : "Scorecard ran. No eligible listings among the confirmed results.") : "No scored listings recorded."}
+    rows={(state.rows??[]).map(r=>({key:r.symbol,cells:[<TradingViewSymbolLink key="stock" symbol={r.symbol}/>,num(r.score),...Object.keys(labels).map(k=>num(r.points?.[k])),r.reason]}))}/></>;
+  }
   return <Decisions output={output}/>;
 }
 

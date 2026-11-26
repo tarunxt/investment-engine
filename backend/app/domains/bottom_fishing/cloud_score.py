@@ -6,11 +6,11 @@ import httpx
 
 from . import market, score_inputs
 from .engine import paper_cycle, roll
-
-FILTERS = ("universe", "liquidity", "touches", "rebound", "proximity")
+from .discovery import FLAGS as FILTERS, Discovery, passed, proximity
 
 
 async def finish_screen(client, cache, guard, instruments, settings, stamp, calendar, report, previous):
+    rules = Discovery.model_validate(settings.get("discovery", {}))
     cutoff = stamp.isoformat()
     rows = {"NSE:" + row["symbol"]: row for row in report["rows"] if row["exchange"] == "NSE"}
     native = set(rows)
@@ -21,14 +21,15 @@ async def finish_screen(client, cache, guard, instruments, settings, stamp, cale
                 rows.setdefault(key, dict(exchange="NSE", symbol=key[4:]))
     allowed = score_inputs.apply_candidates(settings, native, rows)
     state = roll({}, stamp)
-    if previous.get("day") == state["day"] and (previous.get("at") or "") <= cutoff:
+    if (previous.get("day") == state["day"] and (previous.get("at") or "") <= cutoff
+            and (previous.get("discovery") or Discovery().model_dump()) == rules.model_dump()):
         state["setups"] = {k: dict(v) for k, v in previous.get("setups", {}).items() if k in allowed}
     levels, benchmark, series = {}, None, {}
     coverage = {"universe": 0, "covered": 0}
     if rows:
         try:
             async with asyncio.timeout(65):
-                levels, benchmark, coverage = await market.daily(client, cache, stamp, list(rows.values()))
+                levels, benchmark, coverage = await market.daily(client, cache, stamp, list(rows.values()), discovery=rules.model_dump())
         except (httpx.HTTPError, ValueError, KeyError, TimeoutError) as exc:
             report["error"] = f"Daily history unavailable ({type(exc).__name__})."
 
@@ -45,7 +46,7 @@ async def finish_screen(client, cache, guard, instruments, settings, stamp, cale
             row = rows.get(key)
             if row and "low" in row:
                 close = bars[-1]["close"]
-                row.update(close=close, proximity=row["low"] <= close <= row["low"] + .15*(row["high"]-row["low"]))
+                row.update(close=close, proximity=proximity(dict(row, close_formula=rules.formulas["proximity"]), close))
 
     try:
         async with asyncio.timeout(25):
@@ -53,7 +54,10 @@ async def finish_screen(client, cache, guard, instruments, settings, stamp, cale
     except TimeoutError:
         report["error"] = "Some discovery candles were unavailable before the deadline."
 
-    qualified = {k for k, row in rows.items() if all(row.get(flag) is True for flag in FILTERS)}
+    qualified = {k for k, row in rows.items() if passed(row, rules.minimum)}
+    for row in report["rows"]:
+        row["qualified"] = passed(row, rules.minimum)
+    report["minimum"] = rules.minimum
     qualified.intersection_update(allowed)
     selected = {k: levels[k] for k in qualified if k in levels}
     candidates = qualified | set(state["setups"])
@@ -77,13 +81,13 @@ async def finish_screen(client, cache, guard, instruments, settings, stamp, cale
     coverage.update(patterns=len(selected), current_candles=sum(k in series for k in selected))
     paper_cycle(state, effective_settings, stamp, selected, series, facts, benchmark, coverage, calendar, preview=True)
     if "bottom" in effective_settings["inputs"]:
-        for key in sorted(qualified - selected.keys() - state["setups"].keys()):
-            state["rows"].append(dict(symbol=key, sources=["bottom"], reason="Missing verified support levels"))
+        for key in sorted(qualified - {r["symbol"] for r in state["rows"]}):
+            state["rows"].append(dict(symbol=key, sources=["bottom"], reason="Missing current closed candle" if key not in series else "Missing verified support levels"))
     score_inputs.record_inputs(state, settings, native)
     incomplete = any(row["reason"].startswith("Missing ") for row in state["rows"])
     screen_partial = (not report["complete"] or bool(report.get("error")) or
-                      any(any(flag not in row for flag in FILTERS) for key,row in rows.items() if key in native))
-    state.update(market_as_of=cutoff, original_results=report, sync=dict(at=cutoff, **coverage),
+                      any(any(row.get(flag) is None for flag in FILTERS) for key,row in rows.items() if key in native))
+    state.update(discovery=rules.model_dump(), market_as_of=cutoff, original_results=report, sync=dict(at=cutoff, **coverage),
                  screen_query=dict(text=settings["screen_query"], latest_results=settings.get("latest_results", False)),
                  screen_status="partial" if screen_partial else "completed",
                  score_status="partial" if incomplete else "completed", scored_at=datetime.now(market.INDIA).isoformat(),

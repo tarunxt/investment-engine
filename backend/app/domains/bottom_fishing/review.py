@@ -15,6 +15,7 @@ from app.domains.zerodha.upstox_quote_guard import QuoteGuard, redis_client
 from app.domains.zerodha.upstox_quotes import configured_for
 from . import market, store, score_inputs
 
+from .discovery import Discovery, proximity
 from .engine import paper_cycle, roll, size_entries
 from .worker import INDIA, collect_evidence, prepared_market
 
@@ -88,12 +89,14 @@ async def review_cloud_score(sessions, owner, version, settings, client, cache, 
 
 
 async def review_screen(client, cache, owner, settings, stamp, calendar, state, report):
+    rules = Discovery.model_validate(settings.get("discovery", {}))
     if report is not None:
+        report["minimum"] = rules.minimum
         state["original_results"] = report
     if report and report["rows"]:
-        levels, benchmark, coverage = await market.daily(client,cache,stamp,report["rows"])
+        levels, benchmark, coverage = await market.daily(client,cache,stamp,report["rows"],discovery=rules.model_dump())
     else:
-        levels, benchmark, coverage = await prepared_market(client,cache,stamp)
+        levels, benchmark, coverage = await prepared_market(client,cache,stamp,settings.get("discovery"))
     state["sync"] = dict(at=stamp.isoformat(), **coverage)
     guard = ManualReviewQuoteGuard(cache, os.getenv("UPSTOX_LTP_OWNER_USER_ID") or owner, "bottom-review", [])
     series, fundamentals = await collect_evidence(client,cache,guard,stamp,levels,state,coverage)
@@ -111,7 +114,7 @@ async def review_screen(client, cache, owner, settings, stamp, calendar, state, 
                     continue
             if bars and bars[-1]["end"] == stamp.isoformat():
                 close = bars[-1]["close"]
-                row.update(close=close, proximity=row["low"] <= close <= row["low"]+.15*(row["high"]-row["low"]))
+                row.update(close=close, proximity=proximity(dict(row, close_formula=rules.formulas["proximity"]), close))
     levels, native = await score_inputs.filter_paper(client,cache,guard,settings,stamp,calendar,levels,series,state,coverage)
     return levels, series, fundamentals, benchmark, coverage, native
 

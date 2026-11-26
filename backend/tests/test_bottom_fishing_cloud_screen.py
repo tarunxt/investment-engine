@@ -21,7 +21,7 @@ async def test_cloud_scans_query_before_discovery_and_removes_old_matches(monkey
     monkeypatch.setattr(cloud_screen, "technical_instruments", AsyncMock(return_value=master))
     quotes = {"NSE_EQ|INE179A01014":{"price":120}, "NSE_EQ|INE121A01024":{"price":80}}
     monkeypatch.setattr(cloud_screen,"quotes",AsyncMock(return_value=quotes))
-    async def daily(client,cache,stamp,rows):
+    async def daily(client,cache,stamp,rows,discovery=None):
         for row in rows:
             row.update(universe=False,low=90,high=200,liquidity=True,touches=True,rebound=True)
         return {}, None, {"universe": 2, "covered": 2}
@@ -47,7 +47,7 @@ async def test_score_consumes_verified_screen_candles_and_keeps_missing_evidence
     report = dict(complete=False, unknown=1, rows=[dict(exchange="NSE", symbol="A"), dict(exchange="BSE", symbol="X")])
     level = dict(low=100, high=125, width=25, stop=97.5, target=122.5, breakout=109,
                  previous=105, tick=.05, member=True, bounce=.9, turnover=20_000_000)
-    async def daily(client, cache, cutoff, rows):
+    async def daily(client, cache, cutoff, rows, discovery=None):
         rows[0].update(universe=True, liquidity=True, touches=True, rebound=True, low=100, high=125)
         return {"NSE:A":level}, 100, {"universe":2,"covered":1}
 

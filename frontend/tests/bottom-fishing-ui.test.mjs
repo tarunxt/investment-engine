@@ -21,11 +21,14 @@ const mocks = {
       data.manual={id:50,status:"failed",stage:"screen"};
       data.review={mode:"Manual review",state:{status:"failed",error:"ReadTimeout"}};
     }
+    const catalog={catalog:[["Sales","most_used annual_pl","Recent","Sales"],["Industry PE","ratios","Recent","Ind PE"],["Volume","price","Recent","Volume"]],defaults:["Sales"],names:JSON.parse(sessionStorage.getItem("bfsColumns")??'["Sales"]'),version:1};
+    data.columns={names:catalog.names,version:1,session:"2026-11-26",imported:{}};
+    Object.assign(data.live.state.original_results.rows[0],{columns:{Sales:12345,Volume:56789},universe:true,liquidity:true,touches:true});
     let selected;
     const inputState=()=>({version:selected===undefined?0:1,groups:[{id:"bottom",name:"Bottom Fishing Screen",runs:[{id:45,at:cutoff,status:"completed",count:1}],pinned_older:[],latest:[45],selected:selected??[45],automatic:selected===undefined}]});
     export const apiService={
-      get:async path=>path.includes("/screeners/inputs/")?inputState():path.split("?")[0].endsWith("/history")?{items:[{id:45,mode:"Manual review",scored:1,entries:1,candidates:1,status:"completed"}]}:path.endsWith("/history/45")?data.review:data,
-      post:async (path,v)=>{if(path.includes("/screeners/inputs/")){selected=v.selected.bottom;return inputState();}if(path.endsWith("/run")){window.submits=(window.submits??0)+1;window.runVersion=v.version;data.manual={id:46,status:"queued"};return data.manual;}
+      get:async path=>path.endsWith("/columns")?catalog:path.includes("/screeners/inputs/")?inputState():path.split("?")[0].endsWith("/history")?{items:[{id:45,mode:"Manual review",scored:1,entries:1,candidates:1,status:"completed"}]}:path.endsWith("/history/45")?data.review:data,
+      post:async (path,v)=>{if(path.endsWith("/columns")){sessionStorage.setItem("bfsColumns",JSON.stringify(v.names));return v;}if(v.discovery){window.savedRules=v.discovery;data.live.state.original_results.minimum=v.discovery.minimum;}if(path.includes("/screeners/inputs/")){selected=v.selected.bottom;return inputState();}if(path.endsWith("/run")){window.submits=(window.submits??0)+1;window.runVersion=v.version;data.manual={id:46,status:"queued"};return data.manual;}
         data.settings=v;data.version++;return {...data};}
     };`,
 };
@@ -143,6 +146,21 @@ try {
   await page.getByRole("button",{name:"View live results",exact:true}).click();
   await page.getByText("Live query matches",{exact:true}).waitFor();
   await verifyChart(page);
+  await page.getByRole("cell",{name:"12,345",exact:true}).waitFor();
+  await page.getByRole("combobox",{name:"Minimum discovery filters to pass"}).selectOption("3");
+  await page.getByText("✓ Qualified (3/5)").waitFor();
+  assert.equal(await page.evaluate(()=>window.savedRules.minimum),3);
+  await page.getByRole("link",{name:"Edit Columns"}).click();
+  await page.getByRole("button",{name:"Price",exact:true}).click();
+  await page.getByRole("checkbox",{name:"Volume",exact:true}).check();
+  await page.getByRole("button",{name:"Remove Sales"}).click();
+  await page.getByRole("button",{name:"Save columns"}).click();
+  await page.getByRole("cell",{name:"56,789",exact:true}).waitFor();
+  await page.getByRole("link",{name:"Inputs",exact:true}).click();
+  await page.getByRole("spinbutton",{name:"Liquidity value 1",exact:true}).fill("5000000");
+  await page.getByRole("button",{name:"Save query",exact:true}).click();
+  assert.equal(await page.evaluate(()=>window.savedRules.formulas.liquidity),"Median turnover >= 5000000");
+  console.log("PASS actual selected column value, saved column order, threshold requalification and numeric formula edit");
   await page.goto(root+"?empty-cloud");
   const scoreTile=page.getByRole("article").filter({hasText:"Bottom Fishing Scorecard"});
   await scoreTile.getByRole("img",{name:"completed",exact:true}).waitFor();

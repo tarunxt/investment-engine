@@ -12,6 +12,7 @@ import httpx
 from app.domains.scorecards.research import INDIA
 from app.domains.zerodha.upstox_quotes import load_instruments
 from .issuer import issuer
+from .discovery import at_close
 from .query import compile_query, evaluate
 
 
@@ -60,6 +61,12 @@ async def apply_screen(client,cache,guard,settings,stamp,calendar,levels,series,
     spec = {"text":text,"latest_results":latest}
     if state.get("screen_query",{"text":"","latest_results":False})!=spec:
         state["setups"] = {}
+    config = settings.get("discovery")
+    if state.get("discovery") != config and config is not None:
+        from .discovery import Discovery
+        if state.get("discovery") is not None or config != Discovery().model_dump():
+            state["setups"] = {}
+    state["discovery"] = config
     state["screen_query"] = spec
     if not text or coverage is None:
         return levels
@@ -75,12 +82,12 @@ async def apply_screen(client,cache,guard,settings,stamp,calendar,levels,series,
     async def check(k):
         bars = series.get(k) or []
         setup = state["setups"].get(k) or levels[k]
-        if not setup.get("member"):
+        if not setup.get("discovery_flags") and not setup.get("member"):
             return k,"outside"
         if not bars or bars[-1]["end"]!=stamp.isoformat():
             return k,"missing"
         close = bars[-1]["close"]
-        if k not in state["setups"] and not setup["low"]<=close<=setup["low"]+.15*setup["width"]:
+        if k not in state["setups"] and not at_close(setup, close):
             return k,"outside"
         values = {"price":close,"day_return":100*(close/setup["previous"]-1)}
         async with gate:
