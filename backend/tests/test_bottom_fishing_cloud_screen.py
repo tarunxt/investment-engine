@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from app.domains.bottom_fishing import cloud_screen
+from app.domains.bottom_fishing import cloud_screen, store
 
 
 def test_cloud_universe_is_independent_of_index_and_deduplicates():
@@ -24,11 +24,104 @@ async def test_cloud_scans_query_before_discovery_and_removes_old_matches(monkey
     async def daily(client,cache,stamp,rows):
         for row in rows:
             row.update(universe=False,low=90,high=200,liquidity=True,touches=True,rebound=True)
+        return {}, None, {"universe": 2, "covered": 2}
     monkeypatch.setattr(cloud_screen.market,"daily",daily)
     monkeypatch.setattr(cloud_screen.market,"candles",AsyncMock(return_value=[]))
     async def scan():
-        return await cloud_screen.scan(None,AsyncMock(),1,{"screen_query":"Current price > 100"},stamp,{"2026-11-25":""})
-    assert [r["symbol"] for r in (await scan())["rows"]] == ["FIRST"]
+        return await cloud_screen.scan(None,AsyncMock(),1,store.Settings(screen_query="Current price > 100").model_dump(),stamp,{"2026-11-25":""})
+    first = await scan()
+    assert [r["symbol"] for r in first["original_results"]["rows"]] == ["FIRST"]
+    assert first["score_status"] == "completed" and first["at"] == stamp.isoformat() and first["rows"] == []
     quotes["NSE_EQ|INE179A01014"]["price"] = 99
     quotes["NSE_EQ|INE121A01024"]["price"] = 101
-    assert [r["symbol"] for r in (await scan())["rows"]] == ["SECOND"]
+    assert [r["symbol"] for r in (await scan())["original_results"]["rows"]] == ["SECOND"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("missing_facts", [False, True])
+async def test_score_consumes_verified_screen_candles_and_keeps_missing_evidence(monkeypatch, missing_facts):
+    from app.domains.bottom_fishing import cloud_score, market
+
+    stamp = datetime(2026,11,26,14,45,tzinfo=cloud_screen.INDIA)
+    settings = store.Settings(screen_query="Current price > 100").model_dump()
+    report = dict(complete=False, unknown=1, rows=[dict(exchange="NSE", symbol="A"), dict(exchange="BSE", symbol="X")])
+    level = dict(low=100, high=125, width=25, stop=97.5, target=122.5, breakout=109,
+                 previous=105, tick=.05, member=True, bounce=.9, turnover=20_000_000)
+    async def daily(client, cache, cutoff, rows):
+        rows[0].update(universe=True, liquidity=True, touches=True, rebound=True, low=100, high=125)
+        return {"NSE:A":level}, 100, {"universe":2,"covered":1}
+
+    candles = AsyncMock(return_value=[{"end":stamp.isoformat(), "close":102}])
+    monkeypatch.setattr(market, "daily", daily)
+    monkeypatch.setattr(market, "candles", candles)
+    monkeypatch.setattr(market, "facts", AsyncMock(return_value=None if missing_facts else
+                                                  dict(roce=25, sales=25, profit=25, leverage=.2)))
+    state = await cloud_score.finish_screen(None,None,None,{"NSE:A":"stock",market.BENCH:"benchmark"},
+                                            settings,stamp,{},report,{})
+    assert state["original_results"] is report and report["rows"][0]["proximity"] is True
+    assert state["screen_status"] == "partial" and state["scored_at"]
+    assert [r["symbol"] for r in state["rows"]] == ["NSE:A"]
+    assert [call.args[1] for call in candles.await_args_list] == ["stock","benchmark"]
+    row = state["rows"][0]
+    if missing_facts:
+        assert state["score_status"] == "partial" and row["reason"].startswith("Missing ")
+        assert "score" not in row
+    else:
+        assert state["score_status"] == "completed" and len(row["points"]) == 8
+    assert not state["pending"]
+
+
+@pytest.mark.asyncio
+async def test_cloud_refresh_persists_pair_once_and_manual_reuses_only_exact_result(monkeypatch):
+    from contextlib import asynccontextmanager
+    from types import SimpleNamespace
+    from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+    from app.domains.auth.models import User, ActivityLog
+    from app.domains.bottom_fishing import review
+    import app.models
+
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    async with engine.begin() as conn:
+        for table in (User.__table__, ActivityLog.__table__):
+            await conn.run_sync(table.create)
+    owner = SimpleNamespace(id=5, username="owner")
+    settings = store.Settings(screen_query="Current price > 100").model_dump()
+    stamp = datetime(2026,11,26,14,45,tzinfo=cloud_screen.INDIA)
+    async with sessions() as db:
+        db.add(User(id=5, username="owner", email="owner@example.test", password_hash="x"))
+        config = store.append(db, 5, store.CONFIG, settings)
+        await db.commit()
+        version = config.id
+    @asynccontextmanager
+    async def cache():
+        redis = AsyncMock()
+        redis.exists.return_value = False
+        yield redis
+    monkeypatch.setattr(cloud_screen, "redis_client", cache)
+    monkeypatch.setattr(cloud_screen.httpx, "AsyncClient", lambda **kwargs: cache())
+    monkeypatch.setattr(cloud_screen, "configured_for", lambda *args: True)
+    monkeypatch.setattr(cloud_screen.market, "calendar", AsyncMock(return_value={}))
+    monkeypatch.setattr(cloud_screen, "candle_cutoff", lambda *args:(stamp, {}))
+    monkeypatch.setattr(cloud_screen, "query_matches", AsyncMock(return_value=(
+        dict(complete=True, unknown=0, rows=[], source="Cred-X cloud"), {}, None)))
+    await cloud_screen.refresh(sessions, 5)
+    await cloud_screen.refresh(sessions, 5)
+    assert cloud_screen.query_matches.await_count == 1
+    async with sessions() as db:
+        snapshot = await store.snapshot(db,5)
+        paired = snapshot["live"]["state"]
+        history = await store.history(None,db,owner,True,True)
+        assert len(history["items"]) == 1 and history["items"][0]["scored"] == 0
+        assert (await store.history_record(history["items"][0]["id"],db,owner))["state"] == paired
+        assert not snapshot["state"] and paired["at"] == stamp.isoformat()
+        assert paired["screen_status"] == paired["score_status"] == "completed"
+    scan = AsyncMock(return_value={"fresh":True})
+    monkeypatch.setattr(cloud_screen, "scan", scan)
+    args = (sessions, 5, version, settings, None, None)
+    assert await review.review_cloud_score(*args,stamp,{}, {}) == paired
+    scan.assert_not_awaited()
+    assert await review.review_cloud_score(*args,stamp.replace(minute=50),{}, {}) == {"fresh":True}
+    assert await review.review_cloud_score(sessions, 5, version+1, settings, None, None,stamp,{}, {}) == {"fresh":True}
+    assert scan.await_count == 2
+    await engine.dispose()

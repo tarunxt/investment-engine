@@ -11,10 +11,11 @@ from uuid import uuid4
 import httpx
 from sqlalchemy import select
 
-from app.domains.auth.models import ActivityLog, User
+from app.domains.auth.models import User
 from app.domains.zerodha.upstox_quote_guard import QuoteGuard, RELEASE, redis_client
 from app.domains.zerodha.upstox_quotes import build_quote_request, configured_for, technical_instruments
 from . import market, store
+from .cloud_score import finish_screen
 from .issuer import issuer
 from .query import compile_query, evaluate
 from .query_evidence import daily_closes, macd
@@ -22,7 +23,7 @@ from .review import candle_cutoff
 from .worker import INDIA, owners
 
 log = logging.getLogger(__name__)
-LIVE = "bottom_fishing.cloud_screen.v1"
+LIVE = store.LIVE
 
 
 def listings(master):
@@ -67,7 +68,13 @@ async def quotes(client, guard, keys, stamp):
     return result
 
 
-async def scan(client, cache, owner, settings, stamp, calendar):
+async def scan(client, cache, owner, settings, stamp, calendar, previous=None):
+    async with asyncio.timeout(235):
+        report, instruments, guard = await query_matches(client, cache, owner, settings, stamp, calendar)
+    return await finish_screen(client, cache, guard, instruments, settings, stamp, calendar, report, previous or {})
+
+
+async def query_matches(client, cache, owner, settings, stamp, calendar):
     root = compile_query(settings["screen_query"])
     fields = {n.id[1:] for n in ast.walk(root) if isinstance(n,ast.Name)}
     master = await technical_instruments(client)
@@ -138,25 +145,10 @@ async def scan(client, cache, owner, settings, stamp, calendar):
                                        **({"universe":False} if k.startswith("BSE:") else {})))
     report["total"] = len(report["rows"])
     report["complete"] = not report["unknown"]
-    if report["rows"]:
-        nse = [row for row in report["rows"] if row["exchange"]=="NSE"]
-        if nse:
-            try:
-                async with asyncio.timeout(65):
-                    await market.daily(client,cache,stamp,nse)
-                deadline = asyncio.get_running_loop().time()+25
-                for row in nse:
-                    if asyncio.get_running_loop().time()>=deadline:
-                        break
-                    if "low" not in row:
-                        continue
-                    bars = await market.candles(client,instruments["NSE:"+row["symbol"]],stamp,guard)
-                    if bars and bars[-1]["end"]==stamp.isoformat():
-                        close = bars[-1]["close"]
-                        row.update(close=close, proximity=row["low"]<=close<=row["low"]+.15*(row["high"]-row["low"]))
-            except (httpx.HTTPError, ValueError, KeyError, TimeoutError) as exc:
-                report["error"] = f"Some technical checks are unavailable ({type(exc).__name__})."
-    return report
+    benchmark = master.get(market.BENCH)
+    if benchmark:
+        instruments[market.BENCH] = "NSE_EQ|" + benchmark["isin"]
+    return report, instruments, guard
 
 
 async def refresh(sessions,owner):
@@ -166,27 +158,27 @@ async def refresh(sessions,owner):
         if not configured_for(owner,username):
             return
         version,settings = await latest(db,owner,CONFIG,{})
+        previous_id, previous = await latest(db,owner,LIVE,{})
         if not settings.get("screen_query","").strip():
             return
     now = datetime.now(INDIA)
     async with redis_client() as cache, httpx.AsyncClient(timeout=8,follow_redirects=False) as client:
         stamp, calendar = candle_cutoff(now,await market.calendar(client,cache,now))
-        slot = f"bottom:cloud:{owner}:{version}:{stamp.isoformat()}"
+        slot = f"bottom:cloud:scored:{owner}:{version}:{stamp.isoformat()}"
         lease = f"bottom:cloud:lock:{owner}"
         token = uuid4().hex
-        if await cache.exists(slot) or not await cache.set(lease,token,nx=True,ex=260):
+        saved = previous.get("state", {})
+        if (previous.get("version") == version and saved.get("market_as_of") == stamp.isoformat()
+                and saved.get("score_status") and saved.get("status") == "completed"):
+            return
+        if await cache.exists(slot) or not await cache.set(lease,token,nx=True,ex=390):
             return
         state = dict(screen_query=dict(text=settings["screen_query"],latest_results=settings.get("latest_results",False)),
                      market_as_of=stamp.isoformat())
         try:
             try:
-                async with asyncio.timeout(235):
-                    state["original_results"] = await scan(client,cache,owner,settings,stamp,calendar)
-                report = state["original_results"]
-                flags = ("universe","liquidity","touches","rebound","proximity")
-                partial = not report["complete"] or report.get("error") or any(
-                    any(key not in row for key in flags) for row in report["rows"] if row["exchange"]=="NSE")
-                state["status"] = "partial" if partial else "completed"
+                state = await scan(client, cache, owner, store.Settings.model_validate(settings).model_dump(),
+                                   stamp, calendar, previous.get("state") if previous.get("version") == version else None)
             except Exception as exc:
                 log.exception("Cloud BFS scan failed")
                 state.update(status="failed",error=f"Cloud refresh failed ({type(exc).__name__}).")
@@ -195,12 +187,12 @@ async def refresh(sessions,owner):
                 current,_ = await latest(db,owner,CONFIG,{})
                 if current != version:
                     return
-                record = await db.scalar(select(ActivityLog).where(ActivityLog.user_id==owner,ActivityLog.action==LIVE).order_by(ActivityLog.id.desc()).limit(1))
-                output = dict(mode="Cloud screen",version=version,state=state,finished_at=datetime.now(INDIA).isoformat())
-                if record:
-                    record.details = json.dumps(output,allow_nan=False)
-                else:
-                    store.append(db,owner,LIVE,output)
+                latest_id, _ = await latest(db,owner,LIVE,{})
+                if latest_id != previous_id:
+                    return
+                output = dict(mode="Cloud screen",version=version,settings=settings,state=state,
+                              finished_at=datetime.now(INDIA).isoformat())
+                store.append(db,owner,LIVE,output)
                 await db.commit()
             await cache.set(slot,"1",ex=3*86400 if state["status"]=="completed" else 300)
         finally:
