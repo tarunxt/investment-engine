@@ -12,6 +12,15 @@ const mocks = {
   "@/services/api": `const row={symbol:"NSE:TEST",score:82,price:100,qty:2,stop:96,target:111,rr:2.2,reason:"Proposed buy",sources:["bottom"]};
     const state={kite_sync:{captured_at:"2026-11-25T15:30:00+05:30",holdings_count:1,holdings:[{exchange:"NSE",tradingsymbol:"TEST",quantity:11,average_price:20,last_price:22,invested_value:220,market_value:242,pnl:22}]},at:"2026-11-25T15:30:00+05:30",rows:[row,{...row,symbol:"NSE:WATCH",qty:undefined,score:67.57,price:222,target:235.3,reason:"Score below 70"},{...row,symbol:"NSE:MISSING",qty:undefined,score:undefined,price:undefined,target:undefined,reason:"Missing current closed candle"}],positions:{},setups:{"NSE:TEST":{discovered:"2026-11-25T15:30:00+05:30",discovery:99}}};
     const data={live:{mode:"Cloud screen",state:{status:"completed",original_results:{rows:[{symbol:"TEST",name:"Test",exchange:"NSE"}],universe_size:1,unknown:0}}},version:0,settings:{screen_query:"Current price > 10",latest_results:false,inputs:["bottom"],capital:100000,weights:{bounce:20,proximity:15,strength:15,recovery:10,roce:12,sales:10,profit:10,leverage:8}},state:{},review:{request_id:42,mode:"Manual review",state}};
+    const cutoff="2026-11-26T15:30:00+05:30";
+    const empty = location.search.includes("empty-cloud");
+    Object.assign(data.live.state,{screen_status:"partial",score_status:"completed",scored_at:cutoff,at:cutoff,
+      market_as_of:cutoff,rows:empty?[]:[{...row,score:79,qty:undefined,reason:"Waiting for fresh breakout"}],
+      setups:empty?{}:state.setups});
+    if (empty) {
+      data.manual={id:50,status:"failed",stage:"screen"};
+      data.review={mode:"Manual review",state:{status:"failed",error:"ReadTimeout"}};
+    }
     export const apiService={
       get:async path=>path.split("?")[0].endsWith("/history")?{items:[{id:45,mode:"Manual review",scored:1,entries:1,candidates:1,status:"completed"}]}:path.endsWith("/history/45")?data.review:data,
       post:async (path,v)=>{if(path.endsWith("/run")){window.submits=(window.submits??0)+1;window.runVersion=v.version;data.manual={id:46,status:"queued"};return data.manual;}
@@ -111,7 +120,7 @@ try {
   await page.getByRole("button",{name:"Save",exact:true}).click();
   await page.getByText("Settings saved.").waitFor(); await page.keyboard.press("Escape");
   await menu.click(); await page.getByRole("menuitem",{name:"Stock Flow"}).click();
-  await page.getByRole("dialog").getByText("Proposed buy").waitFor(); await page.keyboard.press("Escape");
+  await page.getByRole("dialog").getByText("Waiting for fresh breakout").waitFor(); await page.keyboard.press("Escape");
   await menu.click(); await page.getByRole("menuitem",{name:"Scorecard history"}).click();
   await page.getByRole("link",{name:/#45/}).click();
   await page.getByRole("heading",{name:"Saved run #45"}).waitFor();
@@ -132,6 +141,16 @@ try {
   await page.getByRole("button",{name:"View live results",exact:true}).click();
   await page.getByText("Live query matches",{exact:true}).waitFor();
   await verifyChart(page);
+  await page.goto(root+"?empty-cloud");
+  const scoreTile=page.getByRole("article").filter({hasText:"Bottom Fishing Scorecard"});
+  await scoreTile.getByRole("img",{name:"completed",exact:true}).waitFor();
+  assert.equal(await scoreTile.locator("dd").last().innerText(),"0");
+  await scoreTile.getByRole("button",{name:"Bottom Fishing Scorecard actions"}).click();
+  await page.getByRole("menuitem",{name:"Saved output",exact:true}).click();
+  await page.getByRole("dialog").getByText("Scorecard ran. No eligible listings among the confirmed results.").waitFor();
+  await page.goto(root+"/console/zerodha/bottom-fishing/score");
+  await page.getByRole("cell",{name:"79",exact:true}).waitFor();
+  console.log("PASS cloud scorecard on the board and stage page, including zero candidates after a failed manual review");
   console.log("PASS editable Stage 2 Inputs, checkbox, versioned save and live results");
   console.log("PASS immediate analysis request, review basket, four stage menus, settings, saved outputs, stock flow and frozen scorecard history");
 } finally {

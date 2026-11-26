@@ -46,7 +46,7 @@ export function StageOutput({stage,output}:{stage:Stage;output:Output}) {
   }
   if (stage==="screen" && (query || state.original_results)) {
     const report = state.original_results;
-    const cloud = output.mode==="Cloud screen";
+    const cloud = output.mode==="Cloud screen" || report?.source==="Cred-X cloud";
     const filters = ["universe","liquidity","touches","rebound","proximity"] as const;
     const mark = (value?:boolean) => value === undefined ? "Unavailable" : value ? "✓ Pass" : "✕ Fail";
     return <>
@@ -72,7 +72,7 @@ export function StageOutput({stage,output}:{stage:Stage;output:Output}) {
     {scan?.query_passed!=null && <p>{num(scan.query_passed)} passed the query · {num(scan.query_excluded)} excluded · {num(scan.query_missing)} with missing query data</p>}
     {query && <details><summary className="cursor-pointer text-indigo-700">Query used in this run</summary><pre className="mt-2 whitespace-pre-wrap">{query}</pre></details>}
     <Table headers={["Stock","Discovered (IST)","Discovery ₹","Support ₹","Range high ₹","Setup"]} empty="No setups recorded." rows={setups.map(([k,v])=>({key:k,cells:[<TradingViewSymbolLink key="stock" symbol={k}/>,date(v.discovered),num(v.discovery),num(v.low),num(v.high),v.invalid?"Support broken":"In range at discovery"]}))}/></>;
-  if (stage==="score") return <Table headers={["Stock","Score /100",...Object.values(labels),"Decision"]} empty="No scored listings recorded."
+  if (stage==="score") return <Table headers={["Stock","Score /100",...Object.values(labels),"Decision"]} empty={state.scored_at ? (output.settings?.inputs?.length===0 ? "Scorecard ran with the screen input disabled." : "Scorecard ran. No eligible listings among the confirmed results.") : "No scored listings recorded."}
     rows={(state.rows??[]).map(r=>({key:r.symbol,cells:[<TradingViewSymbolLink key="stock" symbol={r.symbol}/>,num(r.score),...Object.keys(labels).map(k=>num(r.points?.[k])),r.reason]}))}/>;
   return <Decisions output={output}/>;
 }

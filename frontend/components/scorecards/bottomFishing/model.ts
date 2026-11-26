@@ -16,15 +16,24 @@ type KiteSync = {captured_at:string; holdings_count?:number; holdings?:KiteHoldi
   holdings_market_value?:number; holdings_pnl?:number; available_margin?:number};
 export type ScreenMatch = {name:string; symbol:string; exchange?:string; universe?:boolean; liquidity?:boolean; touches?:boolean;
   rebound?:boolean; proximity?:boolean; close?:number};
-export type State = {original_results?:{at:string; source?:string; unknown?:number; universe_size?:number; total?:number; complete:boolean; error?:string; rows:ScreenMatch[]}; kite_sync?:KiteSync; screen_query?:{text:string;latest_results:boolean}; sync?:Coverage; at?:string; market_as_of?:string; error?:string; status?:string; scans?:Coverage[]; rows?:Row[]; setups?:Record<string,Setup>;
+export type State = {screen_status?:string; score_status?:string; scored_at?:string; original_results?:{at:string; source?:string; unknown?:number; universe_size?:number; total?:number; complete:boolean; error?:string; rows:ScreenMatch[]}; kite_sync?:KiteSync; screen_query?:{text:string;latest_results:boolean}; sync?:Coverage; at?:string; market_as_of?:string; error?:string; status?:string; scans?:Coverage[]; rows?:Row[]; setups?:Record<string,Setup>;
   positions?:Record<string,{qty:number; entry:string; price:number; stop:number; target:number}>; realized?:number; closed?:{symbol:string; qty:number; reason:string; pnl:number; end:string}[]};
-export type Output = {request_id?:number; finished_at?:string; mode:string; settings?:Settings; state:State};
+export type Output = {version?:number; request_id?:number; finished_at?:string; mode:string; settings?:Settings; state:State};
 export type Manual = {kite_sync?:KiteSync; id:number; status:string; stage?:Stage; error?:string};
 export type Snapshot = {live?:Output|null; query_fields?:string[]; version:number; settings:Settings; state:State; manual?:Manual; review?:Output};
 export const num = (x?:number) => x == null ? "—" : x.toLocaleString("en-IN",{maximumFractionDigits:2});
 export const date = (x?:string) => x ? new Date(x).toLocaleString("en-IN",{timeZone:"Asia/Kolkata",hour12:false}) : "—";
 export const latestOutput = (data:Snapshot):Output => data.review ?? {mode:"Kite portfolio", state:{}};
 export function stageOutput(data:Snapshot, stage:Stage):Output {
+  if (stage === "screen" || stage === "score") {
+    const live = data.live;
+    const review = data.review;
+    if (review?.version === data.version && review.state.scored_at &&
+        (!live || (review.state.original_results?.at ?? "") > (live.state.original_results?.at ?? live.finished_at ?? ""))) {
+      return review;
+    }
+    if (live) return live;
+  }
   const job = data.manual;
   if (stage === "sync" && job?.kite_sync && pending(job.status)) {
     return {mode:"Manual review",request_id:job.id,state:{kite_sync:job.kite_sync,status:"completed"}};

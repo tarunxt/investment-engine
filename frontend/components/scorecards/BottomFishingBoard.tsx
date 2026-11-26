@@ -35,10 +35,13 @@ function Board({owner}:{owner:WorkflowOwner}){
   const [selection,setSelection]=useState<Selection|null>(null);
   const [basket,setBasket]=useState(false);
   const kite=active?manual?.kite_sync:state.kite_sync;
-  const dates=[kite?.captured_at??(!active?state.sync?.at:undefined),data?.live?.state.market_as_of,state.at,state.at];
+  const screen=data && stageOutput(data,"screen");
+  const score=data && stageOutput(data,"score");
+  const selected=selection && data ? stageOutput(data,selection.stage) : output;
+  const dates=[kite?.captured_at??(!active?state.sync?.at:undefined),screen?.state.market_as_of,score?.state.at,state.at];
   const metrics=[
-    [kite?"Kite holdings":"Histories synced",kite?kite.holdings_count:state.sync?.covered],["Query matches",data?.live?.state.original_results?.rows.length],
-    ["Scored listings",state.rows?.filter(r=>r.score!=null).length],["Sized entries",state.rows?.filter(r=>r.qty).length]
+    [kite?"Kite holdings":"Histories synced",kite?kite.holdings_count:state.sync?.covered],["Query matches",screen?.state.original_results?.rows.length],
+    ["Scored listings",score?.state.rows?.filter(r=>r.score!=null).length],["Sized entries",state.rows?.filter(r=>r.qty).length]
   ];
   const currentStage=manual?.stage?stages.indexOf(manual.stage):-1;
   const sectionRoute=selection?route+"/"+selection.stage+(viewNames[selection.section]?"?view="+viewNames[selection.section]:""):"";
@@ -53,8 +56,9 @@ function Board({owner}:{owner:WorkflowOwner}){
     {manual&&<p role="status" className="mt-2 text-sm">{manual.status==="queued"?"Queued for immediate analysis using the latest completed NSE candle.":manual.status==="running"?"Running · "+(manual.stage?titles[manual.stage]:"Market data"):"Latest manual run · "+manual.status}{active&&data?.review?" · Showing the previous saved output.":""}</p>}
     {(model.error||(!active&&state.error))&&<p role="alert" className="text-sm text-red-700">{model.error||state.error}</p>}
     <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{stages.map((stage,i)=>{
-      const liveStatus=data?.live?.state.status;
-      const info:StageInfo=stage==="screen"?{state:liveStatus==="failed"?"failed":liveStatus?"completed":"idle",runStatus:liveStatus==="partial"?"partial":undefined}:active?{state:manual?.status==="queued"||i>currentStage?"queued":i===currentStage?"running":"completed"}
+      const liveStatus=stage==="screen" ? screen?.state.screen_status ?? screen?.state.status : score?.state.score_status;
+      const isCloudStage=stage==="screen" || (stage==="score" && (score?.state.score_status || score?.mode==="Cloud screen"));
+      const info:StageInfo=isCloudStage?{state:liveStatus==="failed"?"failed":liveStatus?"completed":"idle",runStatus:liveStatus==="partial"?"partial":undefined}:active?{state:manual?.status==="queued"||i>currentStage?"queued":i===currentStage?"running":"completed"}
         :manual?.status==="failed"&&currentStage>=0?{state:i===currentStage?"failed":i<currentStage?"completed":"idle"}
         :{state:dates[i]?"completed":"idle",runStatus:state.status==="partial"?"partial":undefined};
       const title=titles[stage];
@@ -79,11 +83,11 @@ function Board({owner}:{owner:WorkflowOwner}){
     })}</div>
     {basket&&<Basket key={output.request_id ?? output.state.at ?? "pending"} owner={owner.id} output={output} onClose={()=>setBasket(false)}/>}
     {selection&&<SavedOutputDialog title={titles[selection.stage]+" · "+selection.section} sectionLabel={selection.section}
-      savedAt={selection.section==="Live results"||selection.section==="Inputs"||selection.section==="Weights"?undefined:output.finished_at??state.at} provenance={selection.section==="Live results"?"Cloud screen · Five-minute refresh":selection.section==="Inputs"||selection.section==="Weights"?"Current strategy settings":output.mode}
+      savedAt={selection.section==="Live results"||selection.section==="Inputs"||selection.section==="Weights"?undefined:selected.finished_at??selected.state.at} provenance={selection.section==="Live results"?selected.mode:selection.section==="Inputs"||selection.section==="Weights"?"Current strategy settings":selected.mode}
       routeUrl={sectionRoute} onClose={()=>setSelection(null)} onRetry={()=>void model.refresh()} loading={!data}>
       <div className="space-y-3 p-5 text-sm">{!data?<p>Loading strategy…</p>:selection.section==="Inputs"||selection.section==="Weights"?
         <Inputs stage={selection.stage} weights={selection.section==="Weights"} data={data} save={model.save} run={model.run} active={model.active||model.sending}/>:
-        selection.section==="Live results"?<CloudResults output={data.live}/>:selection.section==="Stock Flow"?<StockFlow output={output}/>:<StageOutput stage={selection.stage} output={stageOutput(data,selection.stage)}/>}</div>
+        selection.section==="Live results"?<CloudResults output={screen}/>:selection.section==="Stock Flow"?<StockFlow output={selected}/>:<StageOutput stage={selection.stage} output={stageOutput(data,selection.stage)}/>}</div>
     </SavedOutputDialog>}
   </section>;
 }

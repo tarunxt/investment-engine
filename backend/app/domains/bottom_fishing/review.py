@@ -15,7 +15,6 @@ from app.domains.zerodha.upstox_quote_guard import QuoteGuard, redis_client
 from app.domains.zerodha.upstox_quotes import configured_for
 from . import market, store
 from .query_evidence import apply_screen
-from .screener_results import original_results
 from .engine import paper_cycle, roll, size_entries
 from .worker import INDIA, collect_evidence, prepared_market
 
@@ -71,6 +70,49 @@ async def sync_kite_portfolio(owner):
         raise ValueError("Kite portfolio sync failed. Check the Zerodha sync history.")
     return {key: result[key] for key in ("captured_at", "holdings_count", "holdings",
                                          "holdings_market_value", "holdings_pnl", "available_margin") if key in result}
+
+
+async def review_cloud_score(sessions, owner, version, settings, client, cache, stamp, calendar, portfolio):
+    from .cloud_screen import scan
+
+    async with sessions() as db:
+        _, latest = await store.latest(db, owner, store.LIVE, {})
+    prior = latest.get("state", {}) if latest.get("version") == version else {}
+    if prior.get("market_as_of") == stamp.isoformat() and prior.get("score_status"):
+        return prior
+    spec = dict(text=settings["screen_query"], latest_results=settings.get("latest_results", False))
+    if not prior and portfolio.get("screen_query") == spec:
+        prior = portfolio
+    return await scan(client, cache, owner, settings, stamp, calendar, prior)
+
+
+async def review_screen(client, cache, owner, settings, stamp, calendar, state, report):
+    if report is not None:
+        state["original_results"] = report
+    if report and report["rows"]:
+        levels, benchmark, coverage = await market.daily(client,cache,stamp,report["rows"])
+    else:
+        levels, benchmark, coverage = await prepared_market(client,cache,stamp)
+    state["sync"] = dict(at=stamp.isoformat(), **coverage)
+    guard = ManualReviewQuoteGuard(cache, os.getenv("UPSTOX_LTP_OWNER_USER_ID") or owner, "bottom-review", [])
+    series, fundamentals = await collect_evidence(client,cache,guard,stamp,levels,state,coverage)
+    if report:
+        for row in report["rows"]:
+            if "low" not in row:
+                continue
+            key = "NSE:" + row["symbol"]
+            bars = series.get(key)
+            if bars is None:
+                try:
+                    master = await market.technical_instruments(client)
+                    bars = await market.candles(client, "NSE_EQ|"+master[key]["isin"], stamp, guard)
+                except (httpx.HTTPError, KeyError, ValueError):
+                    continue
+            if bars and bars[-1]["end"] == stamp.isoformat():
+                close = bars[-1]["close"]
+                row.update(close=close, proximity=row["low"] <= close <= row["low"]+.15*(row["high"]-row["low"]))
+    levels = await apply_screen(client,cache,guard,settings,stamp,calendar,levels,series,state,coverage)
+    return levels, series, fundamentals, benchmark, coverage
 
 
 async def execute_review(sessions, owner, request_id):
@@ -131,10 +173,6 @@ async def execute_review(sessions, owner, request_id):
         async with asyncio.timeout(525), redis_client() as cache, httpx.AsyncClient(
                 timeout=12, follow_redirects=False,
                 headers={"User-Agent":"Cred-X market research (https://cred-x.in)"}) as client:
-            report = None
-            if settings.get("screen_query", "").strip():
-                report = job.get("original_results") or await original_results(client, settings, now)
-                state["original_results"] = report
             holidays = await market.calendar(client,cache,now)
             stamp, calendar = candle_cutoff(now,holidays)
             state = roll(portfolio, stamp)
@@ -142,38 +180,28 @@ async def execute_review(sessions, owner, request_id):
             # report an earlier run's rows or stage completions as this review's.
             state.update(rows=[], scans=[], at=None, sync=None, error=None, kite_sync=kite)
             state["market_as_of"] = stamp.isoformat()
-            if report is not None:
-                state["original_results"] = report
-            if report and report["rows"]:
-                levels, benchmark, coverage = await market.daily(client,cache,stamp,report["rows"])
+            capture = job.get("original_results")
+            if settings.get("screen_query", "").strip() and not capture:
+                phase = "cloud screen and scorecard"
+                scored = await review_cloud_score(sessions, owner, version, settings, client, cache, stamp, calendar, state)
+                await checkpoint("score")
+                # Keep the actual portfolio's reservations and risk limits for manual sizing.
+                for key in ("original_results", "screen_query", "screen_status", "score_status", "scored_at",
+                            "rows", "setups", "scans", "sync", "at", "status"):
+                    state[key] = scored[key]
             else:
-                levels, benchmark, coverage = await prepared_market(client,cache,stamp)
-            state["sync"] = dict(at=stamp.isoformat(), **coverage)
-            guard = ManualReviewQuoteGuard(cache, os.getenv("UPSTOX_LTP_OWNER_USER_ID") or owner, "bottom-review", [])
-            series, fundamentals = await collect_evidence(client,cache,guard,stamp,levels,state,coverage)
-            if report:
-                for row in report["rows"]:
-                    if "low" not in row:
-                        continue
-                    key = "NSE:" + row["symbol"]
-                    bars = series.get(key)
-                    if bars is None:
-                        try:
-                            master = await market.technical_instruments(client)
-                            bars = await market.candles(client, "NSE_EQ|"+master[key]["isin"], stamp, guard)
-                        except (httpx.HTTPError, KeyError, ValueError):
-                            continue
-                    if bars and bars[-1]["end"] == stamp.isoformat():
-                        close = bars[-1]["close"]
-                        row.update(close=close, proximity=row["low"] <= close <= row["low"]+.15*(row["high"]-row["low"]))
-            levels = await apply_screen(client,cache,guard,settings,stamp,calendar,levels,series,state,coverage)
-            await checkpoint("score")
-            paper_cycle(state,settings,stamp,levels,series,fundamentals,benchmark,coverage,calendar,preview=True)
+                levels, series, fundamentals, benchmark, coverage = await review_screen(
+                    client, cache, owner, settings, stamp, calendar, state, capture)
+                await checkpoint("score")
+                phase = "scorecard"
+                paper_cycle(state,settings,stamp,levels,series,fundamentals,benchmark,coverage,calendar,preview=True)
+                if (coverage.get("query_missing",0) or coverage["covered"] < coverage["universe"]
+                        or coverage["current_candles"] < coverage["patterns"]
+                        or any(row["reason"].startswith("Missing ") for row in state["rows"])):
+                    state["status"] = "partial"
             await checkpoint("actionables")
+            phase = "final actionables"
             size_entries(state,settings,stamp,preview=True)
-            if (coverage.get("query_missing",0) or coverage["covered"] < coverage["universe"] or coverage["current_candles"] < coverage["patterns"]
-                    or any(row["reason"].startswith("Missing ") for row in state["rows"])):
-                state["status"] = "partial"
     except Exception as exc:
         log.exception("Bottom Fishing review failed for request %s", request_id)
         if isinstance(exc, httpx.HTTPStatusError):

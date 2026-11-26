@@ -56,18 +56,21 @@ function PageContent({owner,stage,view,record}:{owner:WorkflowOwner}&Props) {
     {(model.error||issue)&&<p className="rounded-xl bg-rose-50 p-4 text-rose-900" role="alert">{issue||model.error}</p>}
     {stage&&(currentView==="history"||currentView==="scorecard-history") ? <History stage={stage} client={client} scorecards={currentView==="scorecard-history"}/> :
       !data||!output ? (!issue&&<p role="status" className="text-sm text-indigo-700">Loading saved output…</p>) :
-      (stage?[stage]:stages).map(id=><section id={id} key={id} className="min-w-0 space-y-4">
+      (stage?[stage]:stages).map(id=>{
+        const shown = record ? output : stageOutput(data,id);
+        const status = id==="score" ? shown.state.score_status ?? (shown.mode==="Cloud screen" ? undefined : shown.state.status) : id==="screen" ? shown.state.screen_status ?? shown.state.status : shown.state.status;
+        return <section id={id} key={id} className="min-w-0 space-y-4">
         {!stage && <h2 className="text-lg font-semibold">{titles[id]}</h2>}
         {currentView==="inputs"||currentView==="weights" ? (record ? <div className={scorecardPanel}>
           <h2 className="mb-3 text-lg font-semibold">Saved {currentView}</h2>
-          {recordedSettings ? <Inputs key={record+currentView} stage={id} weights={currentView==="weights"} data={{...data,state:output.state,settings:recordedSettings}} readOnly save={model.save}/> : <p>These inputs were not recorded for this run.</p>}
+          {recordedSettings ? <Inputs key={record+currentView} stage={id} weights={currentView==="weights"} data={{...data,state:shown.state,settings:recordedSettings}} readOnly save={model.save}/> : <p>These inputs were not recorded for this run.</p>}
         </div> : <div className={scorecardPanel}><Inputs key={id+currentView} stage={id} weights={currentView==="weights"} data={data} save={model.save} run={model.run} active={model.active||model.sending}/></div>) :
-          id==="screen" && !record && !currentView ? <CloudResults output={data.live}/> : <><div className="flex flex-wrap items-center gap-3 text-sm">
-            {id==="sync" && output.state.kite_sync ? <Status value="completed"/> : output.state.status && <Status value={output.state.status}/>}
-            {output.finished_at||output.state.at ? <span>{date(id==="sync" && output.state.kite_sync ? output.state.kite_sync.captured_at : output.finished_at??output.state.at)} IST</span> : null}
-            <span>{output.mode==="Paper cycle"?"Archived simulation":output.mode}</span></div>
-            {id!=="actionables" && !(id==="sync" && output.state.kite_sync) && output.state.error && <p role="alert">{output.state.error}</p>}
-            {currentView==="stock-flow"?<StockFlow output={output}/>:<StageOutput stage={id} output={output}/>}</>}
-      </section>)}
+          id==="screen" && !record && !currentView ? <CloudResults output={shown}/> : <><div className="flex flex-wrap items-center gap-3 text-sm">
+            {id==="sync" && shown.state.kite_sync ? <Status value="completed"/> : status && <Status value={status}/>}
+            {shown.finished_at||shown.state.at ? <span>{date(id==="sync" && shown.state.kite_sync ? shown.state.kite_sync.captured_at : shown.finished_at??shown.state.at)} IST</span> : null}
+            <span>{shown.mode==="Paper cycle"?"Archived simulation":shown.mode}</span></div>
+            {id!=="actionables" && !(id==="sync" && shown.state.kite_sync) && shown.state.error && <p role="alert">{shown.state.error}</p>}
+            {currentView==="stock-flow"?<StockFlow output={shown}/>:<StageOutput stage={id} output={shown}/>}</>}
+      </section>})}
   </main>;
 }
