@@ -317,6 +317,11 @@ async def start_scorecard(portfolio,revision_id,card,body,db,user,*,managed=Fals
         if pair_v3:
             from .technical_history import pairwise_prior_bars
             seed = await pairwise_prior_bars(db, manifest, [s["listing"] for s in manifest["stocks"]])
+        if technical_v3 and history and "screener_inputs" in manifest:
+            # Pairwise may have warmed a different selection from the same Stage 2 publication.
+            required = {s["listing"] for s in manifest["stocks"]}
+            if not required.issubset(history.get("technical", {})):
+                history = None
         if technical_v3 and not history:
             from .technical_history import prior_bars
             seed=await prior_bars(db,manifest,[s["listing"] for s in manifest["stocks"]])
