@@ -155,7 +155,7 @@ async def test_legacy_queue_runs_all_four_stages_once_and_freezes_review(monkeyp
     monkeypatch.setattr(review.market,"calendar",calendar)
     async def kite(user_id):
         assert user_id == owner.id
-        return {"captured_at": T.isoformat(), "holdings_count": 7}
+        return {"captured_at": T.isoformat(), "holdings_count": 7, "holdings": []}
     monkeypatch.setattr(review,"sync_kite_portfolio",traced(kite,"kite"))
     monkeypatch.setattr(review,"prepared_market",traced(prepared,"sync"))
     monkeypatch.setattr(review,"collect_evidence",traced(evidence,"screen"))
@@ -247,3 +247,28 @@ async def test_scheduled_candle_and_exit_tick_use_local_service_once(monkeypatch
         (sessions, 42, T.isoformat(), False),
         (sessions, 42, T.isoformat(), True),
     ]
+
+
+@pytest.mark.asyncio
+async def test_old_kite_review_restores_only_its_owners_exact_capture():
+    from datetime import timedelta
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from app.domains.auth.models import User
+    from app.domains.bottom_fishing.store import restore_kite_details
+    from app.domains.zerodha.models import ZerodhaPortfolioSnapshot
+
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        for table in (User.__table__, ZerodhaPortfolioSnapshot.__table__):
+            await conn.run_sync(table.create)
+    async with async_sessionmaker(engine)() as db:
+        db.add(ZerodhaPortfolioSnapshot(user_id=5, captured_at=T, snapshot_date=T.date(),
+                                       holdings=[{"tradingsymbol":"TEST"}]))
+        await db.commit()
+        for owner, stamp, matches in [(5,T,True),(6,T,False),(5,T+timedelta(seconds=1),False)]:
+            kite = {"captured_at":stamp.isoformat()}
+            await restore_kite_details(db,owner,{"state":{"kite_sync":kite}})
+            assert ("holdings" in kite) is matches
+            if matches:
+                assert kite["holdings"] == [{"tradingsymbol":"TEST"}]
+    await engine.dispose()

@@ -10,10 +10,10 @@ const mocks = {
   "next/navigation": 'export const useRouter=()=>({replace:path=>location.assign(path)});',
   "@/hooks/useAuth": 'export const useAuth=()=>({user:{id:7}});',
   "@/services/api": `const row={symbol:"NSE:TEST",score:82,price:100,qty:2,stop:96,target:111,rr:2.2,reason:"Proposed buy",sources:["bottom"]};
-    const state={at:"2026-11-25T15:30:00+05:30",rows:[row,{...row,symbol:"NSE:WATCH",qty:undefined,score:67.57,price:222,target:235.3,reason:"Score below 70"},{...row,symbol:"NSE:MISSING",qty:undefined,score:undefined,price:undefined,target:undefined,reason:"Missing current closed candle"}],positions:{},setups:{"NSE:TEST":{discovered:"2026-11-25T15:30:00+05:30",discovery:99}}};
+    const state={kite_sync:{captured_at:"2026-11-25T15:30:00+05:30",holdings_count:1,holdings:[{exchange:"NSE",tradingsymbol:"TEST",quantity:11,average_price:20,last_price:22,invested_value:220,market_value:242,pnl:22}]},at:"2026-11-25T15:30:00+05:30",rows:[row,{...row,symbol:"NSE:WATCH",qty:undefined,score:67.57,price:222,target:235.3,reason:"Score below 70"},{...row,symbol:"NSE:MISSING",qty:undefined,score:undefined,price:undefined,target:undefined,reason:"Missing current closed candle"}],positions:{},setups:{"NSE:TEST":{discovered:"2026-11-25T15:30:00+05:30",discovery:99}}};
     const data={version:0,settings:{screen_query:"Current price > 10",latest_results:false,inputs:["bottom"],capital:100000,weights:{bounce:20,proximity:15,strength:15,recovery:10,roce:12,sales:10,profit:10,leverage:8}},state:{},review:{request_id:42,mode:"Manual review",state}};
     export const apiService={
-      get:async path=>path.endsWith("/history")?{items:[{id:45,mode:"Manual review",scored:1,entries:1,candidates:1,status:"completed"}]}:path.endsWith("/history/45")?data.review:data,
+      get:async path=>path.includes("/history?")?{items:[{id:45,mode:"Manual review",scored:1,entries:1,candidates:1,status:"completed"}]}:path.endsWith("/history/45")?data.review:data,
       post:async (path,v)=>{if(path.endsWith("/run")){window.submits=(window.submits??0)+1;window.runVersion=v.version;data.manual={id:46,status:"queued"};return data.manual;}
         data.settings=v;data.version++;return {...data};}
     };`,
@@ -93,7 +93,7 @@ try {
     assert.equal(labels.includes("Weights"),title===titles[2]);
     await page.getByRole("menuitem",{name:"Saved output",exact:true}).click();
     await page.getByRole("dialog",{name:title+" · Saved output"}).waitFor();
-    if(title!==titles[0]) await verifyChart(page.getByRole("dialog"));
+    await verifyChart(page.getByRole("dialog"));
     await page.keyboard.press("Escape");
   }
   await page.getByRole("button",{name:"Bottom Fishing Screen actions"}).click();

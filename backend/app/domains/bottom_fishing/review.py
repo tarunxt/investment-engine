@@ -68,7 +68,8 @@ async def sync_kite_portfolio(owner):
         if reason in {"session_expired", "not_connected", "missing_token"}:
             raise ValueError("Connect Kite on the India Portfolio page and run Bottom Fishing again.")
         raise ValueError("Kite portfolio sync failed. Check the Zerodha sync history.")
-    return {key: result[key] for key in ("captured_at", "holdings_count") if key in result}
+    return {key: result[key] for key in ("captured_at", "holdings_count", "holdings",
+                                         "holdings_market_value", "holdings_pnl", "available_margin") if key in result}
 
 
 async def execute_review(sessions, owner, request_id):

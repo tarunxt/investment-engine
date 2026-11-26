@@ -8,7 +8,7 @@ import {StageStatusIcon,getStageLedgerTone,stageTileBorder,type StageInfo} from 
 import {Button} from "@/components/ui/button";
 import {useAuth} from "@/hooks/useAuth";
 import {captureWorkflowOwner,onWorkflowOwnerInvalidated,type WorkflowOwner} from "@/lib/workflowOwnerLifetime";
-import {date,latestOutput,route,stages,titles,type Stage} from "./bottomFishing/model";
+import {date,stageOutput,latestOutput,route,stages,titles,type Stage} from "./bottomFishing/model";
 import {useBottomFishing} from "./bottomFishing/useBottomFishing";
 import {Inputs} from "./bottomFishing/Inputs";
 import {StageOutput,StockFlow} from "./bottomFishing/StageOutput";
@@ -82,7 +82,7 @@ function Board({owner}:{owner:WorkflowOwner}){
       routeUrl={sectionRoute} onClose={()=>setSelection(null)} onRetry={()=>void model.refresh()} loading={!data}>
       <div className="space-y-3 p-5 text-sm">{!data?<p>Loading strategy…</p>:selection.section==="Inputs"||selection.section==="Weights"?
         <Inputs stage={selection.stage} weights={selection.section==="Weights"} data={data} save={model.save} run={model.run} active={model.active||model.sending}/>:
-        selection.section==="Stock Flow"?<StockFlow output={output}/>:<StageOutput stage={selection.stage} output={output}/>}</div>
+        selection.section==="Stock Flow"?<StockFlow output={output}/>:<StageOutput stage={selection.stage} output={stageOutput(data,selection.stage)}/>}</div>
     </SavedOutputDialog>}
   </section>;
 }

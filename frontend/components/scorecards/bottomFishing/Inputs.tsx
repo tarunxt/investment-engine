@@ -16,7 +16,7 @@ export function Inputs({stage,weights=false,data,save,readOnly=false,run,active}
     e.preventDefault();if (readOnly || busy || total!==100 || version!==data.version) return;setBusy(true);setMessage("");
     try {setVersion(await save(draft,version));setMessage("Settings saved.");} catch(err){setMessage(String(err));} finally {setBusy(false);}
   }}>
-    {stage==="sync" ? <label>Assigned paper capital ₹ <input disabled={readOnly} required type="number" min={1} max={100000000} className="rounded border p-2" value={draft.capital} onChange={e=>setDraft({...draft,capital:Number(e.target.value)})}/></label>
+    {stage==="sync" ? <label>Strategy sizing limit ₹ <input disabled={readOnly} required type="number" min={1} max={100000000} className="rounded border p-2" value={draft.capital} onChange={e=>setDraft({...draft,capital:Number(e.target.value)})}/></label>
     : weights ? <fieldset className="grid gap-3 sm:grid-cols-2"><legend className="mb-3 font-semibold">Factor weights · {total} / 100</legend>{Object.entries(draft.weights).map(([k,v])=><label className="flex justify-between gap-3" key={k}>{labels[k]} <input disabled={readOnly} className="w-20 rounded border p-1" required type="number" min={0} max={100} value={v} onChange={e=>setDraft({...draft,weights:{...draft.weights,[k]:Number(e.target.value)}})}/></label>)}</fieldset>
     : <label><input disabled={readOnly} type="checkbox" checked={draft.inputs.includes("bottom")} onChange={e=>setDraft({...draft,inputs:e.target.checked?["bottom"]:[]})}/> Bottom Fishing Screen</label>}
     {!draft.inputs.length && stage==="score" && <p>No source selected · fresh entries paused.</p>}

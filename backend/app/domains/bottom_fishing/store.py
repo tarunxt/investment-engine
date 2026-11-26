@@ -68,11 +68,25 @@ def public_request(request_id, job):
     return dict(id=request_id, **{key: job[key] for key in fields if key in job})
 
 
+async def restore_kite_details(db, owner, review):
+    kite = (review or {}).get("state", {}).get("kite_sync")
+    if not kite or "holdings" in kite:
+        return
+    from app.domains.zerodha.models import ZerodhaPortfolioSnapshot as Snapshot
+    captured = datetime.fromisoformat(kite["captured_at"])
+    row = await db.scalar(select(Snapshot).where(
+        Snapshot.user_id == owner, Snapshot.captured_at == captured))
+    if row is not None:
+        kite.update(holdings=row.holdings, holdings_market_value=row.holdings_market_value,
+                    holdings_pnl=row.holdings_pnl, available_margin=row.available_margin)
+
+
 async def snapshot(db, owner, *, include_review=True):
     version, settings = await latest(db,owner,CONFIG,Settings().model_dump())
     _, state = await latest(db,owner,CYCLE,{})
     manual_id, manual = await latest(db,owner,MANUAL,{})
     _, review = await latest(db,owner,REVIEW,None) if include_review else (0,None)
+    await restore_kite_details(db, owner, review)
     return dict(review=review, version=version, settings=Settings.model_validate(settings).model_dump(),
                 query_fields=list(FIELDS), state=state, mode="paper", formula_version=1,
                 manual=public_request(manual_id, manual) if manual_id else None)
@@ -145,9 +159,11 @@ async def ready_requests(db, now):
 
 
 @router.get("/history")
-async def history(before: int | None = Query(default=None, gt=0), db=Depends(get_async_db), user=Depends(get_current_user)):
+async def history(before: int | None = Query(default=None, gt=0), db=Depends(get_async_db), user=Depends(get_current_user), reviews_only: bool=False):
     query = select(ActivityLog.id, ActivityLog.action, ActivityLog.details).where(
         ActivityLog.user_id == user.id, ActivityLog.action.in_((CYCLE, REVIEW)))
+    if reviews_only:
+        query = query.where(ActivityLog.action == REVIEW)
     if before is not None:
         query = query.where(ActivityLog.id < before)
     records = (await db.execute(query.order_by(ActivityLog.id.desc()).limit(21))).all()
@@ -157,6 +173,8 @@ async def history(before: int | None = Query(default=None, gt=0), db=Depends(get
         state = data["state"] if action == REVIEW else data
         items.append(dict(id=key, mode="Manual review" if action == REVIEW else "Paper cycle",
                           at=data.get("finished_at") or state.get("attempt") or state.get("at"),
+                          kite_captured_at=(state.get("kite_sync") or {}).get("captured_at"),
+                          kite_holdings=(state.get("kite_sync") or {}).get("holdings_count"),
                           status=state.get("status"), scored=sum(r.get("score") is not None for r in state.get("rows", [])),
                           candidates=len(state.get("setups", {})), entries=sum(bool(r.get("qty")) for r in state.get("rows", []))))
     return dict(items=items, next_before=items[-1]["id"] if len(records)>20 else None)
@@ -169,4 +187,6 @@ async def history_record(record_id:int, db=Depends(get_async_db), user=Depends(g
     if not record:
         raise HTTPException(404, "Saved run unavailable")
     data = json.loads(record.details)
+    if record.action == REVIEW:
+        await restore_kite_details(db, user.id, data)
     return data if record.action == REVIEW else dict(state=data, mode="Paper cycle")
