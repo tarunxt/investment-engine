@@ -5,6 +5,8 @@ from datetime import datetime
 import httpx
 
 from . import market, score_inputs
+from .query_evidence import daily_closes
+from .strategy import fundamental_factors, clamp
 from .engine import paper_cycle, roll
 from .discovery import FLAGS as FILTERS, Discovery, passed, proximity
 
@@ -54,11 +56,21 @@ async def finish_screen(client, cache, guard, instruments, settings, stamp, cale
                 close = bars[-1]["close"]
                 row.update(close=close, proximity=proximity(dict(row, close_formula=rules.formulas["proximity"]), close))
 
+    prioritized = sorted((k for k, row in rows.items() if "low" in row or k in state["setups"]),
+                         key=lambda k: (k not in state["setups"], k not in levels))
     try:
         async with asyncio.timeout(25):
-            await asyncio.gather(*(get_bars(k) for k, row in rows.items() if "low" in row or k in state["setups"]))
+            await asyncio.gather(*(get_bars(k) for k in prioritized))
     except TimeoutError:
         report["error"] = "Some discovery candles were unavailable before the deadline."
+
+    retry = [k for k in prioritized if k not in series and (k in levels or k in state["setups"])]
+    if retry:
+        try:
+            async with asyncio.timeout(8):
+                await asyncio.gather(*(get_bars(k) for k in retry))
+        except TimeoutError:
+            pass
 
     qualified = {k for k, row in rows.items() if passed(row, rules.minimum)}
     for row in report["rows"]:
@@ -79,11 +91,24 @@ async def finish_screen(client, cache, guard, instruments, settings, stamp, cale
         except (httpx.HTTPError, ValueError, KeyError, IndexError):
             pass  # The scorecard records an explicit missing-evidence decision.
 
+    async def benchmark_evidence():
+        nonlocal benchmark
+        await get_bars(market.BENCH)
+        if benchmark is None and market.BENCH in instruments:
+            prior = max((day for day in calendar if day < stamp.date().isoformat()), default=None)
+            if prior:
+                try:
+                    closes = await daily_closes(client, cache, guard, instruments[market.BENCH], stamp, prior)
+                    if closes:
+                        benchmark = closes[-1]
+                except (httpx.HTTPError, ValueError, KeyError):
+                    pass
+
     effective_settings = score_inputs.scoring_settings(settings)
     if candidates and "bottom" in effective_settings["inputs"]:
         try:
             async with asyncio.timeout(35):
-                await asyncio.gather(get_bars(market.BENCH), *(get_facts(k) for k in candidates if k in series))
+                await asyncio.gather(benchmark_evidence(), *(get_facts(k) for k in candidates if k in series or k in levels or k in state["setups"]))
         except TimeoutError:
             pass  # Keep individual results already received.
 
@@ -92,6 +117,18 @@ async def finish_screen(client, cache, guard, instruments, settings, stamp, cale
     if "bottom" in effective_settings["inputs"]:
         for key in sorted((qualified | awaiting_candle) - {r["symbol"] for r in state["rows"]}):
             state["rows"].append(dict(symbol=key, sources=["bottom"], reason="Missing current closed candle" if key not in series else "Missing verified support levels"))
+    for row in state["rows"]:
+        if row["reason"] != "Missing current closed candle":
+            continue
+        key = row["symbol"]
+        factors, _ = fundamental_factors(facts.get(key))
+        pattern = state["setups"].get(key) or levels.get(key)
+        if pattern and "bounce" in pattern:
+            factors["bounce"] = pattern["bounce"]
+            if "discovery" in pattern:
+                factors["proximity"] = 1-(pattern["discovery"]-pattern["low"])/(.15*pattern["width"])
+        row["points"] = {field:round(clamp(value)*effective_settings["weights"][field], 4)
+                         for field,value in factors.items()}
     score_inputs.record_inputs(state, settings, native)
     incomplete = any(row["reason"].startswith("Missing ") for row in state["rows"])
     screen_partial = (not report["complete"] or bool(report.get("error")) or

@@ -38,6 +38,19 @@ def support(bars, tick, metrics=None):
                 tick=tick, previous=bars[-1]["close"], stop=low-.1*width, target=high-.1*width)
 
 
+def fundamental_factors(facts):
+    factors = {}
+    missing = []
+    for field, label in (("roce", "ROCE"), ("sales", "quarterly sales growth"),
+                         ("profit", "quarterly profit growth"), ("leverage", "debt/equity")):
+        value = (facts or {}).get(field)
+        if value is None:
+            missing.append(label)
+        else:
+            factors[field] = 1-value/2 if field == "leverage" else value/25
+    return factors, missing
+
+
 def evaluate(setup, price, previous, benchmark_return, facts, weights):
     low, width = setup["low"], setup["width"]
     risk = price*(1+COST) - setup["stop"]*(1-COST)
@@ -48,13 +61,19 @@ def evaluate(setup, price, previous, benchmark_return, facts, weights):
                   rr=round(reward/risk, 4) if risk > 0 else None)
     if setup.get("invalid"):
         return dict(result, reason="Support broken")
-    if not facts or benchmark_return is None:
-        return dict(result, reason="Missing fundamentals or benchmark")
     factors = dict(bounce=setup["bounce"], proximity=1-(setup["discovery"]-low)/(.15*width),
-                   strength=.5+((price/setup["previous"]-1)-benchmark_return)/.04,
-                   recovery=(price-setup["discovery"])/(.25*width), roce=facts["roce"]/25,
-                   sales=facts["sales"]/25, profit=facts["profit"]/25, leverage=1-facts["leverage"]/2)
+                   recovery=(price-setup["discovery"])/(.25*width))
+    missing = []
+    if benchmark_return is None:
+        missing.append("NIFTYBEES return")
+    else:
+        factors["strength"] = .5+((price/setup["previous"]-1)-benchmark_return)/.04
+    financial, missing_financials = fundamental_factors(facts)
+    factors.update(financial)
+    missing.extend(missing_financials)
     points = {k:round(clamp(v)*weights[k], 4) for k,v in factors.items()}
+    if missing:
+        return dict(result, points=points, financials=facts, reason="Missing " + ", ".join(missing))
     score = round(sum(points.values()), 2)
     if score < 70:
         reason = "Score below 70"
