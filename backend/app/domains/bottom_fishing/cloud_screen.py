@@ -174,19 +174,24 @@ async def refresh(sessions,owner):
         previous_id, previous = await latest(db,owner,LIVE,{})
         if not settings.get("screen_query","").strip():
             return
-        _, display_names = await latest(db,owner,columns.PREF,columns.DEFAULT)
+        column_version, display_names = await latest(db,owner,columns.PREF,columns.DEFAULT)
         inputs = await score_inputs.plan(db, owner, settings)
         fingerprint = inputs["fingerprint"] if inputs else ""
     now = datetime.now(INDIA)
     async with redis_client() as cache, httpx.AsyncClient(timeout=8,follow_redirects=False) as client:
         stamp, calendar = candle_cutoff(now,await market.calendar(client,cache,now))
-        slot = f"bottom:cloud:scored:columns2:{owner}:{version}:{fingerprint}:{stamp.isoformat()}"
+        slot = f"bottom:cloud:scored:v3:{owner}:{version}:{column_version}:{fingerprint}:{stamp.isoformat()}"
         lease = f"bottom:cloud:lock:{owner}"
         token = uuid4().hex
         saved = previous.get("state", {})
-        if (previous.get("version") == version and previous.get("input_fingerprint","") == fingerprint and saved.get("market_as_of") == stamp.isoformat()
-                and (saved.get("original_results") or {}).get("column_schema") == 2 and saved.get("score_status") and saved.get("status") == "completed"):
-            return
+        final_candle = calendar.get(stamp.date().isoformat()) == stamp.isoformat() and now >= stamp
+        if (previous.get("version") == version and previous.get("column_version") == column_version
+                and previous.get("input_fingerprint", "") == fingerprint
+                and saved.get("market_as_of") == stamp.isoformat()):
+            if final_candle and previous.get("final_candle_attempt"):
+                return
+            if saved.get("score_status") and saved.get("status") == "completed":
+                return
         if await cache.exists(slot) or not await cache.set(lease,token,nx=True,ex=390):
             return
         state = dict(screen_query=dict(text=settings["screen_query"],latest_results=settings.get("latest_results",False)),
@@ -201,7 +206,8 @@ async def refresh(sessions,owner):
             async with sessions() as db:
                 await store.lock(db,owner)
                 current,_ = await latest(db,owner,CONFIG,{})
-                if current != version:
+                current_columns, _ = await latest(db,owner,columns.PREF,columns.DEFAULT)
+                if current != version or current_columns != column_version:
                     return
                 latest_inputs = await score_inputs.plan(db, owner, settings)
                 if (latest_inputs["fingerprint"] if latest_inputs else "") != fingerprint:
@@ -210,6 +216,7 @@ async def refresh(sessions,owner):
                 if latest_id != previous_id:
                     return
                 output = dict(mode="Cloud screen",version=version,input_fingerprint=fingerprint,settings=settings,state=state,
+                              column_version=column_version, final_candle_attempt=final_candle,
                               finished_at=datetime.now(INDIA).isoformat())
                 store.append(db,owner,LIVE,output)
                 await db.commit()

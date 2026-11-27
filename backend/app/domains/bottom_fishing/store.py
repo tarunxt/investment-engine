@@ -247,7 +247,7 @@ async def history(before: int | None = Query(default=None, gt=0), db=Depends(get
         data = json.loads(details)
         state = data if action == CYCLE else data["state"]
         items.append(dict(id=key, mode="Paper cycle" if action == CYCLE else data.get("mode","Manual review"),
-                          at=data.get("finished_at") or state.get("attempt") or state.get("at"),
+                          at=data.get("finished_at") or (state.get("attempt") if state.get("status") == "failed" else None) or state.get("at"),
                           kite_captured_at=(state.get("kite_sync") or {}).get("captured_at"),
                           kite_holdings=(state.get("kite_sync") or {}).get("holdings_count"),
                           screen_status=state.get("screen_status"), score_status=state.get("score_status"),

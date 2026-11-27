@@ -103,6 +103,7 @@ async def daily(client, cache, stamp, comparison=None, discovery=None):
     rows = {"NSE:"+r["symbol"]:r for r in (comparison or [])}
     for k, row in rows.items():
         row["universe"] = membership(k)
+        row["identity_matches"] = k in master and (k not in members or master[k]["isin"] == members[k])
         if k in master and (k not in members or master[k]["isin"] == members[k]):
             keys[k] = master[k]["isin"]
     holidays = await calendar(client, cache, stamp)
@@ -162,7 +163,9 @@ async def daily(client, cache, stamp, comparison=None, discovery=None):
         if pattern and (k in members or k in rows or comparison is None and k != BENCH):
             levels[k] = pattern
     benchmark = days[-1].get(BENCH)
-    return levels, benchmark and benchmark["close"], dict(universe=len(members), covered=covered)
+    mismatches = [k for k, isin in members.items() if k in master and master[k].get("isin") != isin]
+    return levels, benchmark and benchmark["close"], dict(universe=len(members), covered=covered,
+                                                        identity_mismatches=mismatches)
 
 
 async def candles(client, key, stamp, guard):

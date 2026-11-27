@@ -84,7 +84,7 @@ async def paper_fills(client, guard, state):
 async def prepared_market(client, cache, stamp, discovery=None):
     config = Discovery.model_validate(discovery or {}).model_dump()
     signature = sha256(json.dumps(config,sort_keys=True).encode()).hexdigest()
-    cache_key = f"bottom:prepared:v2:{stamp.date()}:{signature}"
+    cache_key = f"bottom:prepared:v3:{stamp.date()}:{signature}"
     prepared = await cache.get(cache_key)
     if prepared:
         levels,benchmark,coverage = json.loads(prepared)
@@ -94,9 +94,24 @@ async def prepared_market(client, cache, stamp, discovery=None):
     return levels, benchmark, coverage
 
 
+async def discovery_market(client, cache, stamp, discovery):
+    try:
+        return await prepared_market(client, cache, stamp, discovery)
+    except httpx.TimeoutException:
+        # Retry only the read-only discovery input, within the original candle.
+        # No reservation, fill or stored cycle has been created at this point.
+        if (datetime.now(INDIA) - stamp).total_seconds() >= 100:
+            raise
+        return await prepared_market(client, cache, stamp, discovery)
+
+
 async def collect_evidence(client, cache, guard, stamp, levels, state, coverage):
-    keys = set(levels)|set(state["setups"])|set(state["positions"])|{market.BENCH}
     master = await load_instruments(client)
+    mismatches = set((coverage or {}).get("identity_mismatches", []))
+    for symbol, setup in list(state["setups"].items()):
+        if symbol in mismatches or not setup.get("isin") or master.get(symbol) != "NSE_EQ|" + setup["isin"]:
+            del state["setups"][symbol]
+    keys = set(levels)|set(state["setups"])|set(state["positions"])|{market.BENCH}
     gate = asyncio.Semaphore(4)
     async def evidence(k):
         async with gate:
@@ -148,7 +163,8 @@ async def run(sessions, owner, stamp):
             if state.get("at")!=stamp.isoformat():
                 screen = stamp.time() in (time(9,30),time(13,15))
                 if screen or stamp.time()==time(9,20):
-                    levels,benchmark,coverage = await prepared_market(client,cache,stamp,settings.get("discovery"))
+                    load_market = discovery_market if screen else prepared_market
+                    levels,benchmark,coverage = await load_market(client,cache,stamp,settings.get("discovery"))
                     state["sync"] = dict(at=stamp.isoformat(), **coverage)
                     state["benchmark_close"] = benchmark
                     if not screen:

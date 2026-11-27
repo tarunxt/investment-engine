@@ -54,6 +54,9 @@ def paper_cycle(state, settings, stamp, levels, series, fundamentals, benchmark_
         bars = series.get(k,[])
         current = bars[-1] if bars and bars[-1]["end"]==at else None
         pattern = levels.get(k)
+        if screen and k not in setups and pattern and not current and "bottom" in settings["inputs"]:
+            rows.append(dict(symbol=k, sources=["bottom"], reason="Missing current closed candle"))
+            continue
         if screen and k not in setups and pattern and current:
             price = current["close"]
             if at_close(pattern, price):

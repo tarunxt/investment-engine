@@ -23,7 +23,8 @@ async def finish_screen(client, cache, guard, instruments, settings, stamp, cale
     state = roll({}, stamp)
     if (previous.get("day") == state["day"] and (previous.get("at") or "") <= cutoff
             and (previous.get("discovery") or Discovery().model_dump()) == rules.model_dump()):
-        state["setups"] = {k: dict(v) for k, v in previous.get("setups", {}).items() if k in allowed}
+        state["setups"] = {k: dict(v) for k, v in previous.get("setups", {}).items() if k in allowed and v.get("isin")
+                           and instruments.get(k) == "NSE_EQ|" + v["isin"]}
     levels, benchmark, series = {}, None, {}
     coverage = {"universe": 0, "covered": 0}
     if rows:
@@ -32,6 +33,11 @@ async def finish_screen(client, cache, guard, instruments, settings, stamp, cale
                 levels, benchmark, coverage = await market.daily(client, cache, stamp, list(rows.values()), discovery=rules.model_dump())
         except (httpx.HTTPError, ValueError, KeyError, TimeoutError) as exc:
             report["error"] = f"Daily history unavailable ({type(exc).__name__})."
+
+    # The configurable universe filter may be optional, but an issuer mismatch never is.
+    for key in list(state["setups"]):
+        if rows[key].get("identity_matches") is False:
+            del state["setups"][key]
 
     gate = asyncio.Semaphore(4)
 
@@ -60,6 +66,9 @@ async def finish_screen(client, cache, guard, instruments, settings, stamp, cale
     report["minimum"] = rules.minimum
     qualified.intersection_update(allowed)
     selected = {k: levels[k] for k in qualified if k in levels}
+    # A selected listing with a viable daily pattern still needs its closed candle
+    # before the final discovery filter can decide. Keep it visible without qualifying it.
+    awaiting_candle = {key for key in allowed if key in levels and key not in series}
     candidates = qualified | set(state["setups"])
     facts = {}
 
@@ -81,7 +90,7 @@ async def finish_screen(client, cache, guard, instruments, settings, stamp, cale
     coverage.update(patterns=len(selected), current_candles=sum(k in series for k in selected))
     paper_cycle(state, effective_settings, stamp, selected, series, facts, benchmark, coverage, calendar, preview=True)
     if "bottom" in effective_settings["inputs"]:
-        for key in sorted(qualified - {r["symbol"] for r in state["rows"]}):
+        for key in sorted((qualified | awaiting_candle) - {r["symbol"] for r in state["rows"]}):
             state["rows"].append(dict(symbol=key, sources=["bottom"], reason="Missing current closed candle" if key not in series else "Missing verified support levels"))
     score_inputs.record_inputs(state, settings, native)
     incomplete = any(row["reason"].startswith("Missing ") for row in state["rows"])
