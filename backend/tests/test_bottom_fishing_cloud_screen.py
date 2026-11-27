@@ -61,7 +61,7 @@ async def test_score_consumes_verified_screen_candles_and_keeps_missing_evidence
     assert state["original_results"] is report and report["rows"][0]["proximity"] is True
     assert state["screen_status"] == "partial" and state["scored_at"]
     assert [r["symbol"] for r in state["rows"]] == ["NSE:A"]
-    assert [call.args[1] for call in candles.await_args_list] == ["stock","benchmark"]
+    assert [call.args[1] for call in candles.await_args_list] == ["benchmark","stock"]
     row = state["rows"][0]
     if missing_facts:
         assert state["score_status"] == "partial" and row["reason"].startswith("Missing ")
@@ -146,3 +146,37 @@ async def test_cloud_refresh_persists_pair_once_and_manual_reuses_only_exact_res
     await cloud_screen.refresh(sessions, 5)
     assert scan.await_count == 2
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("returned_date,expected", [("2026-11-26", 295.33), ("2026-11-25", None)])
+async def test_benchmark_fallback_accepts_only_the_previous_session(monkeypatch, returned_date, expected):
+    from unittest.mock import AsyncMock
+    import httpx
+    from app.domains.bottom_fishing import market
+
+    monkeypatch.setenv("UPSTOX_ANALYTICS_TOKEN", "test")
+    def serve(request):
+        assert request.url.path.endswith("/days/1/2026-11-26/2026-11-26")
+        candle = [returned_date+"T00:00:00+05:30", 294, 296, 293, 295.33, 1050]
+        return httpx.Response(200, json={"data":{"candles":[candle]}})
+    cache, guard = AsyncMock(), AsyncMock()
+    cache.get.return_value = None
+    guard.admit.return_value = True
+    async with httpx.AsyncClient(transport=httpx.MockTransport(serve)) as client:
+        result = await market.previous_session_close(client, cache, guard, "NSE_EQ|INF204KB14I2", "2026-11-26")
+    assert result == expected
+    assert cache.set.await_count == int(expected is not None)
+
+
+@pytest.mark.asyncio
+async def test_verified_fundamentals_are_reused_without_a_new_fetch():
+    import json
+    from unittest.mock import AsyncMock
+    from app.domains.bottom_fishing import issuer
+
+    verified = {"quarter":"Sep 2026", "sales":9, "profit":0, "roce":12, "leverage":0}
+    cache = AsyncMock()
+    cache.get.return_value = json.dumps(verified)
+    assert await issuer.facts(None, cache, "NSE:TEST") == verified
+    cache.get.assert_awaited_once_with("bottom:verified-financials:v1:NSE:TEST")

@@ -168,6 +168,31 @@ async def daily(client, cache, stamp, comparison=None, discovery=None):
                                                         identity_mismatches=mismatches)
 
 
+async def previous_session_close(client, cache, guard, instrument, session):
+    key = f"bottom:benchmark-close:{instrument}:{session}"
+    cached = await cache.get(key)
+    if cached is not None:
+        return float(cached)
+    if not await guard.admit():
+        return None
+    url = f"https://api.upstox.com/v3/historical-candle/{quote(instrument, safe='')}/days/1/{session}/{session}"
+    response = await client.get(url, headers={"Authorization":"Bearer "+os.environ["UPSTOX_ANALYTICS_TOKEN"]})
+    if response.status_code == 429:
+        await guard.backoff(response.headers.get("Retry-After"))
+    response.raise_for_status()
+    candles = response.json()["data"]["candles"]
+    if len(candles) != 1 or len(candles[0]) < 5:
+        return None
+    candle = candles[0]
+    end = datetime.fromisoformat(candle[0])
+    close = candle[4]
+    if (end.tzinfo is None or end.astimezone(INDIA).date().isoformat() != session
+            or type(close) not in (float, int) or not math.isfinite(close) or close <= 0):
+        return None
+    await cache.set(key, str(close), ex=3*86400)
+    return close
+
+
 async def candles(client, key, stamp, guard):
     if not await guard.admit():
         return []
