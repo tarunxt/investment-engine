@@ -51,7 +51,7 @@ export function PortfolioWorkflowHistoryCard({ group, runs, onOpen, runLinksAvai
     const source = children.find(run => run.id === stage?.run_id);
     const cardPath = isCard(key) ? scorecardHref(group.portfolio === "india" ? "zerodha" : "indmoneyUs", key, group.sequence) : null;
     const path = cardPath ?? (stage?.run_id ? getRunDetailPathFromPrompt(stage.run_id, source?.prompt_preview) : detailPath);
-    return <HistoricalStageLedgerRow key={key} stage={key} info={historicalStageInfo(stage)} now={Date.parse(group.updated_at)} additional={additional} stageRunAvailable={Boolean(stage?.run_id)}
+    return <HistoricalStageLedgerRow key={key} stage={key} info={historicalStageInfo(stage)} now={Date.parse(group.updated_at)} additional={additional} destination={cardPath ? "scorecard" : stage?.run_id ? "stage" : "workflow"}
       onClick={stage ? () => onOpen(path) : undefined} onOutputClick={stage ? () => onOpen(cardPath ? cardPath+"?tab=output" : path) : undefined} onPromptClick={stage?.run_id ? () => onOpen(cardPath ? cardPath+"?tab=prompts" : path) : undefined} />;
   };
   return (
