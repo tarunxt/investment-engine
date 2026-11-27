@@ -5,6 +5,7 @@ from datetime import datetime
 from urllib.parse import quote
 
 from lxml import html
+from . import screen_ratios
 from .column_facts import statement_columns
 from app.domains.scorecards.research import INDIA, download
 
@@ -135,7 +136,7 @@ def issuer_fields(root):
 
 async def issuer(client, cache, listing):
     symbol = listing.split(":",1)[1]
-    key = "bottom:query-issuer:v3:"+listing
+    key = "bottom:query-issuer:v4:"+listing
     raw = await cache.get(key)
     if raw:
         return json.loads(raw)
@@ -145,6 +146,7 @@ async def issuer(client, cache, listing):
     verify_issuer(root,symbol)
     fields = issuer_fields(root)
     fields['display'] = statement_columns(root)
+    fields['screen_source'] = screen_ratios.source(root)
     try:
         score_facts = score_financials(root)
         observed = datetime.now(INDIA)

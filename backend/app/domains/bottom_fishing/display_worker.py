@@ -9,7 +9,7 @@ from uuid import uuid4
 import httpx
 
 from app.domains.zerodha.upstox_quote_guard import QuoteGuard, RELEASE, redis_client
-from . import columns, market
+from . import columns, market, screen_ratios
 from .issuer import issuer
 
 log = logging.getLogger(__name__)
@@ -32,6 +32,8 @@ async def overlay(cache, report, stamp):
     day = report.get("history_day", stamp)
     lookup = [key for row in rows for key in keys(row, session, day)]
     records = await cache.mget(lookup)
+    ratio_keys = [key + ":" + metric for key in lookup[::3] for metric in screen_ratios.METRICS]
+    ratios = await cache.mget(ratio_keys)
     for i, row in enumerate(rows):
         financial, history, previous = [json.loads(raw) if raw else {} for raw in records[i*3:i*3+3]]
         fallback = previous if previous.get("session", "9999") <= session else {}
@@ -45,8 +47,27 @@ async def overlay(cache, report, stamp):
             values["CMP by 200 DMA"] = cmp_dma
         row["column_status"] = {name: (history if name in HISTORY else financial).get("status", "loading")
                                 for name in report.get("column_names", columns.DEFAULT) if name not in values}
+        pat_basis = None
+        for offset, metric in enumerate(screen_ratios.METRICS):
+            if metric in values or metric not in row["column_status"]:
+                continue
+            raw = ratios[2*i + offset]
+            record = json.loads(raw) if raw else {}
+            result = record.get("values", {}).get(metric)
+            if result is not None and (metric != screen_ratios.PAT or not observed.get("quarter")
+                                       or isinstance(record.get("quarter"), dict)
+                                       or record.get("quarter") == observed["quarter"]):
+                if metric == screen_ratios.PAT and isinstance(record.get("quarter"), dict):
+                    pat_basis = record["quarter"]
+                values[metric] = result
+                row["column_status"].pop(metric)
+            else:
+                row["column_status"][metric] = record.get("status", "loading")
         row["issuer_observed_at"] = observed.get("observed_at")
         row["issuer_quarter"] = observed.get("quarter")
+        if pat_basis:
+            label = f"Prior-year PAT: {pat_basis['period']} ({pat_basis['basis']}, Screener)"
+            row["issuer_quarter"] = " · ".join(filter(None, [row["issuer_quarter"], label]))
 
 
 async def resolve(cache, key, fetch, *, session, last=None):
@@ -118,8 +139,20 @@ async def fill(sessions, owner):
                         raise ValueError("Price history unavailable")
                     return values, None
 
+                async def named_ratio(metric):
+                    async def fetch():
+                        symbol = row["exchange_token"] if row["exchange"] == "BSE" else row["symbol"]
+                        fields, _ = await issuer(client, cache, f"{row['exchange']}:{symbol}")
+                        direct = fields.get("display", {}).get(metric)
+                        if direct is not None:
+                            return {metric: direct}, fields.get("quarter")
+                        return await screen_ratios.lookup(client, cache, fields, metric, session)
+                    await resolve(cache, finance_key + ":" + metric, fetch, session=session)
+
                 await asyncio.gather(resolve(cache, finance_key, financials, session=session, last=last),
                                      resolve(cache, price_key, prices, session=session))
+                for metric in screen_ratios.METRICS:
+                    await named_ratio(metric)
 
         await asyncio.gather(*(project(row) for row in report["rows"]))
 

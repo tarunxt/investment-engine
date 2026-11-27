@@ -17,11 +17,14 @@ async def test_47_matches_keep_scan_values_and_reuse_sessions():
     entries = [json.dumps(current), json.dumps({"values":{"DMA 200":10}}), None,
                json.dumps({"status":"retry"}), None, json.dumps(previous)] + [None]*135
     cache = AsyncMock()
-    cache.mget.return_value = entries
+    ratios = [json.dumps({"status": "ready", "values": {"Industry PE": 22.5}}), None,
+              json.dumps({"status": "retry"}), None] + [None]*90
+    cache.mget.side_effect = lambda ks: entries if len(ks) == 141 else ratios
     await worker.overlay(cache, report, stamp)
-    assert len(cache.mget.call_args.args[0]) == 141
+    assert len(cache.mget.call_args.args[0]) == 94
     assert rows[0]["columns"]["Net Profit latest quarter"] == 0
-    assert rows[0]["column_status"] == {"Industry PE":"ready"}
+    assert rows[0]["columns"]["Industry PE"] == 22.5
+    assert "Industry PE" not in rows[0]["column_status"]
     assert rows[1]["columns"]["Net Profit latest quarter"] == 10
     assert rows[1]["issuer_quarter"] == "Jun 2026"
     assert rows[1]["column_status"]["Industry PE"] == "retry"
