@@ -109,6 +109,18 @@ async def snapshot(db, owner, *, include_review=True):
         _, saved_live = await latest(db,owner,LIVE,{})
         if saved_live.get("version")==version:
             live = saved_live
+            report = live.get("state", {}).get("original_results")
+            stamp = live.get("state", {}).get("market_as_of")
+            if report and stamp:
+                from redis.exceptions import RedisError
+                from app.domains.zerodha.upstox_quote_guard import redis_client
+                from .display_worker import overlay
+                try:
+                    async with redis_client() as cache:
+                        await overlay(cache, report, stamp)
+                except (RedisError, OSError):
+                    import logging
+                    logging.getLogger(__name__).exception("Live display cache unavailable")
     column_version, names = await latest(db,owner,columns.PREF,columns.DEFAULT)
     session = ((live or review or {}).get("state",{}).get("market_as_of") or "")[:10]
     _, imported = await latest(db,owner,columns.IMPORT+session,{}) if session else (0,{})

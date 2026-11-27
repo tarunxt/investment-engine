@@ -14,7 +14,7 @@ from sqlalchemy import select
 from app.domains.auth.models import User
 from app.domains.zerodha.upstox_quote_guard import QuoteGuard, RELEASE, redis_client
 from app.domains.zerodha.upstox_quotes import build_quote_request, configured_for, technical_instruments
-from . import market, store, score_inputs, columns
+from . import market, store, score_inputs, columns, display_worker
 from .discovery import Discovery, INDEX_SIZES
 from .cloud_score import finish_screen
 from .issuer import issuer
@@ -72,14 +72,20 @@ async def quotes(client, guard, keys, stamp):
     return result
 
 
-async def scan(client, cache, owner, settings, stamp, calendar, previous=None):
+async def scan(client, cache, owner, settings, stamp, calendar, previous=None, *, background_display=False):
     async with asyncio.timeout(235):
         report, instruments, guard = await query_matches(client, cache, owner, settings, stamp, calendar)
     state = await finish_screen(client, cache, guard, instruments, settings, stamp, calendar, report, previous or {})
-    try:
-        await columns.enrich(client, cache, guard, instruments, settings, stamp, calendar, report)
-    except Exception:
-        log.exception("Display column enrichment unavailable")
+    if not background_display:
+        try:
+            await columns.enrich(client, cache, guard, instruments, settings, stamp, calendar, report)
+        except Exception:
+            log.exception("Manual display column enrichment unavailable")
+        return state
+    report["column_names"] = settings.get("column_names", columns.DEFAULT)
+    report["column_schema"] = 3
+    report["history_day"] = max((day for day, close in calendar.items() if day < stamp.date().isoformat()
+                                 or close and datetime.fromisoformat(close) <= stamp), default=stamp.date().isoformat())
     return state
 
 
@@ -199,7 +205,8 @@ async def refresh(sessions,owner):
         try:
             try:
                 state = await scan(client, cache, owner, {**store.Settings.model_validate(settings).model_dump(), "score_inputs": inputs, "column_names":display_names},
-                                   stamp, calendar, previous.get("state") if previous.get("version") == version else None)
+                                   stamp, calendar, previous.get("state") if previous.get("version") == version else None,
+                                   background_display=True)
             except Exception as exc:
                 log.exception("Cloud BFS scan failed")
                 state.update(status="failed",error=f"Cloud refresh failed ({type(exc).__name__}).")
@@ -226,6 +233,10 @@ async def refresh(sessions,owner):
 
 
 async def serve(sessions):
+    await asyncio.gather(scan_loop(sessions), display_worker.serve(sessions))
+
+
+async def scan_loop(sessions):
     while True:
         try:
             if os.getenv("UPSTOX_ANALYTICS_TOKEN"):

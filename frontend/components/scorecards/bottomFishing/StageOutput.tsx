@@ -96,7 +96,11 @@ export function StageOutput({stage,output,model,chooser}:{stage:Stage;output:Out
               (qualified(row)?"✓ Qualified":possible<minimum?"✕ Excluded":"Unconfirmed")+" ("+count+"/5)",
               ...names.map(name=>{const native=imported?.[key]?.[name];const v=native??row.columns?.[name];
                 const source=native!=null?"Screener CSV":name.startsWith("Volume")||name.includes("DMA")?(row.exchange??"NSE")+" listing · Upstox":"Issuer or exchange observation";
-                return <span key={name} title={v==null?"No verified value for this company and session":source}>{num(v)}</span>;})]};
+                const status=row.column_status?.[name];
+                const missing=status==="ready"?"Unavailable from source":status==="retry"?"Retry scheduled":status==="loading"?"Loading":num(undefined);
+                const detail=native==null && source==="Issuer or exchange observation" && row.issuer_observed_at
+                  ? [source,row.issuer_quarter,date(row.issuer_observed_at)+" IST"].filter(Boolean).join(" · ") : source;
+                return <span key={name} title={v==null?missing:detail}>{v==null?missing:num(v)}</span>;})]};
           })}
           empty={cloud ? (report.unknown ? "No confirmed matches yet. Coverage is partial." : "No stocks matched this query.") : report.complete?"Screener returned zero matches for this query.":"Original query results unavailable."}/>
       </> : cloud ? <p>Current query results unavailable.</p> : <p>This run did not capture the original Screener result list. Run the query again to populate the comparison.</p>}
