@@ -5,7 +5,6 @@ from datetime import datetime
 import httpx
 
 from . import market, score_inputs
-from .query_evidence import daily_closes
 from .strategy import fundamental_factors, clamp
 from .engine import paper_cycle, roll
 from .discovery import FLAGS as FILTERS, Discovery, passed, proximity
@@ -56,6 +55,16 @@ async def finish_screen(client, cache, guard, instruments, settings, stamp, cale
                 close = bars[-1]["close"]
                 row.update(close=close, proximity=proximity(dict(row, close_formula=rules.formulas["proximity"]), close))
 
+    prior = max((day for day in calendar if day < stamp.date().isoformat()), default=None)
+    if rows and market.BENCH in instruments:
+        # Reserve benchmark evidence before the fan-out to individual listings.
+        await get_bars(market.BENCH)
+        if benchmark is None and prior:
+            try:
+                benchmark = await market.previous_session_close(client, cache, guard, instruments[market.BENCH], prior)
+            except (httpx.HTTPError, ValueError, KeyError, IndexError) as exc:
+                coverage["benchmark_close_error"] = type(exc).__name__
+
     prioritized = sorted((k for k, row in rows.items() if "low" in row or k in state["setups"]),
                          key=lambda k: (k not in state["setups"], k not in levels))
     try:
@@ -88,30 +97,20 @@ async def finish_screen(client, cache, guard, instruments, settings, stamp, cale
         try:
             async with gate:
                 facts[key] = await market.facts(client, cache, key)
-        except (httpx.HTTPError, ValueError, KeyError, IndexError):
-            pass  # The scorecard records an explicit missing-evidence decision.
-
-    async def benchmark_evidence():
-        nonlocal benchmark
-        await get_bars(market.BENCH)
-        if benchmark is None and market.BENCH in instruments:
-            prior = max((day for day in calendar if day < stamp.date().isoformat()), default=None)
-            if prior:
-                try:
-                    closes = await daily_closes(client, cache, guard, instruments[market.BENCH], stamp, prior)
-                    if closes:
-                        benchmark = closes[-1]
-                except (httpx.HTTPError, ValueError, KeyError):
-                    pass
+        except (httpx.HTTPError, ValueError, KeyError, IndexError) as exc:
+            coverage.setdefault("fundamental_errors", {})[key] = type(exc).__name__
 
     effective_settings = score_inputs.scoring_settings(settings)
     if candidates and "bottom" in effective_settings["inputs"]:
         try:
             async with asyncio.timeout(35):
-                await asyncio.gather(benchmark_evidence(), *(get_facts(k) for k in candidates if k in series or k in levels or k in state["setups"]))
+                await asyncio.gather(*(get_facts(k) for k in candidates if k in series or k in levels or k in state["setups"]))
         except TimeoutError:
             pass  # Keep individual results already received.
 
+    if candidates and market.BENCH not in series and market.BENCH in instruments:
+        await get_bars(market.BENCH)
+    coverage.update(benchmark_previous_close=benchmark, benchmark_current_candle=market.BENCH in series)
     coverage.update(patterns=len(selected), current_candles=sum(k in series for k in selected))
     paper_cycle(state, effective_settings, stamp, selected, series, facts, benchmark, coverage, calendar, preview=True)
     if "bottom" in effective_settings["inputs"]:

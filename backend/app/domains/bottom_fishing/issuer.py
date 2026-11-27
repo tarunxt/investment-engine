@@ -153,11 +153,16 @@ async def issuer(client, cache, listing):
         score_facts.update(source=url, observed=observed.isoformat())
     except (ValueError, KeyError, IndexError):
         score_facts = None
+    if score_facts:
+        await cache.set("bottom:verified-financials:v1:"+listing, json.dumps(score_facts,allow_nan=False), ex=86400)
     result = [fields,score_facts]
     await cache.set(key,json.dumps(result,allow_nan=False),ex=300)
     return result
 
 
 async def facts(client, cache, listing):
+    saved = await cache.get("bottom:verified-financials:v1:"+listing)
+    if saved:
+        return json.loads(saved)
     _, score_facts = await issuer(client, cache, listing)
     return score_facts
