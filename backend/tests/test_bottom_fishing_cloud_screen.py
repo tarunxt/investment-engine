@@ -65,6 +65,8 @@ async def test_score_consumes_verified_screen_candles_and_keeps_missing_evidence
     row = state["rows"][0]
     if missing_facts:
         assert state["score_status"] == "partial" and row["reason"].startswith("Missing ")
+        assert set(row["points"]) == {"bounce", "proximity", "strength", "recovery"}
+        assert "ROCE" in row["reason"]
         assert "score" not in row
     else:
         assert state["score_status"] == "completed" and len(row["points"]) == 8

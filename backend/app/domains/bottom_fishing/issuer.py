@@ -24,32 +24,50 @@ def financials(data, symbol):
 
 def score_financials(root):
     def series(section, label):
-        table = root.xpath(f'//section[@id="{section}"]//table')[0]
-        dates = [c.text_content().strip() for c in table.xpath('.//thead/tr[last()]/th')][1:]
-        for row in table.xpath('.//tbody/tr'):
+        tables = root.xpath(f'//section[@id="{section}"]//table')
+        if not tables:
+            return {}
+        dates = [c.text_content().strip() for c in tables[0].xpath('.//thead/tr[last()]/th')][1:]
+        for row in tables[0].xpath('.//tbody/tr'):
             cells = row.xpath('./td')
-            if cells and ' '.join(cells[0].text_content().replace('+','').split())==label:
-                return {d:float(c.text_content().replace(',','').replace('%','').strip()) for d,c in zip(dates,cells[1:])
-                        if c.text_content().strip() not in ('','—','-')}
-        raise ValueError("Missing "+label)
-    def latest(series):
-        return max(series, key=lambda d:datetime.strptime(d,'%b %Y'))
-    sales, profit = series("quarters","Sales"), series("quarters","Net Profit")
-    period = latest(sales)
-    prev = datetime.strptime(period,'%b %Y')
-    prior = prev.replace(year=prev.year-1).strftime('%b %Y')
-    def growth(values):
-        if values[prior]<=0:
-            raise ValueError("Non-positive growth base")
-        return 100*(values[period]/values[prior]-1)
+            if not cells or ' '.join(cells[0].text_content().replace('+','').split()) != label:
+                continue
+            values = {}
+            for period, cell in zip(dates, cells[1:]):
+                try:
+                    datetime.strptime(period, '%b %Y')
+                    value = float(cell.text_content().replace(',','').replace('%','').strip())
+                    if math.isfinite(value):
+                        values[period] = value
+                except ValueError:
+                    continue
+            return values
+        return {}
+
+    def latest(values):
+        return max(values, key=lambda d:datetime.strptime(d,'%b %Y'), default=None)
+
+    sales = series("quarters","Sales") or series("quarters","Revenue")
+    profit = series("quarters","Net Profit")
+    period = latest(sales.keys() | profit.keys())
+    if not period:
+        raise ValueError("Latest quarter unavailable")
+    date = datetime.strptime(period,'%b %Y')
+    prior = date.replace(year=date.year-1).strftime('%b %Y')
+    facts = dict(quarter=period)
+    for key, values in (("sales", sales), ("profit", profit)):
+        if period in values and values.get(prior, 0) > 0:
+            facts[key] = 100*(values[period]/values[prior]-1)
     debt, capital, reserves = (series("balance-sheet",k) for k in ("Borrowings","Equity Capital","Reserves"))
-    balance = latest(debt)
-    equity = capital[balance]+reserves[balance]
-    if equity<=0:
-        raise ValueError("Non-positive equity")
+    balance = latest(debt.keys() | capital.keys() | reserves.keys())
+    if balance in debt and balance in capital and balance in reserves:
+        equity = capital[balance]+reserves[balance]
+        if equity > 0:
+            facts.update(balance=balance, leverage=debt[balance]/equity)
     roce = series("ratios","ROCE %")
-    return dict(sales=growth(sales), profit=growth(profit), roce=roce[latest(roce)], leverage=debt[balance]/equity,
-                quarter=period, balance=balance, roce_period=latest(roce))
+    if roce:
+        facts.update(roce_period=latest(roce), roce=roce[latest(roce)])
+    return facts
 
 
 def issuer_fields(root):
@@ -117,7 +135,7 @@ def issuer_fields(root):
 
 async def issuer(client, cache, listing):
     symbol = listing.split(":",1)[1]
-    key = "bottom:query-issuer:v2:"+listing
+    key = "bottom:query-issuer:v3:"+listing
     raw = await cache.get(key)
     if raw:
         return json.loads(raw)
