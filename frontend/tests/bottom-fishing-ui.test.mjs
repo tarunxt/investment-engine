@@ -15,7 +15,7 @@ const mocks = {
     const cutoff="2026-11-26T15:30:00+05:30";
     const empty = location.search.includes("empty-cloud");
     Object.assign(data.live.state,{screen_status:"partial",score_status:"completed",scored_at:cutoff,at:cutoff,
-      market_as_of:cutoff,rows:empty?[]:[{...row,score:79,qty:undefined,reason:"Waiting for fresh breakout"}],
+      market_as_of:cutoff,rows:empty?[]:[{...row,score:79,points:{bounce:20,proximity:15,strength:15,recovery:0,roce:12,sales:9,profit:0,leverage:8},qty:undefined,reason:"Waiting for fresh breakout"}],
       setups:empty?{}:state.setups});
     if (empty) {
       data.manual={id:50,status:"failed",stage:"screen"};
@@ -129,7 +129,7 @@ try {
   await menu.click(); await page.getByRole("menuitem",{name:"Scorecard history"}).click();
   await page.getByRole("link",{name:/#45/}).click();
   await page.getByRole("heading",{name:"Saved run #45"}).waitFor();
-  await page.getByRole("cell",{name:"82",exact:true}).waitFor();
+  assert.equal(await page.getByRole("button",{name:"Score calculation for NSE:TEST"}).innerText(),"82.00");
   await verifyChart(page);
   for(const stage of ["screen","score","actionables"]){
     await page.goto(root+"/console/zerodha/bottom-fishing/"+stage+"?view=stock-flow");
@@ -169,7 +169,11 @@ try {
   await page.getByRole("menuitem",{name:"Saved output",exact:true}).click();
   await page.getByRole("dialog").getByText("Scorecard ran. No eligible listings among the confirmed results.").waitFor();
   await page.goto(root+"/console/zerodha/bottom-fishing/score");
-  await page.getByRole("cell",{name:"79",exact:true}).waitFor();
+  await page.getByRole("button",{name:"Score calculation for NSE:TEST"}).click();
+  const calculation=page.getByRole("dialog",{name:"Score calculation for NSE:TEST"});
+  await calculation.getByText("20 + 15 + 15 + 0 + 12 + 9 + 0 + 8 ≈ 79.00 / 100").waitFor();
+  await page.keyboard.press("Escape");
+  await calculation.waitFor({state:"hidden"});
   console.log("PASS cloud scorecard on the board and stage page, including zero candidates after a failed manual review");
   console.log("PASS editable Stage 2 Inputs, checkbox, versioned save and live results");
   console.log("PASS immediate analysis request, review basket, four stage menus, settings, saved outputs, stock flow and frozen scorecard history");
