@@ -1,3 +1,4 @@
+import {ScoreCalculation} from "./ScoreCalculation";
 import Link from "next/link";
 import {useState} from "react";
 import {defaultDiscovery,thresholdName,filterKeys} from "./DiscoveryEditor";
@@ -22,7 +23,7 @@ export function Decisions({output}:{output:Output}) {
     {state.status === "partial" && <p className="text-sm text-amber-800">Partial coverage. Decisions use only the available market data.</p>}
     {state.error && <p role="alert" className="text-sm text-red-700">{state.error}</p>}
     <Table headers={["Stock","Decision","Score /100","Price ₹","Breakout ₹","Max buy ₹","Qty","Amount ₹","Stop ₹","Target ₹","Net R/R"]}
-      rows={rows.map(r=>({key:r.symbol,cells:[<TradingViewSymbolLink key="stock" symbol={r.symbol}/>,r.reason,num(r.score),num(r.price),num(r.breakout),num(r.max_buy),num(r.qty),num(r.qty && r.price ? r.qty*r.price : undefined),num(r.stop),num(r.target),num(r.rr)]}))}
+      rows={rows.map(r=>({key:r.symbol,cells:[<TradingViewSymbolLink key="stock" symbol={r.symbol}/>,r.reason,<ScoreCalculation key="score" row={r} output={output}/>,num(r.price),num(r.breakout),num(r.max_buy),num(r.qty),num(r.qty && r.price ? r.qty*r.price : undefined),num(r.stop),num(r.target),num(r.rr)]}))}
       empty={state.status === "failed" ? "No final basket was produced by this run." : state.at ? "No entry qualified in this run." : "Awaiting the first completed run."}/>
   </div>;
 }
@@ -116,7 +117,7 @@ export function StageOutput({stage,output,model,chooser}:{stage:Stage;output:Out
     return <>{state.scored_at && report && <p className="text-sm text-slate-700">{report.rows.length} query matches · {passed} qualified under <strong>{thresholdName(minimum)}</strong> · {(state.rows??[]).filter(r=>r.score!=null).length} scored.
       {state.scorecard_inputs && <> Stage 3 used the runs selected in Inputs.</>}</p>}
       <Table headers={["Stock","Score /100",...Object.values(labels),"Decision"]} empty={state.scored_at ? (output.settings?.inputs?.length===0 ? "Scorecard ran with the screen input disabled." : "Scorecard ran. No eligible listings among the confirmed results.") : "No scored listings recorded."}
-    rows={(state.rows??[]).map(r=>({key:r.symbol,cells:[<TradingViewSymbolLink key="stock" symbol={r.symbol}/>,num(r.score),...Object.keys(labels).map(k=>num(r.points?.[k])),r.reason]}))}/></>;
+    rows={(state.rows??[]).map(r=>({key:r.symbol,cells:[<TradingViewSymbolLink key="stock" symbol={r.symbol}/>,<ScoreCalculation key="score" row={r} output={output}/>,...Object.keys(labels).map(k=>num(r.points?.[k])),r.reason]}))}/></>;
   }
   return <Decisions output={output}/>;
 }
@@ -126,6 +127,6 @@ export function StockFlow({output}:{output:Output}) {
   const symbols=Array.from(new Set([...Object.keys(s.setups??{}),...rows.keys()]));
   return <><p>{num(s.sync?.covered)} histories synced · {symbols.length} discovered · {Array.from(rows.values()).filter(r=>r.score!=null).length} scored</p>
     <Table headers={["Stock","Screen (IST)","Score /100","Stage 4 decision","Qty"]} empty="No stocks have progressed through the screen." rows={symbols.map(k=>{
-      const row=rows.get(k);return {key:k,cells:[<TradingViewSymbolLink key="stock" symbol={k}/>,date(s.setups?.[k]?.discovered),num(row?.score),row?.reason??"Outside selected scorecard inputs",num(row?.qty)]};
+      const row=rows.get(k);return {key:k,cells:[<TradingViewSymbolLink key="stock" symbol={k}/>,date(s.setups?.[k]?.discovered),row?<ScoreCalculation key="score" row={row} output={output}/>:"—",row?.reason??"Outside selected scorecard inputs",num(row?.qty)]};
     })}/></>;
 }

@@ -17,6 +17,7 @@ from app.domains.zerodha.upstox_quotes import build_quote_request, configured_fo
 from . import market, store, score_inputs, columns, display_worker
 from .discovery import Discovery, INDEX_SIZES
 from .cloud_score import finish_screen
+from . import closing_scores
 from .issuer import issuer
 from .query import compile_query, evaluate
 from .query_evidence import daily_closes, macd
@@ -195,6 +196,8 @@ async def refresh(sessions,owner):
                 and previous.get("input_fingerprint", "") == fingerprint
                 and saved.get("market_as_of") == stamp.isoformat()):
             if final_candle and previous.get("final_candle_attempt"):
+                if now.date() == stamp.date():
+                    await closing_scores.recover(sessions, owner, previous_id, previous, cache)
                 return
             if saved.get("score_status") and saved.get("status") == "completed":
                 return
