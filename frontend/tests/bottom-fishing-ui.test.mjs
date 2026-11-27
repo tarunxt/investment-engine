@@ -129,7 +129,7 @@ try {
   await menu.click(); await page.getByRole("menuitem",{name:"Scorecard history"}).click();
   await page.getByRole("link",{name:/#45/}).click();
   await page.getByRole("heading",{name:"Saved run #45"}).waitFor();
-  await page.getByRole("cell",{name:"82",exact:true}).waitFor();
+  assert.equal(await page.getByRole("button",{name:"Score calculation for NSE:TEST"}).innerText(),"82.00");
   await verifyChart(page);
   for(const stage of ["screen","score","actionables"]){
     await page.goto(root+"/console/zerodha/bottom-fishing/"+stage+"?view=stock-flow");
