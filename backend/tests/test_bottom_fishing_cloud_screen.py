@@ -124,4 +124,23 @@ async def test_cloud_refresh_persists_pair_once_and_manual_reuses_only_exact_res
     assert await review.review_cloud_score(*args,stamp.replace(minute=50),{}, {}) == {"fresh":True}
     assert await review.review_cloud_score(sessions, 5, version+1, settings, None, None,stamp,{}, {}) == {"fresh":True}
     assert scan.await_count == 2
+    # Once the final session candle has a saved automatic attempt, a partial
+    # result must survive restarts without unbounded overnight provider calls.
+    class AfterClose(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return stamp.replace(hour=19, minute=0)
+    monkeypatch.setattr(cloud_screen, "datetime", AfterClose)
+    close = stamp.replace(hour=15, minute=30)
+    monkeypatch.setattr(cloud_screen, "candle_cutoff", lambda *args: (close, {close.date().isoformat(): close.isoformat()}))
+    scan.reset_mock()
+    scan.return_value = dict(market_as_of=close.isoformat(), status="partial", score_status="partial")
+    await cloud_screen.refresh(sessions, 5)
+    await cloud_screen.refresh(sessions, 5)
+    assert scan.await_count == 1
+    async with sessions() as db:
+        store.append(db, 5, cloud_screen.columns.PREF, ["Sales"])
+        await db.commit()
+    await cloud_screen.refresh(sessions, 5)
+    assert scan.await_count == 2
     await engine.dispose()
