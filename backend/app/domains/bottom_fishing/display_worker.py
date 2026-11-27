@@ -47,6 +47,7 @@ async def overlay(cache, report, stamp):
             values["CMP by 200 DMA"] = cmp_dma
         row["column_status"] = {name: (history if name in HISTORY else financial).get("status", "loading")
                                 for name in report.get("column_names", columns.DEFAULT) if name not in values}
+        pat_basis = None
         for offset, metric in enumerate(screen_ratios.METRICS):
             if metric in values or metric not in row["column_status"]:
                 continue
@@ -54,13 +55,19 @@ async def overlay(cache, report, stamp):
             record = json.loads(raw) if raw else {}
             result = record.get("values", {}).get(metric)
             if result is not None and (metric != screen_ratios.PAT or not observed.get("quarter")
+                                       or isinstance(record.get("quarter"), dict)
                                        or record.get("quarter") == observed["quarter"]):
+                if metric == screen_ratios.PAT and isinstance(record.get("quarter"), dict):
+                    pat_basis = record["quarter"]
                 values[metric] = result
                 row["column_status"].pop(metric)
             else:
                 row["column_status"][metric] = record.get("status", "loading")
         row["issuer_observed_at"] = observed.get("observed_at")
         row["issuer_quarter"] = observed.get("quarter")
+        if pat_basis:
+            label = f"Prior-year PAT: {pat_basis['period']} ({pat_basis['basis']}, Screener)"
+            row["issuer_quarter"] = " · ".join(filter(None, [row["issuer_quarter"], label]))
 
 
 async def resolve(cache, key, fetch, *, session, last=None):

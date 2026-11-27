@@ -7,7 +7,7 @@ import httpx
 from lxml import html
 
 from app.domains.scorecards.research import download
-from .column_facts import number, period_shift
+from .column_facts import dated, number, period_shift, sheet
 
 PE = "Industry PE"
 PAT = "Profit after tax preceding year quarter"
@@ -37,9 +37,13 @@ def parse_page(content, metric, current):
     for row in table.xpath('.//tr[@data-row-company-id]'):
         cells = row.xpath('./td')
         if len(cells) == len(headers):
-            rows[row.get("data-row-company-id")] = {
+            result = {
                 key: number(cells[cols[key]].text_content()) for key in (metric, SALES, PROFIT) if key in cols
             }
+            href = row.xpath('string(./td/a[starts-with(@href,"/company/")]/@href)')
+            if re.fullmatch(r"/company/[A-Za-z0-9&_.%-]+/(?:consolidated/)?", href):
+                result["company_path"] = href
+            rows[row.get("data-row-company-id")] = result
     more = any(str(current+1) in parse_qs(urlsplit(href).query).get("page", [])
                for href in root.xpath('//a[contains(@href,"page=")]/@href'))
     return {"rows": rows, "more": more}
@@ -86,7 +90,24 @@ async def lookup(client, cache, fields, metric, session):
                     row.get(k) is None or display.get(k) is None or abs(row[k]-display[k]) > 0.51
                     for k in (SALES, PROFIT)
                 ):
-                    value = None
+                    path = row.get("company_path")
+                    if value is None or not path:
+                        value = None
+                    else:
+                        # Screener can switch the default listing to standalone after
+                        # a subsidiary merger. Date and identify that observation.
+                        detail = html.fromstring(await download(client, "https://www.screener.in" + path))
+                        if detail.xpath('string(//*[@id="company-info"]/@data-company-id)') != ref["id"]:
+                            raise ValueError("Screener statement identity changed")
+                        table = sheet(detail, "quarters")
+                        dates = dated(table)
+                        sales = table.get("Sales") or table.get("Revenue") or {}
+                        profit = table.get("Net Profit", {})
+                        if dates and all(v is not None and row.get(k) is not None and abs(row[k]-v) <= 0.51
+                                         for k, v in ((SALES, sales.get(dates[0])), (PROFIT, profit.get(dates[0])))):
+                            basis = "consolidated" if detail.xpath('//*[@id="company-info"]/@data-consolidated') else "standalone"
+                            return {metric: value}, {"period": period_shift(dates[0], -12), "basis": basis}
+                        value = None
             if value is None and schedule_error is not None:
                 raise schedule_error
             return ({metric: value} if value is not None else {}), fields.get("quarter")
