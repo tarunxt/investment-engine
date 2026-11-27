@@ -7,7 +7,7 @@ import { formatDuration, formatLlmCompletion, formatRecommendedStockProgress, ge
 import { formatRebalanceCost } from '@/lib/rebalanceCost';
 import { formatCompactStageTime } from '@/lib/datetime';
 
-export function HistoricalStageLedgerRow({ stage, info, now, onClick, onOutputClick, onPromptClick, additional = false, stageRunAvailable = true }: {
+export function HistoricalStageLedgerRow({ stage, info, now, onClick, onOutputClick, onPromptClick, additional = false, destination }: {
   stage: WorkflowStageKey;
   info: StageInfo;
   now: number;
@@ -15,7 +15,7 @@ export function HistoricalStageLedgerRow({ stage, info, now, onClick, onOutputCl
   onOutputClick?: () => void;
   onPromptClick?: () => void;
   additional?: boolean;
-  stageRunAvailable?: boolean;
+  destination: 'scorecard' | 'stage' | 'workflow';
 }) {
   const [durationOpen, setDurationOpen] = useState(false);
   const label = getStageTileLabel(stage);
@@ -26,8 +26,8 @@ export function HistoricalStageLedgerRow({ stage, info, now, onClick, onOutputCl
   if (additional) return <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-slate-200 py-2 text-xs dark:border-slate-700">
     <span className="font-semibold">{label}</span>
     {llm ? <span>Scan cost: {formatRebalanceCost(info)}</span> : null}
-    {onClick ? <button type="button" className={actionClass} onClick={onClick}>{stageRunAvailable ? 'Open stage' : 'View workflow context — no stage run'}</button> : null}
-    {onOutputClick ? <button type="button" className={actionClass} onClick={onOutputClick}>{stageRunAvailable ? `Saved output for ${label}` : `Workflow output context for ${label} — no stage run`}</button> : null}
+    {onClick ? <button type="button" className={actionClass} onClick={onClick}>{destination === 'scorecard' ? 'Open scorecard' : destination === 'stage' ? 'Open stage' : 'View workflow context — no stage run'}</button> : null}
+    {onOutputClick ? <button type="button" className={actionClass} onClick={onOutputClick}>{destination !== 'workflow' ? `Saved output for ${label}` : `Workflow output context for ${label} — no stage run`}</button> : null}
     {onPromptClick ? <button type="button" className={actionClass} onClick={onPromptClick}>Prompt for {label}</button> : null}
     {llm && info.endedAt ? <button type="button" className={actionClass} aria-haspopup="dialog" aria-label={`Show duration breakdown for ${label}`} onClick={() => setDurationOpen(true)}>Duration: {duration}</button> : null}
     {error.detail ? <span>Error detail <StageErrorDetails stageLabel={label} info={info} row={error} /></span> : null}

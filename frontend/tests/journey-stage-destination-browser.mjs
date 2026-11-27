@@ -59,7 +59,7 @@ window.paths=[];
 createRoot(document.getElementById('root')).render(React.createElement(Card,{group,runs:[{id:459,auto_rebalance_portfolio:market,auto_rebalance_sequence:122,status:'completed',prompt_preview:'fixture',run_jobs:[{}]}],adjacentGroups:[earlier],runLinksAvailable:state!=='loading',lastRefreshed:'14:03:00',initialView:'evidence',onOpen:path=>{window.paths.push(path);history.pushState(null,'',path)}}));
 `);
   await new Promise((resolve, reject) => webpack({ mode:'none', target:'web', entry:path.join(temp,'fixture.cjs'), output:{path:temp,filename:'bundle.js'}, plugins:[new webpack.DefinePlugin({'process.env.NODE_ENV':JSON.stringify('test')})] }, (error, stats) => error || stats.hasErrors() ? reject(error || new Error(stats.toString({all:false,errors:true}))) : resolve()));
-  browser = await chromium.launch({executablePath:'/usr/bin/chromium',headless:true,args:['--no-sandbox']});
+  browser = await chromium.launch({executablePath:process.env.CHROMIUM_EXECUTABLE_PATH || '/usr/bin/chromium',headless:true,args:['--no-sandbox']});
   const page = await browser.newPage({viewport:{width:1180,height:757}});
   const errors=[],externalRequests=[]; page.on('pageerror',error=>errors.push(error.message));
   await page.route('**/*', route => route.request().url().startsWith('http://fixture.local/') ? route.fulfill({contentType:'text/html',body:`<style>${css.css}</style><main style="max-width:920px;margin:auto;padding:12px"><div id="root"></div></main>`}) : (externalRequests.push(route.request().url()), route.abort()));
@@ -67,7 +67,7 @@ createRoot(document.getElementById('root')).render(React.createElement(Card,{gro
     for (const state of ['loading', 'empty', 'error', 'partial', 'stale']) {
       const url = 'http://fixture.local/console/runs?market='+market+'&state='+state+'&selectedRun='+encodeURIComponent(market+':122')+'&runView=evidence';
       await page.goto(url); await page.addScriptTag({path:path.join(temp,'bundle.js')});
-      const fallback = page.locator('div.border-t').filter({hasText:'Threats Scan'}).getByRole('button', {name:'View workflow context — no stage run', exact:true});
+      const fallback = page.locator('div.border-t').filter({hasText:'Sync Portfolio'}).getByRole('button', {name:'View workflow context — no stage run', exact:true});
       await fallback.first().waitFor();
       const expected = '/console/auto-rebalance-runs/'+(market==='india'?'zerodha':'indmoneyUs')+'/122';
       await fallback.first().focus();
@@ -79,13 +79,21 @@ createRoot(document.getElementById('root')).render(React.createElement(Card,{gro
       assert.match(page.url(), /runView=evidence/);
       assert.equal(new URL(page.url()).searchParams.get('selectedRun'), market+':122');
       assert.equal(await page.getByRole('tab', {name:'Run 122 stage evidence',exact:true}).getAttribute('aria-selected'),'true');
-      await page.getByRole('button',{name:'Open stage',exact:true}).click();
-      assert.equal(new URL(page.url()).pathname, '/console/runs/459');
+      const cardRoot = '/console/'+(market==='india'?'zerodha':'indmoney-us')+'/scorecards/';
+      const threats = page.locator('div.border-t').filter({hasText:'Threats Scan'});
+      await threats.getByRole('button',{name:'Open scorecard',exact:true}).click();
+      assert.equal(new URL(page.url()).pathname, cardRoot+'threats/122');
+      await page.goBack();
+      await threats.getByRole('button',{name:'Saved output for Threats Scan',exact:true}).click();
+      assert.equal(new URL(page.url()).search,'?tab=output');
+      await page.goBack();
+      await page.locator('div.border-t').filter({hasText:'Saved output for Rebalance'}).getByRole('button',{name:'Open scorecard',exact:true}).click();
+      assert.equal(new URL(page.url()).pathname, cardRoot+'rebalance/122');
       await page.goBack();
       await page.getByRole('button',{name:'Saved output for Rebalance',exact:true}).click();
-      assert.equal(new URL(page.url()).pathname, '/console/runs/459');
+      assert.equal(new URL(page.url()).pathname, cardRoot+'rebalance/122');
       await page.goBack();
-      assert.deepEqual(await page.evaluate(()=>window.paths),[expected,'/console/runs/459','/console/runs/459']);
+      assert.deepEqual(await page.evaluate(()=>window.paths),[expected,cardRoot+'threats/122',cardRoot+'threats/122?tab=output',cardRoot+'rebalance/122',cardRoot+'rebalance/122?tab=output']);
       await page.setViewportSize({width:390,height:757});
       const region=page.getByRole('region',{name:/stage evidence/});
       await region.focus(); await page.keyboard.press('ArrowRight');
@@ -98,6 +106,6 @@ createRoot(document.getElementById('root')).render(React.createElement(Card,{gro
   }
   assert.deepEqual(errors,[]);
   assert.deepEqual(externalRequests,[]);
-  await writeFile(path.join(artifacts,'result.json'),JSON.stringify({task:'JOURNEY-RUNS-STAGE-DESTINATION',result:'PASS',markets:['india','indmoney_us'],syntheticStates:['loading','empty','error','partial','stale'],checks:['skipped Threats fallback label and exact workflow path','recorded Rebalance run and saved-output paths','keyboard activation','390px and 1180px','Back selectedRun/runView restoration'],externalRequests:0,limitations:['Offline actual-component fixture; destination page lifecycle and live-route acceptance not claimed']},null,2));
+  await writeFile(path.join(artifacts,'result.json'),JSON.stringify({task:'JOURNEY-RUNS-STAGE-DESTINATION',result:'PASS',markets:['india','indmoney_us'],syntheticStates:['loading','empty','error','partial','stale'],checks:['Sync workflow fallback and dedicated Threats scorecard','recorded Rebalance run and saved-output paths','keyboard activation','390px and 1180px','Back selectedRun/runView restoration'],externalRequests:0,limitations:['Offline actual-component fixture; destination page lifecycle and live-route acceptance not claimed']},null,2));
   console.log('PASS JOURNEY-RUNS-STAGE-DESTINATION both markets, five synthetic states, known/missing run paths, keyboard, narrow, Back context; '+artifacts);
 } finally { await browser?.close(); await rm(temp,{recursive:true,force:true}); }
