@@ -15,7 +15,7 @@ type KiteHolding = {tradingsymbol:string; exchange:string; quantity:number; aver
   last_price:number; invested_value:number; market_value:number; pnl:number; day_change_percentage?:number};
 type KiteSync = {captured_at:string; holdings_count?:number; holdings?:KiteHolding[];
   holdings_market_value?:number; holdings_pnl?:number; available_margin?:number};
-export type ScreenMatch = {columns?:Record<string,number>;qualified?:boolean;name:string; symbol:string; exchange?:string; universe?:boolean; liquidity?:boolean; touches?:boolean;
+export type ScreenMatch = {column_status?:Record<string,"ready"|"retry"|"loading">;issuer_observed_at?:string;issuer_quarter?:string;columns?:Record<string,number>;qualified?:boolean;name:string; symbol:string; exchange?:string; universe?:boolean; liquidity?:boolean; touches?:boolean;
   rebound?:boolean; proximity?:boolean; close?:number};
 export type State = {scorecard_inputs?:{current_bottom:boolean;runs:Record<string,number[]>};screen_status?:string; score_status?:string; scored_at?:string; original_results?:{column_names?:string[];minimum?:number;column_schema?:number;at:string; source?:string; unknown?:number; universe_size?:number; total?:number; complete:boolean; error?:string; rows:ScreenMatch[]}; kite_sync?:KiteSync; screen_query?:{text:string;latest_results:boolean}; sync?:Coverage; at?:string; market_as_of?:string; error?:string; status?:string; scans?:Coverage[]; rows?:Row[]; setups?:Record<string,Setup>;
   positions?:Record<string,{qty:number; entry:string; price:number; stop:number; target:number}>; realized?:number; closed?:{symbol:string; qty:number; reason:string; pnl:number; end:string}[]};
