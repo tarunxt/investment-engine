@@ -44,12 +44,12 @@ export function CloudResults({output,model}:{output?:Output|null;model:Model}) {
   const current=output && (!output.version || output.version===data?.version);
   return <><Link className="inline-block rounded-full border border-indigo-200 px-4 py-2 text-sm font-semibold text-indigo-800" href={route+"/screen?view=columns"}>Edit Columns</Link>
     {error&&<p role="alert">{error}</p>}
-    {current && output?.state.original_results ? <StageOutput stage="screen" output={output} model={model} chooser={chooser}/> :
-      <>{chooser}{current && output?.state.setups ? <StageOutput stage="screen" output={output}/> : <p role="status">Waiting for cloud results for the current saved query.</p>}</>}
+    {current && output?.state.original_results ? <StageOutput stage="screen" output={output} model={model} chooser={chooser} liveScreen/> :
+      <>{chooser}{current && output?.state.setups ? <StageOutput stage="screen" output={output} liveScreen/> : <p role="status">Waiting for cloud results for the current saved query.</p>}</>}
   </>;
 }
 
-export function StageOutput({stage,output,model,chooser}:{stage:Stage;output:Output;model?:Model;chooser?:ReactNode}) {
+export function StageOutput({stage,output,model,chooser,liveScreen=false}:{stage:Stage;output:Output;model?:Model;chooser?:ReactNode;liveScreen?:boolean}) {
   const {state} = output;
   const query = state.screen_query?.text ?? output.settings?.screen_query;
   const scan = state.scans?.at(-1);
@@ -79,7 +79,7 @@ export function StageOutput({stage,output,model,chooser}:{stage:Stage;output:Out
     const qualified=(row:NonNullable<typeof report>["rows"][number])=>filters.filter(k=>row[k]===true).length>=minimum;
     const mark = (value?:boolean) => value == null ? "Unavailable" : value ? "✓ Pass" : "✕ Fail";
     return <>
-      <h3 className="font-semibold">{cloud?"Live query matches":"Original Screener query matches"}</h3>
+      <h3 className="font-semibold">{cloud ? (liveScreen ? "Live query matches" : "Saved query matches") : "Original Screener query matches"}</h3>
       {query && <details><summary>Query used in this run</summary><pre className="whitespace-pre-wrap">{query}</pre></details>}
       {state.error && <p role="alert">{state.error}</p>}
       {report ? <>

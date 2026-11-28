@@ -38,6 +38,7 @@ export function SavedOutputDialog({ title, savedAt, provenance, sectionLabel, ro
       onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <div ref={ref} role="dialog" aria-modal="true" aria-labelledby={titleId}
         onKeyDown={(event) => {
+          if (!(event.target instanceof Element) || event.target.closest('[role="dialog"], dialog') !== ref.current) return;
           if (event.key === "Escape") { event.stopPropagation(); onClose(); }
           if (event.key !== "Tab") return;
           const controls = Array.from(ref.current?.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex="0"]') ?? [])
