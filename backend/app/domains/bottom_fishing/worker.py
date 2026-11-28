@@ -18,6 +18,7 @@ from .engine import close_position, paper_cycle, roll
 
 log = logging.getLogger(__name__)
 INDIA = market.INDIA
+DISCOVERY_TIMES = (time(9, 30), time(13, 15))
 
 
 async def save(sessions, owner, version, previous, state):
@@ -137,6 +138,24 @@ async def collect_evidence(client, cache, guard, stamp, levels, state, coverage)
     return series, fundamentals
 
 
+def reconcile_discovery_coverage(state, stamp, error=None):
+    """Keep failed discovery windows visible across later ticks of the same session."""
+    at = stamp.isoformat()
+    failures = state.get("discovery_failures", {})
+    if stamp.time() in DISCOVERY_TIMES:
+        if any(scan.get("at") == at for scan in state.get("scans", [])):
+            failures.pop(at, None)
+        elif error:
+            failures[at] = error
+    if failures:
+        state["discovery_failures"] = failures
+        if state.get("status") != "failed":
+            state["status"] = "partial"
+            state["error"] = "Scheduled discovery incomplete: " + ", ".join(failures)
+    else:
+        state.pop("discovery_failures", None)
+
+
 async def run(sessions, owner, stamp):
     async with sessions() as db:
         await store.lock(db,owner)
@@ -150,19 +169,22 @@ async def run(sessions, owner, stamp):
     state = roll(view["state"],stamp)
     if state.get("at","")>stamp.isoformat() or (state.get("at")==stamp.isoformat() and not state["pending"]):
         return
+    phase = "account readiness"
     try:
         if not configured_for(owner,username):
             raise ValueError("Market data unavailable for this account")
         async with redis_client() as cache, httpx.AsyncClient(timeout=9, follow_redirects=False,
                 headers={"User-Agent":"Cred-X market research (https://cred-x.in)"}) as client:
             guard = QuoteGuard(cache,os.getenv("UPSTOX_LTP_OWNER_USER_ID") or owner,"bottom-paper",[])
+            phase = "exchange calendar"
             holidays = await market.calendar(client,cache,stamp)
             calendar = session_calendar(stamp.replace(hour=23,minute=59),"NSE",holidays,60)
             if stamp.date().isoformat() not in calendar:
                 return
             if state.get("at")!=stamp.isoformat():
-                screen = stamp.time() in (time(9,30),time(13,15))
+                screen = stamp.time() in DISCOVERY_TIMES
                 if screen or stamp.time()==time(9,20):
+                    phase = "daily market inputs"
                     load_market = discovery_market if screen else prepared_market
                     levels,benchmark,coverage = await load_market(client,cache,stamp,settings.get("discovery"))
                     state["sync"] = dict(at=stamp.isoformat(), **coverage)
@@ -171,8 +193,11 @@ async def run(sessions, owner, stamp):
                         levels,coverage = {},None
                 else:
                     levels,coverage = {},None
+                phase = "instrument, candle and financial evidence"
                 series, fundamentals = await collect_evidence(client, cache, guard, stamp, levels, state, coverage)
+                phase = "saved screener inputs"
                 levels, native = await score_inputs.filter_paper(client,cache,guard,settings,stamp,calendar,levels,series,state,coverage)
+                phase = "paper decision"
                 paper_cycle(state,score_inputs.scoring_settings(settings),stamp,levels,series,fundamentals,state.get("benchmark_close"),coverage,calendar)
                 score_inputs.record_inputs(state,settings,native)
                 if coverage:
@@ -185,17 +210,22 @@ async def run(sessions, owner, stamp):
                         if r["reason"]=="Paper limit pending":
                             r["reason"]="Signal expired"
                     state["pending"]={}
+                reconcile_discovery_coverage(state, stamp)
+                phase = "cycle persistence"
                 prior = await save(sessions,owner,view["version"],prior,state)
                 if prior is None:
                     return
             if state["positions"] or state["pending"]:
                 await cache.set(f"bottom:monitor:{owner}","1",ex=4*86400)
             if state["pending"]:
+                phase = "paper fills"
                 await paper_fills(client,guard,state)
                 await save(sessions,owner,view["version"],prior,state)
     except Exception as exc:
         log.exception("Bottom Fishing cycle failed for account %s",owner)
-        state.update(status="failed",error=type(exc).__name__+" during market-data collection",attempt=stamp.isoformat())
+        message = f"{type(exc).__name__} during {phase}"
+        state.update(status="failed", error=message, attempt=stamp.isoformat())
+        reconcile_discovery_coverage(state, stamp, error=message)
         await save(sessions,owner,view["version"],prior,state)
         raise
 

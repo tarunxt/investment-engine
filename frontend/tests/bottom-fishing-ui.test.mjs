@@ -27,7 +27,7 @@ const mocks = {
     let selected;
     const inputState=()=>({version:selected===undefined?0:1,groups:[{id:"bottom",name:"Bottom Fishing Screen",runs:[{id:45,at:cutoff,status:"completed",count:1}],pinned_older:[],latest:[45],selected:selected??[45],automatic:selected===undefined}]});
     export const apiService={
-      get:async path=>path.endsWith("/columns")?catalog:path.includes("/screeners/inputs/")?inputState():path.split("?")[0].endsWith("/history")?{items:[{id:45,mode:"Manual review",scored:1,entries:1,candidates:1,status:"completed"}]}:path.endsWith("/history/45")?data.review:data,
+      get:async path=>path.endsWith("/columns")?catalog:path.includes("/screeners/inputs/")?inputState():path.split("?")[0].endsWith("/history")?{items:[{id:45,mode:"Manual review",scored:1,entries:1,candidates:1,status:"completed"}]}:path.endsWith("/history/45")?data.review:path.endsWith("/history/46")?data.live:data,
       post:async (path,v)=>{if(path.endsWith("/columns")){sessionStorage.setItem("bfsColumns",JSON.stringify(v.names));return v;}if(v.discovery){window.savedRules=v.discovery;data.live.state.original_results.minimum=v.discovery.minimum;}if(path.includes("/screeners/inputs/")){selected=v.selected.bottom;return inputState();}if(path.endsWith("/run")){window.submits=(window.submits??0)+1;window.runVersion=v.version;data.manual={id:46,status:"queued"};return data.manual;}
         data.settings=v;data.version++;return {...data};}
     };`,
@@ -109,6 +109,13 @@ try {
     await page.getByRole("menuitem",{name:outputLabel,exact:true}).click();
     await page.getByRole("dialog",{name:title+" · "+outputLabel}).waitFor();
     await verifyChart(page.getByRole("dialog"));
+    if (title === titles[2]) {
+      const scoreButton = page.getByRole("button",{name:"Score calculation for NSE:TEST"});
+      await scoreButton.click();
+      await page.keyboard.press("Escape");
+      assert.equal(await page.getByRole("dialog",{name:title+" · "+outputLabel}).count(),1);
+      assert.equal(await scoreButton.evaluate(button=>button===document.activeElement),true);
+    }
     await page.keyboard.press("Escape");
   }
   await page.getByRole("button",{name:"Bottom Fishing Screen actions"}).click();
@@ -131,6 +138,9 @@ try {
   await page.getByRole("heading",{name:"Saved run #45"}).waitFor();
   assert.equal(await page.getByRole("button",{name:"Score calculation for NSE:TEST"}).innerText(),"82.00");
   await verifyChart(page);
+  await page.goto(root+"/console/zerodha/bottom-fishing/screen?record=46");
+  await page.getByRole("heading",{name:"Saved query matches",exact:true}).waitFor();
+  assert.equal(await page.getByRole("heading",{name:"Live query matches",exact:true}).count(),0);
   for(const stage of ["screen","score","actionables"]){
     await page.goto(root+"/console/zerodha/bottom-fishing/"+stage+"?view=stock-flow");
     await verifyChart(page);

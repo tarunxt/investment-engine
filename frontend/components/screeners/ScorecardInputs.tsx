@@ -55,7 +55,8 @@ function Editor({strategy,card,owner}:{strategy:Strategy;card:string;owner:Workf
         </label>)}
       </fieldset>;
     })}
-    {data && <button type="button" disabled={busy} className="rounded-lg bg-indigo-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50" onClick={async()=>{
+    {data && <button type="button" aria-disabled={busy} className="rounded-lg bg-indigo-700 px-3 py-2 text-sm font-semibold text-white aria-disabled:opacity-50" onClick={async()=>{
+      if (busy) return;
       setBusy(true);setError("");setNotice("");
       try {apply(await client.post<Inputs>(path,{version:data.version,selected:choices}));setNotice("Scorecard inputs saved.");}
       catch(e){setError(String(e));}finally{setBusy(false);}
