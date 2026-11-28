@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+from copy import deepcopy
 from datetime import datetime, time, timedelta
 
 import httpx
@@ -91,19 +92,17 @@ async def prepared_market(client, cache, stamp, discovery=None):
         levels,benchmark,coverage = json.loads(prepared)
     else:
         levels,benchmark,coverage = await market.daily(client,cache,stamp,discovery=config)
-        await cache.set(cache_key,json.dumps([levels,benchmark,coverage]),ex=86400)
+        if coverage.get("corporate_action_source") != "cached_issuer_ledgers":
+            await cache.set(cache_key,json.dumps([levels,benchmark,coverage]),ex=86400)
     return levels, benchmark, coverage
 
 
-async def discovery_market(client, cache, stamp, discovery):
-    try:
-        return await prepared_market(client, cache, stamp, discovery)
-    except httpx.TimeoutException:
-        # Retry only the read-only discovery input, within the original candle.
-        # No reservation, fill or stored cycle has been created at this point.
-        if (datetime.now(INDIA) - stamp).total_seconds() >= 100:
-            raise
-        return await prepared_market(client, cache, stamp, discovery)
+class DiscoveryReadTimeout(Exception):
+    """A discovery input timed out before any paper decision or fill."""
+
+    def __init__(self, message, version):
+        super().__init__(message)
+        self.version = version
 
 
 async def collect_evidence(client, cache, guard, stamp, levels, state, coverage):
@@ -140,13 +139,22 @@ async def collect_evidence(client, cache, guard, stamp, levels, state, coverage)
 
 def reconcile_discovery_coverage(state, stamp, error=None):
     """Keep failed discovery windows visible across later ticks of the same session."""
-    at = stamp.isoformat()
+    scans = {scan["at"]: scan for scan in state.get("scans", []) if scan.get("at")}
     failures = state.get("discovery_failures", {})
-    if stamp.time() in DISCOVERY_TIMES:
-        if any(scan.get("at") == at for scan in state.get("scans", [])):
+    for window in DISCOVERY_TIMES:
+        if window > stamp.time():
+            continue
+        at = datetime.combine(stamp.date(), window, tzinfo=INDIA).isoformat()
+        if at in scans:
             failures.pop(at, None)
-        elif error:
+        elif window == stamp.time() and error:
             failures[at] = error
+        else:
+            failures.setdefault(at, "No saved scheduled discovery")
+    partial_scans = [at for at, scan in scans.items()
+                     if scan.get("issuer_coverage_incomplete")]
+    if partial_scans and state.get("status") == "completed":
+        state.update(status="partial", error="Incomplete issuer evidence: " + ", ".join(partial_scans))
     if failures:
         state["discovery_failures"] = failures
         if state.get("status") != "failed":
@@ -157,16 +165,30 @@ def reconcile_discovery_coverage(state, stamp, error=None):
 
 
 async def run(sessions, owner, stamp):
+    try:
+        await _run_once(sessions, owner, stamp)
+    except DiscoveryReadTimeout as exc:
+        if not 0 <= (datetime.now(INDIA) - stamp).total_seconds() < 100:
+            raise
+        # The dispatch and owner locks still cover this exact candle. Reload the
+        # committed state and version; never replay the decision or fills.
+        await _run_once(sessions, owner, stamp, expected_version=exc.version)
+
+
+async def _run_once(sessions, owner, stamp, *, expected_version=None):
     async with sessions() as db:
         await store.lock(db,owner)
         username = await db.scalar(select(User.username).where(User.id==owner))
         if username is None:
             return
         view = await store.snapshot(db,owner,include_review=False)
+        if expected_version is not None and view["version"] != expected_version:
+            return
         prior,_ = await store.latest(db,owner,store.CYCLE,{})
         settings = view["settings"]
         settings["score_inputs"] = await score_inputs.plan(db, owner, settings)
-    state = roll(view["state"],stamp)
+    screen = stamp.time() in DISCOVERY_TIMES
+    state = roll(deepcopy(view["state"]) if screen else view["state"], stamp)
     if state.get("at","")>stamp.isoformat() or (state.get("at")==stamp.isoformat() and not state["pending"]):
         return
     phase = "account readiness"
@@ -182,11 +204,9 @@ async def run(sessions, owner, stamp):
             if stamp.date().isoformat() not in calendar:
                 return
             if state.get("at")!=stamp.isoformat():
-                screen = stamp.time() in DISCOVERY_TIMES
                 if screen or stamp.time()==time(9,20):
                     phase = "daily market inputs"
-                    load_market = discovery_market if screen else prepared_market
-                    levels,benchmark,coverage = await load_market(client,cache,stamp,settings.get("discovery"))
+                    levels,benchmark,coverage = await prepared_market(client,cache,stamp,settings.get("discovery"))
                     state["sync"] = dict(at=stamp.isoformat(), **coverage)
                     state["benchmark_close"] = benchmark
                     if not screen:
@@ -224,9 +244,16 @@ async def run(sessions, owner, stamp):
     except Exception as exc:
         log.exception("Bottom Fishing cycle failed for account %s",owner)
         message = f"{type(exc).__name__} during {phase}"
+        retryable = (screen and isinstance(exc, httpx.TimeoutException)
+                     and phase in {"exchange calendar", "daily market inputs",
+                                   "instrument, candle and financial evidence", "saved screener inputs"})
+        if retryable:
+            state = roll(view["state"], stamp)
         state.update(status="failed", error=message, attempt=stamp.isoformat())
         reconcile_discovery_coverage(state, stamp, error=message)
-        await save(sessions,owner,view["version"],prior,state)
+        receipt = await save(sessions,owner,view["version"],prior,state)
+        if retryable and receipt is not None:
+            raise DiscoveryReadTimeout(message, view["version"]) from exc
         raise
 
 

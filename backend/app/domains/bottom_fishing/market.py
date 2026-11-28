@@ -28,10 +28,40 @@ async def archive_download(client, primary, alternate):
         return await download(client, alternate)
 
 
+def issuer_action_key(isin, start, end):
+    return f"bottom:issuer-actions:{isin}:{start}:{end}"
+
+
+async def cached_issuer_actions(cache, isins, start, end):
+    """Read only ledgers verified for the exact issuer and adjustment interval."""
+    result = {}
+    unique = sorted(set(isins))
+    for offset in range(0, len(unique), 256):
+        batch = unique[offset:offset + 256]
+        raw = await cache.mget([issuer_action_key(isin, start, end) for isin in batch])
+        for isin, payload in zip(batch, raw, strict=True):
+            if payload is None:
+                continue
+            try:
+                events = json.loads(payload)
+            except (TypeError, ValueError):
+                continue
+            if isinstance(events, list) and all(
+                isinstance(event, dict) and isinstance(event.get("date"), str)
+                and start < event["date"] <= end
+                and "multiplier" in event and (event["multiplier"] is None or
+                     (type(event["multiplier"]) in (int, float) and math.isfinite(event["multiplier"])
+                      and event["multiplier"] > 0))
+                for event in events
+            ):
+                result[isin] = events
+    return result
+
+
 async def issuer_actions(client, cache, isins, start, end):
     gate = asyncio.Semaphore(4)
     async def ledger(isin):
-        key = f"bottom:issuer-actions:{isin}:{start}:{end}"
+        key = issuer_action_key(isin, start, end)
         try:
             cached = await cache.get(key)
             if cached is not None:
@@ -128,6 +158,7 @@ async def daily(client, cache, stamp, comparison=None, discovery=None):
     start = datetime.fromisoformat(next(iter(sessions)))
     actions_key = f"bottom:actions:{start.date()}:{day}"
     raw = await cache.get(actions_key)
+    action_coverage = {}
     try:
         if raw is None:
             url = ("https://www.nseindia.com/api/corporates-corporateActions?index=equities"
@@ -137,12 +168,17 @@ async def daily(client, cache, stamp, comparison=None, discovery=None):
             await cache.set(actions_key, raw, ex=6*3600)
         actions = nse_actions(json.loads(raw), keys.values())
     except (httpx.HTTPError, ValueError):
-        if not rows:
-            raise
-        # The bulk ledger can time out. Retain independently confirmed issuer
-        # histories for the original matches and report partial universe coverage.
-        wanted = [keys[k] for k in rows if k in keys]
-        actions = await issuer_actions(client, cache, wanted, start.date().isoformat(), day)
+        if rows:
+            wanted = [keys[k] for k in rows if k in keys]
+            actions = await issuer_actions(client, cache, wanted, start.date().isoformat(), day)
+        else:
+            wanted = set(keys.values())
+            actions = await cached_issuer_actions(cache, wanted, start.date().isoformat(), day)
+            if not actions:
+                raise
+            action_coverage = dict(corporate_action_source="cached_issuer_ledgers",
+                                   verified_issuer_ledgers=len(actions), requested_issuer_ledgers=len(wanted),
+                                   issuer_coverage_incomplete=len(actions) < len(wanted))
     levels = {}
     covered = 0
     for k,isin in keys.items():
@@ -165,7 +201,7 @@ async def daily(client, cache, stamp, comparison=None, discovery=None):
     benchmark = days[-1].get(BENCH)
     mismatches = [k for k, isin in members.items() if k in master and master[k].get("isin") != isin]
     return levels, benchmark and benchmark["close"], dict(universe=len(members), covered=covered,
-                                                        identity_mismatches=mismatches)
+                                                        identity_mismatches=mismatches, **action_coverage)
 
 
 async def previous_session_close(client, cache, guard, instrument, session):

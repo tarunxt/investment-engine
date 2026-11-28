@@ -87,12 +87,16 @@ def paper_cycle(state, settings, stamp, levels, series, fundamentals, benchmark_
 def size_entries(state, settings, stamp, *, preview=False):
     positions = state["positions"]
     reservations = dict(state["pending"]) if preview else state["pending"]
+    scans = state.get("scans") or []
+    incomplete_issuer_evidence = bool(scans and scans[-1].get("issuer_coverage_incomplete"))
     for row in state["rows"]:
         k = row["symbol"]
         if row["reason"]!="Qualified":
             continue
         if k in positions or k in reservations or k in state["seen"]:
             row["reason"] = "Already held or attempted today"
+        elif not preview and incomplete_issuer_evidence:
+            row["reason"] = "Awaiting complete corporate-action coverage"
         elif not preview and not time(9,30)<=stamp.time()<=time(14,45):
             row["reason"] = "Outside entry window"
         else:
