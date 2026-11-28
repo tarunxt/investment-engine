@@ -159,7 +159,11 @@ function harness({ boardOverride, analysisOnly = false, formulaScore = 0, interc
     reserveAutoRebalanceRunMetadata: reserve ?? (async (p) => metadata(p === "zerodha" ? "india" : "indmoney_us")),
     analysisOnlyRuns: { zerodha: analysisOnly, indmoneyUs: analysisOnly }, setAnalysisOnlyRuns: () => {}, setActiveAutoRebalanceMetadata: () => {}, setSpecificMode: () => {}, setSelectedStages: () => {}, setSelectedInputs: () => {}, setLastAutoRebalanceCosts: () => {},
     buildZerodhaPopupFeatures: () => "", ensureZerodhaConnectedForSync: async () => {},
-    onDashboardRefresh: async () => {}, waitForRunWithStageHandling: async (_, __, id) => ({ id, status: "completed", run_jobs: [] }),
+    onDashboardRefresh: async () => {},
+    waitForRunWithStageHandling: async (_, stage, id) => ({
+      id, status: "completed",
+      run_jobs: stage === "swing" ? [{ job_id: id, job: { id, status: "completed", response: "Saved Swing output" } }] : [],
+    }),
     retryWorkflowRead: (read) => read(),
     swingPrompts, getSwingTradeDefaultExportSheetName: () => "existing sheet",
     getLatestMatchingRebalanceRuns: runs => runs,
