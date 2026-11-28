@@ -7318,7 +7318,7 @@ ${zerodhaExecutionMode === "direct_market"
             return match ? [Number(match[1])] : [];
           });
           // Selecting a saved Stage 2 publication never re-reads holdings or Swing.
-          if (generatedSwingRun || (!revision && explicitJobs.length) || (broker === "india" && !recovery && (selectedCards.length || customToRun.length))) {
+          if (generatedSwingRun || (!revision && (explicitJobs.length || (broker === "india" && !recovery && (selectedCards.length || customToRun.length))))) {
             const snapshot = workflowSnapshot ?? (portfolio === "zerodha" ? await apiService.zerodhaPortfolioOverview() : await apiService.indmoneyUsPortfolioOverview()).latest;
             if (!snapshot) throw new Error("Stage 2 requires a portfolio snapshot.");
             const currentJobs = generatedSwingRun?.run_jobs ?? [];
