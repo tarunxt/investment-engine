@@ -1666,11 +1666,7 @@ function getRunProgress(run: RunResponse) {
 
 function isUsableStageJob(job?: { status?: string; response?: string | null }) {
   const status = (job?.status || "").toLowerCase();
-  return (
-    status === "completed" ||
-    status === "partial" ||
-    Boolean(job?.response?.trim())
-  );
+  return status === "completed" || status === "partial";
 }
 
 function getRunJobTimestamp(
@@ -1688,7 +1684,7 @@ function buildRunJobCandidate(
 ): InputSelectionCandidate | null {
   const link = run.run_jobs?.find((item) => item.job?.id === jobId);
   const job = link?.job;
-  if (!job || !isUsableStageJob(job)) return null;
+  if (!job?.response?.trim() || !isUsableStageJob(job)) return null;
   const costUsd =
     typeof job.estimated_cost === "number" ? job.estimated_cost : null;
   return {
@@ -7322,10 +7318,18 @@ ${zerodhaExecutionMode === "direct_market"
             return match ? [Number(match[1])] : [];
           });
           // Selecting a saved Stage 2 publication never re-reads holdings or Swing.
-          if (generatedSwingRun || (!revision && explicitJobs.length) || (broker === "india" && !recovery && (selectedCards.length || customToRun.length))) {
+          if (generatedSwingRun || (!revision && (explicitJobs.length || (broker === "india" && !recovery && (selectedCards.length || customToRun.length))))) {
             const snapshot = workflowSnapshot ?? (portfolio === "zerodha" ? await apiService.zerodhaPortfolioOverview() : await apiService.indmoneyUsPortfolioOverview()).latest;
             if (!snapshot) throw new Error("Stage 2 requires a portfolio snapshot.");
-            const selectedIds = [...new Set([...explicitJobs,...(generatedSwingRun?.run_jobs ?? []).filter(link => isUsableStageJob(link.job)).map(link=>link.job_id)])];
+            const currentJobs = generatedSwingRun?.run_jobs ?? [];
+            const currentIds = new Set(currentJobs.map(link => link.job_id));
+            const usableIds = currentJobs
+              .filter(link => isUsableStageJob(link.job) && link.job?.response?.trim())
+              .map(link => link.job_id);
+            const selectedIds = [...new Set([...explicitJobs.filter(id => !currentIds.has(id)), ...usableIds])];
+            if (generatedSwingRun && !selectedIds.length) {
+              throw new Error("The Swing scan has no completed or partial job with saved output. Review its diagnostics before scoring.");
+            }
             revision = (await api.publish({sequence, request_key:"workflow-"+sequence, captured_at:snapshot.captured_at,
               ...("id" in snapshot ? {snapshot_id:snapshot.id} : {}), swing_job_ids:selectedIds})).id;
             setSourceSelections(prev=>({...prev,[portfolio]:revision}));

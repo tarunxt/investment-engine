@@ -159,7 +159,11 @@ function harness({ boardOverride, analysisOnly = false, formulaScore = 0, interc
     reserveAutoRebalanceRunMetadata: reserve ?? (async (p) => metadata(p === "zerodha" ? "india" : "indmoney_us")),
     analysisOnlyRuns: { zerodha: analysisOnly, indmoneyUs: analysisOnly }, setAnalysisOnlyRuns: () => {}, setActiveAutoRebalanceMetadata: () => {}, setSpecificMode: () => {}, setSelectedStages: () => {}, setSelectedInputs: () => {}, setLastAutoRebalanceCosts: () => {},
     buildZerodhaPopupFeatures: () => "", ensureZerodhaConnectedForSync: async () => {},
-    onDashboardRefresh: async () => {}, waitForRunWithStageHandling: async (_, __, id) => ({ id, status: "completed", run_jobs: [] }),
+    onDashboardRefresh: async () => {},
+    waitForRunWithStageHandling: async (_, stage, id) => ({
+      id, status: "completed",
+      run_jobs: stage === "swing" ? [{ job_id: id, job: { id, status: "completed", response: "Saved Swing output" } }] : [],
+    }),
     retryWorkflowRead: (read) => read(),
     swingPrompts, getSwingTradeDefaultExportSheetName: () => "existing sheet",
     getLatestMatchingRebalanceRuns: runs => runs,
@@ -567,6 +571,13 @@ test("Technical uses the published revision after broker quote access is denied"
   await h.runWorkflow("zerodha");
   assert.equal(h.modelCalls.find(call=>call.card==="technical").revision,17);
   assert.equal(h.view.states.zerodha.actionables.state,"completed");
+});
+
+test("a selective Zerodha run uses the reviewed Stage 2 revision without replacing its Swing jobs", async () => {
+  const h = harness({ selection: ["technical"] });
+  await h.runWorkflow("zerodha");
+  assert.deepEqual(h.publications, []);
+  assert.equal(h.modelCalls.find(call => call.card === "technical").revision, 17);
 });
 
 test("subsequent runs publish the exact retained holdings snapshot",async()=>{

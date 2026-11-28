@@ -224,16 +224,17 @@ const workflowSource = read('../app/console/dashboard/_components/RebalanceWorkf
 const ast = ts.createSourceFile('workflow.tsx', workflowSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const declarations = new Map();
 function visit(node) {
-  if (node.name && ['runWorkflow', 'loadInputCandidates', 'resetDefaultInputCandidates', 'STAGE_ORDER', 'buildRunPayload', 'RecordedWorkflowStageFailure', 'markRunning'].includes(node.name.getText(ast))) {
+  if (node.name && ['runWorkflow', 'loadInputCandidates', 'resetDefaultInputCandidates', 'STAGE_ORDER', 'buildRunPayload', 'RecordedWorkflowStageFailure', 'markRunning', 'isUsableStageJob'].includes(node.name.getText(ast))) {
     declarations.set(node.name.getText(ast), node);
   }
   ts.forEachChild(node, visit);
 }
 visit(ast);
+const { isUsableStageJob } = load(`${declarations.get('isUsableStageJob').getText(ast)}\nexport { isUsableStageJob };`);
 const callbackSource = declarations.get('runWorkflow').initializer.arguments[0].getText(ast);
 const helpers = load(`${declarations.get('buildRunPayload').getText(ast)}\n${declarations.get('RecordedWorkflowStageFailure').getText(ast)}\nexport const STAGE_ORDER = ${declarations.get('STAGE_ORDER').initializer.getText(ast)};\nexport { buildRunPayload, RecordedWorkflowStageFailure };`, { recommendationAuditEnabled: false });
 
-async function executeWorkflow({ stages = ['sync', 'swing', 'threats', 'rebalance', 'technical', 'pairwise', 'actionables'], selected = {}, revision=0, onPublish, failCard, runOverrides = {}, threatOverrides = {}, snapshot = portfolioSnapshot,
+async function executeWorkflow({ stages = ['sync', 'swing', 'threats', 'rebalance', 'technical', 'pairwise', 'actionables'], selected = {}, revision=0, onPublish, failCard, runOverrides = {}, threatOverrides = {}, snapshot = portfolioSnapshot, swingResult,
   sourceHasher = modules['@/lib/outputSourceJobs'].buildOutputSourceJobs, cancelRequestedRef = { current: false }, rebalanceStatus = "completed" } = {}) {
   const created = [];
   const alerts = [];
@@ -244,7 +245,7 @@ async function executeWorkflow({ stages = ['sync', 'swing', 'threats', 'rebalanc
   const threatReads = [];
   const runReads = [];
   const consensusInputs = [];
-  const generatedSwing = run();
+  const generatedSwing = swingResult ?? run();
   const generatedRebalance = run(60, [601, 602], 'rebalance');
   generatedRebalance.status = rebalanceStatus;
   if (rebalanceStatus === 'partial') generatedRebalance.run_jobs[1].job.status = 'partial';
@@ -284,7 +285,7 @@ async function executeWorkflow({ stages = ['sync', 'swing', 'threats', 'rebalanc
   };
   const bindings = {
     indiaBoard:null,boardIssue:"",reloadBoard:noop,customSelection:[],
-    cards,scorecardApi:()=>api,migratedPolicy:()=>({}),cardPolicies:{},sourceSelections:{indmoneyUs:revision},setSourceSelections:noop,isUsableStageJob:()=>true,
+    cards,scorecardApi:()=>api,migratedPolicy:()=>({}),cardPolicies:{},sourceSelections:{indmoneyUs:revision},setSourceSelections:noop,isUsableStageJob,
     parseApiTimestamp: value => value ? new Date(value) : null, captureUsValuation: async () => ({schema:"us-valuation-v1"}),
     requireWorkflowOwner: () => ({ id: 7 }), actionablesActivityKey: () => "test", announceActionablesActivity: () => () => {},
     readLatestIndmoneySnapshot: () => apiService.indmoneyUsPortfolioOverview(),
@@ -347,6 +348,31 @@ test('one Stage 2 publication feeds four independent jobs with the selected Swin
   assert.deepEqual(r.created.map(c=>c.stage),["swing","rebalance","technical","threats","pairwise"]);
   assert.ok(r.created.slice(1).every(c=>c.revision===77 && c.targets.length===2));
   assert.deepEqual(r.runReads,[]);
+});
+
+test('a partial Swing run publishes only eligible saved results even when a failed sibling retains diagnostic text', async () => {
+  const swing = run(50, [501, 502, 504]);
+  swing.status = 'partial';
+  swing.run_jobs[0].job.status = 'partial';
+  swing.run_jobs[1].job.status = 'failed';
+  swing.run_jobs[2].job.response = ' ';
+  const before = structuredClone(swing);
+  const r = await executeWorkflow({ swingResult: swing, selected: { rebalance: new Set(['run:50:job:502', 'run:51:job:503']) } });
+  assert.deepEqual(r.errors, []);
+  assert.deepEqual(r.publications[0].swing_job_ids.sort(), [501, 503]);
+  assert.equal(r.results.length, 1);
+  assert.deepEqual(swing, before);
+});
+
+test('a generated Swing run with only failed or empty output stops before publication', async () => {
+  const swing = run();
+  swing.status = 'partial';
+  swing.run_jobs[0].job.status = 'failed';
+  swing.run_jobs[1].job.response = '';
+  const r = await executeWorkflow({ swingResult: swing, selected: { rebalance: new Set(['rebalance:next']) } });
+  assert.deepEqual(r.publications, []);
+  assert.deepEqual(r.created.map(item => item.stage), ['swing']);
+  assert.match(r.errors[0].error, /no completed or partial job/);
 });
 
 test('cancellation during Stage 2 publication prevents any subsequent paid card',async()=>{
