@@ -573,6 +573,13 @@ test("Technical uses the published revision after broker quote access is denied"
   assert.equal(h.view.states.zerodha.actionables.state,"completed");
 });
 
+test("a selective Zerodha run uses the reviewed Stage 2 revision without replacing its Swing jobs", async () => {
+  const h = harness({ selection: ["technical"] });
+  await h.runWorkflow("zerodha");
+  assert.deepEqual(h.publications, []);
+  assert.equal(h.modelCalls.find(call => call.card === "technical").revision, 17);
+});
+
 test("subsequent runs publish the exact retained holdings snapshot",async()=>{
   const h=harness({snapshot:holdingsSnapshot});
   await h.runWorkflow("indmoneyUs");
